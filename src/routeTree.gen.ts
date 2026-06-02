@@ -23,6 +23,7 @@ import { Route as AppMaintenanceRouteImport } from './routes/_app.maintenance'
 import { Route as AppInventoryRouteImport } from './routes/_app.inventory'
 import { Route as AppDevicesRouteImport } from './routes/_app.devices'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
 
@@ -95,6 +96,11 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppComplianceRoute = AppComplianceRouteImport.update({
+  id: '/compliance',
+  path: '/compliance',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBranchesRoute = AppBranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
@@ -110,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
+  '/compliance': typeof AppComplianceRoute
   '/dashboard': typeof AppDashboardRoute
   '/devices': typeof AppDevicesRoute
   '/inventory': typeof AppInventoryRoute
@@ -127,6 +134,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
+  '/compliance': typeof AppComplianceRoute
   '/dashboard': typeof AppDashboardRoute
   '/devices': typeof AppDevicesRoute
   '/inventory': typeof AppInventoryRoute
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/batches': typeof AppBatchesRoute
   '/_app/branches': typeof AppBranchesRoute
+  '/_app/compliance': typeof AppComplianceRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/devices': typeof AppDevicesRoute
   '/_app/inventory': typeof AppInventoryRoute
@@ -165,6 +174,7 @@ export interface FileRouteTypes {
     | '/'
     | '/batches'
     | '/branches'
+    | '/compliance'
     | '/dashboard'
     | '/devices'
     | '/inventory'
@@ -182,6 +192,7 @@ export interface FileRouteTypes {
     | '/'
     | '/batches'
     | '/branches'
+    | '/compliance'
     | '/dashboard'
     | '/devices'
     | '/inventory'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/_app/batches'
     | '/_app/branches'
+    | '/_app/compliance'
     | '/_app/dashboard'
     | '/_app/devices'
     | '/_app/inventory'
@@ -319,6 +331,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/compliance': {
+      id: '/_app/compliance'
+      path: '/compliance'
+      fullPath: '/compliance'
+      preLoaderRoute: typeof AppComplianceRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/branches': {
       id: '/_app/branches'
       path: '/branches'
@@ -339,6 +358,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppBatchesRoute: typeof AppBatchesRoute
   AppBranchesRoute: typeof AppBranchesRoute
+  AppComplianceRoute: typeof AppComplianceRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppDevicesRoute: typeof AppDevicesRoute
   AppInventoryRoute: typeof AppInventoryRoute
@@ -356,6 +376,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppBatchesRoute: AppBatchesRoute,
   AppBranchesRoute: AppBranchesRoute,
+  AppComplianceRoute: AppComplianceRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppDevicesRoute: AppDevicesRoute,
   AppInventoryRoute: AppInventoryRoute,
