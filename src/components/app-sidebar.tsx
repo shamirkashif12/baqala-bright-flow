@@ -18,6 +18,7 @@ import {
   Settings,
   ShieldCheck,
   LogOut,
+  Shield,
 } from "lucide-react";
 import {
   Sidebar,
@@ -70,6 +71,7 @@ const navGroups = [
   {
     label: "Admin",
     items: [
+      { title: "Admin Portal", url: "/admin", icon: Shield },
       { title: "Staff & Roles", url: "/staff", icon: Users },
       { title: "Maintenance", url: "/maintenance", icon: Wrench },
       { title: "ZATCA Invoices", url: "/zatca", icon: ReceiptText },
