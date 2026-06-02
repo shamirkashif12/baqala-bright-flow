@@ -91,7 +91,7 @@ export function AppSidebar() {
 
   const handleLogout = () => {
     logout();
-    navigate({ to: "/login" });
+    navigate({ to: "/login", search: { redirect: "/" } });
   };
 
   return (
