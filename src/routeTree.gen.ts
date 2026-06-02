@@ -17,6 +17,7 @@ import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
+import { Route as AppMaintenanceRouteImport } from './routes/_app.maintenance'
 import { Route as AppInventoryRouteImport } from './routes/_app.inventory'
 import { Route as AppDevicesRouteImport } from './routes/_app.devices'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
@@ -62,6 +63,11 @@ const AppPosRoute = AppPosRouteImport.update({
   path: '/pos',
   getParentRoute: () => AppRoute,
 } as any)
+const AppMaintenanceRoute = AppMaintenanceRouteImport.update({
+  id: '/maintenance',
+  path: '/maintenance',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppInventoryRoute = AppInventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
@@ -95,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AppDashboardRoute
   '/devices': typeof AppDevicesRoute
   '/inventory': typeof AppInventoryRoute
+  '/maintenance': typeof AppMaintenanceRoute
   '/pos': typeof AppPosRoute
   '/reports': typeof AppReportsRoute
   '/sales': typeof AppSalesRoute
@@ -109,6 +116,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AppDashboardRoute
   '/devices': typeof AppDevicesRoute
   '/inventory': typeof AppInventoryRoute
+  '/maintenance': typeof AppMaintenanceRoute
   '/pos': typeof AppPosRoute
   '/reports': typeof AppReportsRoute
   '/sales': typeof AppSalesRoute
@@ -125,6 +133,7 @@ export interface FileRoutesById {
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/devices': typeof AppDevicesRoute
   '/_app/inventory': typeof AppInventoryRoute
+  '/_app/maintenance': typeof AppMaintenanceRoute
   '/_app/pos': typeof AppPosRoute
   '/_app/reports': typeof AppReportsRoute
   '/_app/sales': typeof AppSalesRoute
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/devices'
     | '/inventory'
+    | '/maintenance'
     | '/pos'
     | '/reports'
     | '/sales'
@@ -155,6 +165,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/devices'
     | '/inventory'
+    | '/maintenance'
     | '/pos'
     | '/reports'
     | '/sales'
@@ -170,6 +181,7 @@ export interface FileRouteTypes {
     | '/_app/dashboard'
     | '/_app/devices'
     | '/_app/inventory'
+    | '/_app/maintenance'
     | '/_app/pos'
     | '/_app/reports'
     | '/_app/sales'
@@ -241,6 +253,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppPosRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/maintenance': {
+      id: '/_app/maintenance'
+      path: '/maintenance'
+      fullPath: '/maintenance'
+      preLoaderRoute: typeof AppMaintenanceRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/inventory': {
       id: '/_app/inventory'
       path: '/inventory'
@@ -285,6 +304,7 @@ interface AppRouteChildren {
   AppDashboardRoute: typeof AppDashboardRoute
   AppDevicesRoute: typeof AppDevicesRoute
   AppInventoryRoute: typeof AppInventoryRoute
+  AppMaintenanceRoute: typeof AppMaintenanceRoute
   AppPosRoute: typeof AppPosRoute
   AppReportsRoute: typeof AppReportsRoute
   AppSalesRoute: typeof AppSalesRoute
@@ -299,6 +319,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDashboardRoute: AppDashboardRoute,
   AppDevicesRoute: AppDevicesRoute,
   AppInventoryRoute: AppInventoryRoute,
+  AppMaintenanceRoute: AppMaintenanceRoute,
   AppPosRoute: AppPosRoute,
   AppReportsRoute: AppReportsRoute,
   AppSalesRoute: AppSalesRoute,
