@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   ScanBarcode,
@@ -33,6 +33,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useAuth } from "@/lib/auth";
 import { BaqalaLogo } from "./baqala-logo";
 
 const navGroups = [
@@ -85,6 +86,13 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    navigate({ to: "/login", search: { redirect: "/" } });
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -124,18 +132,21 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
       <SidebarFooter className="p-3 border-t border-sidebar-border/50">
-        <div className="flex items-center gap-2.5 rounded-xl p-2 bg-sidebar-accent/40">
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center gap-2.5 rounded-xl p-2 bg-sidebar-accent/40 hover:bg-sidebar-accent/60 transition-colors text-left"
+        >
           <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center text-primary-foreground text-xs font-bold shrink-0">
-            AF
+            {user?.initials ?? "U"}
           </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold truncate">Abdullah Al Faisal</p>
-              <p className="text-[10px] text-sidebar-foreground/60 truncate">Owner · Riyadh HQ</p>
+              <p className="text-xs font-semibold truncate">{user?.name ?? "User"}</p>
+              <p className="text-[10px] text-sidebar-foreground/60 truncate">{user?.role === "owner" ? "Owner" : user?.role === "manager" ? "Manager" : "Cashier"} · {user?.branch?.split(" — ")[1] ?? "HQ"}</p>
             </div>
           )}
           {!collapsed && <LogOut className="h-4 w-4 text-sidebar-foreground/60" />}
-        </div>
+        </button>
       </SidebarFooter>
     </Sidebar>
   );

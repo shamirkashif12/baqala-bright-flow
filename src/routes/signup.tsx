@@ -24,7 +24,7 @@ function Signup() {
       <header className="border-b border-border/60 bg-card">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <BaqalaLogo />
-          <Link to="/login" className="text-sm text-muted-foreground hover:text-foreground">Already have an account? <span className="text-primary font-semibold">Sign in</span></Link>
+          <Link to="/login" search={{ redirect: '/' }} className="text-sm text-muted-foreground hover:text-foreground">Already have an account? <span className="text-primary font-semibold">Sign in</span></Link>
         </div>
       </header>
 
