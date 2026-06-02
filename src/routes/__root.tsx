@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { AuthProvider, useAuth, type AuthState } from "../lib/auth";
 
 function NotFoundComponent() {
   return (
@@ -72,19 +73,19 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient; auth: AuthState }>()({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Baqala ECR — Modern POS for KSA Marts" },
+      { title: "Mimony — Modern POS for KSA Marts" },
       { name: "description", content: "ZATCA-ready POS, inventory and multi-branch management for Saudi baqalas and marts." },
-      { name: "author", content: "Baqala ECR" },
-      { property: "og:title", content: "Baqala ECR — Modern POS for KSA Marts" },
+      { name: "author", content: "Mimony" },
+      { property: "og:title", content: "Mimony — Modern POS for KSA Marts" },
       { property: "og:description", content: "ZATCA-ready POS, inventory and multi-branch management for Saudi baqalas." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@BaqalaECR" },
+      { name: "twitter:site", content: "@MimonyPOS" },
     ],
     links: [
       {
@@ -124,8 +125,9 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <AuthProvider>
+        <Outlet />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
