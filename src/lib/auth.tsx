@@ -9,7 +9,7 @@ export interface AuthUser {
   initials: string;
 }
 
-interface AuthState {
+export interface AuthState {
   isAuthenticated: boolean;
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<void>;
