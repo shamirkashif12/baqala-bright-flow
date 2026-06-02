@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
+import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
@@ -39,6 +40,11 @@ const AppTerminalsRoute = AppTerminalsRouteImport.update({
 const AppSuppliersRoute = AppSuppliersRouteImport.update({
   id: '/suppliers',
   path: '/suppliers',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppStaffRoute = AppStaffRouteImport.update({
+  id: '/staff',
+  path: '/staff',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSalesRoute = AppSalesRouteImport.update({
@@ -92,6 +98,7 @@ export interface FileRoutesByFullPath {
   '/pos': typeof AppPosRoute
   '/reports': typeof AppReportsRoute
   '/sales': typeof AppSalesRoute
+  '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
   '/terminals': typeof AppTerminalsRoute
 }
@@ -105,6 +112,7 @@ export interface FileRoutesByTo {
   '/pos': typeof AppPosRoute
   '/reports': typeof AppReportsRoute
   '/sales': typeof AppSalesRoute
+  '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
   '/terminals': typeof AppTerminalsRoute
 }
@@ -120,6 +128,7 @@ export interface FileRoutesById {
   '/_app/pos': typeof AppPosRoute
   '/_app/reports': typeof AppReportsRoute
   '/_app/sales': typeof AppSalesRoute
+  '/_app/staff': typeof AppStaffRoute
   '/_app/suppliers': typeof AppSuppliersRoute
   '/_app/terminals': typeof AppTerminalsRoute
 }
@@ -135,6 +144,7 @@ export interface FileRouteTypes {
     | '/pos'
     | '/reports'
     | '/sales'
+    | '/staff'
     | '/suppliers'
     | '/terminals'
   fileRoutesByTo: FileRoutesByTo
@@ -148,6 +158,7 @@ export interface FileRouteTypes {
     | '/pos'
     | '/reports'
     | '/sales'
+    | '/staff'
     | '/suppliers'
     | '/terminals'
   id:
@@ -162,6 +173,7 @@ export interface FileRouteTypes {
     | '/_app/pos'
     | '/_app/reports'
     | '/_app/sales'
+    | '/_app/staff'
     | '/_app/suppliers'
     | '/_app/terminals'
   fileRoutesById: FileRoutesById
@@ -199,6 +211,13 @@ declare module '@tanstack/react-router' {
       path: '/suppliers'
       fullPath: '/suppliers'
       preLoaderRoute: typeof AppSuppliersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/staff': {
+      id: '/_app/staff'
+      path: '/staff'
+      fullPath: '/staff'
+      preLoaderRoute: typeof AppStaffRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/sales': {
@@ -269,6 +288,7 @@ interface AppRouteChildren {
   AppPosRoute: typeof AppPosRoute
   AppReportsRoute: typeof AppReportsRoute
   AppSalesRoute: typeof AppSalesRoute
+  AppStaffRoute: typeof AppStaffRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
   AppTerminalsRoute: typeof AppTerminalsRoute
 }
@@ -282,6 +302,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPosRoute: AppPosRoute,
   AppReportsRoute: AppReportsRoute,
   AppSalesRoute: AppSalesRoute,
+  AppStaffRoute: AppStaffRoute,
   AppSuppliersRoute: AppSuppliersRoute,
   AppTerminalsRoute: AppTerminalsRoute,
 }
