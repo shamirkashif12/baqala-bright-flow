@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
 import { Route as AppInventoryRouteImport } from './routes/_app.inventory'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppSuppliersRoute = AppSuppliersRouteImport.update({
+  id: '/suppliers',
+  path: '/suppliers',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppPosRoute = AppPosRouteImport.update({
   id: '/pos',
@@ -45,12 +51,14 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AppDashboardRoute
   '/inventory': typeof AppInventoryRoute
   '/pos': typeof AppPosRoute
+  '/suppliers': typeof AppSuppliersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof AppDashboardRoute
   '/inventory': typeof AppInventoryRoute
   '/pos': typeof AppPosRoute
+  '/suppliers': typeof AppSuppliersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -59,12 +67,13 @@ export interface FileRoutesById {
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/inventory': typeof AppInventoryRoute
   '/_app/pos': typeof AppPosRoute
+  '/_app/suppliers': typeof AppSuppliersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/inventory' | '/pos'
+  fullPaths: '/' | '/dashboard' | '/inventory' | '/pos' | '/suppliers'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/inventory' | '/pos'
+  to: '/' | '/dashboard' | '/inventory' | '/pos' | '/suppliers'
   id:
     | '__root__'
     | '/'
@@ -72,6 +81,7 @@ export interface FileRouteTypes {
     | '/_app/dashboard'
     | '/_app/inventory'
     | '/_app/pos'
+    | '/_app/suppliers'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -94,6 +104,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/suppliers': {
+      id: '/_app/suppliers'
+      path: '/suppliers'
+      fullPath: '/suppliers'
+      preLoaderRoute: typeof AppSuppliersRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/pos': {
       id: '/_app/pos'
@@ -123,12 +140,14 @@ interface AppRouteChildren {
   AppDashboardRoute: typeof AppDashboardRoute
   AppInventoryRoute: typeof AppInventoryRoute
   AppPosRoute: typeof AppPosRoute
+  AppSuppliersRoute: typeof AppSuppliersRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppDashboardRoute: AppDashboardRoute,
   AppInventoryRoute: AppInventoryRoute,
   AppPosRoute: AppPosRoute,
+  AppSuppliersRoute: AppSuppliersRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
