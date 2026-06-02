@@ -1,7 +1,6 @@
-import { createFileRoute, Outlet, redirect, Link } from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: ({ context, location }) => {
@@ -16,12 +15,10 @@ export const Route = createFileRoute("/_app")({
 });
 
 function AppLayout() {
-  const { user } = useAuth();
-
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
-        <AppSidebar user={user!} />
+        <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
           <Outlet />
         </div>
