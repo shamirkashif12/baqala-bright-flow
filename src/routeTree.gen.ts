@@ -30,6 +30,7 @@ import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
+import { Route as AppAdminRouteImport } from './routes/_app.admin'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -135,11 +136,17 @@ const AppBatchesRoute = AppBatchesRouteImport.update({
   path: '/batches',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/admin': typeof AppAdminRoute
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
   '/compliance': typeof AppComplianceRoute
@@ -162,6 +169,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/admin': typeof AppAdminRoute
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
   '/compliance': typeof AppComplianceRoute
@@ -186,6 +194,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/_app/admin': typeof AppAdminRoute
   '/_app/batches': typeof AppBatchesRoute
   '/_app/branches': typeof AppBranchesRoute
   '/_app/compliance': typeof AppComplianceRoute
@@ -210,6 +219,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/admin'
     | '/batches'
     | '/branches'
     | '/compliance'
@@ -232,6 +242,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/admin'
     | '/batches'
     | '/branches'
     | '/compliance'
@@ -255,6 +266,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/login'
     | '/signup'
+    | '/_app/admin'
     | '/_app/batches'
     | '/_app/branches'
     | '/_app/compliance'
@@ -430,10 +442,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBatchesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/admin': {
+      id: '/_app/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
+  AppAdminRoute: typeof AppAdminRoute
   AppBatchesRoute: typeof AppBatchesRoute
   AppBranchesRoute: typeof AppBranchesRoute
   AppComplianceRoute: typeof AppComplianceRoute
@@ -454,6 +474,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAdminRoute: AppAdminRoute,
   AppBatchesRoute: AppBatchesRoute,
   AppBranchesRoute: AppBranchesRoute,
   AppComplianceRoute: AppComplianceRoute,
