@@ -133,7 +133,7 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter className="p-3 border-t border-sidebar-border/50">
         <button
-          onClick={logout}
+          onClick={handleLogout}
           className="w-full flex items-center gap-2.5 rounded-xl p-2 bg-sidebar-accent/40 hover:bg-sidebar-accent/60 transition-colors text-left"
         >
           <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center text-primary-foreground text-xs font-bold shrink-0">
