@@ -56,6 +56,11 @@ currentUser = readStorage();
 export const authStore: AuthState = {
   get isAuthenticated() { return !!currentUser; },
   get user() { return currentUser; },
+  subscribe: (cb: () => void) => {
+    listeners.add(cb);
+    return () => listeners.delete(cb);
+  },
+  getSnapshot: () => currentUser,
   async login(email: string, password: string) {
     await new Promise((r) => setTimeout(r, 800));
     if (!email.includes("@") && !email.match(/^\d{10}$/)) {
