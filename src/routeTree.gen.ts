@@ -15,6 +15,7 @@ import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
 import { Route as AppInventoryRouteImport } from './routes/_app.inventory'
+import { Route as AppDevicesRouteImport } from './routes/_app.devices'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
@@ -48,6 +49,11 @@ const AppInventoryRoute = AppInventoryRouteImport.update({
   path: '/inventory',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDevicesRoute = AppDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -69,6 +75,7 @@ export interface FileRoutesByFullPath {
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
   '/dashboard': typeof AppDashboardRoute
+  '/devices': typeof AppDevicesRoute
   '/inventory': typeof AppInventoryRoute
   '/pos': typeof AppPosRoute
   '/suppliers': typeof AppSuppliersRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByTo {
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
   '/dashboard': typeof AppDashboardRoute
+  '/devices': typeof AppDevicesRoute
   '/inventory': typeof AppInventoryRoute
   '/pos': typeof AppPosRoute
   '/suppliers': typeof AppSuppliersRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   '/_app/batches': typeof AppBatchesRoute
   '/_app/branches': typeof AppBranchesRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/devices': typeof AppDevicesRoute
   '/_app/inventory': typeof AppInventoryRoute
   '/_app/pos': typeof AppPosRoute
   '/_app/suppliers': typeof AppSuppliersRoute
@@ -103,6 +112,7 @@ export interface FileRouteTypes {
     | '/batches'
     | '/branches'
     | '/dashboard'
+    | '/devices'
     | '/inventory'
     | '/pos'
     | '/suppliers'
@@ -113,6 +123,7 @@ export interface FileRouteTypes {
     | '/batches'
     | '/branches'
     | '/dashboard'
+    | '/devices'
     | '/inventory'
     | '/pos'
     | '/suppliers'
@@ -124,6 +135,7 @@ export interface FileRouteTypes {
     | '/_app/batches'
     | '/_app/branches'
     | '/_app/dashboard'
+    | '/_app/devices'
     | '/_app/inventory'
     | '/_app/pos'
     | '/_app/suppliers'
@@ -179,6 +191,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppInventoryRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/devices': {
+      id: '/_app/devices'
+      path: '/devices'
+      fullPath: '/devices'
+      preLoaderRoute: typeof AppDevicesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dashboard': {
       id: '/_app/dashboard'
       path: '/dashboard'
@@ -207,6 +226,7 @@ interface AppRouteChildren {
   AppBatchesRoute: typeof AppBatchesRoute
   AppBranchesRoute: typeof AppBranchesRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppDevicesRoute: typeof AppDevicesRoute
   AppInventoryRoute: typeof AppInventoryRoute
   AppPosRoute: typeof AppPosRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
@@ -217,6 +237,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppBatchesRoute: AppBatchesRoute,
   AppBranchesRoute: AppBranchesRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppDevicesRoute: AppDevicesRoute,
   AppInventoryRoute: AppInventoryRoute,
   AppPosRoute: AppPosRoute,
   AppSuppliersRoute: AppSuppliersRoute,
