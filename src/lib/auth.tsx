@@ -51,13 +51,9 @@ function setUser(user: AuthUser | null) {
 // Initialize from storage on module load (client only)
 currentUser = readStorage();
 
-export const authStore = {
-  getUser: () => currentUser,
-  getSnapshot: () => currentUser,
-  subscribe: (cb: () => void) => {
-    listeners.add(cb);
-    return () => listeners.delete(cb);
-  },
+export const authStore: AuthState = {
+  get isAuthenticated() { return !!currentUser; },
+  get user() { return currentUser; },
   async login(email: string, password: string) {
     await new Promise((r) => setTimeout(r, 800));
     if (!email.includes("@") && !email.match(/^\d{10}$/)) {
@@ -78,9 +74,6 @@ export const authStore = {
   },
   logout() {
     setUser(null);
-  },
-  get isAuthenticated() {
-    return !!currentUser;
   },
 };
 
