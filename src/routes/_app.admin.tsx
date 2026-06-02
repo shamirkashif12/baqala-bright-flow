@@ -1,0 +1,308 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { PageShell } from "@/components/app-topbar";
+import { MetricCard, StatusDot } from "@/components/metric-card";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Activity, Users, Building2, ShieldCheck, Server, Cpu, HardDrive, Wifi,
+  TrendingUp, AlertTriangle, ReceiptText, Sparkles, Zap, Search, Plus,
+  ArrowUpRight, RefreshCw, Crown, Lock, Database, Globe, CircleCheck,
+} from "lucide-react";
+import heroBg from "@/assets/admin-hero.jpg";
+import storePhoto from "@/assets/store-photo.jpg";
+import ownerPhoto from "@/assets/owner-photo.jpg";
+
+export const Route = createFileRoute("/_app/admin")({ component: AdminHome });
+
+function useTicker(seed: number, min: number, max: number, intervalMs = 1800) {
+  const [v, setV] = useState(seed);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setV((prev) => {
+        const drift = (Math.random() - 0.4) * (max - min) * 0.04;
+        const next = Math.max(min, Math.min(max, prev + drift));
+        return next;
+      });
+    }, intervalMs);
+    return () => clearInterval(id);
+  }, [min, max, intervalMs]);
+  return v;
+}
+
+function LiveBars() {
+  const [bars, setBars] = useState<number[]>(() => Array.from({ length: 24 }, () => 30 + Math.random() * 70));
+  useEffect(() => {
+    const id = setInterval(() => {
+      setBars((b) => [...b.slice(1), 20 + Math.random() * 80]);
+    }, 1200);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="flex items-end gap-1 h-28">
+      {bars.map((h, i) => (
+        <div
+          key={i}
+          className="flex-1 rounded-t-md bg-gradient-to-t from-primary/30 to-primary transition-all duration-700"
+          style={{ height: `${h}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PulseDot() {
+  return (
+    <span className="relative inline-flex h-2 w-2">
+      <span className="absolute inline-flex h-full w-full rounded-full bg-success/70 animate-ping" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+    </span>
+  );
+}
+
+const allActivity = [
+  { who: "Fahad Al Otaibi", what: "Approved supplier PO #1284", when: "just now", color: "bg-success/15 text-success", icon: CircleCheck },
+  { who: "POS-04 · Jeddah", what: "Terminal reconnected after sync", when: "2m", color: "bg-primary/10 text-primary", icon: Server },
+  { who: "ZATCA Gateway", what: "147 e-invoices cleared", when: "5m", color: "bg-success/15 text-success", icon: ShieldCheck },
+  { who: "Mona Al Saud", what: "Updated price list for Olaya", when: "12m", color: "bg-accent text-accent-foreground", icon: ReceiptText },
+  { who: "Inventory bot", what: "Reorder draft created · 23 items", when: "18m", color: "bg-warning/20 text-warning-foreground", icon: AlertTriangle },
+  { who: "Khalid Operator", what: "Closed cash drawer · ر.س 6,420", when: "22m", color: "bg-primary/10 text-primary", icon: Lock },
+  { who: "API · /branches", what: "New branch onboarded: Madinah Quba", when: "1h", color: "bg-success/15 text-success", icon: Building2 },
+  { who: "Sara Al Qahtani", what: "Granted Manager role to 2 users", when: "1h", color: "bg-accent text-accent-foreground", icon: Crown },
+];
+
+function AdminHome() {
+  const sales = useTicker(48920, 48000, 52000);
+  const orders = useTicker(1284, 1200, 1450, 2200);
+  const apiRps = useTicker(312, 240, 480, 900);
+  const uptime = useTicker(99.98, 99.9, 100, 4000);
+
+  const [feedIdx, setFeedIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFeedIdx((i) => (i + 1) % allActivity.length), 2600);
+    return () => clearInterval(id);
+  }, []);
+  const feed = useMemo(
+    () => [...allActivity.slice(feedIdx), ...allActivity.slice(0, feedIdx)].slice(0, 6),
+    [feedIdx]
+  );
+
+  return (
+    <PageShell title="Admin Portal" subtitle="Live operations · tenant control center">
+      {/* Hero */}
+      <Card className="relative overflow-hidden border-0 text-primary-foreground p-0 shadow-elegant">
+        <img
+          src={heroBg}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+          width={1920}
+          height={640}
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-primary-deep/90 via-primary/70 to-transparent" />
+        <div className="relative grid md:grid-cols-5 gap-6 p-6 md:p-10 items-center">
+          <div className="md:col-span-3 space-y-4">
+            <Badge className="bg-white/15 text-primary-foreground border-white/25 backdrop-blur gap-1.5">
+              <Sparkles className="h-3 w-3" /> Mimony · Admin Console
+            </Badge>
+            <h2 className="text-3xl md:text-5xl font-bold leading-[1.05] tracking-tight">
+              Run every baqala from <span className="italic text-white/95">one</span> elegant cockpit.
+            </h2>
+            <p className="text-primary-foreground/85 max-w-xl">
+              Real-time visibility across 4 branches, 12 terminals, 38 suppliers and the ZATCA gateway —
+              built for owners who don't have time to babysit a POS.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Link to="/dashboard"><Button className="bg-white text-primary hover:bg-white/90 shadow-lg gap-2"><Zap className="h-4 w-4" />Open Live Dashboard</Button></Link>
+              <Link to="/staff"><Button variant="outline" className="bg-white/10 border-white/30 text-primary-foreground hover:bg-white/20 gap-2"><Plus className="h-4 w-4" />Invite teammate</Button></Link>
+              <Link to="/zatca"><Button variant="ghost" className="text-primary-foreground hover:bg-white/10 gap-2"><ShieldCheck className="h-4 w-4" />ZATCA log</Button></Link>
+            </div>
+          </div>
+          <div className="md:col-span-2 hidden md:block">
+            <div className="relative aspect-[4/5] rounded-3xl overflow-hidden border border-white/20 shadow-2xl">
+              <img src={ownerPhoto} alt="Shop owner" className="h-full w-full object-cover" loading="lazy" width={1024} height={1024} />
+              <div className="absolute bottom-3 left-3 right-3 rounded-2xl glass p-3 text-foreground">
+                <div className="flex items-center gap-2">
+                  <PulseDot />
+                  <span className="text-xs font-semibold">Olaya HQ · Live</span>
+                  <span className="text-xs text-muted-foreground ml-auto">ر.س {Math.round(sales).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Live metrics */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <MetricCard label="Live Sales" value={`ر.س ${Math.round(sales).toLocaleString()}`} delta="+18%" trend="up" hint="updating" icon={TrendingUp} accent="primary" />
+        <MetricCard label="Orders Today" value={Math.round(orders).toLocaleString()} delta="+12%" trend="up" hint={`${Math.round(orders/420)}/min`} icon={ReceiptText} />
+        <MetricCard label="API Throughput" value={`${Math.round(apiRps)} rps`} delta="healthy" trend="flat" icon={Activity} accent="success" />
+        <MetricCard label="Platform Uptime" value={`${uptime.toFixed(2)}%`} delta="30d" trend="up" icon={ShieldCheck} accent="success" />
+      </div>
+
+      {/* Middle row */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Live throughput */}
+        <Card className="lg:col-span-2 p-6 border-border/60 shadow-card">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold">Live Transaction Throughput</h3>
+                <PulseDot />
+              </div>
+              <p className="text-xs text-muted-foreground">Refreshes every 1.2s · last 24 buckets</p>
+            </div>
+            <Button variant="ghost" size="sm" className="gap-1.5"><RefreshCw className="h-3.5 w-3.5" />Snapshot</Button>
+          </div>
+          <LiveBars />
+          <div className="grid grid-cols-4 gap-3 mt-5 pt-5 border-t">
+            {[
+              { l: "Cleared", v: "1,141", c: "text-success" },
+              { l: "Pending", v: "108", c: "text-warning-foreground" },
+              { l: "Refunds", v: "12", c: "text-destructive" },
+              { l: "Voids", v: "23", c: "text-muted-foreground" },
+            ].map((s) => (
+              <div key={s.l}>
+                <p className="text-xs text-muted-foreground">{s.l}</p>
+                <p className={`text-lg font-bold ${s.c}`}>{s.v}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Live activity feed */}
+        <Card className="p-6 border-border/60 shadow-card overflow-hidden">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold">Live Activity</h3>
+              <PulseDot />
+            </div>
+            <Badge variant="outline" className="text-xs">streaming</Badge>
+          </div>
+          <div className="space-y-3">
+            {feed.map((a, i) => (
+              <div
+                key={`${a.who}-${i}`}
+                className="flex gap-3 transition-all duration-500"
+                style={{ opacity: 1 - i * 0.08, transform: `translateY(${i * 0}px)` }}
+              >
+                <div className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 ${a.color}`}>
+                  <a.icon className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium leading-tight truncate">{a.what}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{a.who} · {a.when}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      {/* Quick actions */}
+      <Card className="p-6 border-border/60 shadow-card">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-base font-semibold">Admin Quick Actions</h3>
+            <p className="text-xs text-muted-foreground">Most-used controls across your tenant</p>
+          </div>
+          <div className="relative w-64 hidden md:block">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Jump to module…" className="pl-9 h-9 bg-muted/50" />
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { t: "Invite Staff", d: "Add cashiers, managers", to: "/staff", i: Users, c: "from-primary/15 to-primary/5" },
+            { t: "New Branch", d: "Onboard a new location", to: "/branches", i: Building2, c: "from-[color:var(--brand-teal)]/20 to-transparent" },
+            { t: "Provision Terminal", d: "Pair a POS device", to: "/terminals", i: Server, c: "from-warning/20 to-transparent" },
+            { t: "ZATCA Settings", d: "Manage e-invoicing", to: "/compliance", i: ShieldCheck, c: "from-success/20 to-transparent" },
+          ].map((q) => (
+            <Link key={q.t} to={q.to}>
+              <div className={`group relative rounded-2xl border border-border/60 p-4 hover:border-primary/40 hover:shadow-elegant transition-all overflow-hidden bg-gradient-to-br ${q.c}`}>
+                <q.i className="h-5 w-5 text-primary" />
+                <p className="font-semibold text-sm mt-3">{q.t}</p>
+                <p className="text-xs text-muted-foreground">{q.d}</p>
+                <ArrowUpRight className="absolute top-3 right-3 h-4 w-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </Card>
+
+      {/* System health + tenants + photo */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="p-6 border-border/60 shadow-card">
+          <div className="flex items-center gap-2 mb-4">
+            <Cpu className="h-4 w-4 text-primary" />
+            <h3 className="text-base font-semibold">System Health</h3>
+          </div>
+          {[
+            { l: "API Gateway", v: 99, i: Globe },
+            { l: "Database", v: 96, i: Database },
+            { l: "Storage", v: 71, i: HardDrive },
+            { l: "Network", v: 88, i: Wifi },
+          ].map((s) => (
+            <div key={s.l} className="mb-3 last:mb-0">
+              <div className="flex justify-between text-xs mb-1.5">
+                <span className="flex items-center gap-1.5 font-medium"><s.i className="h-3.5 w-3.5 text-muted-foreground" />{s.l}</span>
+                <span className="tabular-nums font-semibold">{s.v}%</span>
+              </div>
+              <Progress value={s.v} className="h-1.5" />
+            </div>
+          ))}
+        </Card>
+
+        <Card className="lg:col-span-2 p-6 border-border/60 shadow-card">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-base font-semibold">Active Operators</h3>
+              <p className="text-xs text-muted-foreground">Signed in across all terminals right now</p>
+            </div>
+            <Badge className="bg-success/15 text-success border-0">7 online</Badge>
+          </div>
+          <div className="space-y-2.5">
+            {[
+              { n: "Abdullah Al Faisal", r: "Owner · Riyadh HQ", c: "AF", s: "online", t: "POS-01" },
+              { n: "Fahad Al Otaibi", r: "Manager · Olaya", c: "FO", s: "online", t: "POS-02" },
+              { n: "Mona Al Saud", r: "Cashier · Olaya", c: "MS", s: "online", t: "KIOSK-01" },
+              { n: "Ali Al Ghamdi", r: "Cashier · Khobar", c: "AG", s: "syncing", t: "POS-03" },
+              { n: "Yousef Al Dossari", r: "Cashier · Madinah", c: "YD", s: "online", t: "POS-05" },
+            ].map((u) => (
+              <div key={u.n} className="flex items-center gap-3 rounded-xl p-2.5 hover:bg-muted/60 transition-colors">
+                <Avatar className="h-9 w-9">
+                  <AvatarFallback className="gradient-primary text-primary-foreground text-xs font-bold">{u.c}</AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">{u.n}</p>
+                  <p className="text-xs text-muted-foreground truncate">{u.r}</p>
+                </div>
+                <Badge variant="outline" className="text-[10px] font-mono">{u.t}</Badge>
+                <StatusDot status={u.s as any} />
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      {/* Inspirational store image */}
+      <Card className="relative overflow-hidden border-0 shadow-elegant">
+        <img src={storePhoto} alt="Saudi mart aisle" className="h-64 w-full object-cover" loading="lazy" width={1280} height={800} />
+        <div className="absolute inset-0 bg-gradient-to-t from-primary-deep/90 via-primary-deep/40 to-transparent" />
+        <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 text-primary-foreground">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest opacity-80">Vision 2030 ready</p>
+              <h3 className="text-2xl md:text-3xl font-bold mt-1">Powering the next generation of Saudi retail.</h3>
+            </div>
+            <Link to="/reports"><Button className="bg-white text-primary hover:bg-white/90 gap-2">View tenant report <ArrowUpRight className="h-4 w-4" /></Button></Link>
+          </div>
+        </div>
+      </Card>
+    </PageShell>
+  );
+}
