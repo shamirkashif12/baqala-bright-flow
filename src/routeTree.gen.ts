@@ -9,38 +9,301 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SignupRouteImport } from './routes/signup'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
+import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
+import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
+import { Route as AppStaffRouteImport } from './routes/_app.staff'
+import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as AppSalesRouteImport } from './routes/_app.sales'
+import { Route as AppReportsRouteImport } from './routes/_app.reports'
+import { Route as AppPosRouteImport } from './routes/_app.pos'
+import { Route as AppMobilePosRouteImport } from './routes/_app.mobile-pos'
+import { Route as AppMaintenanceRouteImport } from './routes/_app.maintenance'
+import { Route as AppKioskRouteImport } from './routes/_app.kiosk'
+import { Route as AppInventoryRouteImport } from './routes/_app.inventory'
+import { Route as AppDevicesRouteImport } from './routes/_app.devices'
+import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
+import { Route as AppBranchesRouteImport } from './routes/_app.branches'
+import { Route as AppBatchesRouteImport } from './routes/_app.batches'
 
+const SignupRoute = SignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppZatcaRoute = AppZatcaRouteImport.update({
+  id: '/zatca',
+  path: '/zatca',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTerminalsRoute = AppTerminalsRouteImport.update({
+  id: '/terminals',
+  path: '/terminals',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSuppliersRoute = AppSuppliersRouteImport.update({
+  id: '/suppliers',
+  path: '/suppliers',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppStaffRoute = AppStaffRouteImport.update({
+  id: '/staff',
+  path: '/staff',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSalesRoute = AppSalesRouteImport.update({
+  id: '/sales',
+  path: '/sales',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportsRoute = AppReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPosRoute = AppPosRouteImport.update({
+  id: '/pos',
+  path: '/pos',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMobilePosRoute = AppMobilePosRouteImport.update({
+  id: '/mobile-pos',
+  path: '/mobile-pos',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMaintenanceRoute = AppMaintenanceRouteImport.update({
+  id: '/maintenance',
+  path: '/maintenance',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppKioskRoute = AppKioskRouteImport.update({
+  id: '/kiosk',
+  path: '/kiosk',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInventoryRoute = AppInventoryRouteImport.update({
+  id: '/inventory',
+  path: '/inventory',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDevicesRoute = AppDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppComplianceRoute = AppComplianceRouteImport.update({
+  id: '/compliance',
+  path: '/compliance',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBranchesRoute = AppBranchesRouteImport.update({
+  id: '/branches',
+  path: '/branches',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBatchesRoute = AppBatchesRouteImport.update({
+  id: '/batches',
+  path: '/batches',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/batches': typeof AppBatchesRoute
+  '/branches': typeof AppBranchesRoute
+  '/compliance': typeof AppComplianceRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/devices': typeof AppDevicesRoute
+  '/inventory': typeof AppInventoryRoute
+  '/kiosk': typeof AppKioskRoute
+  '/maintenance': typeof AppMaintenanceRoute
+  '/mobile-pos': typeof AppMobilePosRoute
+  '/pos': typeof AppPosRoute
+  '/reports': typeof AppReportsRoute
+  '/sales': typeof AppSalesRoute
+  '/settings': typeof AppSettingsRoute
+  '/staff': typeof AppStaffRoute
+  '/suppliers': typeof AppSuppliersRoute
+  '/terminals': typeof AppTerminalsRoute
+  '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/batches': typeof AppBatchesRoute
+  '/branches': typeof AppBranchesRoute
+  '/compliance': typeof AppComplianceRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/devices': typeof AppDevicesRoute
+  '/inventory': typeof AppInventoryRoute
+  '/kiosk': typeof AppKioskRoute
+  '/maintenance': typeof AppMaintenanceRoute
+  '/mobile-pos': typeof AppMobilePosRoute
+  '/pos': typeof AppPosRoute
+  '/reports': typeof AppReportsRoute
+  '/sales': typeof AppSalesRoute
+  '/settings': typeof AppSettingsRoute
+  '/staff': typeof AppStaffRoute
+  '/suppliers': typeof AppSuppliersRoute
+  '/terminals': typeof AppTerminalsRoute
+  '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/_app/batches': typeof AppBatchesRoute
+  '/_app/branches': typeof AppBranchesRoute
+  '/_app/compliance': typeof AppComplianceRoute
+  '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/devices': typeof AppDevicesRoute
+  '/_app/inventory': typeof AppInventoryRoute
+  '/_app/kiosk': typeof AppKioskRoute
+  '/_app/maintenance': typeof AppMaintenanceRoute
+  '/_app/mobile-pos': typeof AppMobilePosRoute
+  '/_app/pos': typeof AppPosRoute
+  '/_app/reports': typeof AppReportsRoute
+  '/_app/sales': typeof AppSalesRoute
+  '/_app/settings': typeof AppSettingsRoute
+  '/_app/staff': typeof AppStaffRoute
+  '/_app/suppliers': typeof AppSuppliersRoute
+  '/_app/terminals': typeof AppTerminalsRoute
+  '/_app/zatca': typeof AppZatcaRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/signup'
+    | '/batches'
+    | '/branches'
+    | '/compliance'
+    | '/dashboard'
+    | '/devices'
+    | '/inventory'
+    | '/kiosk'
+    | '/maintenance'
+    | '/mobile-pos'
+    | '/pos'
+    | '/reports'
+    | '/sales'
+    | '/settings'
+    | '/staff'
+    | '/suppliers'
+    | '/terminals'
+    | '/zatca'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/login'
+    | '/signup'
+    | '/batches'
+    | '/branches'
+    | '/compliance'
+    | '/dashboard'
+    | '/devices'
+    | '/inventory'
+    | '/kiosk'
+    | '/maintenance'
+    | '/mobile-pos'
+    | '/pos'
+    | '/reports'
+    | '/sales'
+    | '/settings'
+    | '/staff'
+    | '/suppliers'
+    | '/terminals'
+    | '/zatca'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/login'
+    | '/signup'
+    | '/_app/batches'
+    | '/_app/branches'
+    | '/_app/compliance'
+    | '/_app/dashboard'
+    | '/_app/devices'
+    | '/_app/inventory'
+    | '/_app/kiosk'
+    | '/_app/maintenance'
+    | '/_app/mobile-pos'
+    | '/_app/pos'
+    | '/_app/reports'
+    | '/_app/sales'
+    | '/_app/settings'
+    | '/_app/staff'
+    | '/_app/suppliers'
+    | '/_app/terminals'
+    | '/_app/zatca'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  SignupRoute: typeof SignupRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/signup': {
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,22 +311,176 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/zatca': {
+      id: '/_app/zatca'
+      path: '/zatca'
+      fullPath: '/zatca'
+      preLoaderRoute: typeof AppZatcaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/terminals': {
+      id: '/_app/terminals'
+      path: '/terminals'
+      fullPath: '/terminals'
+      preLoaderRoute: typeof AppTerminalsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/suppliers': {
+      id: '/_app/suppliers'
+      path: '/suppliers'
+      fullPath: '/suppliers'
+      preLoaderRoute: typeof AppSuppliersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/staff': {
+      id: '/_app/staff'
+      path: '/staff'
+      fullPath: '/staff'
+      preLoaderRoute: typeof AppStaffRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/sales': {
+      id: '/_app/sales'
+      path: '/sales'
+      fullPath: '/sales'
+      preLoaderRoute: typeof AppSalesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/reports': {
+      id: '/_app/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AppReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pos': {
+      id: '/_app/pos'
+      path: '/pos'
+      fullPath: '/pos'
+      preLoaderRoute: typeof AppPosRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/mobile-pos': {
+      id: '/_app/mobile-pos'
+      path: '/mobile-pos'
+      fullPath: '/mobile-pos'
+      preLoaderRoute: typeof AppMobilePosRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/maintenance': {
+      id: '/_app/maintenance'
+      path: '/maintenance'
+      fullPath: '/maintenance'
+      preLoaderRoute: typeof AppMaintenanceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/kiosk': {
+      id: '/_app/kiosk'
+      path: '/kiosk'
+      fullPath: '/kiosk'
+      preLoaderRoute: typeof AppKioskRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/inventory': {
+      id: '/_app/inventory'
+      path: '/inventory'
+      fullPath: '/inventory'
+      preLoaderRoute: typeof AppInventoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/devices': {
+      id: '/_app/devices'
+      path: '/devices'
+      fullPath: '/devices'
+      preLoaderRoute: typeof AppDevicesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/compliance': {
+      id: '/_app/compliance'
+      path: '/compliance'
+      fullPath: '/compliance'
+      preLoaderRoute: typeof AppComplianceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/branches': {
+      id: '/_app/branches'
+      path: '/branches'
+      fullPath: '/branches'
+      preLoaderRoute: typeof AppBranchesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/batches': {
+      id: '/_app/batches'
+      path: '/batches'
+      fullPath: '/batches'
+      preLoaderRoute: typeof AppBatchesRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
+interface AppRouteChildren {
+  AppBatchesRoute: typeof AppBatchesRoute
+  AppBranchesRoute: typeof AppBranchesRoute
+  AppComplianceRoute: typeof AppComplianceRoute
+  AppDashboardRoute: typeof AppDashboardRoute
+  AppDevicesRoute: typeof AppDevicesRoute
+  AppInventoryRoute: typeof AppInventoryRoute
+  AppKioskRoute: typeof AppKioskRoute
+  AppMaintenanceRoute: typeof AppMaintenanceRoute
+  AppMobilePosRoute: typeof AppMobilePosRoute
+  AppPosRoute: typeof AppPosRoute
+  AppReportsRoute: typeof AppReportsRoute
+  AppSalesRoute: typeof AppSalesRoute
+  AppSettingsRoute: typeof AppSettingsRoute
+  AppStaffRoute: typeof AppStaffRoute
+  AppSuppliersRoute: typeof AppSuppliersRoute
+  AppTerminalsRoute: typeof AppTerminalsRoute
+  AppZatcaRoute: typeof AppZatcaRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppBatchesRoute: AppBatchesRoute,
+  AppBranchesRoute: AppBranchesRoute,
+  AppComplianceRoute: AppComplianceRoute,
+  AppDashboardRoute: AppDashboardRoute,
+  AppDevicesRoute: AppDevicesRoute,
+  AppInventoryRoute: AppInventoryRoute,
+  AppKioskRoute: AppKioskRoute,
+  AppMaintenanceRoute: AppMaintenanceRoute,
+  AppMobilePosRoute: AppMobilePosRoute,
+  AppPosRoute: AppPosRoute,
+  AppReportsRoute: AppReportsRoute,
+  AppSalesRoute: AppSalesRoute,
+  AppSettingsRoute: AppSettingsRoute,
+  AppStaffRoute: AppStaffRoute,
+  AppSuppliersRoute: AppSuppliersRoute,
+  AppTerminalsRoute: AppTerminalsRoute,
+  AppZatcaRoute: AppZatcaRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  LoginRoute: LoginRoute,
+  SignupRoute: SignupRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
