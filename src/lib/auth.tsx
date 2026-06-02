@@ -14,6 +14,8 @@ export interface AuthState {
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  subscribe?: (cb: () => void) => () => boolean;
+  getSnapshot?: () => AuthUser | null;
 }
 
 const AUTH_KEY = "baqala_auth_session";
