@@ -114,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ isAuthenticated: !!user, user, login, logout }}
+      value={{ isAuthenticated: !!user, user, login, logout, subscribe: authStore.subscribe, getSnapshot: authStore.getSnapshot }}
     >
       {children}
     </AuthContext.Provider>
