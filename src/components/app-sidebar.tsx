@@ -86,7 +86,13 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    navigate({ to: "/login" });
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
