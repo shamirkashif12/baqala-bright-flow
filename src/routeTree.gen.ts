@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
 import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
@@ -32,6 +33,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppZatcaRoute = AppZatcaRouteImport.update({
+  id: '/zatca',
+  path: '/zatca',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppTerminalsRoute = AppTerminalsRouteImport.update({
   id: '/terminals',
@@ -108,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
   '/terminals': typeof AppTerminalsRoute
+  '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
   '/terminals': typeof AppTerminalsRoute
+  '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -140,6 +148,7 @@ export interface FileRoutesById {
   '/_app/staff': typeof AppStaffRoute
   '/_app/suppliers': typeof AppSuppliersRoute
   '/_app/terminals': typeof AppTerminalsRoute
+  '/_app/zatca': typeof AppZatcaRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -157,6 +166,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/suppliers'
     | '/terminals'
+    | '/zatca'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -172,6 +182,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/suppliers'
     | '/terminals'
+    | '/zatca'
   id:
     | '__root__'
     | '/'
@@ -188,6 +199,7 @@ export interface FileRouteTypes {
     | '/_app/staff'
     | '/_app/suppliers'
     | '/_app/terminals'
+    | '/_app/zatca'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -210,6 +222,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/zatca': {
+      id: '/_app/zatca'
+      path: '/zatca'
+      fullPath: '/zatca'
+      preLoaderRoute: typeof AppZatcaRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/terminals': {
       id: '/_app/terminals'
@@ -311,6 +330,7 @@ interface AppRouteChildren {
   AppStaffRoute: typeof AppStaffRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
   AppTerminalsRoute: typeof AppTerminalsRoute
+  AppZatcaRoute: typeof AppZatcaRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -326,6 +346,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppStaffRoute: AppStaffRoute,
   AppSuppliersRoute: AppSuppliersRoute,
   AppTerminalsRoute: AppTerminalsRoute,
+  AppZatcaRoute: AppZatcaRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
