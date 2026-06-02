@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useSyncExternalStore, type ReactNode } from "react";
 
 export interface AuthUser {
   id: string;
@@ -18,7 +18,14 @@ export interface AuthState {
 
 const AUTH_KEY = "baqala_auth_session";
 
-function getStoredSession(): AuthUser | null {
+let currentUser: AuthUser | null = null;
+let listeners: Set<() => void> = new Set();
+
+function emit() {
+  listeners.forEach((fn) => fn());
+}
+
+function readStorage(): AuthUser | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(AUTH_KEY);
@@ -29,19 +36,29 @@ function getStoredSession(): AuthUser | null {
   }
 }
 
-function storeSession(user: AuthUser | null) {
+function writeStorage(user: AuthUser | null) {
   if (typeof window === "undefined") return;
   if (user) localStorage.setItem(AUTH_KEY, JSON.stringify(user));
   else localStorage.removeItem(AUTH_KEY);
 }
 
-const AuthContext = createContext<AuthState | null>(null);
+function setUser(user: AuthUser | null) {
+  currentUser = user;
+  writeStorage(user);
+  emit();
+}
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => getStoredSession());
+// Initialize from storage on module load (client only)
+currentUser = readStorage();
 
-  const login = useCallback(async (email: string, password: string) => {
-    // Demo auth — in production this calls your backend
+export const authStore = {
+  getUser: () => currentUser,
+  getSnapshot: () => currentUser,
+  subscribe: (cb: () => void) => {
+    listeners.add(cb);
+    return () => listeners.delete(cb);
+  },
+  async login(email: string, password: string) {
     await new Promise((r) => setTimeout(r, 800));
     if (!email.includes("@") && !email.match(/^\d{10}$/)) {
       throw new Error("Invalid email or phone number");
@@ -58,23 +75,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       initials: "AF",
     };
     setUser(demoUser);
-    storeSession(demoUser);
+  },
+  logout() {
+    setUser(null);
+  },
+  get isAuthenticated() {
+    return !!currentUser;
+  },
+};
+
+// Sync across tabs
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === AUTH_KEY) {
+      currentUser = e.newValue ? JSON.parse(e.newValue) : null;
+      emit();
+    }
+  });
+}
+
+/* ── React layer ── */
+const AuthContext = createContext<AuthState | null>(null);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const user = useSyncExternalStore(
+    authStore.subscribe,
+    authStore.getSnapshot,
+    () => null
+  );
+
+  const login = useCallback(async (email: string, password: string) => {
+    await authStore.login(email, password);
   }, []);
 
   const logout = useCallback(() => {
-    setUser(null);
-    storeSession(null);
-  }, []);
-
-  // Sync across tabs
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === AUTH_KEY) {
-        setUser(e.newValue ? JSON.parse(e.newValue) : null);
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    authStore.logout();
   }, []);
 
   return (
