@@ -1,12 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { PageShell } from "@/components/app-topbar";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ScanLine, CreditCard, Wallet, Bell, Trash2, CheckCircle2, QrCode, ShoppingBag, X } from "lucide-react";
-import { BaqalaLogo } from "@/components/baqala-logo";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/_app/kiosk")({ component: Kiosk });
+export const Route = createFileRoute("/_app/kiosk")({
+  beforeLoad: () => {
+    throw redirect({ to: "/mobile-pos", search: { tab: "kiosk" } as any });
+  },
+});
 
 function Screen({ children, label }: { children: React.ReactNode; label: string }) {
   return (
