@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 export function AppTopbar({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/80 backdrop-blur-xl px-4 md:px-6">
-      <SidebarTrigger className="md:hidden" />
+      <SidebarTrigger />
       <div className="flex-1 min-w-0">
         <h1 className="text-lg md:text-xl font-bold tracking-tight truncate">{title}</h1>
         {subtitle && <p className="text-xs text-muted-foreground truncate">{subtitle}</p>}

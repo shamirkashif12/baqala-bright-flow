@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { BaqalaLogo } from "@/components/baqala-logo";
 import { useAuth } from "@/lib/auth";
 import { ShieldCheck, ScanBarcode, Smartphone, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
+import loginHero from "@/assets/login-hero.jpg";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search) => ({
@@ -54,7 +55,8 @@ function Login() {
     <div className="min-h-screen grid lg:grid-cols-2 bg-background">
       {/* Left brand panel */}
       <div className="relative hidden lg:flex flex-col justify-between p-10 gradient-primary text-primary-foreground overflow-hidden">
-        <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 20% 20%, white 0, transparent 40%), radial-gradient(circle at 80% 70%, white 0, transparent 35%)" }} />
+        <img src={loginHero} alt="Mart POS" className="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-luminosity" />
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/85 via-primary/70 to-primary/40" />
         <div className="relative z-10">
           <BaqalaLogo />
         </div>

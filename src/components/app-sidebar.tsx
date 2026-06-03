@@ -1,9 +1,9 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import {
   LayoutDashboard,
   ScanBarcode,
   Smartphone,
-  Monitor,
   Package,
   CalendarClock,
   Truck,
@@ -25,6 +25,7 @@ import {
   Store,
   Activity,
   UserCog,
+  ChevronDown,
 } from "lucide-react";
 import {
   Sidebar,
@@ -39,6 +40,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/lib/auth";
 import { BaqalaLogo } from "./baqala-logo";
 
@@ -48,8 +50,7 @@ const navGroups = [
     items: [
       { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
       { title: "POS Checkout", url: "/pos", icon: ScanBarcode },
-      { title: "Mobile POS", url: "/mobile-pos", icon: Smartphone },
-      { title: "Self-Checkout Kiosk", url: "/kiosk", icon: Monitor },
+      { title: "Mobile POS & Kiosk", url: "/mobile-pos", icon: Smartphone },
       { title: "Orders", url: "/orders", icon: ShoppingBag },
     ],
   },
@@ -110,6 +111,9 @@ export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(navGroups.map((g) => [g.label, true])),
+  );
 
   const handleLogout = () => {
     logout();
@@ -122,36 +126,60 @@ export function AppSidebar() {
         {collapsed ? <BaqalaLogo showText={false} /> : <BaqalaLogo />}
       </SidebarHeader>
       <SidebarContent className="px-2 py-3">
-        {navGroups.map((group) => (
-          <SidebarGroup key={group.label}>
-            {!collapsed && (
-              <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/40 px-3">
-                {group.label}
-              </SidebarGroupLabel>
-            )}
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.items.map((item) => {
-                  const active = path === item.url || path.startsWith(item.url + "/");
-                  return (
-                    <SidebarMenuItem key={item.url}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={active}
-                        className="data-[active=true]:bg-sidebar-primary data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-glow data-[active=true]:font-semibold rounded-xl h-10"
-                      >
-                        <Link to={item.url}>
-                          <item.icon className="h-4 w-4" />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
+        {navGroups.map((group) => {
+          const open = openGroups[group.label] ?? true;
+          const groupHasActive = group.items.some(
+            (it) => path === it.url || path.startsWith(it.url + "/"),
+          );
+          const renderItems = (
+            <SidebarMenu>
+              {group.items.map((item) => {
+                const active = path === item.url || path.startsWith(item.url + "/");
+                return (
+                  <SidebarMenuItem key={item.url}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active}
+                      className="data-[active=true]:bg-sidebar-primary data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-glow data-[active=true]:font-semibold rounded-xl h-10"
+                    >
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          );
+          if (collapsed) {
+            return (
+              <SidebarGroup key={group.label}>
+                <SidebarGroupContent>{renderItems}</SidebarGroupContent>
+              </SidebarGroup>
+            );
+          }
+          return (
+            <SidebarGroup key={group.label}>
+              <Collapsible
+                open={open || groupHasActive}
+                onOpenChange={(v) => setOpenGroups((s) => ({ ...s, [group.label]: v }))}
+              >
+                <CollapsibleTrigger asChild>
+                  <button className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors">
+                    <span>{group.label}</span>
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform ${open ? "" : "-rotate-90"}`}
+                    />
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <SidebarGroupContent>{renderItems}</SidebarGroupContent>
+                </CollapsibleContent>
+              </Collapsible>
+            </SidebarGroup>
+          );
+        })}
       </SidebarContent>
       <SidebarFooter className="p-3 border-t border-sidebar-border/50">
         <button
