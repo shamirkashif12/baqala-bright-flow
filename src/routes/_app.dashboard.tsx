@@ -8,6 +8,9 @@ import { Progress } from "@/components/ui/progress";
 import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, AlertTriangle, CalendarClock, FileBox, Building2, ReceiptText, MoreHorizontal, ArrowRight, ShieldCheck, Smartphone, Activity, Cpu,
 } from "lucide-react";
+import dashboardHero from "@/assets/dashboard-hero.jpg";
+import storePhoto from "@/assets/store-photo.jpg";
+import ownerPhoto from "@/assets/owner-photo.jpg";
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: Dashboard,
@@ -37,8 +40,13 @@ function Dashboard() {
   return (
     <PageShell title="Dashboard" subtitle="Tuesday, June 2 · Live across 4 branches">
       {/* Hero strip */}
-      <Card className="relative overflow-hidden border-0 gradient-primary text-primary-foreground p-6 md:p-8 shadow-elegant">
-        <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 20% 20%, white 0, transparent 40%), radial-gradient(circle at 80% 60%, white 0, transparent 35%)" }} />
+      <Card className="relative overflow-hidden border-0 gradient-primary text-primary-foreground p-6 md:p-8 shadow-elegant min-h-[260px]">
+        <img
+          src={dashboardHero}
+          alt="Saudi baqala storefront"
+          className="absolute inset-0 w-full h-full object-cover opacity-25 mix-blend-luminosity"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/90 via-primary/70 to-primary/40" />
         <div className="relative grid md:grid-cols-3 gap-6 items-end">
           <div className="md:col-span-2">
             <Badge className="bg-white/15 text-primary-foreground border-white/20 backdrop-blur mb-3">
@@ -47,12 +55,43 @@ function Dashboard() {
             <h2 className="text-2xl md:text-4xl font-bold tracking-tight">Good morning, Abdullah 👋</h2>
             <p className="text-primary-foreground/80 mt-2 max-w-xl">Your 4 baqalas have processed <span className="font-semibold text-white">1,284 invoices</span> today — that's 18% above last Tuesday.</p>
           </div>
-          <div className="flex gap-3 md:justify-end">
+          <div className="flex flex-wrap gap-3 md:justify-end">
             <Button variant="secondary" className="bg-white text-primary hover:bg-white/90 shadow-lg">Open POS</Button>
             <Button variant="outline" className="bg-white/10 border-white/30 text-primary-foreground hover:bg-white/20">View Reports</Button>
           </div>
         </div>
       </Card>
+
+      {/* Visual gallery */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card className="relative overflow-hidden border-border/60 shadow-card h-44 group">
+          <img src={storePhoto} alt="Olaya branch" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+          <div className="relative h-full flex flex-col justify-end p-4 text-white">
+            <Badge className="self-start bg-success/90 border-0 mb-2">Live · 412 orders</Badge>
+            <p className="font-bold">Olaya — Riyadh HQ</p>
+            <p className="text-xs opacity-90">ر.س 18,420 today</p>
+          </div>
+        </Card>
+        <Card className="relative overflow-hidden border-border/60 shadow-card h-44 group">
+          <img src={dashboardHero} alt="Khobar branch" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+          <div className="relative h-full flex flex-col justify-end p-4 text-white">
+            <Badge className="self-start bg-success/90 border-0 mb-2">Live · 318 orders</Badge>
+            <p className="font-bold">Al Khobar Corniche</p>
+            <p className="text-xs opacity-90">ر.س 12,890 today</p>
+          </div>
+        </Card>
+        <Card className="relative overflow-hidden border-border/60 shadow-card h-44 group">
+          <img src={ownerPhoto} alt="Owner" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+          <div className="relative h-full flex flex-col justify-end p-4 text-white">
+            <Badge className="self-start bg-white/20 backdrop-blur border-white/30 mb-2">Owner · Abdullah Al-Saud</Badge>
+            <p className="font-bold">4 baqalas under management</p>
+            <p className="text-xs opacity-90">Operating across Riyadh, Khobar, Jeddah & Madinah</p>
+          </div>
+        </Card>
+      </div>
 
       {/* Metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
