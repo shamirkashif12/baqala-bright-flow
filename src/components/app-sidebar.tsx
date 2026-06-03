@@ -18,7 +18,13 @@ import {
   Settings,
   ShieldCheck,
   LogOut,
-  Shield,
+  ShoppingBag,
+  Wallet,
+  Tags,
+  Warehouse,
+  Store,
+  Activity,
+  UserCog,
 } from "lucide-react";
 import {
   Sidebar,
@@ -44,14 +50,29 @@ const navGroups = [
       { title: "POS Checkout", url: "/pos", icon: ScanBarcode },
       { title: "Mobile POS", url: "/mobile-pos", icon: Smartphone },
       { title: "Self-Checkout Kiosk", url: "/kiosk", icon: Monitor },
+      { title: "Orders", url: "/orders", icon: ShoppingBag },
     ],
   },
   {
     label: "Stock",
     items: [
       { title: "Inventory", url: "/inventory", icon: Package },
-      { title: "Batches & Expiry", url: "/batches", icon: CalendarClock },
+      { title: "Expiry & Permissible", url: "/batches", icon: CalendarClock },
+    ],
+  },
+  {
+    label: "Finance",
+    items: [
+      { title: "Expenses", url: "/expenses", icon: Wallet },
+      { title: "Expense Types", url: "/expense-types", icon: Tags },
+    ],
+  },
+  {
+    label: "Suppliers",
+    items: [
       { title: "Suppliers", url: "/suppliers", icon: Truck },
+      { title: "Warehouse Suppliers", url: "/warehouse-suppliers", icon: Warehouse },
+      { title: "Mart-to-Mart", url: "/mart-suppliers", icon: Store },
     ],
   },
   {
@@ -60,11 +81,13 @@ const navGroups = [
       { title: "Branches", url: "/branches", icon: Building2 },
       { title: "Terminals", url: "/terminals", icon: Terminal },
       { title: "Devices", url: "/devices", icon: HardDrive },
+      { title: "Device Behavior", url: "/device-behavior", icon: Activity },
     ],
   },
   {
-    label: "Insights",
+    label: "People & Insights",
     items: [
+      { title: "Registered Users", url: "/users", icon: UserCog },
       { title: "Sales", url: "/sales", icon: TrendingUp },
       { title: "Reports", url: "/reports", icon: FileBarChart },
     ],
@@ -72,7 +95,6 @@ const navGroups = [
   {
     label: "Admin",
     items: [
-      { title: "Admin Portal", url: "/admin", icon: Shield },
       { title: "Staff & Roles", url: "/staff", icon: Users },
       { title: "Maintenance", url: "/maintenance", icon: Wrench },
       { title: "ZATCA Invoices", url: "/zatca", icon: ReceiptText },
