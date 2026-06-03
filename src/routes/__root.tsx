@@ -82,10 +82,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient; auth
       { name: "description", content: "ZATCA-ready POS, inventory and multi-branch management for Saudi baqalas and marts." },
       { name: "author", content: "Mimony" },
       { property: "og:title", content: "Mimony — Modern POS for KSA Marts" },
-      { property: "og:description", content: "ZATCA-ready POS, inventory and multi-branch management for Saudi baqalas." },
+      { property: "og:description", content: "ZATCA-ready POS, inventory and multi-branch management for Saudi baqalas and marts." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@MimonyPOS" },
+      { name: "twitter:title", content: "Mimony — Modern POS for KSA Marts" },
+      { name: "twitter:description", content: "ZATCA-ready POS, inventory and multi-branch management for Saudi baqalas and marts." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/90bb6ece-5050-4945-9a3e-5714b780793a/id-preview-b2be1464--9d642eec-d96e-43f0-b26e-de21c6fbaaa4.lovable.app-1780408101923.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/90bb6ece-5050-4945-9a3e-5714b780793a/id-preview-b2be1464--9d642eec-d96e-43f0-b26e-de21c6fbaaa4.lovable.app-1780408101923.png" },
     ],
     links: [
       {
