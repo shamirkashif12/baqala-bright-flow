@@ -31,7 +31,7 @@ function Signup() {
       <div className="max-w-3xl mx-auto px-6 py-10">
         <Badge className="bg-primary/10 text-primary border-primary/20">Step {active + 1} of 5</Badge>
         <h1 className="text-3xl font-bold tracking-tight mt-3">Register your business</h1>
-        <p className="text-muted-foreground mt-1">A few details to set up your Baqala ECR workspace.</p>
+        <p className="text-muted-foreground mt-1">A few details to set up your MI Money workspace.</p>
 
         {/* Stepper */}
         <div className="flex items-center gap-2 mt-8">

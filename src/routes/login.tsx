@@ -12,7 +12,7 @@ import { ShieldCheck, ScanBarcode, Smartphone, Building2, Eye, EyeOff, Loader2 }
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search) => ({
-    redirect: (search.redirect as string) || "/admin",
+    redirect: (search.redirect as string) || "/dashboard",
   }),
   component: Login,
 });
@@ -62,8 +62,8 @@ function Login() {
           <Badge className="bg-white/15 text-primary-foreground border-white/20 backdrop-blur gap-1.5">
             <ShieldCheck className="h-3 w-3" />ZATCA Phase 2 ready
           </Badge>
-          <h1 className="text-4xl xl:text-5xl font-bold leading-tight">The modern POS for Saudi <span className="block">baqalas & marts.</span></h1>
-          <p className="text-primary-foreground/80">Run one shop or fifty branches. Inventory, suppliers, kiosks, mobile POS and ZATCA invoicing — in one Arabic-friendly cloud.</p>
+          <h1 className="text-4xl xl:text-5xl font-bold leading-tight">Manage your Mart <span className="block">smartly with MI Money.</span></h1>
+          <p className="text-primary-foreground/80">POS, inventory, suppliers, delivery, devices — one Arabic-friendly cloud for every Saudi mart, kiosk and multi-branch operation.</p>
           <div className="grid grid-cols-3 gap-3 pt-4">
             {[{i: ScanBarcode, l: "POS"}, {i: Smartphone, l: "Mobile"}, {i: Building2, l: "Multi-branch"}].map((f) => (
               <div key={f.l} className="rounded-2xl bg-white/10 backdrop-blur border border-white/15 p-4 text-center">
@@ -73,7 +73,7 @@ function Login() {
             ))}
           </div>
         </div>
-        <p className="relative z-10 text-xs opacity-70">© 2026 Mony · Riyadh, KSA</p>
+        <p className="relative z-10 text-xs opacity-70">© 2026 MI Money · Riyadh, KSA</p>
       </div>
 
       {/* Right form */}
@@ -81,7 +81,7 @@ function Login() {
         <div className="w-full max-w-md">
           <div className="lg:hidden mb-8 flex justify-center"><BaqalaLogo /></div>
           <h2 className="text-2xl font-bold tracking-tight">Welcome back</h2>
-          <p className="text-muted-foreground text-sm mt-1">Sign in to your Mony dashboard.</p>
+          <p className="text-muted-foreground text-sm mt-1">Sign in to your MI Money dashboard.</p>
 
           <form onSubmit={handleSubmit}>
             <Card className="p-6 mt-6 border-border/60 shadow-card space-y-4">
@@ -147,7 +147,7 @@ function Login() {
           </form>
 
           <p className="text-center text-sm text-muted-foreground mt-6">
-            New to Mony? <Link to="/signup" className="text-primary font-semibold hover:underline">Register your business</Link>
+            New to MI Money? <Link to="/signup" className="text-primary font-semibold hover:underline">Register your business</Link>
           </p>
         </div>
       </div>

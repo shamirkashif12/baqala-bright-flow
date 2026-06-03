@@ -14,6 +14,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
+import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehouse-suppliers'
+import { Route as AppUsersRouteImport } from './routes/_app.users'
 import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
@@ -21,11 +23,16 @@ import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
+import { Route as AppOrdersRouteImport } from './routes/_app.orders'
 import { Route as AppMobilePosRouteImport } from './routes/_app.mobile-pos'
+import { Route as AppMartSuppliersRouteImport } from './routes/_app.mart-suppliers'
 import { Route as AppMaintenanceRouteImport } from './routes/_app.maintenance'
 import { Route as AppKioskRouteImport } from './routes/_app.kiosk'
 import { Route as AppInventoryRouteImport } from './routes/_app.inventory'
+import { Route as AppExpensesRouteImport } from './routes/_app.expenses'
+import { Route as AppExpenseTypesRouteImport } from './routes/_app.expense-types'
 import { Route as AppDevicesRouteImport } from './routes/_app.devices'
+import { Route as AppDeviceBehaviorRouteImport } from './routes/_app.device-behavior'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
@@ -54,6 +61,16 @@ const IndexRoute = IndexRouteImport.update({
 const AppZatcaRoute = AppZatcaRouteImport.update({
   id: '/zatca',
   path: '/zatca',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWarehouseSuppliersRoute = AppWarehouseSuppliersRouteImport.update({
+  id: '/warehouse-suppliers',
+  path: '/warehouse-suppliers',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppUsersRoute = AppUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
   getParentRoute: () => AppRoute,
 } as any)
 const AppTerminalsRoute = AppTerminalsRouteImport.update({
@@ -91,9 +108,19 @@ const AppPosRoute = AppPosRouteImport.update({
   path: '/pos',
   getParentRoute: () => AppRoute,
 } as any)
+const AppOrdersRoute = AppOrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppMobilePosRoute = AppMobilePosRouteImport.update({
   id: '/mobile-pos',
   path: '/mobile-pos',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMartSuppliersRoute = AppMartSuppliersRouteImport.update({
+  id: '/mart-suppliers',
+  path: '/mart-suppliers',
   getParentRoute: () => AppRoute,
 } as any)
 const AppMaintenanceRoute = AppMaintenanceRouteImport.update({
@@ -111,9 +138,24 @@ const AppInventoryRoute = AppInventoryRouteImport.update({
   path: '/inventory',
   getParentRoute: () => AppRoute,
 } as any)
+const AppExpensesRoute = AppExpensesRouteImport.update({
+  id: '/expenses',
+  path: '/expenses',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppExpenseTypesRoute = AppExpenseTypesRouteImport.update({
+  id: '/expense-types',
+  path: '/expense-types',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDevicesRoute = AppDevicesRouteImport.update({
   id: '/devices',
   path: '/devices',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDeviceBehaviorRoute = AppDeviceBehaviorRouteImport.update({
+  id: '/device-behavior',
+  path: '/device-behavior',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
@@ -151,11 +193,16 @@ export interface FileRoutesByFullPath {
   '/branches': typeof AppBranchesRoute
   '/compliance': typeof AppComplianceRoute
   '/dashboard': typeof AppDashboardRoute
+  '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
+  '/expense-types': typeof AppExpenseTypesRoute
+  '/expenses': typeof AppExpensesRoute
   '/inventory': typeof AppInventoryRoute
   '/kiosk': typeof AppKioskRoute
   '/maintenance': typeof AppMaintenanceRoute
+  '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
+  '/orders': typeof AppOrdersRoute
   '/pos': typeof AppPosRoute
   '/reports': typeof AppReportsRoute
   '/sales': typeof AppSalesRoute
@@ -163,6 +210,8 @@ export interface FileRoutesByFullPath {
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
   '/terminals': typeof AppTerminalsRoute
+  '/users': typeof AppUsersRoute
+  '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesByTo {
@@ -174,11 +223,16 @@ export interface FileRoutesByTo {
   '/branches': typeof AppBranchesRoute
   '/compliance': typeof AppComplianceRoute
   '/dashboard': typeof AppDashboardRoute
+  '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
+  '/expense-types': typeof AppExpenseTypesRoute
+  '/expenses': typeof AppExpensesRoute
   '/inventory': typeof AppInventoryRoute
   '/kiosk': typeof AppKioskRoute
   '/maintenance': typeof AppMaintenanceRoute
+  '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
+  '/orders': typeof AppOrdersRoute
   '/pos': typeof AppPosRoute
   '/reports': typeof AppReportsRoute
   '/sales': typeof AppSalesRoute
@@ -186,6 +240,8 @@ export interface FileRoutesByTo {
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
   '/terminals': typeof AppTerminalsRoute
+  '/users': typeof AppUsersRoute
+  '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesById {
@@ -199,11 +255,16 @@ export interface FileRoutesById {
   '/_app/branches': typeof AppBranchesRoute
   '/_app/compliance': typeof AppComplianceRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/device-behavior': typeof AppDeviceBehaviorRoute
   '/_app/devices': typeof AppDevicesRoute
+  '/_app/expense-types': typeof AppExpenseTypesRoute
+  '/_app/expenses': typeof AppExpensesRoute
   '/_app/inventory': typeof AppInventoryRoute
   '/_app/kiosk': typeof AppKioskRoute
   '/_app/maintenance': typeof AppMaintenanceRoute
+  '/_app/mart-suppliers': typeof AppMartSuppliersRoute
   '/_app/mobile-pos': typeof AppMobilePosRoute
+  '/_app/orders': typeof AppOrdersRoute
   '/_app/pos': typeof AppPosRoute
   '/_app/reports': typeof AppReportsRoute
   '/_app/sales': typeof AppSalesRoute
@@ -211,6 +272,8 @@ export interface FileRoutesById {
   '/_app/staff': typeof AppStaffRoute
   '/_app/suppliers': typeof AppSuppliersRoute
   '/_app/terminals': typeof AppTerminalsRoute
+  '/_app/users': typeof AppUsersRoute
+  '/_app/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/_app/zatca': typeof AppZatcaRoute
 }
 export interface FileRouteTypes {
@@ -224,11 +287,16 @@ export interface FileRouteTypes {
     | '/branches'
     | '/compliance'
     | '/dashboard'
+    | '/device-behavior'
     | '/devices'
+    | '/expense-types'
+    | '/expenses'
     | '/inventory'
     | '/kiosk'
     | '/maintenance'
+    | '/mart-suppliers'
     | '/mobile-pos'
+    | '/orders'
     | '/pos'
     | '/reports'
     | '/sales'
@@ -236,6 +304,8 @@ export interface FileRouteTypes {
     | '/staff'
     | '/suppliers'
     | '/terminals'
+    | '/users'
+    | '/warehouse-suppliers'
     | '/zatca'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -247,11 +317,16 @@ export interface FileRouteTypes {
     | '/branches'
     | '/compliance'
     | '/dashboard'
+    | '/device-behavior'
     | '/devices'
+    | '/expense-types'
+    | '/expenses'
     | '/inventory'
     | '/kiosk'
     | '/maintenance'
+    | '/mart-suppliers'
     | '/mobile-pos'
+    | '/orders'
     | '/pos'
     | '/reports'
     | '/sales'
@@ -259,6 +334,8 @@ export interface FileRouteTypes {
     | '/staff'
     | '/suppliers'
     | '/terminals'
+    | '/users'
+    | '/warehouse-suppliers'
     | '/zatca'
   id:
     | '__root__'
@@ -271,11 +348,16 @@ export interface FileRouteTypes {
     | '/_app/branches'
     | '/_app/compliance'
     | '/_app/dashboard'
+    | '/_app/device-behavior'
     | '/_app/devices'
+    | '/_app/expense-types'
+    | '/_app/expenses'
     | '/_app/inventory'
     | '/_app/kiosk'
     | '/_app/maintenance'
+    | '/_app/mart-suppliers'
     | '/_app/mobile-pos'
+    | '/_app/orders'
     | '/_app/pos'
     | '/_app/reports'
     | '/_app/sales'
@@ -283,6 +365,8 @@ export interface FileRouteTypes {
     | '/_app/staff'
     | '/_app/suppliers'
     | '/_app/terminals'
+    | '/_app/users'
+    | '/_app/warehouse-suppliers'
     | '/_app/zatca'
   fileRoutesById: FileRoutesById
 }
@@ -328,6 +412,20 @@ declare module '@tanstack/react-router' {
       path: '/zatca'
       fullPath: '/zatca'
       preLoaderRoute: typeof AppZatcaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/warehouse-suppliers': {
+      id: '/_app/warehouse-suppliers'
+      path: '/warehouse-suppliers'
+      fullPath: '/warehouse-suppliers'
+      preLoaderRoute: typeof AppWarehouseSuppliersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/users': {
+      id: '/_app/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof AppUsersRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/terminals': {
@@ -379,11 +477,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppPosRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/orders': {
+      id: '/_app/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof AppOrdersRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/mobile-pos': {
       id: '/_app/mobile-pos'
       path: '/mobile-pos'
       fullPath: '/mobile-pos'
       preLoaderRoute: typeof AppMobilePosRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/mart-suppliers': {
+      id: '/_app/mart-suppliers'
+      path: '/mart-suppliers'
+      fullPath: '/mart-suppliers'
+      preLoaderRoute: typeof AppMartSuppliersRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/maintenance': {
@@ -407,11 +519,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppInventoryRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/expenses': {
+      id: '/_app/expenses'
+      path: '/expenses'
+      fullPath: '/expenses'
+      preLoaderRoute: typeof AppExpensesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/expense-types': {
+      id: '/_app/expense-types'
+      path: '/expense-types'
+      fullPath: '/expense-types'
+      preLoaderRoute: typeof AppExpenseTypesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/devices': {
       id: '/_app/devices'
       path: '/devices'
       fullPath: '/devices'
       preLoaderRoute: typeof AppDevicesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/device-behavior': {
+      id: '/_app/device-behavior'
+      path: '/device-behavior'
+      fullPath: '/device-behavior'
+      preLoaderRoute: typeof AppDeviceBehaviorRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/dashboard': {
@@ -458,11 +591,16 @@ interface AppRouteChildren {
   AppBranchesRoute: typeof AppBranchesRoute
   AppComplianceRoute: typeof AppComplianceRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppDeviceBehaviorRoute: typeof AppDeviceBehaviorRoute
   AppDevicesRoute: typeof AppDevicesRoute
+  AppExpenseTypesRoute: typeof AppExpenseTypesRoute
+  AppExpensesRoute: typeof AppExpensesRoute
   AppInventoryRoute: typeof AppInventoryRoute
   AppKioskRoute: typeof AppKioskRoute
   AppMaintenanceRoute: typeof AppMaintenanceRoute
+  AppMartSuppliersRoute: typeof AppMartSuppliersRoute
   AppMobilePosRoute: typeof AppMobilePosRoute
+  AppOrdersRoute: typeof AppOrdersRoute
   AppPosRoute: typeof AppPosRoute
   AppReportsRoute: typeof AppReportsRoute
   AppSalesRoute: typeof AppSalesRoute
@@ -470,6 +608,8 @@ interface AppRouteChildren {
   AppStaffRoute: typeof AppStaffRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
   AppTerminalsRoute: typeof AppTerminalsRoute
+  AppUsersRoute: typeof AppUsersRoute
+  AppWarehouseSuppliersRoute: typeof AppWarehouseSuppliersRoute
   AppZatcaRoute: typeof AppZatcaRoute
 }
 
@@ -479,11 +619,16 @@ const AppRouteChildren: AppRouteChildren = {
   AppBranchesRoute: AppBranchesRoute,
   AppComplianceRoute: AppComplianceRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppDeviceBehaviorRoute: AppDeviceBehaviorRoute,
   AppDevicesRoute: AppDevicesRoute,
+  AppExpenseTypesRoute: AppExpenseTypesRoute,
+  AppExpensesRoute: AppExpensesRoute,
   AppInventoryRoute: AppInventoryRoute,
   AppKioskRoute: AppKioskRoute,
   AppMaintenanceRoute: AppMaintenanceRoute,
+  AppMartSuppliersRoute: AppMartSuppliersRoute,
   AppMobilePosRoute: AppMobilePosRoute,
+  AppOrdersRoute: AppOrdersRoute,
   AppPosRoute: AppPosRoute,
   AppReportsRoute: AppReportsRoute,
   AppSalesRoute: AppSalesRoute,
@@ -491,6 +636,8 @@ const AppRouteChildren: AppRouteChildren = {
   AppStaffRoute: AppStaffRoute,
   AppSuppliersRoute: AppSuppliersRoute,
   AppTerminalsRoute: AppTerminalsRoute,
+  AppUsersRoute: AppUsersRoute,
+  AppWarehouseSuppliersRoute: AppWarehouseSuppliersRoute,
   AppZatcaRoute: AppZatcaRoute,
 }
 
@@ -505,13 +652,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
