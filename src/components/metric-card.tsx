@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { ArrowUpRight, ArrowDownRight, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, X, type LucideIcon } from "lucide-react";
 
 export function MetricCard({
   label,
@@ -9,6 +9,8 @@ export function MetricCard({
   icon: Icon,
   hint,
   accent = "default",
+  editing,
+  onRemove,
 }: {
   label: string;
   value: string;
@@ -17,6 +19,8 @@ export function MetricCard({
   icon: LucideIcon;
   hint?: string;
   accent?: "default" | "primary" | "success" | "warning" | "destructive";
+  editing?: boolean;
+  onRemove?: () => void;
 }) {
   const accentClasses: Record<string, string> = {
     default: "bg-muted text-foreground",
@@ -26,7 +30,19 @@ export function MetricCard({
     destructive: "bg-destructive/15 text-destructive",
   };
   return (
-    <div className="group relative rounded-2xl border border-border/60 bg-card p-5 shadow-card hover:shadow-elegant transition-all overflow-hidden">
+    <div className={cn(
+      "group relative rounded-2xl border border-border/60 bg-card p-5 shadow-card hover:shadow-elegant transition-all overflow-hidden",
+      editing && "ring-2 ring-primary/40 ring-offset-2 ring-offset-background animate-fade-in",
+    )}>
+      {editing && onRemove && (
+        <button
+          onClick={onRemove}
+          className="absolute -top-2 -right-2 z-10 h-6 w-6 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-md hover:scale-110 transition-transform"
+          aria-label="Remove card"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
       <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-primary/5 group-hover:bg-primary/10 transition-colors" />
       <div className="relative flex items-start justify-between">
         <div>
