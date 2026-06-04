@@ -44,6 +44,7 @@ import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppCouponsRouteImport } from './routes/_app.coupons'
 import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
 import { Route as AppCashierShiftRouteImport } from './routes/_app.cashier-shift'
+import { Route as AppCashierRouteImport } from './routes/_app.cashier'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBiRouteImport } from './routes/_app.bi'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
@@ -223,6 +224,11 @@ const AppCashierShiftRoute = AppCashierShiftRouteImport.update({
   path: '/cashier-shift',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCashierRoute = AppCashierRouteImport.update({
+  id: '/cashier',
+  path: '/cashier',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBranchesRoute = AppBranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
@@ -252,6 +258,7 @@ export interface FileRoutesByFullPath {
   '/batches': typeof AppBatchesRoute
   '/bi': typeof AppBiRoute
   '/branches': typeof AppBranchesRoute
+  '/cashier': typeof AppCashierRoute
   '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
   '/coupons': typeof AppCouponsRoute
@@ -292,6 +299,7 @@ export interface FileRoutesByTo {
   '/batches': typeof AppBatchesRoute
   '/bi': typeof AppBiRoute
   '/branches': typeof AppBranchesRoute
+  '/cashier': typeof AppCashierRoute
   '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
   '/coupons': typeof AppCouponsRoute
@@ -334,6 +342,7 @@ export interface FileRoutesById {
   '/_app/batches': typeof AppBatchesRoute
   '/_app/bi': typeof AppBiRoute
   '/_app/branches': typeof AppBranchesRoute
+  '/_app/cashier': typeof AppCashierRoute
   '/_app/cashier-shift': typeof AppCashierShiftRoute
   '/_app/compliance': typeof AppComplianceRoute
   '/_app/coupons': typeof AppCouponsRoute
@@ -376,6 +385,7 @@ export interface FileRouteTypes {
     | '/batches'
     | '/bi'
     | '/branches'
+    | '/cashier'
     | '/cashier-shift'
     | '/compliance'
     | '/coupons'
@@ -416,6 +426,7 @@ export interface FileRouteTypes {
     | '/batches'
     | '/bi'
     | '/branches'
+    | '/cashier'
     | '/cashier-shift'
     | '/compliance'
     | '/coupons'
@@ -457,6 +468,7 @@ export interface FileRouteTypes {
     | '/_app/batches'
     | '/_app/bi'
     | '/_app/branches'
+    | '/_app/cashier'
     | '/_app/cashier-shift'
     | '/_app/compliance'
     | '/_app/coupons'
@@ -744,6 +756,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCashierShiftRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/cashier': {
+      id: '/_app/cashier'
+      path: '/cashier'
+      fullPath: '/cashier'
+      preLoaderRoute: typeof AppCashierRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/branches': {
       id: '/_app/branches'
       path: '/branches'
@@ -780,6 +799,7 @@ interface AppRouteChildren {
   AppBatchesRoute: typeof AppBatchesRoute
   AppBiRoute: typeof AppBiRoute
   AppBranchesRoute: typeof AppBranchesRoute
+  AppCashierRoute: typeof AppCashierRoute
   AppCashierShiftRoute: typeof AppCashierShiftRoute
   AppComplianceRoute: typeof AppComplianceRoute
   AppCouponsRoute: typeof AppCouponsRoute
@@ -818,6 +838,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppBatchesRoute: AppBatchesRoute,
   AppBiRoute: AppBiRoute,
   AppBranchesRoute: AppBranchesRoute,
+  AppCashierRoute: AppCashierRoute,
   AppCashierShiftRoute: AppCashierShiftRoute,
   AppComplianceRoute: AppComplianceRoute,
   AppCouponsRoute: AppCouponsRoute,
