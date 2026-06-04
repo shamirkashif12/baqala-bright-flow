@@ -33,6 +33,7 @@ import { Route as AppExpensesRouteImport } from './routes/_app.expenses'
 import { Route as AppExpenseTypesRouteImport } from './routes/_app.expense-types'
 import { Route as AppDevicesRouteImport } from './routes/_app.devices'
 import { Route as AppDeviceBehaviorRouteImport } from './routes/_app.device-behavior'
+import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
@@ -157,6 +158,11 @@ const AppDeviceBehaviorRoute = AppDeviceBehaviorRouteImport.update({
   path: '/device-behavior',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppComplianceRoute = AppComplianceRouteImport.update({
   id: '/compliance',
   path: '/compliance',
@@ -186,6 +192,7 @@ export interface FileRoutesByFullPath {
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
   '/compliance': typeof AppComplianceRoute
+  '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
   '/expense-types': typeof AppExpenseTypesRoute
@@ -215,6 +222,7 @@ export interface FileRoutesByTo {
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
   '/compliance': typeof AppComplianceRoute
+  '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
   '/expense-types': typeof AppExpenseTypesRoute
@@ -246,6 +254,7 @@ export interface FileRoutesById {
   '/_app/batches': typeof AppBatchesRoute
   '/_app/branches': typeof AppBranchesRoute
   '/_app/compliance': typeof AppComplianceRoute
+  '/_app/dashboard': typeof AppDashboardRoute
   '/_app/device-behavior': typeof AppDeviceBehaviorRoute
   '/_app/devices': typeof AppDevicesRoute
   '/_app/expense-types': typeof AppExpenseTypesRoute
@@ -277,6 +286,7 @@ export interface FileRouteTypes {
     | '/batches'
     | '/branches'
     | '/compliance'
+    | '/dashboard'
     | '/device-behavior'
     | '/devices'
     | '/expense-types'
@@ -306,6 +316,7 @@ export interface FileRouteTypes {
     | '/batches'
     | '/branches'
     | '/compliance'
+    | '/dashboard'
     | '/device-behavior'
     | '/devices'
     | '/expense-types'
@@ -336,6 +347,7 @@ export interface FileRouteTypes {
     | '/_app/batches'
     | '/_app/branches'
     | '/_app/compliance'
+    | '/_app/dashboard'
     | '/_app/device-behavior'
     | '/_app/devices'
     | '/_app/expense-types'
@@ -535,6 +547,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDeviceBehaviorRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/compliance': {
       id: '/_app/compliance'
       path: '/compliance'
@@ -571,6 +590,7 @@ interface AppRouteChildren {
   AppBatchesRoute: typeof AppBatchesRoute
   AppBranchesRoute: typeof AppBranchesRoute
   AppComplianceRoute: typeof AppComplianceRoute
+  AppDashboardRoute: typeof AppDashboardRoute
   AppDeviceBehaviorRoute: typeof AppDeviceBehaviorRoute
   AppDevicesRoute: typeof AppDevicesRoute
   AppExpenseTypesRoute: typeof AppExpenseTypesRoute
@@ -598,6 +618,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppBatchesRoute: AppBatchesRoute,
   AppBranchesRoute: AppBranchesRoute,
   AppComplianceRoute: AppComplianceRoute,
+  AppDashboardRoute: AppDashboardRoute,
   AppDeviceBehaviorRoute: AppDeviceBehaviorRoute,
   AppDevicesRoute: AppDevicesRoute,
   AppExpenseTypesRoute: AppExpenseTypesRoute,

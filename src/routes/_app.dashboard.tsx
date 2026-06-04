@@ -16,13 +16,13 @@ export const Route = createFileRoute("/_app/dashboard")({
   component: Dashboard,
 });
 
-type Card = {
+type StatCardData = {
   label: string; value: string; desc: string; delta: string; trend: "up" | "down" | "flat";
   updated: string; icon: LucideIcon; href: string; action: string;
   accent?: "primary" | "success" | "warning" | "destructive";
 };
 
-const cards: Card[] = [
+const cards: StatCardData[] = [
   { label: "Pending Orders", value: "24", desc: "Orders awaiting confirmation", delta: "+8%", trend: "up", updated: "5 min ago", icon: Clock3, href: "/orders", action: "View orders", accent: "warning" },
   { label: "Processing Orders", value: "16", desc: "Currently being prepared", delta: "+3%", trend: "up", updated: "2 min ago", icon: ShoppingBag, href: "/orders", action: "Manage", accent: "primary" },
   { label: "Ready to Deliver", value: "12", desc: "Packed & waiting for pickup", delta: "-2%", trend: "down", updated: "1 min ago", icon: PackageCheck, href: "/orders", action: "Dispatch", accent: "primary" },
@@ -35,7 +35,7 @@ const cards: Card[] = [
   { label: "Close to Expiry", value: "41", desc: "Expiring in next 7 days", delta: "+5", trend: "down", updated: "20 min ago", icon: CalendarClock, href: "/batches", action: "Review", accent: "warning" },
 ];
 
-function StatCard({ c }: { c: Card }) {
+function StatCard({ c }: { c: StatCardData }) {
   const accent = c.accent ?? "primary";
   const iconBg = {
     primary: "bg-primary/10 text-primary",
