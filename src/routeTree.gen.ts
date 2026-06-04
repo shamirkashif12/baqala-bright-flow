@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
+import { Route as AppWarehousesRouteImport } from './routes/_app.warehouses'
 import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehouse-suppliers'
 import { Route as AppUsersRouteImport } from './routes/_app.users'
 import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
@@ -61,6 +62,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppZatcaRoute = AppZatcaRouteImport.update({
   id: '/zatca',
   path: '/zatca',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWarehousesRoute = AppWarehousesRouteImport.update({
+  id: '/warehouses',
+  path: '/warehouses',
   getParentRoute: () => AppRoute,
 } as any)
 const AppWarehouseSuppliersRoute = AppWarehouseSuppliersRouteImport.update({
@@ -212,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
+  '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesByTo {
@@ -242,6 +249,7 @@ export interface FileRoutesByTo {
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
+  '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesById {
@@ -274,6 +282,7 @@ export interface FileRoutesById {
   '/_app/terminals': typeof AppTerminalsRoute
   '/_app/users': typeof AppUsersRoute
   '/_app/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
+  '/_app/warehouses': typeof AppWarehousesRoute
   '/_app/zatca': typeof AppZatcaRoute
 }
 export interface FileRouteTypes {
@@ -306,6 +315,7 @@ export interface FileRouteTypes {
     | '/terminals'
     | '/users'
     | '/warehouse-suppliers'
+    | '/warehouses'
     | '/zatca'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
     | '/terminals'
     | '/users'
     | '/warehouse-suppliers'
+    | '/warehouses'
     | '/zatca'
   id:
     | '__root__'
@@ -367,6 +378,7 @@ export interface FileRouteTypes {
     | '/_app/terminals'
     | '/_app/users'
     | '/_app/warehouse-suppliers'
+    | '/_app/warehouses'
     | '/_app/zatca'
   fileRoutesById: FileRoutesById
 }
@@ -412,6 +424,13 @@ declare module '@tanstack/react-router' {
       path: '/zatca'
       fullPath: '/zatca'
       preLoaderRoute: typeof AppZatcaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/warehouses': {
+      id: '/_app/warehouses'
+      path: '/warehouses'
+      fullPath: '/warehouses'
+      preLoaderRoute: typeof AppWarehousesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/warehouse-suppliers': {
@@ -610,6 +629,7 @@ interface AppRouteChildren {
   AppTerminalsRoute: typeof AppTerminalsRoute
   AppUsersRoute: typeof AppUsersRoute
   AppWarehouseSuppliersRoute: typeof AppWarehouseSuppliersRoute
+  AppWarehousesRoute: typeof AppWarehousesRoute
   AppZatcaRoute: typeof AppZatcaRoute
 }
 
@@ -638,6 +658,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppTerminalsRoute: AppTerminalsRoute,
   AppUsersRoute: AppUsersRoute,
   AppWarehouseSuppliersRoute: AppWarehouseSuppliersRoute,
+  AppWarehousesRoute: AppWarehousesRoute,
   AppZatcaRoute: AppZatcaRoute,
 }
 
@@ -652,3 +673,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
