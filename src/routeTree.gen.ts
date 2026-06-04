@@ -36,6 +36,7 @@ import { Route as AppDevicesRouteImport } from './routes/_app.devices'
 import { Route as AppDeviceBehaviorRouteImport } from './routes/_app.device-behavior'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
+import { Route as AppCashierShiftRouteImport } from './routes/_app.cashier-shift'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
@@ -174,6 +175,11 @@ const AppComplianceRoute = AppComplianceRouteImport.update({
   path: '/compliance',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCashierShiftRoute = AppCashierShiftRouteImport.update({
+  id: '/cashier-shift',
+  path: '/cashier-shift',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBranchesRoute = AppBranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
@@ -197,6 +203,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRoute
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
+  '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
@@ -228,6 +235,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AppAdminRoute
   '/batches': typeof AppBatchesRoute
   '/branches': typeof AppBranchesRoute
+  '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
@@ -261,6 +269,7 @@ export interface FileRoutesById {
   '/_app/admin': typeof AppAdminRoute
   '/_app/batches': typeof AppBatchesRoute
   '/_app/branches': typeof AppBranchesRoute
+  '/_app/cashier-shift': typeof AppCashierShiftRoute
   '/_app/compliance': typeof AppComplianceRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/device-behavior': typeof AppDeviceBehaviorRoute
@@ -294,6 +303,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/batches'
     | '/branches'
+    | '/cashier-shift'
     | '/compliance'
     | '/dashboard'
     | '/device-behavior'
@@ -325,6 +335,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/batches'
     | '/branches'
+    | '/cashier-shift'
     | '/compliance'
     | '/dashboard'
     | '/device-behavior'
@@ -357,6 +368,7 @@ export interface FileRouteTypes {
     | '/_app/admin'
     | '/_app/batches'
     | '/_app/branches'
+    | '/_app/cashier-shift'
     | '/_app/compliance'
     | '/_app/dashboard'
     | '/_app/device-behavior'
@@ -580,6 +592,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppComplianceRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/cashier-shift': {
+      id: '/_app/cashier-shift'
+      path: '/cashier-shift'
+      fullPath: '/cashier-shift'
+      preLoaderRoute: typeof AppCashierShiftRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/branches': {
       id: '/_app/branches'
       path: '/branches'
@@ -608,6 +627,7 @@ interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
   AppBatchesRoute: typeof AppBatchesRoute
   AppBranchesRoute: typeof AppBranchesRoute
+  AppCashierShiftRoute: typeof AppCashierShiftRoute
   AppComplianceRoute: typeof AppComplianceRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppDeviceBehaviorRoute: typeof AppDeviceBehaviorRoute
@@ -637,6 +657,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
   AppBatchesRoute: AppBatchesRoute,
   AppBranchesRoute: AppBranchesRoute,
+  AppCashierShiftRoute: AppCashierShiftRoute,
   AppComplianceRoute: AppComplianceRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppDeviceBehaviorRoute: AppDeviceBehaviorRoute,
