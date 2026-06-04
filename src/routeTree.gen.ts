@@ -33,6 +33,7 @@ import { Route as AppOrdersRouteImport } from './routes/_app.orders'
 import { Route as AppMobilePosRouteImport } from './routes/_app.mobile-pos'
 import { Route as AppMartSuppliersRouteImport } from './routes/_app.mart-suppliers'
 import { Route as AppMaintenanceRouteImport } from './routes/_app.maintenance'
+import { Route as AppKpiRouteImport } from './routes/_app.kpi'
 import { Route as AppKioskRouteImport } from './routes/_app.kiosk'
 import { Route as AppInventoryRouteImport } from './routes/_app.inventory'
 import { Route as AppExpensesRouteImport } from './routes/_app.expenses'
@@ -166,6 +167,11 @@ const AppMaintenanceRoute = AppMaintenanceRouteImport.update({
   path: '/maintenance',
   getParentRoute: () => AppRoute,
 } as any)
+const AppKpiRoute = AppKpiRouteImport.update({
+  id: '/kpi',
+  path: '/kpi',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppKioskRoute = AppKioskRouteImport.update({
   id: '/kiosk',
   path: '/kiosk',
@@ -249,6 +255,7 @@ export interface FileRoutesByFullPath {
   '/expenses': typeof AppExpensesRoute
   '/inventory': typeof AppInventoryRoute
   '/kiosk': typeof AppKioskRoute
+  '/kpi': typeof AppKpiRoute
   '/maintenance': typeof AppMaintenanceRoute
   '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
@@ -287,6 +294,7 @@ export interface FileRoutesByTo {
   '/expenses': typeof AppExpensesRoute
   '/inventory': typeof AppInventoryRoute
   '/kiosk': typeof AppKioskRoute
+  '/kpi': typeof AppKpiRoute
   '/maintenance': typeof AppMaintenanceRoute
   '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
@@ -327,6 +335,7 @@ export interface FileRoutesById {
   '/_app/expenses': typeof AppExpensesRoute
   '/_app/inventory': typeof AppInventoryRoute
   '/_app/kiosk': typeof AppKioskRoute
+  '/_app/kpi': typeof AppKpiRoute
   '/_app/maintenance': typeof AppMaintenanceRoute
   '/_app/mart-suppliers': typeof AppMartSuppliersRoute
   '/_app/mobile-pos': typeof AppMobilePosRoute
@@ -367,6 +376,7 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/inventory'
     | '/kiosk'
+    | '/kpi'
     | '/maintenance'
     | '/mart-suppliers'
     | '/mobile-pos'
@@ -405,6 +415,7 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/inventory'
     | '/kiosk'
+    | '/kpi'
     | '/maintenance'
     | '/mart-suppliers'
     | '/mobile-pos'
@@ -444,6 +455,7 @@ export interface FileRouteTypes {
     | '/_app/expenses'
     | '/_app/inventory'
     | '/_app/kiosk'
+    | '/_app/kpi'
     | '/_app/maintenance'
     | '/_app/mart-suppliers'
     | '/_app/mobile-pos'
@@ -643,6 +655,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppMaintenanceRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/kpi': {
+      id: '/_app/kpi'
+      path: '/kpi'
+      fullPath: '/kpi'
+      preLoaderRoute: typeof AppKpiRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/kiosk': {
       id: '/_app/kiosk'
       path: '/kiosk'
@@ -751,6 +770,7 @@ interface AppRouteChildren {
   AppExpensesRoute: typeof AppExpensesRoute
   AppInventoryRoute: typeof AppInventoryRoute
   AppKioskRoute: typeof AppKioskRoute
+  AppKpiRoute: typeof AppKpiRoute
   AppMaintenanceRoute: typeof AppMaintenanceRoute
   AppMartSuppliersRoute: typeof AppMartSuppliersRoute
   AppMobilePosRoute: typeof AppMobilePosRoute
@@ -787,6 +807,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppExpensesRoute: AppExpensesRoute,
   AppInventoryRoute: AppInventoryRoute,
   AppKioskRoute: AppKioskRoute,
+  AppKpiRoute: AppKpiRoute,
   AppMaintenanceRoute: AppMaintenanceRoute,
   AppMartSuppliersRoute: AppMartSuppliersRoute,
   AppMobilePosRoute: AppMobilePosRoute,
