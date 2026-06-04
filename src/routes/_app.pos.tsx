@@ -278,7 +278,7 @@ function POS() {
       </Dialog>
 
       {/* Payment dialog */}
-      <PaymentDialog open={payOpen} onOpenChange={setPayOpen} total={total} onDone={() => { setPayOpen(false); setInvOpen(true); }} />
+      <PaymentDialog open={payOpen} onOpenChange={setPayOpen} total={total} onDone={() => { setPayOpen(false); setInvOpen(true); setCart([]); }} />
 
       {/* Held orders dialog */}
       <Dialog open={holdOpen} onOpenChange={setHoldOpen}>
