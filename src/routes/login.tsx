@@ -9,8 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { BaqalaLogo } from "@/components/baqala-logo";
 import { useAuth } from "@/lib/auth";
 import { ShieldCheck, ScanBarcode, Smartphone, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
-import loginHero from "@/assets/login-hero.jpg";
-
 export const Route = createFileRoute("/login")({
   validateSearch: (search) => ({
     redirect: (search.redirect as string) || "/dashboard",
@@ -55,10 +53,27 @@ function Login() {
     <div className="min-h-screen grid lg:grid-cols-2 bg-background">
       {/* Left brand panel */}
       <div className="relative hidden lg:flex flex-col justify-between p-10 gradient-primary text-primary-foreground overflow-hidden">
-        <img src={loginHero} alt="Mart POS" className="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-luminosity" />
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/85 via-primary/70 to-primary/40" />
+        {/* Animated mesh / orbs */}
+        <div className="absolute -top-24 -left-16 h-80 w-80 rounded-full bg-white/20 blur-3xl animate-pulse" />
+        <div className="absolute bottom-10 -right-24 h-96 w-96 rounded-full bg-primary-glow/40 blur-3xl animate-pulse" style={{ animationDelay: "1s" }} />
+        <div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(white_1px,transparent_1px),linear-gradient(90deg,white_1px,transparent_1px)] [background-size:32px_32px]" />
         <div className="relative z-10">
           <BaqalaLogo />
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            {["POS", "Inventory", "Suppliers", "Delivery", "Devices"].map(p => (
+              <Badge key={p} className="bg-white/15 text-primary-foreground border-white/20 backdrop-blur text-[10px]">{p}</Badge>
+            ))}
+          </div>
+        </div>
+        {/* Floating KPI chips */}
+        <div className="absolute top-32 right-10 rounded-2xl bg-white/15 backdrop-blur border border-white/20 p-3 z-10 animate-pulse" style={{ animationDuration: "3s" }}>
+          <p className="text-[10px] uppercase tracking-wider opacity-80">Today's Sales</p>
+          <p className="text-lg font-bold">ر.س 48,920</p>
+          <p className="text-[10px] text-success-foreground bg-success/40 inline-block px-1.5 rounded mt-1">+18%</p>
+        </div>
+        <div className="absolute bottom-44 right-20 rounded-2xl bg-white/15 backdrop-blur border border-white/20 p-3 z-10 animate-pulse" style={{ animationDuration: "4s", animationDelay: "0.5s" }}>
+          <p className="text-[10px] uppercase tracking-wider opacity-80">Active Terminals</p>
+          <p className="text-lg font-bold">11 / 12</p>
         </div>
         <div className="relative z-10 space-y-6 max-w-md">
           <Badge className="bg-white/15 text-primary-foreground border-white/20 backdrop-blur gap-1.5">
