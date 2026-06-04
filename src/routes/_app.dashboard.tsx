@@ -1,240 +1,264 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { PageShell } from "@/components/app-topbar";
-import { MetricCard, StatusDot } from "@/components/metric-card";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 import {
-  Wallet, ShoppingBag, Terminal as TerminalIcon, AlertTriangle, CalendarClock, FileBox, Building2, ReceiptText, MoreHorizontal, ArrowRight, ShieldCheck, Smartphone, Activity, Cpu,
+  Wallet, ShoppingBag, Terminal as TerminalIcon, AlertTriangle, CalendarClock,
+  Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowUpRight, ArrowDownRight,
+  ArrowRight, type LucideIcon,
 } from "lucide-react";
-import dashboardHero from "@/assets/dashboard-hero.jpg";
-import storePhoto from "@/assets/store-photo.jpg";
-import ownerPhoto from "@/assets/owner-photo.jpg";
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: Dashboard,
 });
 
-const sparkData = [12, 18, 14, 22, 30, 26, 34, 28, 40, 36, 48, 52, 46, 58, 64];
+type StatCardData = {
+  label: string; value: string; desc: string; delta: string; trend: "up" | "down" | "flat";
+  updated: string; icon: LucideIcon; href: string; action: string;
+  accent?: "primary" | "success" | "warning" | "destructive";
+};
 
-function Sparkline({ data, color = "var(--primary)" }: { data: number[]; color?: string }) {
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const points = data.map((v, i) => `${(i / (data.length - 1)) * 100},${100 - ((v - min) / (max - min || 1)) * 100}`).join(" ");
+const cards: StatCardData[] = [
+  { label: "Pending Orders", value: "24", desc: "Orders awaiting confirmation", delta: "+8%", trend: "up", updated: "5 min ago", icon: Clock3, href: "/orders", action: "View orders", accent: "warning" },
+  { label: "Processing Orders", value: "16", desc: "Currently being prepared", delta: "+3%", trend: "up", updated: "2 min ago", icon: ShoppingBag, href: "/orders", action: "Manage", accent: "primary" },
+  { label: "Ready to Deliver", value: "12", desc: "Packed & waiting for pickup", delta: "-2%", trend: "down", updated: "1 min ago", icon: PackageCheck, href: "/orders", action: "Dispatch", accent: "primary" },
+  { label: "Delivered Orders", value: "189", desc: "Completed deliveries today", delta: "+14%", trend: "up", updated: "just now", icon: Truck, href: "/orders", action: "History", accent: "success" },
+  { label: "Today's Sales", value: "ر.س 48,920", desc: "Gross sales across 4 branches", delta: "+18%", trend: "up", updated: "live", icon: Wallet, href: "/sales", action: "Sales report", accent: "primary" },
+  { label: "Today's Delivery", value: "ر.س 9,140", desc: "Delivery revenue collected", delta: "+22%", trend: "up", updated: "3 min ago", icon: Truck, href: "/orders", action: "Open", accent: "success" },
+  { label: "Active Cashiers", value: "9 / 12", desc: "Checked-in this shift", delta: "+1", trend: "up", updated: "live", icon: Users, href: "/cashier-shift", action: "Shifts", accent: "primary" },
+  { label: "Active Terminals", value: "11 / 12", desc: "Connected POS terminals", delta: "1 offline", trend: "down", updated: "30 sec ago", icon: TerminalIcon, href: "/terminals", action: "Terminals", accent: "warning" },
+  { label: "Low Stock Items", value: "23", desc: "Need reorder soon", delta: "6 critical", trend: "down", updated: "10 min ago", icon: PackageX, href: "/inventory", action: "Restock", accent: "destructive" },
+  { label: "Close to Expiry", value: "41", desc: "Expiring in next 7 days", delta: "+5", trend: "down", updated: "20 min ago", icon: CalendarClock, href: "/batches", action: "Review", accent: "warning" },
+];
+
+function StatCard({ c }: { c: StatCardData }) {
+  const accent = c.accent ?? "primary";
+  const iconBg = {
+    primary: "bg-primary/10 text-primary",
+    success: "bg-success/15 text-success",
+    warning: "bg-warning/20 text-warning-foreground",
+    destructive: "bg-destructive/15 text-destructive",
+  }[accent];
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-16">
-      <defs>
-        <linearGradient id="sg" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polygon points={`0,100 ${points} 100,100`} fill="url(#sg)" />
-      <polyline points={points} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <Card className="p-5 border-border/60 shadow-card hover:shadow-elegant transition-shadow flex flex-col gap-3">
+      <div className="flex items-start justify-between">
+        <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center", iconBg)}>
+          <c.icon className="h-5 w-5" />
+        </div>
+        <span className={cn(
+          "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-semibold",
+          c.trend === "up" && "bg-success/15 text-success",
+          c.trend === "down" && "bg-destructive/15 text-destructive",
+          c.trend === "flat" && "bg-muted text-muted-foreground",
+        )}>
+          {c.trend === "up" && <ArrowUpRight className="h-3 w-3" />}
+          {c.trend === "down" && <ArrowDownRight className="h-3 w-3" />}
+          {c.delta}
+        </span>
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{c.label}</p>
+        <p className="text-2xl md:text-3xl font-bold tracking-tight mt-1">{c.value}</p>
+        <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{c.desc}</p>
+      </div>
+      <div className="flex items-center justify-between pt-2 border-t border-border/60 text-xs">
+        <span className="text-muted-foreground">Updated {c.updated}</span>
+        <Link to={c.href} className="text-primary font-semibold hover:underline inline-flex items-center gap-0.5">
+          {c.action} <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+    </Card>
   );
 }
 
+const filters = ["Daily", "Weekly", "Monthly", "Custom"] as const;
+
 function Dashboard() {
+  const [filter, setFilter] = useState<(typeof filters)[number]>("Daily");
+
   return (
-    <PageShell title="Dashboard" subtitle="Tuesday, June 2 · Live across 4 branches">
-      {/* Hero strip */}
-      <Card className="relative overflow-hidden border-0 gradient-primary text-primary-foreground p-6 md:p-8 shadow-elegant min-h-[260px]">
-        <img
-          src={dashboardHero}
-          alt="Saudi baqala storefront"
-          className="absolute inset-0 w-full h-full object-cover opacity-25 mix-blend-luminosity"
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/90 via-primary/70 to-primary/40" />
-        <div className="relative grid md:grid-cols-3 gap-6 items-end">
-          <div className="md:col-span-2">
-            <Badge className="bg-white/15 text-primary-foreground border-white/20 backdrop-blur mb-3">
-              <ShieldCheck className="h-3 w-3 mr-1" /> ZATCA Phase 2 · Connected
-            </Badge>
-            <h2 className="text-2xl md:text-4xl font-bold tracking-tight">Good morning, Abdullah 👋</h2>
-            <p className="text-primary-foreground/80 mt-2 max-w-xl">Your 4 baqalas have processed <span className="font-semibold text-white">1,284 invoices</span> today — that's 18% above last Tuesday.</p>
-          </div>
-          <div className="flex flex-wrap gap-3 md:justify-end">
-            <Button variant="secondary" className="bg-white text-primary hover:bg-white/90 shadow-lg">Open POS</Button>
-            <Button variant="outline" className="bg-white/10 border-white/30 text-primary-foreground hover:bg-white/20">View Reports</Button>
-          </div>
-        </div>
-      </Card>
-
-      {/* Visual gallery */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card className="relative overflow-hidden border-border/60 shadow-card h-44 group">
-          <img src={storePhoto} alt="Olaya branch" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-          <div className="relative h-full flex flex-col justify-end p-4 text-white">
-            <Badge className="self-start bg-success/90 border-0 mb-2">Live · 412 orders</Badge>
-            <p className="font-bold">Olaya — Riyadh HQ</p>
-            <p className="text-xs opacity-90">ر.س 18,420 today</p>
-          </div>
-        </Card>
-        <Card className="relative overflow-hidden border-border/60 shadow-card h-44 group">
-          <img src={dashboardHero} alt="Khobar branch" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-          <div className="relative h-full flex flex-col justify-end p-4 text-white">
-            <Badge className="self-start bg-success/90 border-0 mb-2">Live · 318 orders</Badge>
-            <p className="font-bold">Al Khobar Corniche</p>
-            <p className="text-xs opacity-90">ر.س 12,890 today</p>
-          </div>
-        </Card>
-        <Card className="relative overflow-hidden border-border/60 shadow-card h-44 group">
-          <img src={ownerPhoto} alt="Owner" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-          <div className="relative h-full flex flex-col justify-end p-4 text-white">
-            <Badge className="self-start bg-white/20 backdrop-blur border-white/30 mb-2">Owner · Abdullah Al-Saud</Badge>
-            <p className="font-bold">4 baqalas under management</p>
-            <p className="text-xs opacity-90">Operating across Riyadh, Khobar, Jeddah & Madinah</p>
-          </div>
-        </Card>
+    <PageShell title="Dashboard" subtitle="Live snapshot across 4 branches">
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2 -mt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mr-1">Range</span>
+        {filters.map((f) => (
+          <Button
+            key={f}
+            size="sm"
+            variant={filter === f ? "default" : "outline"}
+            className={filter === f ? "gradient-primary text-primary-foreground border-0 shadow-glow" : ""}
+            onClick={() => setFilter(f)}
+          >
+            {f}
+          </Button>
+        ))}
+        <Badge variant="outline" className="ml-auto text-xs">Tuesday · June 2, 2026</Badge>
       </div>
 
-      {/* Metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Sales Today" value="ر.س 48,920" delta="+18%" trend="up" hint="vs last Tue" icon={Wallet} accent="primary" />
-        <MetricCard label="Orders" value="1,284" delta="+12%" trend="up" hint="3.4 avg/min" icon={ShoppingBag} />
-        <MetricCard label="Active Terminals" value="11 / 12" delta="1 offline" trend="down" icon={TerminalIcon} accent="warning" />
-        <MetricCard label="Low Stock Items" value="23" delta="6 critical" trend="down" icon={AlertTriangle} accent="destructive" />
+      {/* Stat cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {cards.map((c) => <StatCard key={c.label} c={c} />)}
       </div>
 
+      {/* Widgets row 1 */}
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Sales chart */}
-        <Card className="lg:col-span-2 p-6 border-border/60 shadow-card">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <h3 className="text-base font-semibold">Sales Performance</h3>
-              <p className="text-xs text-muted-foreground">Last 15 days · all branches</p>
+        <Widget title="Order Status Summary" link={{ to: "/orders", label: "All orders" }}>
+          {[
+            { l: "Pending", v: 24, c: "bg-warning" },
+            { l: "Processing", v: 16, c: "bg-primary" },
+            { l: "Ready", v: 12, c: "bg-primary" },
+            { l: "Delivered", v: 189, c: "bg-success" },
+            { l: "Cancelled", v: 3, c: "bg-destructive" },
+          ].map((s) => (
+            <div key={s.l} className="flex items-center gap-3">
+              <span className={cn("h-2 w-2 rounded-full", s.c)} />
+              <span className="text-sm flex-1">{s.l}</span>
+              <span className="text-sm font-bold tabular-nums">{s.v}</span>
             </div>
-            <div className="flex gap-1">
-              {["Day", "Week", "Month"].map((t, i) => (
-                <Button key={t} variant={i === 1 ? "default" : "ghost"} size="sm" className={i === 1 ? "gradient-primary text-primary-foreground border-0" : ""}>{t}</Button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div><p className="text-xs text-muted-foreground">Revenue</p><p className="text-xl font-bold">ر.س 312,480</p></div>
-            <div><p className="text-xs text-muted-foreground">Profit</p><p className="text-xl font-bold text-success">ر.س 86,210</p></div>
-            <div><p className="text-xs text-muted-foreground">VAT Collected</p><p className="text-xl font-bold">ر.س 40,620</p></div>
-          </div>
-          <Sparkline data={sparkData} />
-        </Card>
+          ))}
+        </Widget>
 
-        {/* Best sellers */}
-        <Card className="p-6 border-border/60 shadow-card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold">Best Sellers</h3>
-            <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
+        <Widget title="Today's Delivery" link={{ to: "/orders", label: "Deliveries" }}>
+          <div className="grid grid-cols-2 gap-3">
+            <Mini label="Dispatched" value="48" />
+            <Mini label="In Transit" value="12" />
+            <Mini label="Delivered" value="36" />
+            <Mini label="Failed" value="2" tone="destructive" />
           </div>
-          <div className="space-y-3">
-            {[
-              { name: "Almarai Laban 1L", sold: 342, pct: 92 },
-              { name: "Nadec Full Cream Milk 2L", sold: 287, pct: 78 },
-              { name: "Sadia Frozen Chicken 1kg", sold: 204, pct: 60 },
-              { name: "Lipton Tea 100 Bags", sold: 168, pct: 48 },
-              { name: "Al Rabie Juice Mango 1L", sold: 142, pct: 40 },
-            ].map((p) => (
-              <div key={p.name}>
-                <div className="flex justify-between text-sm mb-1.5">
-                  <span className="font-medium truncate pr-2">{p.name}</span>
-                  <span className="text-muted-foreground tabular-nums">{p.sold}</span>
-                </div>
-                <Progress value={p.pct} className="h-1.5" />
-              </div>
-            ))}
+          <div className="pt-2">
+            <p className="text-xs text-muted-foreground mb-1.5">Delivery success</p>
+            <Progress value={94} className="h-1.5" />
+            <p className="text-xs text-muted-foreground mt-1">94% on-time delivery rate</p>
           </div>
-        </Card>
+        </Widget>
+
+        <Widget title="BI Summary" link={{ to: "/bi", label: "Open BI" }}>
+          <Mini label="Revenue (week)" value="ر.س 312,480" />
+          <Mini label="Gross Profit" value="ر.س 86,210" tone="success" />
+          <Mini label="Avg Basket" value="ر.س 38.10" />
+          <Mini label="Refund Rate" value="1.8%" tone="warning" />
+        </Widget>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Branch performance */}
-        <Card className="lg:col-span-2 p-6 border-border/60 shadow-card">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-base font-semibold">Branch Performance</h3>
-              <p className="text-xs text-muted-foreground">Live snapshot · refreshed 2 min ago</p>
+      {/* Widgets row 2 */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Widget title="Cashier Performance" link={{ to: "/kpi", label: "KPI" }}>
+          {[
+            { n: "Fahad Al-Qahtani", t: "TML-RYD-001", o: 142, s: "ر.س 8,420" },
+            { n: "Mohammed Al-Harbi", t: "TML-RYD-002", o: 128, s: "ر.س 7,180" },
+            { n: "Khalid Al-Otaibi", t: "TML-KHB-001", o: 96, s: "ر.س 5,310" },
+            { n: "Sultan Al-Dossari", t: "TML-JED-001", o: 88, s: "ر.س 4,920" },
+          ].map((r) => (
+            <div key={r.n} className="flex items-center justify-between text-sm">
+              <div className="min-w-0">
+                <p className="font-medium truncate">{r.n}</p>
+                <p className="text-xs text-muted-foreground">{r.t}</p>
+              </div>
+              <div className="text-right">
+                <p className="font-semibold">{r.s}</p>
+                <p className="text-xs text-muted-foreground">{r.o} orders</p>
+              </div>
             </div>
-            <Button variant="ghost" size="sm" className="gap-1">All <ArrowRight className="h-3.5 w-3.5" /></Button>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            {[
-              { name: "Olaya — Riyadh HQ", sales: "ر.س 18,420", orders: 412, status: "online", trend: "+22%" },
-              { name: "Al Khobar Corniche", sales: "ر.س 12,890", orders: 318, status: "online", trend: "+9%" },
-              { name: "Jeddah Tahlia", sales: "ر.س 11,260", orders: 287, status: "syncing", trend: "+14%" },
-              { name: "Madinah Quba", sales: "ر.س 6,350", orders: 167, status: "warning", trend: "-3%" },
-            ].map((b) => (
-              <div key={b.name} className="rounded-xl border border-border/60 p-4 hover:border-primary/40 hover:shadow-card transition-all">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Building2 className="h-4 w-4 text-primary shrink-0" />
-                    <span className="font-semibold text-sm truncate">{b.name}</span>
-                  </div>
-                  <StatusDot status={b.status as any} />
-                </div>
-                <p className="text-xl font-bold">{b.sales}</p>
-                <div className="flex justify-between items-center mt-1 text-xs">
-                  <span className="text-muted-foreground">{b.orders} orders</span>
-                  <span className={b.trend.startsWith("+") ? "text-success font-semibold" : "text-destructive font-semibold"}>{b.trend}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
+          ))}
+        </Widget>
 
-        {/* Alerts timeline */}
-        <Card className="p-6 border-border/60 shadow-card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold">Alerts & Activity</h3>
-            <Badge variant="outline" className="text-xs">7 new</Badge>
-          </div>
-          <div className="space-y-4">
-            {[
-              { icon: AlertTriangle, color: "text-destructive bg-destructive/10", title: "Almarai Yogurt expires in 2 days", time: "5 min", branch: "Olaya" },
-              { icon: ReceiptText, color: "text-success bg-success/10", title: "147 invoices synced to ZATCA", time: "12 min", branch: "All branches" },
-              { icon: FileBox, color: "text-warning bg-warning/20", title: "Reorder needed: Sugar 1kg (8 left)", time: "1 hr", branch: "Khobar" },
-              { icon: TerminalIcon, color: "text-primary bg-primary/10", title: "Terminal POS-04 went offline", time: "2 hr", branch: "Jeddah" },
-              { icon: CalendarClock, color: "text-warning bg-warning/20", title: "Supplier PO #1240 due tomorrow", time: "4 hr", branch: "HQ" },
-            ].map((a, i) => (
-              <div key={i} className="flex gap-3">
-                <div className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 ${a.color}`}><a.icon className="h-4 w-4" /></div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium leading-tight">{a.title}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{a.branch} · {a.time} ago</p>
-                </div>
+        <Widget title="Terminal Performance" link={{ to: "/terminals", label: "Terminals" }}>
+          {[
+            { t: "TML-RYD-001 · Olaya", st: "online", o: 412, util: 92 },
+            { t: "TML-RYD-002 · Olaya", st: "online", o: 287, util: 78 },
+            { t: "TML-KHB-001 · Khobar", st: "online", o: 318, util: 80 },
+            { t: "TML-JED-001 · Jeddah", st: "offline", o: 0, util: 0 },
+          ].map((t) => (
+            <div key={t.t} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="font-medium truncate">{t.t}</span>
+                <span className={cn("text-xs font-semibold", t.st === "online" ? "text-success" : "text-destructive")}>
+                  {t.st} · {t.o} orders
+                </span>
               </div>
-            ))}
-          </div>
-        </Card>
+              <Progress value={t.util} className="h-1.5" />
+            </div>
+          ))}
+        </Widget>
       </div>
 
-      {/* Bottom row */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="p-5 border-border/60 shadow-card">
-          <div className="flex items-center gap-2 mb-3"><ShieldCheck className="h-4 w-4 text-success" /><h4 className="font-semibold text-sm">ZATCA Sync</h4></div>
-          <p className="text-2xl font-bold">100%</p>
-          <Progress value={100} className="h-1.5 mt-2" />
-          <p className="text-xs text-muted-foreground mt-2">1,284 / 1,284 invoices synced</p>
-        </Card>
-        <Card className="p-5 border-border/60 shadow-card">
-          <div className="flex items-center gap-2 mb-3"><Cpu className="h-4 w-4 text-primary" /><h4 className="font-semibold text-sm">Device Health</h4></div>
-          <p className="text-2xl font-bold">94%</p>
-          <Progress value={94} className="h-1.5 mt-2" />
-          <p className="text-xs text-muted-foreground mt-2">38 / 41 devices healthy</p>
-        </Card>
-        <Card className="p-5 border-border/60 shadow-card">
-          <div className="flex items-center gap-2 mb-3"><Smartphone className="h-4 w-4 text-primary" /><h4 className="font-semibold text-sm">Mobile POS</h4></div>
-          <p className="text-2xl font-bold">7 active</p>
-          <p className="text-xs text-muted-foreground mt-2">ر.س 4,210 from mobile today</p>
-        </Card>
-        <Card className="p-5 border-border/60 shadow-card">
-          <div className="flex items-center gap-2 mb-3"><Activity className="h-4 w-4 text-primary" /><h4 className="font-semibold text-sm">Supplier Dues</h4></div>
-          <p className="text-2xl font-bold">ر.س 28,400</p>
-          <p className="text-xs text-muted-foreground mt-2">3 invoices due this week</p>
-        </Card>
+      {/* Alerts row */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Widget title="Low Stock Alerts" link={{ to: "/inventory", label: "Inventory" }}>
+          {[
+            { n: "Sugar 1kg Al Osra", q: 8, b: "Khobar" },
+            { n: "Nadec Milk 2L", q: 18, b: "Olaya" },
+            { n: "Sadia Chicken 1kg", q: 14, b: "Madinah" },
+            { n: "Lay's Classic 75g", q: 6, b: "Jeddah" },
+          ].map((p) => (
+            <div key={p.n} className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center">
+                <Package className="h-4 w-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{p.n}</p>
+                <p className="text-xs text-muted-foreground">{p.b}</p>
+              </div>
+              <Badge variant="outline" className="text-destructive border-destructive/30 bg-destructive/10">{p.q} left</Badge>
+            </div>
+          ))}
+        </Widget>
+
+        <Widget title="Close to Expiry Alerts" link={{ to: "/batches", label: "Batches" }}>
+          {[
+            { n: "Almarai Yogurt 170g", d: 2, b: "Olaya" },
+            { n: "L'usine Croissant", d: 3, b: "Jeddah" },
+            { n: "Al Marai Cheese Slices", d: 5, b: "Olaya" },
+            { n: "Arabic Bread Tamees", d: 1, b: "Khobar" },
+          ].map((p) => (
+            <div key={p.n} className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-lg bg-warning/20 text-warning-foreground flex items-center justify-center">
+                <CalendarClock className="h-4 w-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{p.n}</p>
+                <p className="text-xs text-muted-foreground">{p.b}</p>
+              </div>
+              <Badge variant="outline" className="text-warning-foreground border-warning/40 bg-warning/20">{p.d}d left</Badge>
+            </div>
+          ))}
+        </Widget>
       </div>
     </PageShell>
+  );
+}
+
+function Widget({ title, children, link }: { title: string; children: React.ReactNode; link?: { to: string; label: string } }) {
+  return (
+    <Card className="p-5 border-border/60 shadow-card space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm">{title}</h3>
+        {link && (
+          <Link to={link.to} className="text-xs text-primary font-semibold hover:underline inline-flex items-center gap-0.5">
+            {link.label} <ArrowRight className="h-3 w-3" />
+          </Link>
+        )}
+      </div>
+      <div className="space-y-2.5">{children}</div>
+    </Card>
+  );
+}
+
+function Mini({ label, value, tone = "default" }: { label: string; value: string | number; tone?: "default" | "success" | "warning" | "destructive" }) {
+  const colors = {
+    default: "text-foreground",
+    success: "text-success",
+    warning: "text-warning-foreground",
+    destructive: "text-destructive",
+  }[tone];
+  return (
+    <div className="rounded-xl bg-muted/40 p-3">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
+      <p className={cn("text-lg font-bold mt-0.5", colors)}>{value}</p>
+    </div>
   );
 }

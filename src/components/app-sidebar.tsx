@@ -26,6 +26,15 @@ import {
   Activity,
   UserCog,
   ChevronDown,
+  ClipboardCheck,
+  Sliders,
+  Lock,
+  TicketPercent,
+  Undo2,
+  Crown,
+  Gauge,
+  BarChart3,
+  Briefcase,
 } from "lucide-react";
 import {
   Sidebar,
@@ -52,6 +61,9 @@ const navGroups = [
       { title: "POS Checkout", url: "/pos", icon: ScanBarcode },
       { title: "Mobile POS & Kiosk", url: "/mobile-pos", icon: Smartphone },
       { title: "Orders", url: "/orders", icon: ShoppingBag },
+      { title: "Cashier Workspace", url: "/cashier", icon: Briefcase },
+      { title: "Cashier Shift", url: "/cashier-shift", icon: ClipboardCheck },
+      { title: "Terminal Sessions", url: "/terminal-sessions", icon: Terminal },
     ],
   },
   {
@@ -59,6 +71,7 @@ const navGroups = [
     items: [
       { title: "Inventory", url: "/inventory", icon: Package },
       { title: "Expiry & Permissible", url: "/batches", icon: CalendarClock },
+      { title: "Warehouses", url: "/warehouses", icon: Warehouse },
     ],
   },
   {
@@ -66,6 +79,8 @@ const navGroups = [
     items: [
       { title: "Expenses", url: "/expenses", icon: Wallet },
       { title: "Expense Types", url: "/expense-types", icon: Tags },
+      { title: "Coupons & Discounts", url: "/coupons", icon: TicketPercent },
+      { title: "Refunds", url: "/refunds", icon: Undo2 },
     ],
   },
   {
@@ -86,20 +101,25 @@ const navGroups = [
     ],
   },
   {
-    label: "People & Insights",
+    label: "Insights",
     items: [
-      { title: "Registered Users", url: "/users", icon: UserCog },
       { title: "Sales", url: "/sales", icon: TrendingUp },
       { title: "Reports", url: "/reports", icon: FileBarChart },
+      { title: "KPI Evaluation", url: "/kpi", icon: Gauge },
+      { title: "Business Intelligence", url: "/bi", icon: BarChart3 },
     ],
   },
   {
     label: "Admin",
     items: [
+      { title: "Registered Users", url: "/users", icon: UserCog },
+      { title: "Roles & Permissions", url: "/roles", icon: Lock },
       { title: "Staff & Roles", url: "/staff", icon: Users },
       { title: "Maintenance", url: "/maintenance", icon: Wrench },
       { title: "ZATCA Invoices", url: "/zatca", icon: ReceiptText },
       { title: "Compliance", url: "/compliance", icon: ShieldCheck },
+      { title: "POS Settings", url: "/pos-settings", icon: Sliders },
+      { title: "Plans & Pricing", url: "/plans", icon: Crown },
       { title: "Settings", url: "/settings", icon: Settings },
     ],
   },

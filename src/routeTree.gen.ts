@@ -14,19 +14,26 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
+import { Route as AppWarehousesRouteImport } from './routes/_app.warehouses'
 import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehouse-suppliers'
 import { Route as AppUsersRouteImport } from './routes/_app.users'
 import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
+import { Route as AppTerminalSessionsRouteImport } from './routes/_app.terminal-sessions'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
+import { Route as AppRolesRouteImport } from './routes/_app.roles'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
+import { Route as AppRefundsRouteImport } from './routes/_app.refunds'
+import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
+import { Route as AppPlansRouteImport } from './routes/_app.plans'
 import { Route as AppOrdersRouteImport } from './routes/_app.orders'
 import { Route as AppMobilePosRouteImport } from './routes/_app.mobile-pos'
 import { Route as AppMartSuppliersRouteImport } from './routes/_app.mart-suppliers'
 import { Route as AppMaintenanceRouteImport } from './routes/_app.maintenance'
+import { Route as AppKpiRouteImport } from './routes/_app.kpi'
 import { Route as AppKioskRouteImport } from './routes/_app.kiosk'
 import { Route as AppInventoryRouteImport } from './routes/_app.inventory'
 import { Route as AppExpensesRouteImport } from './routes/_app.expenses'
@@ -34,8 +41,12 @@ import { Route as AppExpenseTypesRouteImport } from './routes/_app.expense-types
 import { Route as AppDevicesRouteImport } from './routes/_app.devices'
 import { Route as AppDeviceBehaviorRouteImport } from './routes/_app.device-behavior'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppCouponsRouteImport } from './routes/_app.coupons'
 import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
+import { Route as AppCashierShiftRouteImport } from './routes/_app.cashier-shift'
+import { Route as AppCashierRouteImport } from './routes/_app.cashier'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
+import { Route as AppBiRouteImport } from './routes/_app.bi'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
 
@@ -63,6 +74,11 @@ const AppZatcaRoute = AppZatcaRouteImport.update({
   path: '/zatca',
   getParentRoute: () => AppRoute,
 } as any)
+const AppWarehousesRoute = AppWarehousesRouteImport.update({
+  id: '/warehouses',
+  path: '/warehouses',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppWarehouseSuppliersRoute = AppWarehouseSuppliersRouteImport.update({
   id: '/warehouse-suppliers',
   path: '/warehouse-suppliers',
@@ -76,6 +92,11 @@ const AppUsersRoute = AppUsersRouteImport.update({
 const AppTerminalsRoute = AppTerminalsRouteImport.update({
   id: '/terminals',
   path: '/terminals',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTerminalSessionsRoute = AppTerminalSessionsRouteImport.update({
+  id: '/terminal-sessions',
+  path: '/terminal-sessions',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSuppliersRoute = AppSuppliersRouteImport.update({
@@ -98,14 +119,34 @@ const AppSalesRoute = AppSalesRouteImport.update({
   path: '/sales',
   getParentRoute: () => AppRoute,
 } as any)
+const AppRolesRoute = AppRolesRouteImport.update({
+  id: '/roles',
+  path: '/roles',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppReportsRoute = AppReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
   getParentRoute: () => AppRoute,
 } as any)
+const AppRefundsRoute = AppRefundsRouteImport.update({
+  id: '/refunds',
+  path: '/refunds',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPosSettingsRoute = AppPosSettingsRouteImport.update({
+  id: '/pos-settings',
+  path: '/pos-settings',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppPosRoute = AppPosRouteImport.update({
   id: '/pos',
   path: '/pos',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPlansRoute = AppPlansRouteImport.update({
+  id: '/plans',
+  path: '/plans',
   getParentRoute: () => AppRoute,
 } as any)
 const AppOrdersRoute = AppOrdersRouteImport.update({
@@ -126,6 +167,11 @@ const AppMartSuppliersRoute = AppMartSuppliersRouteImport.update({
 const AppMaintenanceRoute = AppMaintenanceRouteImport.update({
   id: '/maintenance',
   path: '/maintenance',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppKpiRoute = AppKpiRouteImport.update({
+  id: '/kpi',
+  path: '/kpi',
   getParentRoute: () => AppRoute,
 } as any)
 const AppKioskRoute = AppKioskRouteImport.update({
@@ -163,14 +209,34 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCouponsRoute = AppCouponsRouteImport.update({
+  id: '/coupons',
+  path: '/coupons',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppComplianceRoute = AppComplianceRouteImport.update({
   id: '/compliance',
   path: '/compliance',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCashierShiftRoute = AppCashierShiftRouteImport.update({
+  id: '/cashier-shift',
+  path: '/cashier-shift',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCashierRoute = AppCashierRouteImport.update({
+  id: '/cashier',
+  path: '/cashier',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBranchesRoute = AppBranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBiRoute = AppBiRouteImport.update({
+  id: '/bi',
+  path: '/bi',
   getParentRoute: () => AppRoute,
 } as any)
 const AppBatchesRoute = AppBatchesRouteImport.update({
@@ -190,8 +256,12 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/admin': typeof AppAdminRoute
   '/batches': typeof AppBatchesRoute
+  '/bi': typeof AppBiRoute
   '/branches': typeof AppBranchesRoute
+  '/cashier': typeof AppCashierRoute
+  '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
+  '/coupons': typeof AppCouponsRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
@@ -199,19 +269,26 @@ export interface FileRoutesByFullPath {
   '/expenses': typeof AppExpensesRoute
   '/inventory': typeof AppInventoryRoute
   '/kiosk': typeof AppKioskRoute
+  '/kpi': typeof AppKpiRoute
   '/maintenance': typeof AppMaintenanceRoute
   '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
   '/orders': typeof AppOrdersRoute
+  '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
+  '/pos-settings': typeof AppPosSettingsRoute
+  '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
+  '/roles': typeof AppRolesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
+  '/terminal-sessions': typeof AppTerminalSessionsRoute
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
+  '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesByTo {
@@ -220,8 +297,12 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/admin': typeof AppAdminRoute
   '/batches': typeof AppBatchesRoute
+  '/bi': typeof AppBiRoute
   '/branches': typeof AppBranchesRoute
+  '/cashier': typeof AppCashierRoute
+  '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
+  '/coupons': typeof AppCouponsRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
@@ -229,19 +310,26 @@ export interface FileRoutesByTo {
   '/expenses': typeof AppExpensesRoute
   '/inventory': typeof AppInventoryRoute
   '/kiosk': typeof AppKioskRoute
+  '/kpi': typeof AppKpiRoute
   '/maintenance': typeof AppMaintenanceRoute
   '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
   '/orders': typeof AppOrdersRoute
+  '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
+  '/pos-settings': typeof AppPosSettingsRoute
+  '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
+  '/roles': typeof AppRolesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
+  '/terminal-sessions': typeof AppTerminalSessionsRoute
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
+  '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
 }
 export interface FileRoutesById {
@@ -252,8 +340,12 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/_app/admin': typeof AppAdminRoute
   '/_app/batches': typeof AppBatchesRoute
+  '/_app/bi': typeof AppBiRoute
   '/_app/branches': typeof AppBranchesRoute
+  '/_app/cashier': typeof AppCashierRoute
+  '/_app/cashier-shift': typeof AppCashierShiftRoute
   '/_app/compliance': typeof AppComplianceRoute
+  '/_app/coupons': typeof AppCouponsRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/device-behavior': typeof AppDeviceBehaviorRoute
   '/_app/devices': typeof AppDevicesRoute
@@ -261,19 +353,26 @@ export interface FileRoutesById {
   '/_app/expenses': typeof AppExpensesRoute
   '/_app/inventory': typeof AppInventoryRoute
   '/_app/kiosk': typeof AppKioskRoute
+  '/_app/kpi': typeof AppKpiRoute
   '/_app/maintenance': typeof AppMaintenanceRoute
   '/_app/mart-suppliers': typeof AppMartSuppliersRoute
   '/_app/mobile-pos': typeof AppMobilePosRoute
   '/_app/orders': typeof AppOrdersRoute
+  '/_app/plans': typeof AppPlansRoute
   '/_app/pos': typeof AppPosRoute
+  '/_app/pos-settings': typeof AppPosSettingsRoute
+  '/_app/refunds': typeof AppRefundsRoute
   '/_app/reports': typeof AppReportsRoute
+  '/_app/roles': typeof AppRolesRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
   '/_app/suppliers': typeof AppSuppliersRoute
+  '/_app/terminal-sessions': typeof AppTerminalSessionsRoute
   '/_app/terminals': typeof AppTerminalsRoute
   '/_app/users': typeof AppUsersRoute
   '/_app/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
+  '/_app/warehouses': typeof AppWarehousesRoute
   '/_app/zatca': typeof AppZatcaRoute
 }
 export interface FileRouteTypes {
@@ -284,8 +383,12 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin'
     | '/batches'
+    | '/bi'
     | '/branches'
+    | '/cashier'
+    | '/cashier-shift'
     | '/compliance'
+    | '/coupons'
     | '/dashboard'
     | '/device-behavior'
     | '/devices'
@@ -293,19 +396,26 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/inventory'
     | '/kiosk'
+    | '/kpi'
     | '/maintenance'
     | '/mart-suppliers'
     | '/mobile-pos'
     | '/orders'
+    | '/plans'
     | '/pos'
+    | '/pos-settings'
+    | '/refunds'
     | '/reports'
+    | '/roles'
     | '/sales'
     | '/settings'
     | '/staff'
     | '/suppliers'
+    | '/terminal-sessions'
     | '/terminals'
     | '/users'
     | '/warehouse-suppliers'
+    | '/warehouses'
     | '/zatca'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -314,8 +424,12 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin'
     | '/batches'
+    | '/bi'
     | '/branches'
+    | '/cashier'
+    | '/cashier-shift'
     | '/compliance'
+    | '/coupons'
     | '/dashboard'
     | '/device-behavior'
     | '/devices'
@@ -323,19 +437,26 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/inventory'
     | '/kiosk'
+    | '/kpi'
     | '/maintenance'
     | '/mart-suppliers'
     | '/mobile-pos'
     | '/orders'
+    | '/plans'
     | '/pos'
+    | '/pos-settings'
+    | '/refunds'
     | '/reports'
+    | '/roles'
     | '/sales'
     | '/settings'
     | '/staff'
     | '/suppliers'
+    | '/terminal-sessions'
     | '/terminals'
     | '/users'
     | '/warehouse-suppliers'
+    | '/warehouses'
     | '/zatca'
   id:
     | '__root__'
@@ -345,8 +466,12 @@ export interface FileRouteTypes {
     | '/signup'
     | '/_app/admin'
     | '/_app/batches'
+    | '/_app/bi'
     | '/_app/branches'
+    | '/_app/cashier'
+    | '/_app/cashier-shift'
     | '/_app/compliance'
+    | '/_app/coupons'
     | '/_app/dashboard'
     | '/_app/device-behavior'
     | '/_app/devices'
@@ -354,19 +479,26 @@ export interface FileRouteTypes {
     | '/_app/expenses'
     | '/_app/inventory'
     | '/_app/kiosk'
+    | '/_app/kpi'
     | '/_app/maintenance'
     | '/_app/mart-suppliers'
     | '/_app/mobile-pos'
     | '/_app/orders'
+    | '/_app/plans'
     | '/_app/pos'
+    | '/_app/pos-settings'
+    | '/_app/refunds'
     | '/_app/reports'
+    | '/_app/roles'
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
     | '/_app/suppliers'
+    | '/_app/terminal-sessions'
     | '/_app/terminals'
     | '/_app/users'
     | '/_app/warehouse-suppliers'
+    | '/_app/warehouses'
     | '/_app/zatca'
   fileRoutesById: FileRoutesById
 }
@@ -414,6 +546,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppZatcaRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/warehouses': {
+      id: '/_app/warehouses'
+      path: '/warehouses'
+      fullPath: '/warehouses'
+      preLoaderRoute: typeof AppWarehousesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/warehouse-suppliers': {
       id: '/_app/warehouse-suppliers'
       path: '/warehouse-suppliers'
@@ -433,6 +572,13 @@ declare module '@tanstack/react-router' {
       path: '/terminals'
       fullPath: '/terminals'
       preLoaderRoute: typeof AppTerminalsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/terminal-sessions': {
+      id: '/_app/terminal-sessions'
+      path: '/terminal-sessions'
+      fullPath: '/terminal-sessions'
+      preLoaderRoute: typeof AppTerminalSessionsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/suppliers': {
@@ -463,6 +609,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSalesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/roles': {
+      id: '/_app/roles'
+      path: '/roles'
+      fullPath: '/roles'
+      preLoaderRoute: typeof AppRolesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/reports': {
       id: '/_app/reports'
       path: '/reports'
@@ -470,11 +623,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppReportsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/refunds': {
+      id: '/_app/refunds'
+      path: '/refunds'
+      fullPath: '/refunds'
+      preLoaderRoute: typeof AppRefundsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pos-settings': {
+      id: '/_app/pos-settings'
+      path: '/pos-settings'
+      fullPath: '/pos-settings'
+      preLoaderRoute: typeof AppPosSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/pos': {
       id: '/_app/pos'
       path: '/pos'
       fullPath: '/pos'
       preLoaderRoute: typeof AppPosRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/plans': {
+      id: '/_app/plans'
+      path: '/plans'
+      fullPath: '/plans'
+      preLoaderRoute: typeof AppPlansRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/orders': {
@@ -503,6 +677,13 @@ declare module '@tanstack/react-router' {
       path: '/maintenance'
       fullPath: '/maintenance'
       preLoaderRoute: typeof AppMaintenanceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/kpi': {
+      id: '/_app/kpi'
+      path: '/kpi'
+      fullPath: '/kpi'
+      preLoaderRoute: typeof AppKpiRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/kiosk': {
@@ -554,6 +735,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/coupons': {
+      id: '/_app/coupons'
+      path: '/coupons'
+      fullPath: '/coupons'
+      preLoaderRoute: typeof AppCouponsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/compliance': {
       id: '/_app/compliance'
       path: '/compliance'
@@ -561,11 +749,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppComplianceRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/cashier-shift': {
+      id: '/_app/cashier-shift'
+      path: '/cashier-shift'
+      fullPath: '/cashier-shift'
+      preLoaderRoute: typeof AppCashierShiftRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/cashier': {
+      id: '/_app/cashier'
+      path: '/cashier'
+      fullPath: '/cashier'
+      preLoaderRoute: typeof AppCashierRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/branches': {
       id: '/_app/branches'
       path: '/branches'
       fullPath: '/branches'
       preLoaderRoute: typeof AppBranchesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/bi': {
+      id: '/_app/bi'
+      path: '/bi'
+      fullPath: '/bi'
+      preLoaderRoute: typeof AppBiRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/batches': {
@@ -588,8 +797,12 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
   AppBatchesRoute: typeof AppBatchesRoute
+  AppBiRoute: typeof AppBiRoute
   AppBranchesRoute: typeof AppBranchesRoute
+  AppCashierRoute: typeof AppCashierRoute
+  AppCashierShiftRoute: typeof AppCashierShiftRoute
   AppComplianceRoute: typeof AppComplianceRoute
+  AppCouponsRoute: typeof AppCouponsRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppDeviceBehaviorRoute: typeof AppDeviceBehaviorRoute
   AppDevicesRoute: typeof AppDevicesRoute
@@ -597,27 +810,38 @@ interface AppRouteChildren {
   AppExpensesRoute: typeof AppExpensesRoute
   AppInventoryRoute: typeof AppInventoryRoute
   AppKioskRoute: typeof AppKioskRoute
+  AppKpiRoute: typeof AppKpiRoute
   AppMaintenanceRoute: typeof AppMaintenanceRoute
   AppMartSuppliersRoute: typeof AppMartSuppliersRoute
   AppMobilePosRoute: typeof AppMobilePosRoute
   AppOrdersRoute: typeof AppOrdersRoute
+  AppPlansRoute: typeof AppPlansRoute
   AppPosRoute: typeof AppPosRoute
+  AppPosSettingsRoute: typeof AppPosSettingsRoute
+  AppRefundsRoute: typeof AppRefundsRoute
   AppReportsRoute: typeof AppReportsRoute
+  AppRolesRoute: typeof AppRolesRoute
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
+  AppTerminalSessionsRoute: typeof AppTerminalSessionsRoute
   AppTerminalsRoute: typeof AppTerminalsRoute
   AppUsersRoute: typeof AppUsersRoute
   AppWarehouseSuppliersRoute: typeof AppWarehouseSuppliersRoute
+  AppWarehousesRoute: typeof AppWarehousesRoute
   AppZatcaRoute: typeof AppZatcaRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
   AppBatchesRoute: AppBatchesRoute,
+  AppBiRoute: AppBiRoute,
   AppBranchesRoute: AppBranchesRoute,
+  AppCashierRoute: AppCashierRoute,
+  AppCashierShiftRoute: AppCashierShiftRoute,
   AppComplianceRoute: AppComplianceRoute,
+  AppCouponsRoute: AppCouponsRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppDeviceBehaviorRoute: AppDeviceBehaviorRoute,
   AppDevicesRoute: AppDevicesRoute,
@@ -625,19 +849,26 @@ const AppRouteChildren: AppRouteChildren = {
   AppExpensesRoute: AppExpensesRoute,
   AppInventoryRoute: AppInventoryRoute,
   AppKioskRoute: AppKioskRoute,
+  AppKpiRoute: AppKpiRoute,
   AppMaintenanceRoute: AppMaintenanceRoute,
   AppMartSuppliersRoute: AppMartSuppliersRoute,
   AppMobilePosRoute: AppMobilePosRoute,
   AppOrdersRoute: AppOrdersRoute,
+  AppPlansRoute: AppPlansRoute,
   AppPosRoute: AppPosRoute,
+  AppPosSettingsRoute: AppPosSettingsRoute,
+  AppRefundsRoute: AppRefundsRoute,
   AppReportsRoute: AppReportsRoute,
+  AppRolesRoute: AppRolesRoute,
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,
   AppSuppliersRoute: AppSuppliersRoute,
+  AppTerminalSessionsRoute: AppTerminalSessionsRoute,
   AppTerminalsRoute: AppTerminalsRoute,
   AppUsersRoute: AppUsersRoute,
   AppWarehouseSuppliersRoute: AppWarehouseSuppliersRoute,
+  AppWarehousesRoute: AppWarehousesRoute,
   AppZatcaRoute: AppZatcaRoute,
 }
 
@@ -652,13 +883,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
