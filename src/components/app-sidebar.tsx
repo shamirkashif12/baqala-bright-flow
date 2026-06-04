@@ -35,6 +35,7 @@ import {
   Gauge,
   BarChart3,
   Briefcase,
+  Radar,
 } from "lucide-react";
 import {
   Sidebar,
@@ -64,6 +65,7 @@ const navGroups = [
       { title: "Cashier Workspace", url: "/cashier", icon: Briefcase },
       { title: "Cashier Shift", url: "/cashier-shift", icon: ClipboardCheck },
       { title: "Terminal Sessions", url: "/terminal-sessions", icon: Terminal },
+      { title: "Control Tower", url: "/control-tower", icon: Radar },
     ],
   },
   {
