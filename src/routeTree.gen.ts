@@ -23,6 +23,7 @@ import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
+import { Route as AppRolesRouteImport } from './routes/_app.roles'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
@@ -110,6 +111,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
 const AppSalesRoute = AppSalesRouteImport.update({
   id: '/sales',
   path: '/sales',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRolesRoute = AppRolesRouteImport.update({
+  id: '/roles',
+  path: '/roles',
   getParentRoute: () => AppRoute,
 } as any)
 const AppReportsRoute = AppReportsRouteImport.update({
@@ -231,6 +237,7 @@ export interface FileRoutesByFullPath {
   '/pos': typeof AppPosRoute
   '/pos-settings': typeof AppPosSettingsRoute
   '/reports': typeof AppReportsRoute
+  '/roles': typeof AppRolesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
@@ -265,6 +272,7 @@ export interface FileRoutesByTo {
   '/pos': typeof AppPosRoute
   '/pos-settings': typeof AppPosSettingsRoute
   '/reports': typeof AppReportsRoute
+  '/roles': typeof AppRolesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
@@ -301,6 +309,7 @@ export interface FileRoutesById {
   '/_app/pos': typeof AppPosRoute
   '/_app/pos-settings': typeof AppPosSettingsRoute
   '/_app/reports': typeof AppReportsRoute
+  '/_app/roles': typeof AppRolesRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
@@ -337,6 +346,7 @@ export interface FileRouteTypes {
     | '/pos'
     | '/pos-settings'
     | '/reports'
+    | '/roles'
     | '/sales'
     | '/settings'
     | '/staff'
@@ -371,6 +381,7 @@ export interface FileRouteTypes {
     | '/pos'
     | '/pos-settings'
     | '/reports'
+    | '/roles'
     | '/sales'
     | '/settings'
     | '/staff'
@@ -406,6 +417,7 @@ export interface FileRouteTypes {
     | '/_app/pos'
     | '/_app/pos-settings'
     | '/_app/reports'
+    | '/_app/roles'
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
@@ -523,6 +535,13 @@ declare module '@tanstack/react-router' {
       path: '/sales'
       fullPath: '/sales'
       preLoaderRoute: typeof AppSalesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/roles': {
+      id: '/_app/roles'
+      path: '/roles'
+      fullPath: '/roles'
+      preLoaderRoute: typeof AppRolesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/reports': {
@@ -681,6 +700,7 @@ interface AppRouteChildren {
   AppPosRoute: typeof AppPosRoute
   AppPosSettingsRoute: typeof AppPosSettingsRoute
   AppReportsRoute: typeof AppReportsRoute
+  AppRolesRoute: typeof AppRolesRoute
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
@@ -713,6 +733,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPosRoute: AppPosRoute,
   AppPosSettingsRoute: AppPosSettingsRoute,
   AppReportsRoute: AppReportsRoute,
+  AppRolesRoute: AppRolesRoute,
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,
