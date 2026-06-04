@@ -50,6 +50,7 @@ import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBiRouteImport } from './routes/_app.bi'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
+import { Route as AppControlTowerBranchIdRouteImport } from './routes/_app.control-tower.$branchId'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -255,6 +256,11 @@ const AppAdminRoute = AppAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AppRoute,
 } as any)
+const AppControlTowerBranchIdRoute = AppControlTowerBranchIdRouteImport.update({
+  id: '/$branchId',
+  path: '/$branchId',
+  getParentRoute: () => AppControlTowerRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -267,7 +273,7 @@ export interface FileRoutesByFullPath {
   '/cashier': typeof AppCashierRoute
   '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
-  '/control-tower': typeof AppControlTowerRoute
+  '/control-tower': typeof AppControlTowerRouteWithChildren
   '/coupons': typeof AppCouponsRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
@@ -297,6 +303,7 @@ export interface FileRoutesByFullPath {
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
+  '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -309,7 +316,7 @@ export interface FileRoutesByTo {
   '/cashier': typeof AppCashierRoute
   '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
-  '/control-tower': typeof AppControlTowerRoute
+  '/control-tower': typeof AppControlTowerRouteWithChildren
   '/coupons': typeof AppCouponsRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
@@ -339,6 +346,7 @@ export interface FileRoutesByTo {
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
+  '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -353,7 +361,7 @@ export interface FileRoutesById {
   '/_app/cashier': typeof AppCashierRoute
   '/_app/cashier-shift': typeof AppCashierShiftRoute
   '/_app/compliance': typeof AppComplianceRoute
-  '/_app/control-tower': typeof AppControlTowerRoute
+  '/_app/control-tower': typeof AppControlTowerRouteWithChildren
   '/_app/coupons': typeof AppCouponsRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/device-behavior': typeof AppDeviceBehaviorRoute
@@ -383,6 +391,7 @@ export interface FileRoutesById {
   '/_app/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/_app/warehouses': typeof AppWarehousesRoute
   '/_app/zatca': typeof AppZatcaRoute
+  '/_app/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -427,6 +436,7 @@ export interface FileRouteTypes {
     | '/warehouse-suppliers'
     | '/warehouses'
     | '/zatca'
+    | '/control-tower/$branchId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -469,6 +479,7 @@ export interface FileRouteTypes {
     | '/warehouse-suppliers'
     | '/warehouses'
     | '/zatca'
+    | '/control-tower/$branchId'
   id:
     | '__root__'
     | '/'
@@ -512,6 +523,7 @@ export interface FileRouteTypes {
     | '/_app/warehouse-suppliers'
     | '/_app/warehouses'
     | '/_app/zatca'
+    | '/_app/control-tower/$branchId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -810,8 +822,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/control-tower/$branchId': {
+      id: '/_app/control-tower/$branchId'
+      path: '/$branchId'
+      fullPath: '/control-tower/$branchId'
+      preLoaderRoute: typeof AppControlTowerBranchIdRouteImport
+      parentRoute: typeof AppControlTowerRoute
+    }
   }
 }
+
+interface AppControlTowerRouteChildren {
+  AppControlTowerBranchIdRoute: typeof AppControlTowerBranchIdRoute
+}
+
+const AppControlTowerRouteChildren: AppControlTowerRouteChildren = {
+  AppControlTowerBranchIdRoute: AppControlTowerBranchIdRoute,
+}
+
+const AppControlTowerRouteWithChildren = AppControlTowerRoute._addFileChildren(
+  AppControlTowerRouteChildren,
+)
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
@@ -821,7 +852,7 @@ interface AppRouteChildren {
   AppCashierRoute: typeof AppCashierRoute
   AppCashierShiftRoute: typeof AppCashierShiftRoute
   AppComplianceRoute: typeof AppComplianceRoute
-  AppControlTowerRoute: typeof AppControlTowerRoute
+  AppControlTowerRoute: typeof AppControlTowerRouteWithChildren
   AppCouponsRoute: typeof AppCouponsRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppDeviceBehaviorRoute: typeof AppDeviceBehaviorRoute
@@ -861,7 +892,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCashierRoute: AppCashierRoute,
   AppCashierShiftRoute: AppCashierShiftRoute,
   AppComplianceRoute: AppComplianceRoute,
-  AppControlTowerRoute: AppControlTowerRoute,
+  AppControlTowerRoute: AppControlTowerRouteWithChildren,
   AppCouponsRoute: AppCouponsRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppDeviceBehaviorRoute: AppDeviceBehaviorRoute,
