@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import mimonyLogo from "@/assets/mimony-logo.png.asset.json";
+import mimonyLogo from "@/assets/mimony-logo.png";
 
 export function BaqalaLogo({ className, showText = true }: { className?: string; showText?: boolean }) {
   return (
@@ -7,7 +7,7 @@ export function BaqalaLogo({ className, showText = true }: { className?: string;
       {showText ? (
         <div className="flex flex-col leading-none">
           <img
-            src={mimonyLogo.url}
+            src={mimonyLogo}
             alt="MI Money"
             className="h-8 w-auto object-contain"
             loading="eager"
@@ -18,7 +18,7 @@ export function BaqalaLogo({ className, showText = true }: { className?: string;
         </div>
       ) : (
         <div className="h-9 w-9 rounded-lg bg-white flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
-          <img src={mimonyLogo.url} alt="MI Money" className="h-7 w-auto object-contain" />
+          <img src={mimonyLogo} alt="MI Money" className="h-7 w-auto object-contain" />
         </div>
       )}
     </div>
