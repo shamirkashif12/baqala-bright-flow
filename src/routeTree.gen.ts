@@ -18,11 +18,13 @@ import { Route as AppWarehousesRouteImport } from './routes/_app.warehouses'
 import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehouse-suppliers'
 import { Route as AppUsersRouteImport } from './routes/_app.users'
 import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
+import { Route as AppTerminalSessionsRouteImport } from './routes/_app.terminal-sessions'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
+import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
 import { Route as AppOrdersRouteImport } from './routes/_app.orders'
 import { Route as AppMobilePosRouteImport } from './routes/_app.mobile-pos'
@@ -85,6 +87,11 @@ const AppTerminalsRoute = AppTerminalsRouteImport.update({
   path: '/terminals',
   getParentRoute: () => AppRoute,
 } as any)
+const AppTerminalSessionsRoute = AppTerminalSessionsRouteImport.update({
+  id: '/terminal-sessions',
+  path: '/terminal-sessions',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSuppliersRoute = AppSuppliersRouteImport.update({
   id: '/suppliers',
   path: '/suppliers',
@@ -108,6 +115,11 @@ const AppSalesRoute = AppSalesRouteImport.update({
 const AppReportsRoute = AppReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPosSettingsRoute = AppPosSettingsRouteImport.update({
+  id: '/pos-settings',
+  path: '/pos-settings',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPosRoute = AppPosRouteImport.update({
@@ -217,11 +229,13 @@ export interface FileRoutesByFullPath {
   '/mobile-pos': typeof AppMobilePosRoute
   '/orders': typeof AppOrdersRoute
   '/pos': typeof AppPosRoute
+  '/pos-settings': typeof AppPosSettingsRoute
   '/reports': typeof AppReportsRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
+  '/terminal-sessions': typeof AppTerminalSessionsRoute
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
@@ -249,11 +263,13 @@ export interface FileRoutesByTo {
   '/mobile-pos': typeof AppMobilePosRoute
   '/orders': typeof AppOrdersRoute
   '/pos': typeof AppPosRoute
+  '/pos-settings': typeof AppPosSettingsRoute
   '/reports': typeof AppReportsRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
+  '/terminal-sessions': typeof AppTerminalSessionsRoute
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
@@ -283,11 +299,13 @@ export interface FileRoutesById {
   '/_app/mobile-pos': typeof AppMobilePosRoute
   '/_app/orders': typeof AppOrdersRoute
   '/_app/pos': typeof AppPosRoute
+  '/_app/pos-settings': typeof AppPosSettingsRoute
   '/_app/reports': typeof AppReportsRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
   '/_app/suppliers': typeof AppSuppliersRoute
+  '/_app/terminal-sessions': typeof AppTerminalSessionsRoute
   '/_app/terminals': typeof AppTerminalsRoute
   '/_app/users': typeof AppUsersRoute
   '/_app/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
@@ -317,11 +335,13 @@ export interface FileRouteTypes {
     | '/mobile-pos'
     | '/orders'
     | '/pos'
+    | '/pos-settings'
     | '/reports'
     | '/sales'
     | '/settings'
     | '/staff'
     | '/suppliers'
+    | '/terminal-sessions'
     | '/terminals'
     | '/users'
     | '/warehouse-suppliers'
@@ -349,11 +369,13 @@ export interface FileRouteTypes {
     | '/mobile-pos'
     | '/orders'
     | '/pos'
+    | '/pos-settings'
     | '/reports'
     | '/sales'
     | '/settings'
     | '/staff'
     | '/suppliers'
+    | '/terminal-sessions'
     | '/terminals'
     | '/users'
     | '/warehouse-suppliers'
@@ -382,11 +404,13 @@ export interface FileRouteTypes {
     | '/_app/mobile-pos'
     | '/_app/orders'
     | '/_app/pos'
+    | '/_app/pos-settings'
     | '/_app/reports'
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
     | '/_app/suppliers'
+    | '/_app/terminal-sessions'
     | '/_app/terminals'
     | '/_app/users'
     | '/_app/warehouse-suppliers'
@@ -466,6 +490,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTerminalsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/terminal-sessions': {
+      id: '/_app/terminal-sessions'
+      path: '/terminal-sessions'
+      fullPath: '/terminal-sessions'
+      preLoaderRoute: typeof AppTerminalSessionsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/suppliers': {
       id: '/_app/suppliers'
       path: '/suppliers'
@@ -499,6 +530,13 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/reports'
       preLoaderRoute: typeof AppReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pos-settings': {
+      id: '/_app/pos-settings'
+      path: '/pos-settings'
+      fullPath: '/pos-settings'
+      preLoaderRoute: typeof AppPosSettingsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/pos': {
@@ -641,11 +679,13 @@ interface AppRouteChildren {
   AppMobilePosRoute: typeof AppMobilePosRoute
   AppOrdersRoute: typeof AppOrdersRoute
   AppPosRoute: typeof AppPosRoute
+  AppPosSettingsRoute: typeof AppPosSettingsRoute
   AppReportsRoute: typeof AppReportsRoute
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
+  AppTerminalSessionsRoute: typeof AppTerminalSessionsRoute
   AppTerminalsRoute: typeof AppTerminalsRoute
   AppUsersRoute: typeof AppUsersRoute
   AppWarehouseSuppliersRoute: typeof AppWarehouseSuppliersRoute
@@ -671,11 +711,13 @@ const AppRouteChildren: AppRouteChildren = {
   AppMobilePosRoute: AppMobilePosRoute,
   AppOrdersRoute: AppOrdersRoute,
   AppPosRoute: AppPosRoute,
+  AppPosSettingsRoute: AppPosSettingsRoute,
   AppReportsRoute: AppReportsRoute,
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,
   AppSuppliersRoute: AppSuppliersRoute,
+  AppTerminalSessionsRoute: AppTerminalSessionsRoute,
   AppTerminalsRoute: AppTerminalsRoute,
   AppUsersRoute: AppUsersRoute,
   AppWarehouseSuppliersRoute: AppWarehouseSuppliersRoute,
@@ -694,3 +736,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
