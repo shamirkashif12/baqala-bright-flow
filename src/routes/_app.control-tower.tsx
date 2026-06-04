@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -241,7 +241,7 @@ function ControlTower() {
   ];
   const cards = useCustomizableCards("baqala_control_tower_cards", ALL_CARDS);
 
-  const cardMap: Record<string, JSX.Element> = {
+  const cardMap: Record<string, ReactElement> = {
     "Branches": <MetricCard label="Branches" value={String(totals.branches)} icon={Building2} accent="primary" hint="all KSA" editing={cards.editing} onRemove={() => cards.remove("Branches")} />,
     "Active Terminals": <MetricCard label="Active Terminals" value={String(totals.active)} icon={Activity} accent="success" delta="+3" trend="up" editing={cards.editing} onRemove={() => cards.remove("Active Terminals")} />,
     "Syncing": <MetricCard label="Syncing" value={String(totals.syncing)} icon={RefreshCw} accent="primary" hint="live sync" editing={cards.editing} onRemove={() => cards.remove("Syncing")} />,
