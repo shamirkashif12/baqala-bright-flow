@@ -38,6 +38,7 @@ import { Route as AppExpenseTypesRouteImport } from './routes/_app.expense-types
 import { Route as AppDevicesRouteImport } from './routes/_app.devices'
 import { Route as AppDeviceBehaviorRouteImport } from './routes/_app.device-behavior'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppCouponsRouteImport } from './routes/_app.coupons'
 import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
 import { Route as AppCashierShiftRouteImport } from './routes/_app.cashier-shift'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
@@ -188,6 +189,11 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCouponsRoute = AppCouponsRouteImport.update({
+  id: '/coupons',
+  path: '/coupons',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppComplianceRoute = AppComplianceRouteImport.update({
   id: '/compliance',
   path: '/compliance',
@@ -223,6 +229,7 @@ export interface FileRoutesByFullPath {
   '/branches': typeof AppBranchesRoute
   '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
+  '/coupons': typeof AppCouponsRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/branches': typeof AppBranchesRoute
   '/cashier-shift': typeof AppCashierShiftRoute
   '/compliance': typeof AppComplianceRoute
+  '/coupons': typeof AppCouponsRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
@@ -295,6 +303,7 @@ export interface FileRoutesById {
   '/_app/branches': typeof AppBranchesRoute
   '/_app/cashier-shift': typeof AppCashierShiftRoute
   '/_app/compliance': typeof AppComplianceRoute
+  '/_app/coupons': typeof AppCouponsRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/device-behavior': typeof AppDeviceBehaviorRoute
   '/_app/devices': typeof AppDevicesRoute
@@ -332,6 +341,7 @@ export interface FileRouteTypes {
     | '/branches'
     | '/cashier-shift'
     | '/compliance'
+    | '/coupons'
     | '/dashboard'
     | '/device-behavior'
     | '/devices'
@@ -367,6 +377,7 @@ export interface FileRouteTypes {
     | '/branches'
     | '/cashier-shift'
     | '/compliance'
+    | '/coupons'
     | '/dashboard'
     | '/device-behavior'
     | '/devices'
@@ -403,6 +414,7 @@ export interface FileRouteTypes {
     | '/_app/branches'
     | '/_app/cashier-shift'
     | '/_app/compliance'
+    | '/_app/coupons'
     | '/_app/dashboard'
     | '/_app/device-behavior'
     | '/_app/devices'
@@ -642,6 +654,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/coupons': {
+      id: '/_app/coupons'
+      path: '/coupons'
+      fullPath: '/coupons'
+      preLoaderRoute: typeof AppCouponsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/compliance': {
       id: '/_app/compliance'
       path: '/compliance'
@@ -686,6 +705,7 @@ interface AppRouteChildren {
   AppBranchesRoute: typeof AppBranchesRoute
   AppCashierShiftRoute: typeof AppCashierShiftRoute
   AppComplianceRoute: typeof AppComplianceRoute
+  AppCouponsRoute: typeof AppCouponsRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppDeviceBehaviorRoute: typeof AppDeviceBehaviorRoute
   AppDevicesRoute: typeof AppDevicesRoute
@@ -719,6 +739,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppBranchesRoute: AppBranchesRoute,
   AppCashierShiftRoute: AppCashierShiftRoute,
   AppComplianceRoute: AppComplianceRoute,
+  AppCouponsRoute: AppCouponsRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppDeviceBehaviorRoute: AppDeviceBehaviorRoute,
   AppDevicesRoute: AppDevicesRoute,
