@@ -1,15 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, AlertTriangle, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowUpRight, ArrowDownRight,
-  ArrowRight, type LucideIcon,
+  ArrowRight, Settings2, X, RotateCcw, type LucideIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/dashboard")({
@@ -35,7 +39,7 @@ const cards: StatCardData[] = [
   { label: "Close to Expiry", value: "41", desc: "Expiring in next 7 days", delta: "+5", trend: "down", updated: "20 min ago", icon: CalendarClock, href: "/batches", action: "Review", accent: "warning" },
 ];
 
-function StatCard({ c }: { c: StatCardData }) {
+function StatCard({ c, editing, onRemove }: { c: StatCardData; editing?: boolean; onRemove?: () => void }) {
   const accent = c.accent ?? "primary";
   const iconBg = {
     primary: "bg-primary/10 text-primary",
@@ -44,7 +48,19 @@ function StatCard({ c }: { c: StatCardData }) {
     destructive: "bg-destructive/15 text-destructive",
   }[accent];
   return (
-    <Card className="p-5 border-border/60 shadow-card hover:shadow-elegant transition-shadow flex flex-col gap-3">
+    <Card className={cn(
+      "relative p-5 border-border/60 shadow-card hover:shadow-elegant transition-shadow flex flex-col gap-3",
+      editing && "ring-2 ring-primary/40 ring-offset-2 ring-offset-background animate-fade-in",
+    )}>
+      {editing && (
+        <button
+          onClick={onRemove}
+          className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-md hover:scale-110 transition-transform"
+          aria-label="Remove card"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
       <div className="flex items-start justify-between">
         <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center", iconBg)}>
           <c.icon className="h-5 w-5" />
@@ -76,9 +92,42 @@ function StatCard({ c }: { c: StatCardData }) {
 }
 
 const filters = ["Daily", "Weekly", "Monthly", "Custom"] as const;
+const STORAGE_KEY = "baqala_dashboard_visible_cards";
 
 function Dashboard() {
   const [filter, setFilter] = useState<(typeof filters)[number]>("Daily");
+  const allLabels = cards.map((c) => c.label);
+  const [visible, setVisible] = useState<string[]>(allLabels);
+  const [editing, setEditing] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  // Load persisted selection
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as string[];
+        setVisible(parsed.filter((l) => allLabels.includes(l)));
+      }
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const persist = (next: string[]) => {
+    setVisible(next);
+    if (typeof window !== "undefined") {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    }
+  };
+
+  const toggleCard = (label: string) => {
+    persist(visible.includes(label) ? visible.filter((l) => l !== label) : [...visible, label]);
+  };
+  const removeCard = (label: string) => persist(visible.filter((l) => l !== label));
+  const resetCards = () => persist(allLabels);
+
+  const visibleCards = cards.filter((c) => visible.includes(c.label));
 
   return (
     <PageShell title="Dashboard" subtitle="Live snapshot across 4 branches">
@@ -96,13 +145,86 @@ function Dashboard() {
             {f}
           </Button>
         ))}
-        <Badge variant="outline" className="ml-auto text-xs">Tuesday · June 2, 2026</Badge>
+        <div className="ml-auto flex items-center gap-2">
+          <Badge variant="outline" className="text-xs hidden sm:inline-flex">Tuesday · June 2, 2026</Badge>
+          <Button
+            size="sm"
+            variant={editing ? "default" : "outline"}
+            className={cn("gap-1.5", editing && "gradient-primary text-primary-foreground border-0 shadow-glow")}
+            onClick={() => setEditing((v) => !v)}
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            {editing ? "Done" : "Customize"}
+          </Button>
+          <Dialog open={customizeOpen} onOpenChange={setCustomizeOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-1.5">
+                Add / Remove
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Customize Dashboard Cards</DialogTitle>
+                <DialogDescription>
+                  Choose which KPI cards to show on your dashboard. {visible.length} of {allLabels.length} selected.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="max-h-[55vh] overflow-y-auto -mx-2 px-2 space-y-1.5">
+                {cards.map((c) => {
+                  const checked = visible.includes(c.label);
+                  return (
+                    <label
+                      key={c.label}
+                      className={cn(
+                        "flex items-center gap-3 rounded-xl border px-3 py-2.5 cursor-pointer transition-colors",
+                        checked ? "border-primary/40 bg-primary/5" : "border-border/60 hover:bg-muted/40",
+                      )}
+                    >
+                      <Checkbox checked={checked} onCheckedChange={() => toggleCard(c.label)} />
+                      <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center shrink-0",
+                        {
+                          primary: "bg-primary/10 text-primary",
+                          success: "bg-success/15 text-success",
+                          warning: "bg-warning/20 text-warning-foreground",
+                          destructive: "bg-destructive/15 text-destructive",
+                        }[c.accent ?? "primary"])}>
+                        <c.icon className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{c.label}</p>
+                        <p className="text-xs text-muted-foreground truncate">{c.desc}</p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              <DialogFooter className="gap-2 sm:gap-2">
+                <Button variant="outline" onClick={resetCards} className="gap-1.5">
+                  <RotateCcw className="h-3.5 w-3.5" /> Reset
+                </Button>
+                <Button onClick={() => setCustomizeOpen(false)} className="gradient-primary text-primary-foreground border-0">
+                  Done
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {cards.map((c) => <StatCard key={c.label} c={c} />)}
-      </div>
+      {visibleCards.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {visibleCards.map((c) => (
+            <StatCard key={c.label} c={c} editing={editing} onRemove={() => removeCard(c.label)} />
+          ))}
+        </div>
+      ) : (
+        <Card className="p-8 border-dashed border-border/60 text-center space-y-2">
+          <p className="text-sm font-semibold">No KPI cards visible</p>
+          <p className="text-xs text-muted-foreground">Click "Add / Remove" above to choose cards to display.</p>
+          <Button size="sm" variant="outline" onClick={() => setCustomizeOpen(true)}>Add cards</Button>
+        </Card>
+      )}
 
       {/* Widgets row 1 */}
       <div className="grid gap-4 lg:grid-cols-3">
