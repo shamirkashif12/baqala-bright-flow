@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
+import { useCustomizableCards } from "@/hooks/use-customizable-cards";
 import {
   Select,
   SelectContent,
@@ -37,6 +38,9 @@ import {
   LogOut,
   Wrench,
   Eye,
+  Radio,
+  Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/control-tower")({
@@ -231,6 +235,23 @@ function ControlTower() {
     };
   }, []);
 
+  const ALL_CARDS = [
+    "Branches", "Active Terminals", "Syncing", "Offline",
+    "Idle", "Employees Logged In", "POS In Use", "Mobile POS In Use",
+  ];
+  const cards = useCustomizableCards("baqala_control_tower_cards", ALL_CARDS);
+
+  const cardMap: Record<string, JSX.Element> = {
+    "Branches": <MetricCard label="Branches" value={String(totals.branches)} icon={Building2} accent="primary" hint="all KSA" editing={cards.editing} onRemove={() => cards.remove("Branches")} />,
+    "Active Terminals": <MetricCard label="Active Terminals" value={String(totals.active)} icon={Activity} accent="success" delta="+3" trend="up" editing={cards.editing} onRemove={() => cards.remove("Active Terminals")} />,
+    "Syncing": <MetricCard label="Syncing" value={String(totals.syncing)} icon={RefreshCw} accent="primary" hint="live sync" editing={cards.editing} onRemove={() => cards.remove("Syncing")} />,
+    "Offline": <MetricCard label="Offline" value={String(totals.offline)} icon={WifiOff} accent="destructive" delta="−1" trend="down" editing={cards.editing} onRemove={() => cards.remove("Offline")} />,
+    "Idle": <MetricCard label="Idle" value={String(totals.idle)} icon={CircleDot} hint="no activity" editing={cards.editing} onRemove={() => cards.remove("Idle")} />,
+    "Employees Logged In": <MetricCard label="Employees Logged In" value={String(totals.loggedIn)} icon={Users} accent="primary" editing={cards.editing} onRemove={() => cards.remove("Employees Logged In")} />,
+    "POS In Use": <MetricCard label="POS In Use" value={String(totals.pos)} icon={ScanBarcode} accent="success" editing={cards.editing} onRemove={() => cards.remove("POS In Use")} />,
+    "Mobile POS In Use": <MetricCard label="Mobile POS In Use" value={String(totals.mpos)} icon={Smartphone} accent="success" editing={cards.editing} onRemove={() => cards.remove("Mobile POS In Use")} />,
+  };
+
   const filteredBranches = useMemo(() => {
     return BRANCHES.filter((b) => branchFilter === "all" || b.id === branchFilter);
   }, [branchFilter]);
@@ -266,6 +287,7 @@ function ControlTower() {
       subtitle="Live branch · terminal · workforce control tower"
       actions={
         <div className="flex items-center gap-2">
+          {cards.Controls}
           <span className="inline-flex items-center gap-2 rounded-full border border-success/30 bg-success/10 px-3 py-1 text-xs font-semibold text-success">
             <span className="h-2 w-2 rounded-full bg-success animate-pulse" /> Live · updated 4s ago
           </span>
@@ -273,17 +295,46 @@ function ControlTower() {
         </div>
       }
     >
-      {/* Top summary cards */}
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
-        <MetricCard label="Branches" value={String(totals.branches)} icon={Building2} accent="primary" hint="all KSA" />
-        <MetricCard label="Active Terminals" value={String(totals.active)} icon={Activity} accent="success" delta="+3" trend="up" />
-        <MetricCard label="Syncing" value={String(totals.syncing)} icon={RefreshCw} accent="primary" hint="live sync" />
-        <MetricCard label="Offline" value={String(totals.offline)} icon={WifiOff} accent="destructive" delta="−1" trend="down" />
-        <MetricCard label="Idle" value={String(totals.idle)} icon={CircleDot} hint="no activity" />
-        <MetricCard label="Employees Logged In" value={String(totals.loggedIn)} icon={Users} accent="primary" />
-        <MetricCard label="POS In Use" value={String(totals.pos)} icon={ScanBarcode} accent="success" />
-        <MetricCard label="Mobile POS In Use" value={String(totals.mpos)} icon={Smartphone} accent="success" />
+      {/* Hero header */}
+      <div className="relative overflow-hidden rounded-3xl border border-border/60 gradient-primary text-primary-foreground p-6 md:p-7 shadow-elegant">
+        <div className="absolute inset-0 opacity-[0.15] pointer-events-none"
+          style={{ backgroundImage: "radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0)", backgroundSize: "22px 22px" }} />
+        <div className="absolute -top-10 -right-10 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
+        <div className="absolute -bottom-16 left-1/3 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
+        <div className="relative flex flex-wrap items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className="h-14 w-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center ring-1 ring-white/30">
+              <Radio className="h-7 w-7 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/80">
+                <Sparkles className="h-3.5 w-3.5" /> Live Control Tower
+              </div>
+              <h2 className="mt-1 text-2xl md:text-3xl font-bold tracking-tight">All systems in view</h2>
+              <p className="text-sm text-white/80 mt-0.5">{totals.branches} branches · {totals.active + totals.syncing} live terminals · {totals.loggedIn} employees on shift</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <HeroPill icon={ShieldCheck} label="Uptime" value="99.8%" />
+            <HeroPill icon={Activity} label="Active" value={String(totals.active)} />
+            <HeroPill icon={WifiOff} label="Offline" value={String(totals.offline)} tone="danger" />
+            <HeroPill icon={Users} label="On Shift" value={String(totals.loggedIn)} />
+          </div>
+        </div>
       </div>
+
+      {/* Top summary cards (customizable) */}
+      {cards.visible.length === 0 ? (
+        <Card className="p-8 text-center border-dashed border-border/60">
+          <p className="text-sm text-muted-foreground">No KPI cards visible. Click <span className="font-semibold">Add / Remove</span> to add some back.</p>
+        </Card>
+      ) : (
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
+          {ALL_CARDS.filter(cards.isVisible).map((label) => (
+            <div key={label}>{cardMap[label]}</div>
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       <Card className="p-3 border-border/60 shadow-card">
@@ -483,6 +534,18 @@ function ControlTower() {
         </TabsContent>
       </Tabs>
     </PageShell>
+  );
+}
+
+function HeroPill({ icon: Icon, label, value, tone }: { icon: typeof Radio; label: string; value: string; tone?: "danger" }) {
+  return (
+    <div className={`flex items-center gap-2.5 rounded-xl px-3 py-2 backdrop-blur ring-1 ${tone === "danger" ? "bg-destructive/30 ring-destructive/50" : "bg-white/15 ring-white/30"}`}>
+      <Icon className="h-4 w-4" />
+      <div className="leading-tight">
+        <div className="text-[10px] uppercase tracking-wider opacity-80">{label}</div>
+        <div className="text-sm font-bold tabular-nums">{value}</div>
+      </div>
+    </div>
   );
 }
 
