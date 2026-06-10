@@ -235,6 +235,159 @@ function Unified() {
             </Screen>
           </div>
         </TabsContent>
+
+        <TabsContent value="items" className="mt-0 space-y-4">
+          <FilterBar placeholder="Search items by name, SKU, barcode…" />
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <MetricCard label="Items on Device" value="2,148" icon={Package} accent="primary" />
+            <MetricCard label="Low Stock" value="14" icon={AlertTriangle} accent="warning" />
+            <MetricCard label="Close to Expiry" value="8" icon={CalendarClock} accent="warning" />
+            <MetricCard label="Out of Stock" value="3" icon={Package} accent="destructive" />
+          </div>
+          <DataTable
+            columns={[
+              { key: "sku", label: "SKU", render: r => <span className="font-mono text-xs">{r.sku}</span> },
+              { key: "name", label: "Item", render: r => <span className="font-semibold">{r.name}</span> },
+              { key: "cat", label: "Category" },
+              { key: "qty", label: "Stock", render: r => <span className="font-semibold tabular-nums">{r.qty}</span> },
+              { key: "price", label: "Price" },
+              { key: "expiry", label: "Expiry" },
+              { key: "status", label: "Status", render: r => <StatusBadge status={r.status} /> },
+            ]}
+            rows={[
+              { sku: "MLK-001", name: "Almarai Laban 1L", cat: "Dairy", qty: 142, price: "ر.س 6.50", expiry: "12d", status: "in stock" },
+              { sku: "MLK-002", name: "Nadec Milk 2L", cat: "Dairy", qty: 18, price: "ر.س 12.00", expiry: "5d", status: "low" },
+              { sku: "CHK-001", name: "Sadia Chicken 1kg", cat: "Meat", qty: 24, price: "ر.س 28.00", expiry: "3d", status: "near expiry" },
+              { sku: "SNK-001", name: "Lay's Classic 75g", cat: "Snacks", qty: 6, price: "ر.س 7.00", expiry: "60d", status: "low" },
+              { sku: "BVG-001", name: "Pepsi 330ml ×6", cat: "Beverages", qty: 0, price: "ر.س 15.00", expiry: "90d", status: "out of stock" },
+            ]}
+          />
+        </TabsContent>
+
+        <TabsContent value="reports" className="mt-0 space-y-4">
+          <FilterBar placeholder="Search reports by name…" />
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <MetricCard label="Sales (Today)" value="ر.س 4,820" icon={TrendingUp} accent="primary" delta="+14%" trend="up" />
+            <MetricCard label="Orders" value="87" icon={ShoppingBag} />
+            <MetricCard label="Avg Basket" value="ر.س 55.40" icon={Wallet} accent="success" />
+            <MetricCard label="Returns" value="3" icon={Undo2} accent="warning" />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="p-5 border-border/60 shadow-card space-y-3">
+              <h3 className="text-sm font-semibold">Top Items (Today)</h3>
+              {[
+                { n: "Almarai Laban 1L", u: 42, pct: 90 },
+                { n: "Lay's Classic 75g", u: 28, pct: 60 },
+                { n: "Pepsi 330ml", u: 22, pct: 48 },
+                { n: "Sadia Chicken 1kg", u: 14, pct: 32 },
+              ].map(p => (
+                <div key={p.n}>
+                  <div className="flex justify-between text-xs mb-1"><span>{p.n}</span><span className="font-semibold">{p.u} sold</span></div>
+                  <Progress value={p.pct} className="h-1.5" />
+                </div>
+              ))}
+            </Card>
+            <Card className="p-5 border-border/60 shadow-card space-y-3">
+              <h3 className="text-sm font-semibold">Payment Mix (Today)</h3>
+              {[
+                { m: "Cash", v: 62 }, { m: "Card", v: 26 }, { m: "Wallet", v: 12 },
+              ].map(p => (
+                <div key={p.m}>
+                  <div className="flex justify-between text-xs mb-1"><span>{p.m}</span><span className="font-semibold">{p.v}%</span></div>
+                  <Progress value={p.v} className="h-1.5" />
+                </div>
+              ))}
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="dayend" className="mt-0 space-y-4">
+          <Card className="p-6 border-primary/30 bg-primary/5 shadow-card">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-primary/15 text-primary flex items-center justify-center">
+                  <ClipboardCheck className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">Day-End Closing Report</h3>
+                  <p className="text-sm text-muted-foreground">Fahad Al-Qahtani · Olaya · Mobile-02 · Shift opened 08:00</p>
+                </div>
+              </div>
+              <Button className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5">
+                <ClipboardCheck className="h-4 w-4" /> Close shift & print
+              </Button>
+            </div>
+          </Card>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <MetricCard label="Opening Cash" value="ر.س 500" icon={Wallet} />
+            <MetricCard label="Expected Cash" value="ر.س 3,488" icon={Banknote} accent="primary" />
+            <MetricCard label="Counted Cash" value="ر.س 3,480" icon={Banknote} accent="success" />
+            <MetricCard label="Difference" value="-ر.س 8.00" icon={AlertTriangle} accent="warning" />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="p-5 border-border/60 shadow-card">
+              <h3 className="text-sm font-semibold mb-3">Sales by tender</h3>
+              <div className="space-y-2 text-sm">
+                {[
+                  { k: "Cash", v: "ر.س 2,988" },
+                  { k: "Card (Mada)", v: "ر.س 1,212" },
+                  { k: "Wallet (STC/Apple)", v: "ر.س 558" },
+                  { k: "Bank Transfer", v: "ر.س 62" },
+                ].map(r => (
+                  <div key={r.k} className="flex justify-between py-2 border-b border-border/40 last:border-0">
+                    <span className="text-muted-foreground">{r.k}</span>
+                    <span className="font-semibold tabular-nums">{r.v}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+            <Card className="p-5 border-border/60 shadow-card">
+              <h3 className="text-sm font-semibold mb-3">Shift summary</h3>
+              <div className="space-y-2 text-sm">
+                {[
+                  { k: "Orders completed", v: "87" },
+                  { k: "Items scanned", v: "342" },
+                  { k: "Refunds issued", v: "3 · ر.س 64.00" },
+                  { k: "Discounts given", v: "ر.س 142" },
+                  { k: "Cash withdrawal", v: "ر.س 200" },
+                  { k: "Held orders", v: "1" },
+                ].map(r => (
+                  <div key={r.k} className="flex justify-between py-2 border-b border-border/40 last:border-0">
+                    <span className="text-muted-foreground">{r.k}</span>
+                    <span className="font-semibold tabular-nums">{r.v}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="audit" className="mt-0 space-y-4">
+          <FilterBar placeholder="Search by action, user…" />
+          <Card className="p-0 border-border/60 shadow-card overflow-hidden">
+            <ul className="divide-y divide-border/40">
+              {[
+                { t: "14:42", a: "Refund issued", d: "Sadia Chicken 1kg · ر.س 28.00", c: "warning" },
+                { t: "14:32", a: "Sale completed", d: "INV-20260602-0142 · ر.س 60.95", c: "info" },
+                { t: "14:18", a: "Discount applied", d: "10% manager override · INV-...0140", c: "warning" },
+                { t: "13:42", a: "Shift opened", d: "Opening cash ر.س 500", c: "info" },
+                { t: "13:38", a: "Item voided", d: "Lay's Classic 75g ×2", c: "warning" },
+                { t: "12:50", a: "Card timeout", d: "Retry succeeded after 8s", c: "warning" },
+              ].map((l, i) => (
+                <li key={i} className="flex items-start gap-3 p-3.5 hover:bg-muted/30">
+                  <span className={`h-2.5 w-2.5 rounded-full mt-1.5 shrink-0 ${l.c === "warning" ? "bg-warning" : "bg-primary"}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold">{l.a}</p>
+                      <span className="text-xs text-muted-foreground tabular-nums">{l.t}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{l.d}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </TabsContent>
       </Tabs>
     </PageShell>
   );
