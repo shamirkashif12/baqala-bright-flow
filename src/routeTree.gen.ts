@@ -19,11 +19,13 @@ import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehou
 import { Route as AppUsersRouteImport } from './routes/_app.users'
 import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
 import { Route as AppTerminalSessionsRouteImport } from './routes/_app.terminal-sessions'
+import { Route as AppTaxFeesRouteImport } from './routes/_app.tax-fees'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
 import { Route as AppRolesRouteImport } from './routes/_app.roles'
+import { Route as AppReturnsRouteImport } from './routes/_app.returns'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppRefundsRouteImport } from './routes/_app.refunds'
 import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
@@ -49,6 +51,7 @@ import { Route as AppCashierRouteImport } from './routes/_app.cashier'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBiRouteImport } from './routes/_app.bi'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
+import { Route as AppAuditLogsRouteImport } from './routes/_app.audit-logs'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
 import { Route as AppControlTowerBranchIdRouteImport } from './routes/_app.control-tower.$branchId'
 
@@ -101,6 +104,11 @@ const AppTerminalSessionsRoute = AppTerminalSessionsRouteImport.update({
   path: '/terminal-sessions',
   getParentRoute: () => AppRoute,
 } as any)
+const AppTaxFeesRoute = AppTaxFeesRouteImport.update({
+  id: '/tax-fees',
+  path: '/tax-fees',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSuppliersRoute = AppSuppliersRouteImport.update({
   id: '/suppliers',
   path: '/suppliers',
@@ -124,6 +132,11 @@ const AppSalesRoute = AppSalesRouteImport.update({
 const AppRolesRoute = AppRolesRouteImport.update({
   id: '/roles',
   path: '/roles',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReturnsRoute = AppReturnsRouteImport.update({
+  id: '/returns',
+  path: '/returns',
   getParentRoute: () => AppRoute,
 } as any)
 const AppReportsRoute = AppReportsRouteImport.update({
@@ -251,6 +264,11 @@ const AppBatchesRoute = AppBatchesRouteImport.update({
   path: '/batches',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAuditLogsRoute = AppAuditLogsRouteImport.update({
+  id: '/audit-logs',
+  path: '/audit-logs',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -267,6 +285,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/admin': typeof AppAdminRoute
+  '/audit-logs': typeof AppAuditLogsRoute
   '/batches': typeof AppBatchesRoute
   '/bi': typeof AppBiRoute
   '/branches': typeof AppBranchesRoute
@@ -292,11 +311,13 @@ export interface FileRoutesByFullPath {
   '/pos-settings': typeof AppPosSettingsRoute
   '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
+  '/returns': typeof AppReturnsRoute
   '/roles': typeof AppRolesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
+  '/tax-fees': typeof AppTaxFeesRoute
   '/terminal-sessions': typeof AppTerminalSessionsRoute
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
@@ -310,6 +331,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/admin': typeof AppAdminRoute
+  '/audit-logs': typeof AppAuditLogsRoute
   '/batches': typeof AppBatchesRoute
   '/bi': typeof AppBiRoute
   '/branches': typeof AppBranchesRoute
@@ -335,11 +357,13 @@ export interface FileRoutesByTo {
   '/pos-settings': typeof AppPosSettingsRoute
   '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
+  '/returns': typeof AppReturnsRoute
   '/roles': typeof AppRolesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
+  '/tax-fees': typeof AppTaxFeesRoute
   '/terminal-sessions': typeof AppTerminalSessionsRoute
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
@@ -355,6 +379,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/_app/admin': typeof AppAdminRoute
+  '/_app/audit-logs': typeof AppAuditLogsRoute
   '/_app/batches': typeof AppBatchesRoute
   '/_app/bi': typeof AppBiRoute
   '/_app/branches': typeof AppBranchesRoute
@@ -380,11 +405,13 @@ export interface FileRoutesById {
   '/_app/pos-settings': typeof AppPosSettingsRoute
   '/_app/refunds': typeof AppRefundsRoute
   '/_app/reports': typeof AppReportsRoute
+  '/_app/returns': typeof AppReturnsRoute
   '/_app/roles': typeof AppRolesRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
   '/_app/suppliers': typeof AppSuppliersRoute
+  '/_app/tax-fees': typeof AppTaxFeesRoute
   '/_app/terminal-sessions': typeof AppTerminalSessionsRoute
   '/_app/terminals': typeof AppTerminalsRoute
   '/_app/users': typeof AppUsersRoute
@@ -400,6 +427,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/admin'
+    | '/audit-logs'
     | '/batches'
     | '/bi'
     | '/branches'
@@ -425,11 +453,13 @@ export interface FileRouteTypes {
     | '/pos-settings'
     | '/refunds'
     | '/reports'
+    | '/returns'
     | '/roles'
     | '/sales'
     | '/settings'
     | '/staff'
     | '/suppliers'
+    | '/tax-fees'
     | '/terminal-sessions'
     | '/terminals'
     | '/users'
@@ -443,6 +473,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/admin'
+    | '/audit-logs'
     | '/batches'
     | '/bi'
     | '/branches'
@@ -468,11 +499,13 @@ export interface FileRouteTypes {
     | '/pos-settings'
     | '/refunds'
     | '/reports'
+    | '/returns'
     | '/roles'
     | '/sales'
     | '/settings'
     | '/staff'
     | '/suppliers'
+    | '/tax-fees'
     | '/terminal-sessions'
     | '/terminals'
     | '/users'
@@ -487,6 +520,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/_app/admin'
+    | '/_app/audit-logs'
     | '/_app/batches'
     | '/_app/bi'
     | '/_app/branches'
@@ -512,11 +546,13 @@ export interface FileRouteTypes {
     | '/_app/pos-settings'
     | '/_app/refunds'
     | '/_app/reports'
+    | '/_app/returns'
     | '/_app/roles'
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
     | '/_app/suppliers'
+    | '/_app/tax-fees'
     | '/_app/terminal-sessions'
     | '/_app/terminals'
     | '/_app/users'
@@ -605,6 +641,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTerminalSessionsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/tax-fees': {
+      id: '/_app/tax-fees'
+      path: '/tax-fees'
+      fullPath: '/tax-fees'
+      preLoaderRoute: typeof AppTaxFeesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/suppliers': {
       id: '/_app/suppliers'
       path: '/suppliers'
@@ -638,6 +681,13 @@ declare module '@tanstack/react-router' {
       path: '/roles'
       fullPath: '/roles'
       preLoaderRoute: typeof AppRolesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/returns': {
+      id: '/_app/returns'
+      path: '/returns'
+      fullPath: '/returns'
+      preLoaderRoute: typeof AppReturnsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/reports': {
@@ -815,6 +865,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBatchesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/audit-logs': {
+      id: '/_app/audit-logs'
+      path: '/audit-logs'
+      fullPath: '/audit-logs'
+      preLoaderRoute: typeof AppAuditLogsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/admin': {
       id: '/_app/admin'
       path: '/admin'
@@ -846,6 +903,7 @@ const AppControlTowerRouteWithChildren = AppControlTowerRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
+  AppAuditLogsRoute: typeof AppAuditLogsRoute
   AppBatchesRoute: typeof AppBatchesRoute
   AppBiRoute: typeof AppBiRoute
   AppBranchesRoute: typeof AppBranchesRoute
@@ -871,11 +929,13 @@ interface AppRouteChildren {
   AppPosSettingsRoute: typeof AppPosSettingsRoute
   AppRefundsRoute: typeof AppRefundsRoute
   AppReportsRoute: typeof AppReportsRoute
+  AppReturnsRoute: typeof AppReturnsRoute
   AppRolesRoute: typeof AppRolesRoute
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
+  AppTaxFeesRoute: typeof AppTaxFeesRoute
   AppTerminalSessionsRoute: typeof AppTerminalSessionsRoute
   AppTerminalsRoute: typeof AppTerminalsRoute
   AppUsersRoute: typeof AppUsersRoute
@@ -886,6 +946,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
+  AppAuditLogsRoute: AppAuditLogsRoute,
   AppBatchesRoute: AppBatchesRoute,
   AppBiRoute: AppBiRoute,
   AppBranchesRoute: AppBranchesRoute,
@@ -911,11 +972,13 @@ const AppRouteChildren: AppRouteChildren = {
   AppPosSettingsRoute: AppPosSettingsRoute,
   AppRefundsRoute: AppRefundsRoute,
   AppReportsRoute: AppReportsRoute,
+  AppReturnsRoute: AppReturnsRoute,
   AppRolesRoute: AppRolesRoute,
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,
   AppSuppliersRoute: AppSuppliersRoute,
+  AppTaxFeesRoute: AppTaxFeesRoute,
   AppTerminalSessionsRoute: AppTerminalSessionsRoute,
   AppTerminalsRoute: AppTerminalsRoute,
   AppUsersRoute: AppUsersRoute,

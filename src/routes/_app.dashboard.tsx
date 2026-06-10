@@ -13,8 +13,9 @@ import { cn } from "@/lib/utils";
 import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, AlertTriangle, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowUpRight, ArrowDownRight,
-  ArrowRight, Settings2, X, RotateCcw, type LucideIcon,
+  ArrowRight, Settings2, X, RotateCcw, TrendingUp, BarChart3, type LucideIcon,
 } from "lucide-react";
+import { FilterBar } from "@/components/filter-bar";
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: Dashboard,
@@ -211,6 +212,9 @@ function Dashboard() {
         </div>
       </div>
 
+      {/* Universal filter bar */}
+      <FilterBar placeholder="Search by item, SKU, branch, cashier…" />
+
       {/* Stat cards */}
       {visibleCards.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
@@ -266,7 +270,36 @@ function Dashboard() {
         </Widget>
       </div>
 
-      {/* Widgets row 2 */}
+      {/* Business Intelligence (merged from /bi) */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2 p-5 border-border/60 shadow-card space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold flex items-center gap-2"><BarChart3 className="h-4 w-4 text-primary" />Sales Trend · 14 days</h3>
+              <p className="text-xs text-muted-foreground">All branches · gross sales</p>
+            </div>
+            <Badge variant="outline" className="bg-success/15 text-success border-success/30 gap-1"><TrendingUp className="h-3 w-3" />+18% WoW</Badge>
+          </div>
+          <BiSparkline data={[12,18,16,22,28,24,30,26,34,32,40,38,44,48]} />
+        </Card>
+        <Card className="p-5 border-border/60 shadow-card space-y-3">
+          <h3 className="text-sm font-semibold">Payment Mix</h3>
+          {[
+            { m: "Cash", v: 58, c: "bg-primary" },
+            { m: "Card", v: 28, c: "bg-success" },
+            { m: "Wallet", v: 11, c: "bg-warning" },
+            { m: "Transfer", v: 3, c: "bg-muted-foreground" },
+          ].map(p => (
+            <div key={p.m}>
+              <div className="flex justify-between text-xs mb-1"><span>{p.m}</span><span className="font-semibold">{p.v}%</span></div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden"><div className={cn("h-full", p.c)} style={{ width: `${p.v}%` }} /></div>
+            </div>
+          ))}
+          <Link to="/bi" className="text-xs text-primary font-semibold inline-flex items-center gap-0.5 pt-1">Open full BI <ArrowRight className="h-3 w-3" /></Link>
+        </Card>
+      </div>
+
+      {/* Performance widgets row */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Widget title="Cashier Performance" link={{ to: "/kpi", label: "KPI" }}>
           {[
@@ -382,5 +415,22 @@ function Mini({ label, value, tone = "default" }: { label: string; value: string
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
       <p className={cn("text-lg font-bold mt-0.5", colors)}>{value}</p>
     </div>
+  );
+}
+
+function BiSparkline({ data }: { data: number[] }) {
+  const max = Math.max(...data), min = Math.min(...data);
+  const pts = data.map((v, i) => `${(i/(data.length-1))*100},${100-((v-min)/(max-min||1))*100}`).join(" ");
+  return (
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-28">
+      <defs>
+        <linearGradient id="bi-grad" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={`0,100 ${pts} 100,100`} fill="url(#bi-grad)" />
+      <polyline points={pts} fill="none" stroke="hsl(var(--primary))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }

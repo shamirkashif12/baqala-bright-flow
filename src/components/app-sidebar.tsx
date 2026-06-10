@@ -36,6 +36,9 @@ import {
   BarChart3,
   Briefcase,
   Radar,
+  Cigarette,
+  Undo2 as ReturnIcon,
+  History,
 } from "lucide-react";
 import {
   Sidebar,
@@ -83,6 +86,8 @@ const navGroups = [
       { title: "Expense Types", url: "/expense-types", icon: Tags },
       { title: "Coupons & Discounts", url: "/coupons", icon: TicketPercent },
       { title: "Refunds", url: "/refunds", icon: Undo2 },
+      { title: "Customer Returns", url: "/returns", icon: ReturnIcon },
+      { title: "Tax, Fees & Tobacco", url: "/tax-fees", icon: Cigarette },
     ],
   },
   {
@@ -121,6 +126,7 @@ const navGroups = [
       { title: "ZATCA Invoices", url: "/zatca", icon: ReceiptText },
       { title: "Compliance", url: "/compliance", icon: ShieldCheck },
       { title: "POS Settings", url: "/pos-settings", icon: Sliders },
+      { title: "Audit Logs", url: "/audit-logs", icon: History },
       { title: "Plans & Pricing", url: "/plans", icon: Crown },
       { title: "Settings", url: "/settings", icon: Settings },
     ],
