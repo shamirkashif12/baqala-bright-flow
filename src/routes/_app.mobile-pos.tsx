@@ -50,9 +50,13 @@ function Unified() {
       subtitle="Unified workspace · designed for on-the-go cashiers and self-service customers"
     >
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid grid-cols-2 max-w-md mb-6">
+        <TabsList className="flex flex-wrap h-auto mb-6">
           <TabsTrigger value="mobile" className="gap-2"><Smartphone className="h-4 w-4" />Mobile POS</TabsTrigger>
           <TabsTrigger value="kiosk" className="gap-2"><Monitor className="h-4 w-4" />Self-Checkout</TabsTrigger>
+          <TabsTrigger value="items" className="gap-2"><Package className="h-4 w-4" />Items</TabsTrigger>
+          <TabsTrigger value="reports" className="gap-2"><BarChart3 className="h-4 w-4" />Reports</TabsTrigger>
+          <TabsTrigger value="dayend" className="gap-2"><ClipboardCheck className="h-4 w-4" />Day-End</TabsTrigger>
+          <TabsTrigger value="audit" className="gap-2"><HistoryIcon className="h-4 w-4" />Audit</TabsTrigger>
         </TabsList>
 
         <TabsContent value="mobile" className="mt-0">
