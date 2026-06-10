@@ -270,11 +270,6 @@ function Dashboard() {
         </Widget>
       </div>
 
-      {/* Widgets row 2 */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Business Intelligence — merged in */}
-      </div>
-
       {/* Business Intelligence (merged from /bi) */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2 p-5 border-border/60 shadow-card space-y-3">
