@@ -7,7 +7,7 @@ import { MetricCard } from "@/components/metric-card";
 import { FilterBar } from "@/components/filter-bar";
 import {
   LogIn, LogOut, ShieldAlert, Undo2, Edit3, Trash2, ScanBarcode,
-  Settings as SettingsIcon, CreditCard, type LucideIcon,
+  Settings as SettingsIcon, CreditCard, BadgePercent, type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +21,7 @@ type Log = {
 
 const allLogs: Log[] = [
   { ts: "14:42", actor: "Fahad Al-Qahtani", role: "Cashier", branch: "Olaya", action: "Refund issued", target: "RET-20260602-008 · ر.س 28.00", icon: Undo2, severity: "warning" },
-  { ts: "14:38", actor: "Mohammed Al-Harbi", role: "Cashier", branch: "Olaya", action: "Discount applied", target: "INV-...0141 · 10% manager override", icon: BadgePct, severity: "warning" },
+  { ts: "14:38", actor: "Mohammed Al-Harbi", role: "Cashier", branch: "Olaya", action: "Discount applied", target: "INV-...0141 · 10% manager override", icon: BadgePercent, severity: "warning" },
   { ts: "14:32", actor: "Fahad Al-Qahtani", role: "Cashier", branch: "Olaya", action: "Sale completed", target: "INV-20260602-0142", icon: ScanBarcode, severity: "info" },
   { ts: "14:20", actor: "Khalid Al-Otaibi", role: "Manager", branch: "Khobar", action: "Price changed", target: "SKU TBC-001 · ر.س 41.00 → ر.س 41.40", icon: Edit3, severity: "warning" },
   { ts: "13:55", actor: "Sara M.", role: "Admin", branch: "HQ", action: "User role updated", target: "user@baqala.sa → Manager", icon: ShieldAlert, severity: "critical" },
@@ -31,8 +31,6 @@ const allLogs: Log[] = [
   { ts: "12:20", actor: "Sultan Al-Dossari", role: "Cashier", branch: "Jeddah", action: "Shift closed", target: "Expected ر.س 4,820 · Actual ر.س 4,815 · -5.00", icon: LogOut, severity: "info" },
   { ts: "11:45", actor: "Admin", role: "Admin", branch: "HQ", action: "POS setting changed", target: "Refund > ر.س 100 requires manager", icon: SettingsIcon, severity: "info" },
 ];
-
-function BadgePct(props: React.SVGProps<SVGSVGElement>) { return <Edit3 {...props} />; }
 
 function AuditLogs() {
   const [logs, setLogs] = useState(allLogs);
