@@ -13,8 +13,9 @@ import { cn } from "@/lib/utils";
 import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, AlertTriangle, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowUpRight, ArrowDownRight,
-  ArrowRight, Settings2, X, RotateCcw, type LucideIcon,
+  ArrowRight, Settings2, X, RotateCcw, TrendingUp, BarChart3, type LucideIcon,
 } from "lucide-react";
+import { FilterBar } from "@/components/filter-bar";
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: Dashboard,
