@@ -12,7 +12,6 @@ import {
   Undo2, CalendarClock,
 } from "lucide-react";
 import { BaqalaLogo } from "@/components/baqala-logo";
-import { Card } from "@/components/ui/card";
 import { MetricCard } from "@/components/metric-card";
 import { FilterBar } from "@/components/filter-bar";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
