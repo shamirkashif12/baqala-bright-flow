@@ -54,9 +54,6 @@ import { Route as AppBatchesRouteImport } from './routes/_app.batches'
 import { Route as AppAuditLogsRouteImport } from './routes/_app.audit-logs'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
 import { Route as AppControlTowerBranchIdRouteImport } from './routes/_app.control-tower.$branchId'
-import { Route as AppTaxFeesRouteImport } from './routes/_app.tax-fees'
-import { Route as AppReturnsRouteImport } from './routes/_app.returns'
-import { Route as AppAuditLogsRouteImport } from './routes/_app.audit-logs'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -282,21 +279,6 @@ const AppControlTowerBranchIdRoute = AppControlTowerBranchIdRouteImport.update({
   path: '/$branchId',
   getParentRoute: () => AppControlTowerRoute,
 } as any)
-const AppTaxFeesRoute = AppTaxFeesRouteImport.update({
-  id: '/tax-fees',
-  path: '/tax-fees',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppReturnsRoute = AppReturnsRouteImport.update({
-  id: '/returns',
-  path: '/returns',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAuditLogsRoute = AppAuditLogsRouteImport.update({
-  id: '/audit-logs',
-  path: '/audit-logs',
-  getParentRoute: () => AppRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -343,9 +325,6 @@ export interface FileRoutesByFullPath {
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
   '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
-  '/tax-fees': typeof AppTaxFeesRoute
-  '/returns': typeof AppReturnsRoute
-  '/audit-logs': typeof AppAuditLogsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -392,9 +371,6 @@ export interface FileRoutesByTo {
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
   '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
-  '/tax-fees': typeof AppTaxFeesRoute
-  '/returns': typeof AppReturnsRoute
-  '/audit-logs': typeof AppAuditLogsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -443,9 +419,6 @@ export interface FileRoutesById {
   '/_app/warehouses': typeof AppWarehousesRoute
   '/_app/zatca': typeof AppZatcaRoute
   '/_app/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
-  '/_app/tax-fees': typeof AppTaxFeesRoute
-  '/_app/returns': typeof AppReturnsRoute
-  '/_app/audit-logs': typeof AppAuditLogsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -494,9 +467,6 @@ export interface FileRouteTypes {
     | '/warehouses'
     | '/zatca'
     | '/control-tower/$branchId'
-    | '/tax-fees'
-    | '/returns'
-    | '/audit-logs'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -543,9 +513,6 @@ export interface FileRouteTypes {
     | '/warehouses'
     | '/zatca'
     | '/control-tower/$branchId'
-    | '/tax-fees'
-    | '/returns'
-    | '/audit-logs'
   id:
     | '__root__'
     | '/'
@@ -593,9 +560,6 @@ export interface FileRouteTypes {
     | '/_app/warehouses'
     | '/_app/zatca'
     | '/_app/control-tower/$branchId'
-    | '/_app/tax-fees'
-    | '/_app/returns'
-    | '/_app/audit-logs'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -922,27 +886,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppControlTowerBranchIdRouteImport
       parentRoute: typeof AppControlTowerRoute
     }
-    '/_app/tax-fees': {
-      id: '/_app/tax-fees'
-      path: '/tax-fees'
-      fullPath: '/tax-fees'
-      preLoaderRoute: typeof AppTaxFeesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/returns': {
-      id: '/_app/returns'
-      path: '/returns'
-      fullPath: '/returns'
-      preLoaderRoute: typeof AppReturnsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/audit-logs': {
-      id: '/_app/audit-logs'
-      path: '/audit-logs'
-      fullPath: '/audit-logs'
-      preLoaderRoute: typeof AppAuditLogsRouteImport
-      parentRoute: typeof AppRoute
-    }
   }
 }
 
@@ -999,9 +942,6 @@ interface AppRouteChildren {
   AppWarehouseSuppliersRoute: typeof AppWarehouseSuppliersRoute
   AppWarehousesRoute: typeof AppWarehousesRoute
   AppZatcaRoute: typeof AppZatcaRoute
-  AppTaxFeesRoute: typeof AppTaxFeesRoute
-  AppReturnsRoute: typeof AppReturnsRoute
-  AppAuditLogsRoute: typeof AppAuditLogsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -1045,9 +985,6 @@ const AppRouteChildren: AppRouteChildren = {
   AppWarehouseSuppliersRoute: AppWarehouseSuppliersRoute,
   AppWarehousesRoute: AppWarehousesRoute,
   AppZatcaRoute: AppZatcaRoute,
-  AppTaxFeesRoute: AppTaxFeesRoute,
-  AppReturnsRoute: AppReturnsRoute,
-  AppAuditLogsRoute: AppAuditLogsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
