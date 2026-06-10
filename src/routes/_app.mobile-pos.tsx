@@ -8,8 +8,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   ScanLine, Search, WifiOff, Plus, Banknote, CreditCard, Wallet, Building2,
   Bell, ChevronRight, ShoppingBag, Trash2, CheckCircle2, QrCode, X, Smartphone, Monitor,
+  Package, BarChart3, History as HistoryIcon, ClipboardCheck, AlertTriangle, TrendingUp,
+  Undo2, CalendarClock,
 } from "lucide-react";
 import { BaqalaLogo } from "@/components/baqala-logo";
+import { Card } from "@/components/ui/card";
+import { MetricCard } from "@/components/metric-card";
+import { FilterBar } from "@/components/filter-bar";
+import { DataTable, StatusBadge } from "@/components/module-placeholder";
+import { Progress } from "@/components/ui/progress";
 
 export const Route = createFileRoute("/_app/mobile-pos")({ component: Unified });
 
