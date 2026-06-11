@@ -13,17 +13,21 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppZatcaSettingsRouteImport } from './routes/_app.zatca-settings'
 import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
 import { Route as AppWarehousesRouteImport } from './routes/_app.warehouses'
 import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehouse-suppliers'
 import { Route as AppUsersRouteImport } from './routes/_app.users'
 import { Route as AppTerminalsRouteImport } from './routes/_app.terminals'
 import { Route as AppTerminalSessionsRouteImport } from './routes/_app.terminal-sessions'
+import { Route as AppTaxReportsRouteImport } from './routes/_app.tax-reports'
+import { Route as AppTaxFeesRouteImport } from './routes/_app.tax-fees'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
 import { Route as AppRolesRouteImport } from './routes/_app.roles'
+import { Route as AppReturnsRouteImport } from './routes/_app.returns'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppRefundsRouteImport } from './routes/_app.refunds'
 import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
@@ -49,6 +53,7 @@ import { Route as AppCashierRouteImport } from './routes/_app.cashier'
 import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBiRouteImport } from './routes/_app.bi'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
+import { Route as AppAuditLogsRouteImport } from './routes/_app.audit-logs'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
 import { Route as AppControlTowerBranchIdRouteImport } from './routes/_app.control-tower.$branchId'
 
@@ -70,6 +75,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppZatcaSettingsRoute = AppZatcaSettingsRouteImport.update({
+  id: '/zatca-settings',
+  path: '/zatca-settings',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppZatcaRoute = AppZatcaRouteImport.update({
   id: '/zatca',
@@ -101,6 +111,16 @@ const AppTerminalSessionsRoute = AppTerminalSessionsRouteImport.update({
   path: '/terminal-sessions',
   getParentRoute: () => AppRoute,
 } as any)
+const AppTaxReportsRoute = AppTaxReportsRouteImport.update({
+  id: '/tax-reports',
+  path: '/tax-reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTaxFeesRoute = AppTaxFeesRouteImport.update({
+  id: '/tax-fees',
+  path: '/tax-fees',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSuppliersRoute = AppSuppliersRouteImport.update({
   id: '/suppliers',
   path: '/suppliers',
@@ -124,6 +144,11 @@ const AppSalesRoute = AppSalesRouteImport.update({
 const AppRolesRoute = AppRolesRouteImport.update({
   id: '/roles',
   path: '/roles',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReturnsRoute = AppReturnsRouteImport.update({
+  id: '/returns',
+  path: '/returns',
   getParentRoute: () => AppRoute,
 } as any)
 const AppReportsRoute = AppReportsRouteImport.update({
@@ -251,6 +276,11 @@ const AppBatchesRoute = AppBatchesRouteImport.update({
   path: '/batches',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAuditLogsRoute = AppAuditLogsRouteImport.update({
+  id: '/audit-logs',
+  path: '/audit-logs',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -267,6 +297,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/admin': typeof AppAdminRoute
+  '/audit-logs': typeof AppAuditLogsRoute
   '/batches': typeof AppBatchesRoute
   '/bi': typeof AppBiRoute
   '/branches': typeof AppBranchesRoute
@@ -292,17 +323,21 @@ export interface FileRoutesByFullPath {
   '/pos-settings': typeof AppPosSettingsRoute
   '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
+  '/returns': typeof AppReturnsRoute
   '/roles': typeof AppRolesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
+  '/tax-fees': typeof AppTaxFeesRoute
+  '/tax-reports': typeof AppTaxReportsRoute
   '/terminal-sessions': typeof AppTerminalSessionsRoute
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
+  '/zatca-settings': typeof AppZatcaSettingsRoute
   '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRoutesByTo {
@@ -310,6 +345,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/admin': typeof AppAdminRoute
+  '/audit-logs': typeof AppAuditLogsRoute
   '/batches': typeof AppBatchesRoute
   '/bi': typeof AppBiRoute
   '/branches': typeof AppBranchesRoute
@@ -335,17 +371,21 @@ export interface FileRoutesByTo {
   '/pos-settings': typeof AppPosSettingsRoute
   '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
+  '/returns': typeof AppReturnsRoute
   '/roles': typeof AppRolesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/suppliers': typeof AppSuppliersRoute
+  '/tax-fees': typeof AppTaxFeesRoute
+  '/tax-reports': typeof AppTaxReportsRoute
   '/terminal-sessions': typeof AppTerminalSessionsRoute
   '/terminals': typeof AppTerminalsRoute
   '/users': typeof AppUsersRoute
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
+  '/zatca-settings': typeof AppZatcaSettingsRoute
   '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRoutesById {
@@ -355,6 +395,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/_app/admin': typeof AppAdminRoute
+  '/_app/audit-logs': typeof AppAuditLogsRoute
   '/_app/batches': typeof AppBatchesRoute
   '/_app/bi': typeof AppBiRoute
   '/_app/branches': typeof AppBranchesRoute
@@ -380,17 +421,21 @@ export interface FileRoutesById {
   '/_app/pos-settings': typeof AppPosSettingsRoute
   '/_app/refunds': typeof AppRefundsRoute
   '/_app/reports': typeof AppReportsRoute
+  '/_app/returns': typeof AppReturnsRoute
   '/_app/roles': typeof AppRolesRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
   '/_app/suppliers': typeof AppSuppliersRoute
+  '/_app/tax-fees': typeof AppTaxFeesRoute
+  '/_app/tax-reports': typeof AppTaxReportsRoute
   '/_app/terminal-sessions': typeof AppTerminalSessionsRoute
   '/_app/terminals': typeof AppTerminalsRoute
   '/_app/users': typeof AppUsersRoute
   '/_app/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/_app/warehouses': typeof AppWarehousesRoute
   '/_app/zatca': typeof AppZatcaRoute
+  '/_app/zatca-settings': typeof AppZatcaSettingsRoute
   '/_app/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRouteTypes {
@@ -400,6 +445,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/admin'
+    | '/audit-logs'
     | '/batches'
     | '/bi'
     | '/branches'
@@ -425,17 +471,21 @@ export interface FileRouteTypes {
     | '/pos-settings'
     | '/refunds'
     | '/reports'
+    | '/returns'
     | '/roles'
     | '/sales'
     | '/settings'
     | '/staff'
     | '/suppliers'
+    | '/tax-fees'
+    | '/tax-reports'
     | '/terminal-sessions'
     | '/terminals'
     | '/users'
     | '/warehouse-suppliers'
     | '/warehouses'
     | '/zatca'
+    | '/zatca-settings'
     | '/control-tower/$branchId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -443,6 +493,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/admin'
+    | '/audit-logs'
     | '/batches'
     | '/bi'
     | '/branches'
@@ -468,17 +519,21 @@ export interface FileRouteTypes {
     | '/pos-settings'
     | '/refunds'
     | '/reports'
+    | '/returns'
     | '/roles'
     | '/sales'
     | '/settings'
     | '/staff'
     | '/suppliers'
+    | '/tax-fees'
+    | '/tax-reports'
     | '/terminal-sessions'
     | '/terminals'
     | '/users'
     | '/warehouse-suppliers'
     | '/warehouses'
     | '/zatca'
+    | '/zatca-settings'
     | '/control-tower/$branchId'
   id:
     | '__root__'
@@ -487,6 +542,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/_app/admin'
+    | '/_app/audit-logs'
     | '/_app/batches'
     | '/_app/bi'
     | '/_app/branches'
@@ -512,17 +568,21 @@ export interface FileRouteTypes {
     | '/_app/pos-settings'
     | '/_app/refunds'
     | '/_app/reports'
+    | '/_app/returns'
     | '/_app/roles'
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
     | '/_app/suppliers'
+    | '/_app/tax-fees'
+    | '/_app/tax-reports'
     | '/_app/terminal-sessions'
     | '/_app/terminals'
     | '/_app/users'
     | '/_app/warehouse-suppliers'
     | '/_app/warehouses'
     | '/_app/zatca'
+    | '/_app/zatca-settings'
     | '/_app/control-tower/$branchId'
   fileRoutesById: FileRoutesById
 }
@@ -562,6 +622,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/zatca-settings': {
+      id: '/_app/zatca-settings'
+      path: '/zatca-settings'
+      fullPath: '/zatca-settings'
+      preLoaderRoute: typeof AppZatcaSettingsRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/zatca': {
       id: '/_app/zatca'
@@ -605,6 +672,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTerminalSessionsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/tax-reports': {
+      id: '/_app/tax-reports'
+      path: '/tax-reports'
+      fullPath: '/tax-reports'
+      preLoaderRoute: typeof AppTaxReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/tax-fees': {
+      id: '/_app/tax-fees'
+      path: '/tax-fees'
+      fullPath: '/tax-fees'
+      preLoaderRoute: typeof AppTaxFeesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/suppliers': {
       id: '/_app/suppliers'
       path: '/suppliers'
@@ -638,6 +719,13 @@ declare module '@tanstack/react-router' {
       path: '/roles'
       fullPath: '/roles'
       preLoaderRoute: typeof AppRolesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/returns': {
+      id: '/_app/returns'
+      path: '/returns'
+      fullPath: '/returns'
+      preLoaderRoute: typeof AppReturnsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/reports': {
@@ -815,6 +903,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBatchesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/audit-logs': {
+      id: '/_app/audit-logs'
+      path: '/audit-logs'
+      fullPath: '/audit-logs'
+      preLoaderRoute: typeof AppAuditLogsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/admin': {
       id: '/_app/admin'
       path: '/admin'
@@ -846,6 +941,7 @@ const AppControlTowerRouteWithChildren = AppControlTowerRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
+  AppAuditLogsRoute: typeof AppAuditLogsRoute
   AppBatchesRoute: typeof AppBatchesRoute
   AppBiRoute: typeof AppBiRoute
   AppBranchesRoute: typeof AppBranchesRoute
@@ -871,21 +967,26 @@ interface AppRouteChildren {
   AppPosSettingsRoute: typeof AppPosSettingsRoute
   AppRefundsRoute: typeof AppRefundsRoute
   AppReportsRoute: typeof AppReportsRoute
+  AppReturnsRoute: typeof AppReturnsRoute
   AppRolesRoute: typeof AppRolesRoute
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
+  AppTaxFeesRoute: typeof AppTaxFeesRoute
+  AppTaxReportsRoute: typeof AppTaxReportsRoute
   AppTerminalSessionsRoute: typeof AppTerminalSessionsRoute
   AppTerminalsRoute: typeof AppTerminalsRoute
   AppUsersRoute: typeof AppUsersRoute
   AppWarehouseSuppliersRoute: typeof AppWarehouseSuppliersRoute
   AppWarehousesRoute: typeof AppWarehousesRoute
   AppZatcaRoute: typeof AppZatcaRoute
+  AppZatcaSettingsRoute: typeof AppZatcaSettingsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
+  AppAuditLogsRoute: AppAuditLogsRoute,
   AppBatchesRoute: AppBatchesRoute,
   AppBiRoute: AppBiRoute,
   AppBranchesRoute: AppBranchesRoute,
@@ -911,17 +1012,21 @@ const AppRouteChildren: AppRouteChildren = {
   AppPosSettingsRoute: AppPosSettingsRoute,
   AppRefundsRoute: AppRefundsRoute,
   AppReportsRoute: AppReportsRoute,
+  AppReturnsRoute: AppReturnsRoute,
   AppRolesRoute: AppRolesRoute,
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,
   AppSuppliersRoute: AppSuppliersRoute,
+  AppTaxFeesRoute: AppTaxFeesRoute,
+  AppTaxReportsRoute: AppTaxReportsRoute,
   AppTerminalSessionsRoute: AppTerminalSessionsRoute,
   AppTerminalsRoute: AppTerminalsRoute,
   AppUsersRoute: AppUsersRoute,
   AppWarehouseSuppliersRoute: AppWarehouseSuppliersRoute,
   AppWarehousesRoute: AppWarehousesRoute,
   AppZatcaRoute: AppZatcaRoute,
+  AppZatcaSettingsRoute: AppZatcaSettingsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
