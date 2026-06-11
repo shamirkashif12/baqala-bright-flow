@@ -58,6 +58,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/lib/auth";
 import { BaqalaLogo } from "./baqala-logo";
+import { useI18n } from "@/lib/i18n";
 
 const navGroups = [
   {
@@ -143,6 +144,7 @@ export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { t } = useI18n();
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(navGroups.map((g) => [g.label, true])),
   );
@@ -176,7 +178,7 @@ export function AppSidebar() {
                     >
                       <Link to={item.url}>
                         <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
+                        <span>{t(item.title)}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -199,7 +201,7 @@ export function AppSidebar() {
               >
                 <CollapsibleTrigger asChild>
                   <button className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors">
-                    <span>{group.label}</span>
+                    <span>{t(group.label)}</span>
                     <ChevronDown
                       className={`h-3.5 w-3.5 transition-transform ${open ? "" : "-rotate-90"}`}
                     />
@@ -224,7 +226,7 @@ export function AppSidebar() {
           {!collapsed && (
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold truncate">{user?.name ?? "User"}</p>
-              <p className="text-[10px] text-sidebar-foreground/60 truncate">{user?.role === "owner" ? "Owner" : user?.role === "manager" ? "Manager" : "Cashier"} · {user?.branch?.split(" — ")[1] ?? "HQ"}</p>
+              <p className="text-[10px] text-sidebar-foreground/60 truncate">{user?.role === "owner" ? t("Owner") : user?.role === "manager" ? t("Manager") : t("Cashier")} · {user?.branch?.split(" — ")[1] ?? "HQ"}</p>
             </div>
           )}
           {!collapsed && <LogOut className="h-4 w-4 text-sidebar-foreground/60" />}
