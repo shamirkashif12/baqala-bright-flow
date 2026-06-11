@@ -15,8 +15,6 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppZatcaSettingsRouteImport } from './routes/_app.zatca-settings'
 import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
-import { Route as AppZatcaSettingsRouteImport } from './routes/_app.zatca-settings'
-import { Route as AppTaxReportsRouteImport } from './routes/_app.tax-reports'
 import { Route as AppWarehousesRouteImport } from './routes/_app.warehouses'
 import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehouse-suppliers'
 import { Route as AppUsersRouteImport } from './routes/_app.users'
@@ -86,6 +84,16 @@ const AppZatcaSettingsRoute = AppZatcaSettingsRouteImport.update({
 const AppZatcaRoute = AppZatcaRouteImport.update({
   id: '/zatca',
   path: '/zatca',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppZatcaSettingsRoute = AppZatcaSettingsRouteImport.update({
+  id: '/zatca-settings',
+  path: '/zatca-settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTaxReportsRoute = AppTaxReportsRouteImport.update({
+  id: '/tax-reports',
+  path: '/tax-reports',
   getParentRoute: () => AppRoute,
 } as any)
 const AppWarehousesRoute = AppWarehousesRouteImport.update({
