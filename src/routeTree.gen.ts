@@ -86,16 +86,6 @@ const AppZatcaRoute = AppZatcaRouteImport.update({
   path: '/zatca',
   getParentRoute: () => AppRoute,
 } as any)
-const AppZatcaSettingsRoute = AppZatcaSettingsRouteImport.update({
-  id: '/zatca-settings',
-  path: '/zatca-settings',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppTaxReportsRoute = AppTaxReportsRouteImport.update({
-  id: '/tax-reports',
-  path: '/tax-reports',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppWarehousesRoute = AppWarehousesRouteImport.update({
   id: '/warehouses',
   path: '/warehouses',
