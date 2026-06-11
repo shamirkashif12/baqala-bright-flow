@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { ShieldCheck, Cigarette, Receipt, Calculator, Plus } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -45,6 +46,31 @@ function TaxFees() {
         <MetricCard label="Tobacco SKUs" value="42" icon={Cigarette} accent="warning" />
         <MetricCard label="Excise Collected (mo)" value="ر.س 18,420" icon={Calculator} accent="primary" />
       </div>
+
+      {/* Fee calculation preview */}
+      <Card className="p-5 border-primary/30 bg-primary/5 shadow-card">
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <div>
+            <h3 className="font-semibold text-sm flex items-center gap-2"><Calculator className="h-4 w-4 text-primary" />Fee calculation preview</h3>
+            <p className="text-xs text-muted-foreground">Live preview of price + VAT + tobacco excise + custom fees</p>
+          </div>
+          <Link to="/tax-reports" className="text-xs text-primary font-semibold hover:underline">Open tax & fee reports →</Link>
+        </div>
+        <div className="grid sm:grid-cols-5 gap-2 text-sm">
+          {[
+            { l: "Product Price", v: "ر.س 20.00" },
+            { l: "VAT 15%", v: "ر.س 3.00" },
+            { l: "Tobacco Tax", v: "ر.س 20.00" },
+            { l: "Custom Fee", v: "ر.س 2.00" },
+            { l: "Total Payable", v: "ر.س 45.00", strong: true },
+          ].map(r => (
+            <div key={r.l} className={`rounded-xl border bg-background p-3 ${r.strong ? "border-primary/40 ring-1 ring-primary/30" : "border-border/60"}`}>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{r.l}</p>
+              <p className={`mt-1 ${r.strong ? "text-lg font-bold text-primary" : "font-semibold"}`}>{r.v}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <Tabs defaultValue="zatca">
         <TabsList>
