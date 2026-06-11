@@ -39,6 +39,8 @@ import {
   Cigarette,
   Undo2 as ReturnIcon,
   History,
+  FileCheck2,
+  Coins,
 } from "lucide-react";
 import {
   Sidebar,
@@ -88,6 +90,7 @@ const navGroups = [
       { title: "Refunds", url: "/refunds", icon: Undo2 },
       { title: "Customer Returns", url: "/returns", icon: ReturnIcon },
       { title: "Tax, Fees & Tobacco", url: "/tax-fees", icon: Cigarette },
+      { title: "Tax & Fee Reports", url: "/tax-reports", icon: Coins },
     ],
   },
   {
@@ -124,6 +127,7 @@ const navGroups = [
       { title: "Staff & Roles", url: "/staff", icon: Users },
       { title: "Maintenance", url: "/maintenance", icon: Wrench },
       { title: "ZATCA Invoices", url: "/zatca", icon: ReceiptText },
+      { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2 },
       { title: "Compliance", url: "/compliance", icon: ShieldCheck },
       { title: "POS Settings", url: "/pos-settings", icon: Sliders },
       { title: "Audit Logs", url: "/audit-logs", icon: History },
