@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -14,6 +15,7 @@ import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, AlertTriangle, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowUpRight, ArrowDownRight,
   ArrowRight, Settings2, X, RotateCcw, TrendingUp, BarChart3, type LucideIcon,
+  Undo2, Cigarette, Coins, LayoutDashboard,
 } from "lucide-react";
 import { FilterBar } from "@/components/filter-bar";
 
@@ -230,7 +232,19 @@ function Dashboard() {
         </Card>
       )}
 
-      {/* Widgets row 1 */}
+      {/* Tabbed BI sections (merged from /bi) */}
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="flex flex-wrap h-auto">
+          <TabsTrigger value="overview" className="gap-1.5"><LayoutDashboard className="h-4 w-4" />Overview</TabsTrigger>
+          <TabsTrigger value="orders" className="gap-1.5"><ShoppingBag className="h-4 w-4" />Orders</TabsTrigger>
+          <TabsTrigger value="inventory" className="gap-1.5"><Package className="h-4 w-4" />Inventory</TabsTrigger>
+          <TabsTrigger value="cashiers" className="gap-1.5"><Users className="h-4 w-4" />Cashiers</TabsTrigger>
+          <TabsTrigger value="terminals" className="gap-1.5"><TerminalIcon className="h-4 w-4" />Terminals</TabsTrigger>
+          <TabsTrigger value="returns" className="gap-1.5"><Undo2 className="h-4 w-4" />Returns</TabsTrigger>
+          <TabsTrigger value="tax" className="gap-1.5"><Cigarette className="h-4 w-4" />Tax & Fees</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="mt-4 space-y-4">
       <div className="grid gap-4 lg:grid-cols-3">
         <Widget title="Order Status Summary" link={{ to: "/orders", label: "All orders" }}>
           {[
@@ -383,6 +397,116 @@ function Dashboard() {
           ))}
         </Widget>
       </div>
+        </TabsContent>
+
+        <TabsContent value="orders" className="mt-4 grid gap-4 lg:grid-cols-3">
+          <Widget title="Today's order flow" link={{ to: "/orders", label: "All orders" }}>
+            {[
+              { l: "Pending", v: 24, c: "bg-warning" },
+              { l: "Processing", v: 16, c: "bg-primary" },
+              { l: "Ready", v: 12, c: "bg-primary" },
+              { l: "Delivered", v: 189, c: "bg-success" },
+              { l: "Cancelled", v: 3, c: "bg-destructive" },
+            ].map(s => (<div key={s.l} className="flex items-center gap-3"><span className={cn("h-2 w-2 rounded-full", s.c)} /><span className="text-sm flex-1">{s.l}</span><span className="text-sm font-bold tabular-nums">{s.v}</span></div>))}
+          </Widget>
+          <Widget title="Avg basket & discount impact" link={{ to: "/bi", label: "BI" }}>
+            <Mini label="Avg basket" value="ر.س 38.10" />
+            <Mini label="Discount given" value="ر.س 1,840" tone="warning" />
+            <Mini label="Coupons used" value="42" />
+            <Mini label="Online orders" value="58%" tone="success" />
+          </Widget>
+          <Widget title="Payment method breakdown">
+            {[{m:"Cash",v:58,c:"bg-primary"},{m:"Card",v:28,c:"bg-success"},{m:"Wallet",v:11,c:"bg-warning"},{m:"Transfer",v:3,c:"bg-muted-foreground"}].map(p => (
+              <div key={p.m}><div className="flex justify-between text-xs mb-1"><span>{p.m}</span><span className="font-semibold">{p.v}%</span></div><div className="h-2 rounded-full bg-muted overflow-hidden"><div className={cn("h-full", p.c)} style={{ width: `${p.v}%` }} /></div></div>
+            ))}
+          </Widget>
+        </TabsContent>
+
+        <TabsContent value="inventory" className="mt-4 grid gap-4 lg:grid-cols-3">
+          <Widget title="Best selling (week)">
+            {[{n:"Almarai Laban 1L",u:412},{n:"Lay's Classic 75g",u:318},{n:"Pepsi 330ml",u:287},{n:"Sadia Chicken 1kg",u:204}].map((r,i)=>(
+              <div key={r.n} className="flex items-center justify-between text-sm"><span className="flex items-center gap-2 min-w-0"><Badge variant="outline" className="text-[10px] font-mono">{i+1}</Badge><span className="truncate">{r.n}</span></span><span className="font-semibold">{r.u} sold</span></div>
+            ))}
+          </Widget>
+          <Widget title="Slow moving items" link={{to:"/inventory",label:"Inventory"}}>
+            {[{n:"Mr Brown Coffee Can",d:42},{n:"Al Alali Tomato Paste",d:38},{n:"Mama Noodles",d:31},{n:"Rabea Tea Bags",d:27}].map(r=>(
+              <div key={r.n} className="flex items-center justify-between text-sm"><span className="truncate">{r.n}</span><Badge variant="outline" className="text-warning-foreground border-warning/40 bg-warning/20">{r.d}d idle</Badge></div>
+            ))}
+          </Widget>
+          <Widget title="Expiry loss & inventory movement">
+            <Mini label="Expiry loss (mo)" value="ر.س 1,820" tone="destructive" />
+            <Mini label="Items received" value="3,148" />
+            <Mini label="Items dispatched" value="2,940" />
+            <Mini label="Net change" value="+208" tone="success" />
+          </Widget>
+        </TabsContent>
+
+        <TabsContent value="cashiers" className="mt-4 grid gap-4 lg:grid-cols-2">
+          <Widget title="Cashier performance" link={{to:"/kpi",label:"KPI"}}>
+            {[{n:"Fahad Al-Qahtani",t:"TML-RYD-001",o:142,s:"ر.س 8,420"},{n:"Mohammed Al-Harbi",t:"TML-RYD-002",o:128,s:"ر.س 7,180"},{n:"Khalid Al-Otaibi",t:"TML-KHB-001",o:96,s:"ر.س 5,310"},{n:"Sultan Al-Dossari",t:"TML-JED-001",o:88,s:"ر.س 4,920"}].map(r=>(
+              <div key={r.n} className="flex items-center justify-between text-sm"><div className="min-w-0"><p className="font-medium truncate">{r.n}</p><p className="text-xs text-muted-foreground">{r.t}</p></div><div className="text-right"><p className="font-semibold">{r.s}</p><p className="text-xs text-muted-foreground">{r.o} orders</p></div></div>
+            ))}
+          </Widget>
+          <Widget title="Product scan KPI">
+            <Mini label="Items scanned (today)" value="2,408" />
+            <Mini label="Avg scan time" value="2.1 s" tone="success" />
+            <Mini label="Manual entries" value="38" tone="warning" />
+            <Mini label="Mis-scan rate" value="0.8%" />
+          </Widget>
+        </TabsContent>
+
+        <TabsContent value="terminals" className="mt-4 grid gap-4 lg:grid-cols-2">
+          <Widget title="Terminal performance" link={{to:"/terminals",label:"Terminals"}}>
+            {[{t:"TML-RYD-001 · Olaya",st:"online",o:412,util:92},{t:"TML-RYD-002 · Olaya",st:"online",o:287,util:78},{t:"TML-KHB-001 · Khobar",st:"online",o:318,util:80},{t:"TML-JED-001 · Jeddah",st:"offline",o:0,util:0}].map(t=>(
+              <div key={t.t} className="space-y-1"><div className="flex justify-between text-sm"><span className="font-medium truncate">{t.t}</span><span className={cn("text-xs font-semibold",t.st==="online"?"text-success":"text-destructive")}>{t.st} · {t.o}</span></div><Progress value={t.util} className="h-1.5" /></div>
+            ))}
+          </Widget>
+          <Widget title="Branch performance" link={{to:"/branches",label:"Branches"}}>
+            {[{b:"Olaya — Riyadh",s:"ر.س 22,140",pct:92},{b:"Khobar — Eastern",s:"ر.س 12,820",pct:64},{b:"Jeddah — Western",s:"ر.س 9,140",pct:54},{b:"Madinah — Western",s:"ر.س 4,820",pct:38}].map(r=>(
+              <div key={r.b}><div className="flex justify-between text-xs mb-1"><span className="font-medium truncate">{r.b}</span><span className="font-semibold">{r.s}</span></div><div className="h-1.5 rounded-full bg-muted overflow-hidden"><div className="h-full gradient-primary" style={{width:`${r.pct}%`}}/></div></div>
+            ))}
+          </Widget>
+        </TabsContent>
+
+        <TabsContent value="returns" className="mt-4 grid gap-4 lg:grid-cols-3">
+          <Widget title="Returns summary" link={{to:"/returns",label:"Returns"}}>
+            <Mini label="Returns today" value="8" />
+            <Mini label="Refunded amount" value="ر.س 410" tone="warning" />
+            <Mini label="Items restocked" value="14" tone="success" />
+            <Mini label="Pending approval" value="3" tone="destructive" />
+          </Widget>
+          <Widget title="Top return reasons">
+            {[{r:"Damaged packaging",p:38},{r:"Expired stock",p:24},{r:"Wrong item",p:18},{r:"Customer changed mind",p:12},{r:"Other",p:8}].map(x=>(
+              <div key={x.r}><div className="flex justify-between text-xs mb-1"><span>{x.r}</span><span className="font-semibold">{x.p}%</span></div><div className="h-1.5 rounded-full bg-muted overflow-hidden"><div className="h-full bg-destructive" style={{width:`${x.p*2}%`}}/></div></div>
+            ))}
+          </Widget>
+          <Widget title="Refund summary" link={{to:"/refunds",label:"Refunds"}}>
+            {[{m:"Cash",v:"ر.س 220"},{m:"Card (back)",v:"ر.س 118"},{m:"Wallet credit",v:"ر.س 72"},{m:"Exchange",v:"3 items"}].map(x=>(
+              <div key={x.m} className="flex items-center justify-between text-sm"><span>{x.m}</span><span className="font-semibold">{x.v}</span></div>
+            ))}
+          </Widget>
+        </TabsContent>
+
+        <TabsContent value="tax" className="mt-4 grid gap-4 lg:grid-cols-3">
+          <Widget title="Tobacco tax collection" link={{to:"/tax-reports",label:"Reports"}}>
+            <Mini label="Excise (today)" value="ر.س 920" />
+            <Mini label="Excise (month)" value="ر.س 18,420" tone="success" />
+            <Mini label="Tobacco units sold" value="1,142" />
+            <Mini label="Active SKUs" value="42" />
+          </Widget>
+          <Widget title="Custom fees collection">
+            {[{f:"Plastic bag",v:"ر.س 320"},{f:"Delivery fee",v:"ر.س 4,210"},{f:"Card surcharge",v:"ر.س 1,840"},{f:"Service fee",v:"ر.س 920"}].map(x=>(
+              <div key={x.f} className="flex items-center justify-between text-sm"><span>{x.f}</span><span className="font-semibold">{x.v}</span></div>
+            ))}
+          </Widget>
+          <Widget title="VAT summary" link={{to:"/zatca-settings",label:"ZATCA"}}>
+            <Mini label="VAT collected (today)" value="ر.س 4,820" />
+            <Mini label="VAT collected (mo)" value="ر.س 142,300" tone="success" />
+            <Mini label="VAT reversed (returns)" value="ر.س 410" tone="warning" />
+            <Mini label="Invoices cleared" value="2,148" />
+          </Widget>
+        </TabsContent>
+      </Tabs>
     </PageShell>
   );
 }
