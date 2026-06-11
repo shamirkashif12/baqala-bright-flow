@@ -15,7 +15,7 @@ import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, AlertTriangle, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowUpRight, ArrowDownRight,
   ArrowRight, Settings2, X, RotateCcw, TrendingUp, BarChart3, type LucideIcon,
-  Undo2, Cigarette, Coins, LayoutDashboard,
+  Undo2, Cigarette, LayoutDashboard,
 } from "lucide-react";
 import { FilterBar } from "@/components/filter-bar";
 
