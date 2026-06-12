@@ -97,17 +97,23 @@ function Phone({ children, framed }: { children: React.ReactNode; framed: boolea
 // -------- Header inside phone --------
 function PHeader({ title, subtitle, onBack, right }: { title: string; subtitle?: string; onBack?: () => void; right?: React.ReactNode }) {
   return (
-    <div className="gradient-primary text-primary-foreground px-4 pt-9 pb-4 rounded-b-3xl">
-      <div className="flex items-center justify-between gap-2">
+    <div className="relative mpos-gradient-anim text-primary-foreground px-4 pt-9 pb-5 rounded-b-3xl overflow-hidden shadow-elegant">
+      <div className="absolute -top-10 -right-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
+      <div className="absolute -bottom-12 -left-8 h-28 w-28 rounded-full bg-white/10 blur-2xl" />
+      <div className="relative flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {onBack && (
-            <button onClick={onBack} className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center">
+            <button onClick={onBack} className="h-8 w-8 rounded-full bg-white/20 backdrop-blur flex items-center justify-center active:scale-90 transition-transform">
               <ChevronLeft className="h-4 w-4" />
             </button>
           )}
+          <div className="h-9 w-9 rounded-xl bg-white/95 flex items-center justify-center shadow-md shrink-0">
+            <img src={mimonyLogo.url} alt="MI Money" className="h-6 w-auto object-contain" />
+          </div>
           <div className="min-w-0">
-            <p className="text-base font-bold truncate">{title}</p>
-            {subtitle && <p className="text-[11px] opacity-80 truncate">{subtitle}</p>}
+            <p className="text-[10px] uppercase tracking-[0.18em] opacity-80 font-bold">MART MPOS</p>
+            <p className="text-base font-black truncate leading-tight">{title}</p>
+            {subtitle && <p className="text-[11px] opacity-85 truncate">{subtitle}</p>}
           </div>
         </div>
         {right}
