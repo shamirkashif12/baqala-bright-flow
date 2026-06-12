@@ -26,6 +26,7 @@ import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
+import { Route as AppRulesRouteImport } from './routes/_app.rules'
 import { Route as AppRolesRouteImport } from './routes/_app.roles'
 import { Route as AppReturnsRouteImport } from './routes/_app.returns'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
@@ -139,6 +140,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
 const AppSalesRoute = AppSalesRouteImport.update({
   id: '/sales',
   path: '/sales',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRulesRoute = AppRulesRouteImport.update({
+  id: '/rules',
+  path: '/rules',
   getParentRoute: () => AppRoute,
 } as any)
 const AppRolesRoute = AppRolesRouteImport.update({
@@ -325,6 +331,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof AppReportsRoute
   '/returns': typeof AppReturnsRoute
   '/roles': typeof AppRolesRoute
+  '/rules': typeof AppRulesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
@@ -373,6 +380,7 @@ export interface FileRoutesByTo {
   '/reports': typeof AppReportsRoute
   '/returns': typeof AppReturnsRoute
   '/roles': typeof AppRolesRoute
+  '/rules': typeof AppRulesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
@@ -423,6 +431,7 @@ export interface FileRoutesById {
   '/_app/reports': typeof AppReportsRoute
   '/_app/returns': typeof AppReturnsRoute
   '/_app/roles': typeof AppRolesRoute
+  '/_app/rules': typeof AppRulesRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
@@ -473,6 +482,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/returns'
     | '/roles'
+    | '/rules'
     | '/sales'
     | '/settings'
     | '/staff'
@@ -521,6 +531,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/returns'
     | '/roles'
+    | '/rules'
     | '/sales'
     | '/settings'
     | '/staff'
@@ -570,6 +581,7 @@ export interface FileRouteTypes {
     | '/_app/reports'
     | '/_app/returns'
     | '/_app/roles'
+    | '/_app/rules'
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
@@ -712,6 +724,13 @@ declare module '@tanstack/react-router' {
       path: '/sales'
       fullPath: '/sales'
       preLoaderRoute: typeof AppSalesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/rules': {
+      id: '/_app/rules'
+      path: '/rules'
+      fullPath: '/rules'
+      preLoaderRoute: typeof AppRulesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/roles': {
@@ -969,6 +988,7 @@ interface AppRouteChildren {
   AppReportsRoute: typeof AppReportsRoute
   AppReturnsRoute: typeof AppReturnsRoute
   AppRolesRoute: typeof AppRolesRoute
+  AppRulesRoute: typeof AppRulesRoute
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
@@ -1014,6 +1034,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppReportsRoute: AppReportsRoute,
   AppReturnsRoute: AppReturnsRoute,
   AppRolesRoute: AppRolesRoute,
+  AppRulesRoute: AppRulesRoute,
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,
