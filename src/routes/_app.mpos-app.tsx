@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Home, ShoppingCart, Receipt, Package, User, ChevronLeft, ChevronRight,
-  ScanLine, Search, Bell, Cash, CreditCard, Wallet, GitBranch,
+  ScanLine, Search, Bell, CreditCard, Wallet, GitBranch,
   Trash2, Plus, Minus, CheckCircle2, Bookmark, Cpu, AlertCircle, Hourglass,
   TrendingUp, BarChart3, ShieldCheck, LogOut, Smartphone, FileText,
   Banknote, Settings2, Cigarette,
@@ -211,26 +211,26 @@ function MposApp() {
   const renderScreen = () => {
     if (screen.name === "Login") return <LoginScreen onLogin={(u) => { setUser(u); replace({ name: "BranchSelect" }); }} />;
     if (screen.name === "BranchSelect") return <BranchSelectScreen user={user!} onPick={(b) => { setBranch(b); replace({ name: "Main", tab: "Dashboard" }); }} />;
-    if (screen.name === "OpeningCash") return <OpeningCashScreen user={user!} branch={branch!} terminal={terminal} setTerminal={setTerminal} onSubmit={(amt) => { setOpening(amt); back(); }} onBack={back} />;
+    if (screen.name === "OpeningCash") return <OpeningCashScreen user={user!} branch={branch!} terminal={terminal} setTerminal={setTerminal} onSubmit={(amt: number) => { setOpening(amt); back(); }} onBack={back} />;
     if (screen.name === "ClosingReport") return <ClosingReportScreen opening={opening ?? 0} orders={orders} onClose={() => { setOpening(null); back(); }} onBack={back} user={user!} branch={branch!} terminal={terminal} />;
     if (screen.name === "Cart") return <CartScreen cart={cart} onQty={updateQty} onRemove={removeItem} subtotal={cartSubtotal} tax={cartTax} total={cartTotal} onHold={() => { if (cart.length) { setHeld(h => [cart, ...h]); setCart([]); back(); } }} onPay={() => push({ name: "Payment" })} onBack={back} />;
     if (screen.name === "Payment") return <PaymentScreen total={cartTotal} subtotal={cartSubtotal} tax={cartTax} onApprove={finalizeOrder} onBack={back} />;
-    if (screen.name === "HeldOrders") return <HeldOrdersScreen held={held} onResume={(idx) => { setCart(held[idx]); setHeld(h => h.filter((_, i) => i !== idx)); push({ name: "Cart" }); }} onBack={back} />;
+    if (screen.name === "HeldOrders") return <HeldOrdersScreen held={held} onResume={(idx: number) => { setCart(held[idx]); setHeld(h => h.filter((_, i) => i !== idx)); push({ name: "Cart" }); }} onBack={back} />;
     if (screen.name === "Invoice") return <InvoiceScreen order={screen.order} onDone={() => goTab("POS")} onBack={back} />;
     if (screen.name === "OrderDetails") return <OrderDetailsScreen o={screen.order} onBack={back} />;
     if (screen.name === "ItemDetails") return <ItemDetailsScreen p={screen.product} onBack={back} />;
-    if (screen.name === "TerminalOverview") return <TerminalOverviewScreen onOpen={(t) => push({ name: "TerminalDetails", t })} onBack={back} />;
+    if (screen.name === "TerminalOverview") return <TerminalOverviewScreen onOpen={(t: typeof terminals[number]) => push({ name: "TerminalDetails", t })} onBack={back} />;
     if (screen.name === "TerminalDetails") return <TerminalDetailsScreen t={screen.t} onBack={back} />;
     if (screen.name === "Reports") return <ReportsScreen orders={orders} onBack={back} />;
     if (screen.name === "Audit") return <AuditScreen onBack={back} />;
     // Main tabs
     if (screen.name === "Main") {
       const body =
-        screen.tab === "Dashboard" ? <DashboardScreen user={user!} branch={branch!} terminal={terminal} opening={opening} orders={orders} onAction={(s) => push(s)} /> :
+        screen.tab === "Dashboard" ? <DashboardScreen user={user!} branch={branch!} terminal={terminal} opening={opening} orders={orders} onAction={(s: Screen) => push(s)} /> :
         screen.tab === "POS" ? <POSScreen onAdd={addToCart} cartCount={cart.length} cartTotal={cartTotal} onCart={() => push({ name: "Cart" })} onHeld={() => push({ name: "HeldOrders" })} heldCount={held.length} /> :
-        screen.tab === "Orders" ? <OrdersScreen orders={orders} onOpen={(o) => push({ name: "OrderDetails", o })} /> :
-        screen.tab === "Inventory" ? <InventoryScreen onOpen={(p) => push({ name: "ItemDetails", product: p })} /> :
-        <ProfileScreen user={user!} branch={branch!} terminal={terminal} opening={opening} onLogout={reset} onNav={(s) => push(s)} />;
+        screen.tab === "Orders" ? <OrdersScreen orders={orders} onOpen={(o: POrder) => push({ name: "OrderDetails", order: o })} /> :
+        screen.tab === "Inventory" ? <InventoryScreen onOpen={(p: PProduct) => push({ name: "ItemDetails", product: p })} /> :
+        <ProfileScreen user={user!} branch={branch!} terminal={terminal} opening={opening} onLogout={reset} onNav={(s: Screen) => push(s)} />;
       return (
         <div className="flex-1 flex flex-col">
           <div className="flex-1 overflow-y-auto">{body}</div>

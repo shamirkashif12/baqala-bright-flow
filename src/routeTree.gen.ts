@@ -35,6 +35,7 @@ import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
 import { Route as AppPlansRouteImport } from './routes/_app.plans'
 import { Route as AppOrdersRouteImport } from './routes/_app.orders'
+import { Route as AppMposAppRouteImport } from './routes/_app.mpos-app'
 import { Route as AppMobilePosRouteImport } from './routes/_app.mobile-pos'
 import { Route as AppMartSuppliersRouteImport } from './routes/_app.mart-suppliers'
 import { Route as AppMaintenanceRouteImport } from './routes/_app.maintenance'
@@ -187,6 +188,11 @@ const AppOrdersRoute = AppOrdersRouteImport.update({
   path: '/orders',
   getParentRoute: () => AppRoute,
 } as any)
+const AppMposAppRoute = AppMposAppRouteImport.update({
+  id: '/mpos-app',
+  path: '/mpos-app',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppMobilePosRoute = AppMobilePosRouteImport.update({
   id: '/mobile-pos',
   path: '/mobile-pos',
@@ -323,6 +329,7 @@ export interface FileRoutesByFullPath {
   '/maintenance': typeof AppMaintenanceRoute
   '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
+  '/mpos-app': typeof AppMposAppRoute
   '/orders': typeof AppOrdersRoute
   '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
@@ -372,6 +379,7 @@ export interface FileRoutesByTo {
   '/maintenance': typeof AppMaintenanceRoute
   '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
+  '/mpos-app': typeof AppMposAppRoute
   '/orders': typeof AppOrdersRoute
   '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
@@ -423,6 +431,7 @@ export interface FileRoutesById {
   '/_app/maintenance': typeof AppMaintenanceRoute
   '/_app/mart-suppliers': typeof AppMartSuppliersRoute
   '/_app/mobile-pos': typeof AppMobilePosRoute
+  '/_app/mpos-app': typeof AppMposAppRoute
   '/_app/orders': typeof AppOrdersRoute
   '/_app/plans': typeof AppPlansRoute
   '/_app/pos': typeof AppPosRoute
@@ -474,6 +483,7 @@ export interface FileRouteTypes {
     | '/maintenance'
     | '/mart-suppliers'
     | '/mobile-pos'
+    | '/mpos-app'
     | '/orders'
     | '/plans'
     | '/pos'
@@ -523,6 +533,7 @@ export interface FileRouteTypes {
     | '/maintenance'
     | '/mart-suppliers'
     | '/mobile-pos'
+    | '/mpos-app'
     | '/orders'
     | '/plans'
     | '/pos'
@@ -573,6 +584,7 @@ export interface FileRouteTypes {
     | '/_app/maintenance'
     | '/_app/mart-suppliers'
     | '/_app/mobile-pos'
+    | '/_app/mpos-app'
     | '/_app/orders'
     | '/_app/plans'
     | '/_app/pos'
@@ -789,6 +801,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrdersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/mpos-app': {
+      id: '/_app/mpos-app'
+      path: '/mpos-app'
+      fullPath: '/mpos-app'
+      preLoaderRoute: typeof AppMposAppRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/mobile-pos': {
       id: '/_app/mobile-pos'
       path: '/mobile-pos'
@@ -980,6 +999,7 @@ interface AppRouteChildren {
   AppMaintenanceRoute: typeof AppMaintenanceRoute
   AppMartSuppliersRoute: typeof AppMartSuppliersRoute
   AppMobilePosRoute: typeof AppMobilePosRoute
+  AppMposAppRoute: typeof AppMposAppRoute
   AppOrdersRoute: typeof AppOrdersRoute
   AppPlansRoute: typeof AppPlansRoute
   AppPosRoute: typeof AppPosRoute
@@ -1026,6 +1046,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppMaintenanceRoute: AppMaintenanceRoute,
   AppMartSuppliersRoute: AppMartSuppliersRoute,
   AppMobilePosRoute: AppMobilePosRoute,
+  AppMposAppRoute: AppMposAppRoute,
   AppOrdersRoute: AppOrdersRoute,
   AppPlansRoute: AppPlansRoute,
   AppPosRoute: AppPosRoute,
