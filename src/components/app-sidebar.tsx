@@ -67,6 +67,7 @@ const navGroups = [
       { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
       { title: "POS Checkout", url: "/pos", icon: ScanBarcode },
       { title: "Mobile POS & Kiosk", url: "/mobile-pos", icon: Smartphone },
+      { title: "MPOS App Preview", url: "/mpos-app", icon: Smartphone },
       { title: "Orders", url: "/orders", icon: ShoppingBag },
       { title: "Cashier Workspace", url: "/cashier", icon: Briefcase },
       { title: "Cashier Shift", url: "/cashier-shift", icon: ClipboardCheck },
