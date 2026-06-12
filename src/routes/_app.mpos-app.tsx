@@ -305,20 +305,32 @@ function MposApp() {
 
 // ===================== Individual screens =====================
 
-function LoginScreen({ onLogin }: { onLogin: (u: PUser) => void }) {
+function LoginScreen({ onLogin, lang, setLang }: { onLogin: (u: PUser) => void; lang: "EN" | "AR"; setLang: (l: "EN" | "AR") => void }) {
+  const [mode, setMode] = useState<"email" | "phone">("email");
   return (
     <div className="flex-1 flex flex-col">
       <div className="gradient-primary text-primary-foreground px-6 pt-12 pb-10 text-center">
+        <div className="flex justify-end mb-2">
+          <button onClick={() => setLang(lang === "EN" ? "AR" : "EN")} className="flex items-center gap-1 bg-white/15 rounded-full px-2.5 py-1 text-[10px] font-bold">
+            <Globe className="h-3 w-3" /> {lang === "EN" ? "English" : "العربية"}
+          </button>
+        </div>
         <div className="mx-auto h-16 w-16 rounded-2xl bg-white flex items-center justify-center mb-3">
           <Smartphone className="h-8 w-8 text-primary" />
         </div>
-        <h1 className="text-2xl font-black tracking-wide">MART ECR</h1>
-        <p className="opacity-80 text-xs mt-1">MPOS · Saudi Baqala POS</p>
+        <h1 className="text-2xl font-black tracking-wide">{lang === "EN" ? "BAQALA MPOS" : "بقالة MPOS"}</h1>
+        <p className="opacity-80 text-xs mt-1">{lang === "EN" ? "Saudi Baqala POS" : "نقاط بيع بقالة"}</p>
       </div>
       <div className="flex-1 bg-muted/30 rounded-t-3xl -mt-4 p-4 space-y-3 overflow-y-auto">
         <Card className="p-4 space-y-2 border-border/60">
-          <p className="text-sm font-bold mb-1">Sign in</p>
-          <Input placeholder="name@mart.sa" className="h-9" defaultValue="sara@mart.sa" />
+          <p className="text-sm font-bold mb-1">{lang === "EN" ? "Sign in" : "تسجيل الدخول"}</p>
+          <div className="flex gap-1">
+            <button onClick={() => setMode("email")} className={`flex-1 text-[10px] font-bold py-1 rounded-md border ${mode === "email" ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>Email</button>
+            <button onClick={() => setMode("phone")} className={`flex-1 text-[10px] font-bold py-1 rounded-md border ${mode === "phone" ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>Phone</button>
+          </div>
+          {mode === "email"
+            ? <Input placeholder="name@mart.sa" className="h-9" defaultValue="sara@mart.sa" />
+            : <Input placeholder="+966 55 300 9003" className="h-9" defaultValue="+966 55 300 9003" />}
           <Input type="password" placeholder="••••••" className="h-9" defaultValue="demo" />
           <Button className="w-full gradient-primary text-primary-foreground border-0 h-9" onClick={() => onLogin(users[2])}>Login</Button>
         </Card>
@@ -357,6 +369,42 @@ function BranchSelectScreen({ user, onPick }: { user: PUser; onPick: (b: PBranch
             </Card>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function TerminalSelectScreen({ terminal, setTerminal, onDone, onBack }: { terminal: string; setTerminal: (t: string) => void; onDone: () => void; onBack: () => void }) {
+  return (
+    <div className="flex-1 flex flex-col">
+      <PHeader title="Select Terminal" subtitle="Pick your MPOS device" onBack={onBack} />
+      <div className="p-3 space-y-2 overflow-y-auto flex-1">
+        {terminals.map(t => {
+          const selected = terminal === t.id;
+          const live = t.status === "Active" || t.status === "Syncing";
+          return (
+            <button key={t.id} onClick={() => setTerminal(t.id)} className="w-full text-left">
+              <Card className={`p-3 border ${selected ? "border-primary ring-2 ring-primary/30" : "border-border/60"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="relative">
+                      <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center"><Cpu className="h-4 w-4 text-primary" /></div>
+                      {live && <span className={`absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ${t.status === "Active" ? "bg-success" : "bg-primary"} animate-pulse`} />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold truncate">{t.id}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{t.branch} · {t.type}</p>
+                    </div>
+                  </div>
+                  <Badge2 label={t.status} />
+                </div>
+              </Card>
+            </button>
+          );
+        })}
+      </div>
+      <div className="border-t bg-background p-3">
+        <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onDone}>Continue with {terminal}</Button>
       </div>
     </div>
   );
