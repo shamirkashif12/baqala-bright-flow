@@ -604,7 +604,7 @@ function POSScreen({ onAdd, cartCount, cartTotal, onCart, onHeld, heldCount }: a
   );
 }
 
-function CartScreen({ cart, onQty, onRemove, subtotal, tax, total, onHold, onPay, onBack }: any) {
+function CartScreen({ cart, onQty, onRemove, subtotal, tax, tobacco, total, onHold, onPay, onBack }: any) {
   return (
     <div className="flex-1 flex flex-col">
       <PHeader title="Cart" subtitle={`${cart.length} items`} onBack={onBack} />
@@ -633,6 +633,7 @@ function CartScreen({ cart, onQty, onRemove, subtotal, tax, total, onHold, onPay
       <div className="border-t bg-background p-3 space-y-1.5">
         <Row k="Subtotal" v={sar(subtotal)} />
         <Row k="VAT 15%" v={sar(tax)} />
+        {tobacco > 0 && <Row k="Tobacco tax" v={sar(tobacco)} />}
         <Row k="Total" v={sar(total)} highlight />
         <div className="flex gap-2 pt-1">
           <Button variant="outline" className="flex-1" onClick={onHold} disabled={!cart.length}>Hold</Button>
@@ -643,7 +644,7 @@ function CartScreen({ cart, onQty, onRemove, subtotal, tax, total, onHold, onPay
   );
 }
 
-function PaymentScreen({ total, subtotal, tax, onApprove, onBack }: any) {
+function PaymentScreen({ total, subtotal, tax, tobacco, onApprove, onBack }: any) {
   const [method, setMethod] = useState<"Cash" | "Card" | "Wallet" | "Split">("Cash");
   const [received, setReceived] = useState("");
   const change = Math.max(0, (parseFloat(received || "0") || 0) - total);
@@ -682,6 +683,7 @@ function PaymentScreen({ total, subtotal, tax, onApprove, onBack }: any) {
         <Card className="p-3 border-border/60 space-y-1.5">
           <Row k="Subtotal" v={sar(subtotal)} />
           <Row k="VAT 15%" v={sar(tax)} />
+          {tobacco > 0 && <Row k="Tobacco tax" v={sar(tobacco)} />}
           <Row k="Total" v={sar(total)} highlight />
         </Card>
         <Button className="w-full gradient-primary text-primary-foreground border-0 h-11" onClick={() => onApprove(method)}>Approve Payment</Button>
@@ -712,6 +714,7 @@ function InvoiceScreen({ order, onDone, onBack }: any) {
           <div className="my-2 border-t border-dashed" />
           <Row k="Subtotal" v={sar(order.subtotal)} />
           <Row k="VAT 15%" v={sar(order.tax)} />
+          {order.tobacco > 0 && <Row k="Tobacco tax" v={sar(order.tobacco)} />}
           <Row k="Total" v={sar(order.total)} highlight />
           <Row k="Payment" v={order.method} />
         </Card>
@@ -899,7 +902,12 @@ function TerminalOverviewScreen({ onOpen, onBack }: any) {
             <Card className="p-3 border-border/60">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Cpu className="h-4 w-4 text-primary" /></div>
+                  <div className="relative">
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Cpu className="h-4 w-4 text-primary" /></div>
+                    {(t.status === "Active" || t.status === "Syncing") && (
+                      <span className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${t.status === "Active" ? "bg-success" : "bg-primary"} animate-pulse`} />
+                    )}
+                  </div>
                   <div className="min-w-0">
                     <p className="text-xs font-bold truncate">{t.id}</p>
                     <p className="text-[10px] text-muted-foreground truncate">{t.branch} · {t.type}</p>
@@ -997,6 +1005,66 @@ function AuditScreen({ onBack }: any) {
             <p className="text-[10px] text-muted-foreground">{l.terminal} · {l.date}</p>
           </Card>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ReturnsScreen({ orders, onBack, onSubmit }: any) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [selected, setSelected] = useState<POrder | null>(null);
+  const [reason, setReason] = useState("Damaged item");
+  const [qty, setQty] = useState("1");
+  const reasons = ["Damaged item", "Expired item", "Wrong item", "Customer changed mind", "Price issue", "Duplicate billing"];
+  return (
+    <div className="flex-1 flex flex-col">
+      <PHeader title="Customer Returns" subtitle={`Step ${step} of 3`} onBack={onBack} />
+      <div className="p-3 space-y-3 overflow-y-auto">
+        {step === 1 && (
+          <>
+            <p className="text-xs font-bold">1. Pick the order</p>
+            {orders.slice(0, 6).map((o: POrder) => (
+              <button key={o.id} className="w-full text-left" onClick={() => { setSelected(o); setStep(2); }}>
+                <Card className="p-3 border-border/60 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-black text-primary">{o.id}</p>
+                    <p className="text-[10px] text-muted-foreground">{o.customer} · {o.date}</p>
+                  </div>
+                  <span className="text-sm font-black">{sar(o.total)}</span>
+                </Card>
+              </button>
+            ))}
+          </>
+        )}
+        {step === 2 && selected && (
+          <>
+            <p className="text-xs font-bold">2. Items in {selected.id}</p>
+            {products.slice(0, 3).map(p => (
+              <button key={p.id} className="w-full text-left" onClick={() => setStep(3)}>
+                <Card className="p-3 border-border/60 flex items-center justify-between">
+                  <div className="min-w-0"><p className="text-xs font-bold truncate">{p.name}</p><p className="text-[10px] text-muted-foreground">{p.sku}</p></div>
+                  <span className="text-xs font-black text-primary">{sar(p.price)}</span>
+                </Card>
+              </button>
+            ))}
+          </>
+        )}
+        {step === 3 && (
+          <Card className="p-3 border-border/60 space-y-2">
+            <p className="text-xs font-bold">3. Reason & refund</p>
+            <Field label="Quantity" value={qty} onChange={setQty} />
+            <p className="text-[10px] text-muted-foreground font-bold uppercase">Reason</p>
+            <div className="flex flex-wrap gap-1">
+              {reasons.map(r => (
+                <button key={r} onClick={() => setReason(r)} className={`text-[10px] font-bold px-2 py-1 rounded-full border ${reason === r ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>{r}</button>
+              ))}
+            </div>
+            <Row k="Refund method" v="Original (Cash)" />
+            <Row k="Refund amount" v={sar(15.5 * (parseFloat(qty) || 1))} highlight />
+            <div className="flex justify-end pt-1"><Badge2 label="pending" /></div>
+            <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSubmit}><Undo2 className="h-4 w-4 mr-1" />Submit Return</Button>
+          </Card>
+        )}
       </div>
     </div>
   );
