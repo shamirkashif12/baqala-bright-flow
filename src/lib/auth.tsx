@@ -2,11 +2,13 @@ import { createContext, useContext, useCallback, useEffect, useState, type React
 import { supabase } from "@/integrations/supabase/client";
 import type { Session, User as SupabaseUser } from "@supabase/supabase-js";
 
+export type AppRole = "owner" | "manager" | "cashier";
+
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  role: "owner" | "manager" | "cashier";
+  role: AppRole;
   branch: string;
   initials: string;
 }
@@ -18,9 +20,10 @@ export interface AuthState {
   signup: (params: { email: string; password: string; name?: string }) => Promise<{ needsVerification: boolean }>;
   logout: () => void;
   loading: boolean;
+  hasRole: (role: AppRole | AppRole[]) => boolean;
 }
 
-function mapUser(u: SupabaseUser | null | undefined): AuthUser | null {
+function mapUser(u: SupabaseUser | null | undefined, role: AppRole): AuthUser | null {
   if (!u) return null;
   const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
   const name = (meta.name as string) || (meta.full_name as string) || (u.email?.split("@")[0] ?? "User");
@@ -35,7 +38,9 @@ function mapUser(u: SupabaseUser | null | undefined): AuthUser | null {
     id: u.id,
     name,
     email: u.email ?? "",
-    role: ((meta.role as AuthUser["role"]) ?? "owner"),
+    // Role is sourced from the server-controlled `user_roles` table,
+    // NOT from user_metadata (which any user can modify).
+    role,
     branch: (meta.branch as string) ?? "Riyadh — Olaya Branch",
     initials: initials || "U",
   };
@@ -49,14 +54,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+
+    async function resolveRole(): Promise<AppRole> {
+      try {
+        const { data, error } = await supabase.rpc("current_user_role");
+        if (error || !data) return "cashier";
+        return (data as AppRole) ?? "cashier";
+      } catch {
+        return "cashier";
+      }
+    }
+
+    async function hydrate(session: Session | null) {
+      if (!session?.user) {
+        if (active) setAuthUser(null);
+        return;
+      }
+      const role = await resolveRole();
+      if (!active) return;
+      setAuthUser(mapUser(session.user, role));
+    }
+
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
-      if (!active) return;
-      setAuthUser(mapUser(session?.user));
+      void hydrate(session);
     });
-    supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setAuthUser(mapUser(data.session?.user));
-      setLoading(false);
+    supabase.auth.getSession().then(async ({ data }) => {
+      await hydrate(data.session);
+      if (active) setLoading(false);
     });
     return () => {
       active = false;
@@ -92,8 +116,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void supabase.auth.signOut();
   }, []);
 
+  const hasRole = useCallback(
+    (role: AppRole | AppRole[]) => {
+      if (!user) return false;
+      const allowed = Array.isArray(role) ? role : [role];
+      return allowed.includes(user.role);
+    },
+    [user],
+  );
+
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, signup, logout, loading }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, signup, logout, loading, hasRole }}>
       {children}
     </AuthContext.Provider>
   );

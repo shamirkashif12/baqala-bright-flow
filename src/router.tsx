@@ -11,6 +11,7 @@ const authStore: AuthState = {
   login: async () => {},
   signup: async () => ({ needsVerification: false }),
   logout: () => {},
+  hasRole: () => false,
 };
 
 export const getRouter = () => {
