@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
   ScanLine, Search, Bell, CreditCard, Wallet, GitBranch,
   Trash2, Plus, Minus, CheckCircle2, Bookmark, Cpu, AlertCircle, Hourglass,
   TrendingUp, BarChart3, ShieldCheck, LogOut, Smartphone, FileText,
-  Banknote, Settings2, Cigarette,
+  Banknote, Settings2, Cigarette, Undo2, Globe, Phone as PhoneIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/mpos-app")({ component: MposApp });
@@ -148,6 +148,7 @@ function BottomTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void })
 type Screen =
   | { name: "Login" }
   | { name: "BranchSelect" }
+  | { name: "TerminalSelect" }
   | { name: "Main"; tab: Tab }
   | { name: "OpeningCash" }
   | { name: "ClosingReport" }
@@ -160,7 +161,8 @@ type Screen =
   | { name: "TerminalOverview" }
   | { name: "TerminalDetails"; t: typeof terminals[number] }
   | { name: "Reports" }
-  | { name: "Audit" };
+  | { name: "Audit" }
+  | { name: "Returns" };
 
 function MposApp() {
   const [user, setUser] = useState<PUser | null>(null);
@@ -171,6 +173,9 @@ function MposApp() {
   const [held, setHeld] = useState<PCart[][]>([]);
   const [orders, setOrders] = useState<POrder[]>(seedOrders);
   const [stack, setStack] = useState<Screen[]>([{ name: "Login" }]);
+  const [lang, setLang] = useState<"EN" | "AR">("EN");
+  const [toast, setToast] = useState<string | null>(null);
+  const notify = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 1800); };
 
   const screen = stack[stack.length - 1];
   const push = (s: Screen) => setStack(p => [...p, s]);
@@ -180,8 +185,9 @@ function MposApp() {
 
   // POS helpers
   const addToCart = (p: PProduct) => {
-    if (p.expiry === "Expired") { alert("Expired — cannot be sold"); return; }
-    if (!opening) { alert("Submit Opening Cash first"); push({ name: "OpeningCash" }); return; }
+    if (p.expiry === "Expired") { notify("Expired — cannot be sold"); return; }
+    if (!opening) { notify("Submit Opening Cash first"); push({ name: "OpeningCash" }); return; }
+    if (p.expiry === "Close") notify(`Warning: ${p.name} close to expiry`);
     setCart(c => {
       const ex = c.find(x => x.p.id === p.id);
       return ex ? c.map(x => x.p.id === p.id ? { ...x, qty: x.qty + 1 } : x) : [...c, { p, qty: 1 }];
@@ -190,8 +196,9 @@ function MposApp() {
   const updateQty = (id: string, d: number) => setCart(c => c.map(x => x.p.id === id ? { ...x, qty: Math.max(1, x.qty + d) } : x));
   const removeItem = (id: string) => setCart(c => c.filter(x => x.p.id !== id));
   const cartSubtotal = cart.reduce((s, x) => s + x.p.price * x.qty, 0);
+  const cartTobacco = +cart.filter(x => x.p.category === "Tobacco").reduce((s, x) => s + x.p.price * x.qty * 0.5, 0).toFixed(2);
   const cartTax = +(cartSubtotal * 0.15).toFixed(2);
-  const cartTotal = +(cartSubtotal + cartTax).toFixed(2);
+  const cartTotal = +(cartSubtotal + cartTax + cartTobacco).toFixed(2);
 
   const finalizeOrder = (method: string) => {
     const ord: POrder = {
@@ -200,8 +207,9 @@ function MposApp() {
       cashier: user?.name ?? "—", terminal, date: "Today · just now",
     };
     setOrders(o => [ord, ...o]);
-    const invOrder = { ...ord, items: cart, subtotal: cartSubtotal, tax: cartTax, method, invoice: `INV-${Date.now()}` };
+    const invOrder = { ...ord, items: cart, subtotal: cartSubtotal, tax: cartTax, tobacco: cartTobacco, method, invoice: `INV-${Date.now()}` } as any;
     setCart([]);
+    notify("Payment approved · invoice ready");
     push({ name: "Invoice", order: invOrder });
   };
 
@@ -209,13 +217,14 @@ function MposApp() {
 
   // -------- Screens --------
   const renderScreen = () => {
-    if (screen.name === "Login") return <LoginScreen onLogin={(u) => { setUser(u); replace({ name: "BranchSelect" }); }} />;
-    if (screen.name === "BranchSelect") return <BranchSelectScreen user={user!} onPick={(b) => { setBranch(b); replace({ name: "Main", tab: "Dashboard" }); }} />;
-    if (screen.name === "OpeningCash") return <OpeningCashScreen user={user!} branch={branch!} terminal={terminal} setTerminal={setTerminal} onSubmit={(amt: number) => { setOpening(amt); back(); }} onBack={back} />;
-    if (screen.name === "ClosingReport") return <ClosingReportScreen opening={opening ?? 0} orders={orders} onClose={() => { setOpening(null); back(); }} onBack={back} user={user!} branch={branch!} terminal={terminal} />;
-    if (screen.name === "Cart") return <CartScreen cart={cart} onQty={updateQty} onRemove={removeItem} subtotal={cartSubtotal} tax={cartTax} total={cartTotal} onHold={() => { if (cart.length) { setHeld(h => [cart, ...h]); setCart([]); back(); } }} onPay={() => push({ name: "Payment" })} onBack={back} />;
-    if (screen.name === "Payment") return <PaymentScreen total={cartTotal} subtotal={cartSubtotal} tax={cartTax} onApprove={finalizeOrder} onBack={back} />;
-    if (screen.name === "HeldOrders") return <HeldOrdersScreen held={held} onResume={(idx: number) => { setCart(held[idx]); setHeld(h => h.filter((_, i) => i !== idx)); push({ name: "Cart" }); }} onBack={back} />;
+    if (screen.name === "Login") return <LoginScreen lang={lang} setLang={setLang} onLogin={(u) => { setUser(u); replace({ name: "BranchSelect" }); notify(`Welcome, ${u.name.split(" ")[0]}`); }} />;
+    if (screen.name === "BranchSelect") return <BranchSelectScreen user={user!} onPick={(b) => { setBranch(b); replace({ name: "TerminalSelect" }); }} />;
+    if (screen.name === "TerminalSelect") return <TerminalSelectScreen terminal={terminal} setTerminal={setTerminal} onDone={() => { replace({ name: "Main", tab: "Dashboard" }); notify("Terminal ready"); }} onBack={back} />;
+    if (screen.name === "OpeningCash") return <OpeningCashScreen user={user!} branch={branch!} terminal={terminal} setTerminal={setTerminal} onSubmit={(amt: number) => { setOpening(amt); back(); notify("Shift started · POS active"); }} onBack={back} />;
+    if (screen.name === "ClosingReport") return <ClosingReportScreen opening={opening ?? 0} orders={orders} onClose={() => { setOpening(null); back(); notify("Closing submitted · pending review"); }} onBack={back} user={user!} branch={branch!} terminal={terminal} />;
+    if (screen.name === "Cart") return <CartScreen cart={cart} onQty={updateQty} onRemove={removeItem} subtotal={cartSubtotal} tax={cartTax} tobacco={cartTobacco} total={cartTotal} onHold={() => { if (cart.length) { setHeld(h => [cart, ...h]); setCart([]); back(); notify("Order held"); } }} onPay={() => push({ name: "Payment" })} onBack={back} />;
+    if (screen.name === "Payment") return <PaymentScreen total={cartTotal} subtotal={cartSubtotal} tax={cartTax} tobacco={cartTobacco} onApprove={finalizeOrder} onBack={back} />;
+    if (screen.name === "HeldOrders") return <HeldOrdersScreen held={held} onResume={(idx: number) => { setCart(held[idx]); setHeld(h => h.filter((_, i) => i !== idx)); push({ name: "Cart" }); notify("Held order resumed"); }} onBack={back} />;
     if (screen.name === "Invoice") return <InvoiceScreen order={screen.order} onDone={() => goTab("POS")} onBack={back} />;
     if (screen.name === "OrderDetails") return <OrderDetailsScreen o={screen.order} onBack={back} />;
     if (screen.name === "ItemDetails") return <ItemDetailsScreen p={screen.product} onBack={back} />;
@@ -223,6 +232,7 @@ function MposApp() {
     if (screen.name === "TerminalDetails") return <TerminalDetailsScreen t={screen.t} onBack={back} />;
     if (screen.name === "Reports") return <ReportsScreen orders={orders} onBack={back} />;
     if (screen.name === "Audit") return <AuditScreen onBack={back} />;
+    if (screen.name === "Returns") return <ReturnsScreen orders={orders} onBack={back} onSubmit={() => { notify("Return submitted for approval"); back(); }} />;
     // Main tabs
     if (screen.name === "Main") {
       const body =
@@ -248,7 +258,14 @@ function MposApp() {
     <PageShell title="MPOS App Preview" subtitle="Interactive cashier-side mobile app · purple/white theme">
       <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
         <div className="flex justify-center">
-          <Phone>{renderScreen()}</Phone>
+          <Phone>
+            {renderScreen()}
+            {toast && (
+              <div className="absolute left-1/2 -translate-x-1/2 bottom-24 z-40 bg-foreground text-background text-[11px] font-bold px-3 py-2 rounded-full shadow-elegant animate-fade-in">
+                {toast}
+              </div>
+            )}
+          </Phone>
         </div>
         <div className="space-y-4">
           <Card className="p-4 border-border/60 shadow-card space-y-3">
@@ -267,8 +284,9 @@ function MposApp() {
               <Button size="sm" variant="outline" onClick={() => push({ name: "Reports" })} disabled={!user || !branch}>Reports</Button>
               <Button size="sm" variant="outline" onClick={() => push({ name: "Audit" })} disabled={!user || !branch}>Audit</Button>
               <Button size="sm" variant="outline" onClick={() => push({ name: "TerminalOverview" })} disabled={!user || !branch}>Terminals</Button>
-              <Button size="sm" variant="destructive" onClick={reset}>Reset</Button>
+              <Button size="sm" variant="outline" onClick={() => push({ name: "Returns" })} disabled={!user || !branch}>Returns</Button>
             </div>
+            <Button size="sm" variant="destructive" className="w-full" onClick={reset}>Reset session</Button>
           </Card>
           <Card className="p-4 border-border/60 shadow-card text-xs space-y-2">
             <h3 className="font-bold text-sm">Demo accounts</h3>
