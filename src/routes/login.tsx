@@ -1,5 +1,5 @@
-import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState, type FormEvent } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,11 +27,12 @@ function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Already logged in? Go to dashboard
-  if (isAuthenticated) {
-    navigate({ to: redirect });
-    return null;
-  }
+  // Already logged in? Redirect (must be in effect, not render).
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate({ to: redirect, replace: true });
+    }
+  }, [isAuthenticated, navigate, redirect]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
