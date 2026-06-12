@@ -223,3 +223,50 @@
     box-shadow: var(--shadow-glow);
   }
 }
+
+@layer utilities {
+  @keyframes mpos-float {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-10px) rotate(3deg); }
+  }
+  @keyframes mpos-bounce-soft {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+  }
+  @keyframes mpos-gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+  @keyframes mpos-shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  @keyframes mpos-ring {
+    0% { box-shadow: 0 0 0 0 oklch(0.62 0.22 295 / 0.55); }
+    100% { box-shadow: 0 0 0 14px oklch(0.62 0.22 295 / 0); }
+  }
+  .mpos-float { animation: mpos-float 6s ease-in-out infinite; }
+  .mpos-bounce { animation: mpos-bounce-soft 0.6s ease-out; }
+  .mpos-gradient-anim {
+    background: linear-gradient(135deg, oklch(0.32 0.15 295), oklch(0.46 0.21 295), oklch(0.62 0.22 295), oklch(0.36 0.16 280));
+    background-size: 300% 300%;
+    animation: mpos-gradient-shift 12s ease infinite;
+  }
+  .mpos-shimmer {
+    background: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.25), transparent);
+    background-size: 200% 100%;
+    animation: mpos-shimmer 2s linear infinite;
+  }
+  .mpos-ring-pulse { animation: mpos-ring 1.6s ease-out infinite; }
+  .mpos-glass {
+    background: color-mix(in oklab, white 75%, transparent);
+    backdrop-filter: blur(18px);
+    border: 1px solid color-mix(in oklab, white 60%, transparent);
+  }
+  .mpos-paper {
+    background:
+      radial-gradient(circle at 10% 0%, oklch(0.96 0.02 295) 0%, transparent 40%),
+      radial-gradient(circle at 90% 100%, oklch(0.94 0.05 295) 0%, transparent 40%),
+      #fff;
+  }
+}
