@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -172,6 +173,7 @@ type Screen =
   | { name: "Returns" };
 
 function MposApp() {
+  const isMobile = useIsMobile();
   const [user, setUser] = useState<PUser | null>(null);
   const [branch, setBranch] = useState<PBranch | null>(null);
   const [terminal, setTerminal] = useState<string>("TML-RYD-001");
@@ -261,11 +263,24 @@ function MposApp() {
   // Sample state chips
   const stateText = `${user?.name ?? "Not signed in"}${branch ? " · " + branch.code : ""}${opening != null ? " · Shift Active" : ""}`;
 
+  if (isMobile) {
+    return (
+      <Phone framed={false}>
+        {renderScreen()}
+        {toast && (
+          <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-50 bg-foreground text-background text-xs font-bold px-4 py-2 rounded-full shadow-elegant animate-fade-in">
+            {toast}
+          </div>
+        )}
+      </Phone>
+    );
+  }
+
   return (
     <PageShell title="MPOS App Preview" subtitle="Interactive cashier-side mobile app · purple/white theme">
       <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
         <div className="flex justify-center">
-          <Phone>
+          <Phone framed>
             {renderScreen()}
             {toast && (
               <div className="absolute left-1/2 -translate-x-1/2 bottom-24 z-40 bg-foreground text-background text-[11px] font-bold px-3 py-2 rounded-full shadow-elegant animate-fade-in">
