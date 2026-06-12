@@ -633,10 +633,14 @@ function POSScreen({ onAdd, cartCount, cartTotal, onCart, onHeld, heldCount }: a
       </div>
       <div className="flex-1 overflow-y-auto px-3 pb-24">
         <div className="grid grid-cols-2 gap-2">
-          {list.map(p => (
-            <button key={p.id} onClick={() => onAdd(p)} className="text-left">
-              <Card className="p-2 border-border/60">
-                <div className="h-14 rounded-md bg-primary/10 flex items-center justify-center mb-1"><Package className="h-5 w-5 text-primary" /></div>
+          {list.map((p, i) => (
+            <button key={p.id} onClick={() => onAdd(p)} className="text-left animate-fade-in" style={{ animationDelay: `${i * 30}ms` }}>
+              <Card className="relative p-2 border-border/60 hover:border-primary/50 hover:shadow-card active:scale-95 transition-all overflow-hidden group">
+                {p.expiry === "Close" && <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-warning animate-pulse z-10" />}
+                {p.expiry === "Expired" && <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-destructive z-10" />}
+                <div className="h-16 rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 flex items-center justify-center mb-1.5 group-hover:from-primary/25 transition-colors">
+                  <Package className="h-6 w-6 text-primary group-hover:scale-110 transition-transform" />
+                </div>
                 <p className="text-[11px] font-bold leading-tight truncate">{p.name}</p>
                 <p className="text-[9px] text-muted-foreground">{p.category}</p>
                 <p className="text-sm font-black text-primary mt-0.5">{sar(p.price)}</p>
@@ -650,12 +654,16 @@ function POSScreen({ onAdd, cartCount, cartTotal, onCart, onHeld, heldCount }: a
         </div>
       </div>
       {cartCount > 0 && (
-        <div className="absolute left-3 right-3 bottom-16 gradient-primary text-primary-foreground rounded-2xl p-3 flex items-center gap-3 shadow-glow">
+        <div key={cartCount} className="absolute left-3 right-3 bottom-16 mpos-gradient-anim text-primary-foreground rounded-2xl p-3 flex items-center gap-3 shadow-glow animate-scale-in overflow-hidden">
+          <div className="relative h-10 w-10 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
+            <ShoppingCart className="h-5 w-5" />
+            <span className="absolute -top-1 -right-1 bg-warning text-[9px] font-black rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center mpos-bounce">{cartCount}</span>
+          </div>
           <div className="flex-1">
-            <p className="text-[10px] font-bold opacity-90">{cartCount} items</p>
+            <p className="text-[10px] font-bold opacity-90">{cartCount} items in cart</p>
             <p className="text-base font-black">{sar(cartTotal)}</p>
           </div>
-          <Button size="sm" className="bg-white text-primary hover:bg-white/90" onClick={onCart}>View Cart</Button>
+          <Button size="sm" className="bg-white text-primary hover:bg-white/90 font-bold shadow-md active:scale-95" onClick={onCart}>View Cart →</Button>
         </div>
       )}
     </div>
