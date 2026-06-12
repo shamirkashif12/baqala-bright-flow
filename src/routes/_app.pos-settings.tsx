@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { RoleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -7,7 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-export const Route = createFileRoute("/_app/pos-settings")({ component: PosSettings });
+export const Route = createFileRoute("/_app/pos-settings")({
+  component: () => (
+    <RoleGate allow={["owner", "manager"]}>
+      <PosSettings />
+    </RoleGate>
+  ),
+});
 
 function Row({ title, desc, defaultChecked = false }: { title: string; desc?: string; defaultChecked?: boolean }) {
   return (
