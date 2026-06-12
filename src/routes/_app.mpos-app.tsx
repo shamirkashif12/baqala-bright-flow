@@ -72,8 +72,15 @@ const auditLogs = [
 
 const sar = (n: number) => `ر.س ${n.toFixed(2)}`;
 
-// -------- Phone frame --------
-function Phone({ children }: { children: React.ReactNode }) {
+// -------- Phone frame (desktop preview) / full-bleed (mobile) --------
+function Phone({ children, framed }: { children: React.ReactNode; framed: boolean }) {
+  if (!framed) {
+    return (
+      <div className="fixed inset-0 z-30 flex flex-col bg-muted/30 overflow-hidden">
+        {children}
+      </div>
+    );
+  }
   return (
     <div className="mx-auto w-full max-w-[380px]">
       <div className="relative aspect-[9/19] w-full rounded-[2.5rem] border-[10px] border-foreground/90 bg-background shadow-elegant overflow-hidden">
