@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, useCallback, useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import type { Session, User as SupabaseUser } from "@supabase/supabase-js";
 
 export interface AuthUser {
   id: string;
@@ -13,109 +15,85 @@ export interface AuthState {
   isAuthenticated: boolean;
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<void>;
+  signup: (params: { email: string; password: string; name?: string }) => Promise<{ needsVerification: boolean }>;
   logout: () => void;
-  subscribe: (cb: () => void) => () => boolean;
-  getSnapshot: () => AuthUser | null;
+  loading: boolean;
 }
 
-const AUTH_KEY = "baqala_auth_session";
-
-let currentUser: AuthUser | null = null;
-let listeners: Set<() => void> = new Set();
-
-function emit() {
-  listeners.forEach((fn) => fn());
+function mapUser(u: SupabaseUser | null | undefined): AuthUser | null {
+  if (!u) return null;
+  const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+  const name = (meta.name as string) || (meta.full_name as string) || (u.email?.split("@")[0] ?? "User");
+  const initials = name
+    .split(/\s+/)
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return {
+    id: u.id,
+    name,
+    email: u.email ?? "",
+    role: ((meta.role as AuthUser["role"]) ?? "owner"),
+    branch: (meta.branch as string) ?? "Riyadh — Olaya Branch",
+    initials: initials || "U",
+  };
 }
 
-function readStorage(): AuthUser | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(AUTH_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as AuthUser;
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(user: AuthUser | null) {
-  if (typeof window === "undefined") return;
-  if (user) localStorage.setItem(AUTH_KEY, JSON.stringify(user));
-  else localStorage.removeItem(AUTH_KEY);
-}
-
-function setUser(user: AuthUser | null) {
-  currentUser = user;
-  writeStorage(user);
-  emit();
-}
-
-// Initialize from storage on module load (client only)
-currentUser = readStorage();
-
-export const authStore: AuthState = {
-  get isAuthenticated() { return !!currentUser; },
-  get user() { return currentUser; },
-  subscribe: (cb: () => void) => {
-    listeners.add(cb);
-    return () => listeners.delete(cb);
-  },
-  getSnapshot: () => currentUser,
-  async login(email: string, password: string) {
-    await new Promise((r) => setTimeout(r, 800));
-    if (!email.includes("@") && !email.match(/^\d{10}$/)) {
-      throw new Error("Invalid email or phone number");
-    }
-    if (password.length < 4) {
-      throw new Error("Password too short");
-    }
-    const demoUser: AuthUser = {
-      id: "usr_001",
-      name: "Abdullah Al Faisal",
-      email: email.includes("@") ? email : "owner@baqala-faisal.sa",
-      role: "owner",
-      branch: "Riyadh — Olaya Branch",
-      initials: "AF",
-    };
-    setUser(demoUser);
-  },
-  logout() {
-    setUser(null);
-  },
-};
-
-// Sync across tabs
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key === AUTH_KEY) {
-      currentUser = e.newValue ? JSON.parse(e.newValue) : null;
-      emit();
-    }
-  });
-}
-
-/* ── React layer ── */
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const user = useSyncExternalStore(
-    authStore.subscribe,
-    authStore.getSnapshot,
-    () => null
-  );
+  const [user, setAuthUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
+      if (!active) return;
+      setAuthUser(mapUser(session?.user));
+    });
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setAuthUser(mapUser(data.session?.user));
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    await authStore.login(email, password);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) {
+      if (error.message.toLowerCase().includes("email not confirmed")) {
+        throw new Error("Please verify your email first. Check your inbox for the confirmation link.");
+      }
+      throw new Error(error.message);
+    }
+  }, []);
+
+  const signup = useCallback(async ({ email, password, name }: { email: string; password: string; name?: string }) => {
+    const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/login` : undefined;
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        emailRedirectTo: redirectTo,
+        data: name ? { name } : undefined,
+      },
+    });
+    if (error) throw new Error(error.message);
+    return { needsVerification: !data.session };
   }, []);
 
   const logout = useCallback(() => {
-    authStore.logout();
+    void supabase.auth.signOut();
   }, []);
 
   return (
-    <AuthContext.Provider
-      value={{ isAuthenticated: !!user, user, login, logout, subscribe: authStore.subscribe, getSnapshot: authStore.getSnapshot }}
-    >
+    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, signup, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
