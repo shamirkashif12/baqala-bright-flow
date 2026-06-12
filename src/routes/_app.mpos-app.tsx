@@ -520,9 +520,9 @@ function DashboardScreen({ user, branch, terminal, opening, orders, onAction }: 
         </div>
         <p className="text-xs font-bold mt-2">Quick Actions</p>
         <div className="grid grid-cols-4 gap-2">
-          {actions.map(a => (
-            <button key={a.l} onClick={() => onAction(a.s)} className="aspect-square flex flex-col items-center justify-center gap-1 rounded-xl border border-border/60 bg-card p-1.5 active:opacity-70">
-              <div className="h-7 w-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><a.i className="h-3.5 w-3.5" /></div>
+          {actions.map((a, i) => (
+            <button key={a.l} onClick={() => onAction(a.s)} className="aspect-square flex flex-col items-center justify-center gap-1 rounded-2xl border border-border/60 bg-gradient-to-br from-card to-primary/5 p-1.5 active:scale-90 hover:border-primary/50 hover:shadow-card transition-all animate-fade-in" style={{ animationDelay: `${i * 40}ms` }}>
+              <div className="h-8 w-8 rounded-xl gradient-primary text-white flex items-center justify-center shadow-sm"><a.i className="h-4 w-4" /></div>
               <span className="text-[9px] font-bold text-center leading-tight">{a.l}</span>
             </button>
           ))}
