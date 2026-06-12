@@ -762,11 +762,22 @@ function InvoiceScreen({ order, onDone, onBack }: any) {
   return (
     <div className="flex-1 flex flex-col">
       <PHeader title="Invoice" subtitle={order.invoice} onBack={onBack} />
-      <div className="flex-1 overflow-y-auto p-3">
-        <Card className="p-4 border-border/60">
-          <p className="text-center text-xl font-black text-primary">MART ECR</p>
-          <p className="text-center text-[10px] text-muted-foreground">Tax Invoice · ZATCA verified</p>
-          <div className="my-2 border-t border-dashed" />
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div className="mx-auto h-14 w-14 rounded-full bg-success/15 flex items-center justify-center animate-scale-in">
+          <CheckCircle2 className="h-8 w-8 text-success" />
+        </div>
+        <p className="text-center text-xs font-bold text-success">Payment Successful</p>
+        <Card className="mpos-paper p-4 border-border/60 shadow-elegant animate-fade-in">
+          <div className="gradient-primary -mx-4 -mt-4 px-4 py-3 rounded-t-xl text-primary-foreground flex items-center gap-2">
+            <div className="h-9 w-9 rounded-lg bg-white flex items-center justify-center">
+              <img src={mimonyLogo.url} alt="MI Money" className="h-6 w-auto object-contain" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.18em] opacity-80 font-bold">MART MPOS</p>
+              <p className="text-sm font-black">Tax Invoice · ZATCA</p>
+            </div>
+          </div>
+          <div className="my-3 border-t border-dashed" />
           <Row k="Invoice" v={order.invoice} />
           <Row k="Order" v={order.id} />
           <Row k="Cashier" v={order.cashier} />
@@ -783,12 +794,15 @@ function InvoiceScreen({ order, onDone, onBack }: any) {
           {order.tobacco > 0 && <Row k="Tobacco tax" v={sar(order.tobacco)} />}
           <Row k="Total" v={sar(order.total)} highlight />
           <Row k="Payment" v={order.method} />
+          <div className="mt-3 mx-auto h-20 w-20 border-2 border-dashed border-primary/40 rounded-lg flex items-center justify-center text-[9px] text-muted-foreground font-bold">
+            QR · ZATCA
+          </div>
         </Card>
       </div>
       <div className="border-t bg-background p-3 flex gap-2">
-        <Button variant="outline" className="flex-1" onClick={() => alert("Mock printed")}>Print</Button>
-        <Button variant="outline" className="flex-1" onClick={() => alert("Mock shared")}>Share</Button>
-        <Button className="flex-1 gradient-primary text-primary-foreground border-0" onClick={onDone}>Done</Button>
+        <Button variant="outline" className="flex-1 active:scale-95 transition-transform" onClick={() => alert("Mock printed")}>Print</Button>
+        <Button variant="outline" className="flex-1 active:scale-95 transition-transform" onClick={() => alert("Mock shared")}>Share</Button>
+        <Button className="flex-1 gradient-primary text-primary-foreground border-0 active:scale-95 transition-transform shadow-md" onClick={onDone}>Done</Button>
       </div>
     </div>
   );
