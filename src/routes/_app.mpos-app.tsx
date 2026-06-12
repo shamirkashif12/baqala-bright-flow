@@ -467,11 +467,15 @@ function TerminalSelectScreen({ terminal, setTerminal, onDone, onBack }: { termi
 function StatTile({ label, value, icon: I, accent = "primary", sub }: { label: string; value: string | number; icon: React.ComponentType<any>; accent?: "primary" | "success" | "warning" | "destructive"; sub?: string }) {
   const m: Record<string, string> = { primary: "text-primary bg-primary/10", success: "text-success bg-success/10", warning: "text-warning bg-warning/10", destructive: "text-destructive bg-destructive/10" };
   return (
-    <Card className="p-3 border-border/60 flex-1 min-w-0">
-      <div className={`h-8 w-8 rounded-lg ${m[accent]} flex items-center justify-center mb-1.5`}><I className="h-4 w-4" /></div>
-      <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wide">{label}</p>
-      <p className="text-lg font-black mt-0.5 truncate">{value}</p>
-      {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
+    <Card className="relative p-3 border-border/60 flex-1 min-w-0 overflow-hidden hover:shadow-card transition-all active:scale-[0.98] animate-fade-in group">
+      <div className={`absolute -top-6 -right-6 h-16 w-16 rounded-full ${m[accent].split(" ")[1]} opacity-50 group-hover:scale-125 transition-transform duration-500`} />
+      <div className={`relative h-9 w-9 rounded-xl ${m[accent]} flex items-center justify-center mb-1.5 shadow-sm`}>
+        <I className="h-4 w-4" />
+      </div>
+      <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wide relative">{label}</p>
+      <p className="text-lg font-black mt-0.5 truncate relative">{value}</p>
+      {sub && <p className="text-[10px] text-muted-foreground relative">{sub}</p>}
+      <div className="absolute bottom-0 left-0 h-0.5 w-0 group-hover:w-full bg-primary transition-all duration-500" />
     </Card>
   );
 }
