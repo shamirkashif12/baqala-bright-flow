@@ -146,13 +146,17 @@ function BottomTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void })
     { k: "Inventory", icon: Package }, { k: "Profile", icon: User },
   ];
   return (
-    <div className="border-t bg-background flex">
+    <div className="border-t bg-background/95 backdrop-blur-xl flex rounded-t-2xl shadow-[0_-4px_24px_-8px_oklch(0.46_0.21_295/0.15)]">
       {items.map(({ k, icon: I }) => {
         const active = tab === k;
         return (
-          <button key={k} onClick={() => onChange(k)} className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 ${active ? "text-primary" : "text-muted-foreground"}`}>
-            <I className="h-5 w-5" />
-            <span className="text-[10px] font-bold">{k}</span>
+          <button key={k} onClick={() => onChange(k)} className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 transition-all duration-200 ${active ? "text-primary" : "text-muted-foreground"}`}>
+            <div className={`relative flex items-center justify-center transition-all duration-300 ${active ? "-translate-y-0.5" : ""}`}>
+              {active && <span className="absolute inset-[-6px] rounded-full bg-primary/12 animate-scale-in" />}
+              <I className={`h-5 w-5 relative ${active ? "scale-110" : ""} transition-transform`} />
+            </div>
+            <span className={`text-[10px] ${active ? "font-black" : "font-bold"}`}>{k}</span>
+            {active && <span className="h-0.5 w-6 rounded-full bg-primary mt-0.5 animate-fade-in" />}
           </button>
         );
       })}
