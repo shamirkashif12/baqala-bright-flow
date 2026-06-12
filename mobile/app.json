@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "MART ECR MPOS",
+    "slug": "mart-ecr-mpos",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#6D28D9",
+      "resizeMode": "contain"
+    },
+    "ios": { "supportsTablet": true },
+    "android": { "adaptiveIcon": { "backgroundColor": "#6D28D9" } }
+  }
+}
