@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
   ScanLine, Search, Bell, CreditCard, Wallet, GitBranch,
   Trash2, Plus, Minus, CheckCircle2, Bookmark, Cpu, AlertCircle, Hourglass,
   TrendingUp, BarChart3, ShieldCheck, LogOut, Smartphone, FileText,
-  Banknote, Settings2, Cigarette,
+  Banknote, Settings2, Cigarette, Undo2, Globe, Phone as PhoneIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/mpos-app")({ component: MposApp });
@@ -148,6 +148,7 @@ function BottomTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void })
 type Screen =
   | { name: "Login" }
   | { name: "BranchSelect" }
+  | { name: "TerminalSelect" }
   | { name: "Main"; tab: Tab }
   | { name: "OpeningCash" }
   | { name: "ClosingReport" }
@@ -160,7 +161,8 @@ type Screen =
   | { name: "TerminalOverview" }
   | { name: "TerminalDetails"; t: typeof terminals[number] }
   | { name: "Reports" }
-  | { name: "Audit" };
+  | { name: "Audit" }
+  | { name: "Returns" };
 
 function MposApp() {
   const [user, setUser] = useState<PUser | null>(null);
@@ -171,6 +173,9 @@ function MposApp() {
   const [held, setHeld] = useState<PCart[][]>([]);
   const [orders, setOrders] = useState<POrder[]>(seedOrders);
   const [stack, setStack] = useState<Screen[]>([{ name: "Login" }]);
+  const [lang, setLang] = useState<"EN" | "AR">("EN");
+  const [toast, setToast] = useState<string | null>(null);
+  const notify = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 1800); };
 
   const screen = stack[stack.length - 1];
   const push = (s: Screen) => setStack(p => [...p, s]);
@@ -180,8 +185,9 @@ function MposApp() {
 
   // POS helpers
   const addToCart = (p: PProduct) => {
-    if (p.expiry === "Expired") { alert("Expired — cannot be sold"); return; }
-    if (!opening) { alert("Submit Opening Cash first"); push({ name: "OpeningCash" }); return; }
+    if (p.expiry === "Expired") { notify("Expired — cannot be sold"); return; }
+    if (!opening) { notify("Submit Opening Cash first"); push({ name: "OpeningCash" }); return; }
+    if (p.expiry === "Close") notify(`Warning: ${p.name} close to expiry`);
     setCart(c => {
       const ex = c.find(x => x.p.id === p.id);
       return ex ? c.map(x => x.p.id === p.id ? { ...x, qty: x.qty + 1 } : x) : [...c, { p, qty: 1 }];
@@ -190,8 +196,9 @@ function MposApp() {
   const updateQty = (id: string, d: number) => setCart(c => c.map(x => x.p.id === id ? { ...x, qty: Math.max(1, x.qty + d) } : x));
   const removeItem = (id: string) => setCart(c => c.filter(x => x.p.id !== id));
   const cartSubtotal = cart.reduce((s, x) => s + x.p.price * x.qty, 0);
+  const cartTobacco = +cart.filter(x => x.p.category === "Tobacco").reduce((s, x) => s + x.p.price * x.qty * 0.5, 0).toFixed(2);
   const cartTax = +(cartSubtotal * 0.15).toFixed(2);
-  const cartTotal = +(cartSubtotal + cartTax).toFixed(2);
+  const cartTotal = +(cartSubtotal + cartTax + cartTobacco).toFixed(2);
 
   const finalizeOrder = (method: string) => {
     const ord: POrder = {
@@ -200,8 +207,9 @@ function MposApp() {
       cashier: user?.name ?? "—", terminal, date: "Today · just now",
     };
     setOrders(o => [ord, ...o]);
-    const invOrder = { ...ord, items: cart, subtotal: cartSubtotal, tax: cartTax, method, invoice: `INV-${Date.now()}` };
+    const invOrder = { ...ord, items: cart, subtotal: cartSubtotal, tax: cartTax, tobacco: cartTobacco, method, invoice: `INV-${Date.now()}` } as any;
     setCart([]);
+    notify("Payment approved · invoice ready");
     push({ name: "Invoice", order: invOrder });
   };
 
@@ -209,13 +217,14 @@ function MposApp() {
 
   // -------- Screens --------
   const renderScreen = () => {
-    if (screen.name === "Login") return <LoginScreen onLogin={(u) => { setUser(u); replace({ name: "BranchSelect" }); }} />;
-    if (screen.name === "BranchSelect") return <BranchSelectScreen user={user!} onPick={(b) => { setBranch(b); replace({ name: "Main", tab: "Dashboard" }); }} />;
-    if (screen.name === "OpeningCash") return <OpeningCashScreen user={user!} branch={branch!} terminal={terminal} setTerminal={setTerminal} onSubmit={(amt: number) => { setOpening(amt); back(); }} onBack={back} />;
-    if (screen.name === "ClosingReport") return <ClosingReportScreen opening={opening ?? 0} orders={orders} onClose={() => { setOpening(null); back(); }} onBack={back} user={user!} branch={branch!} terminal={terminal} />;
-    if (screen.name === "Cart") return <CartScreen cart={cart} onQty={updateQty} onRemove={removeItem} subtotal={cartSubtotal} tax={cartTax} total={cartTotal} onHold={() => { if (cart.length) { setHeld(h => [cart, ...h]); setCart([]); back(); } }} onPay={() => push({ name: "Payment" })} onBack={back} />;
-    if (screen.name === "Payment") return <PaymentScreen total={cartTotal} subtotal={cartSubtotal} tax={cartTax} onApprove={finalizeOrder} onBack={back} />;
-    if (screen.name === "HeldOrders") return <HeldOrdersScreen held={held} onResume={(idx: number) => { setCart(held[idx]); setHeld(h => h.filter((_, i) => i !== idx)); push({ name: "Cart" }); }} onBack={back} />;
+    if (screen.name === "Login") return <LoginScreen lang={lang} setLang={setLang} onLogin={(u) => { setUser(u); replace({ name: "BranchSelect" }); notify(`Welcome, ${u.name.split(" ")[0]}`); }} />;
+    if (screen.name === "BranchSelect") return <BranchSelectScreen user={user!} onPick={(b) => { setBranch(b); replace({ name: "TerminalSelect" }); }} />;
+    if (screen.name === "TerminalSelect") return <TerminalSelectScreen terminal={terminal} setTerminal={setTerminal} onDone={() => { replace({ name: "Main", tab: "Dashboard" }); notify("Terminal ready"); }} onBack={back} />;
+    if (screen.name === "OpeningCash") return <OpeningCashScreen user={user!} branch={branch!} terminal={terminal} setTerminal={setTerminal} onSubmit={(amt: number) => { setOpening(amt); back(); notify("Shift started · POS active"); }} onBack={back} />;
+    if (screen.name === "ClosingReport") return <ClosingReportScreen opening={opening ?? 0} orders={orders} onClose={() => { setOpening(null); back(); notify("Closing submitted · pending review"); }} onBack={back} user={user!} branch={branch!} terminal={terminal} />;
+    if (screen.name === "Cart") return <CartScreen cart={cart} onQty={updateQty} onRemove={removeItem} subtotal={cartSubtotal} tax={cartTax} tobacco={cartTobacco} total={cartTotal} onHold={() => { if (cart.length) { setHeld(h => [cart, ...h]); setCart([]); back(); notify("Order held"); } }} onPay={() => push({ name: "Payment" })} onBack={back} />;
+    if (screen.name === "Payment") return <PaymentScreen total={cartTotal} subtotal={cartSubtotal} tax={cartTax} tobacco={cartTobacco} onApprove={finalizeOrder} onBack={back} />;
+    if (screen.name === "HeldOrders") return <HeldOrdersScreen held={held} onResume={(idx: number) => { setCart(held[idx]); setHeld(h => h.filter((_, i) => i !== idx)); push({ name: "Cart" }); notify("Held order resumed"); }} onBack={back} />;
     if (screen.name === "Invoice") return <InvoiceScreen order={screen.order} onDone={() => goTab("POS")} onBack={back} />;
     if (screen.name === "OrderDetails") return <OrderDetailsScreen o={screen.order} onBack={back} />;
     if (screen.name === "ItemDetails") return <ItemDetailsScreen p={screen.product} onBack={back} />;
@@ -223,6 +232,7 @@ function MposApp() {
     if (screen.name === "TerminalDetails") return <TerminalDetailsScreen t={screen.t} onBack={back} />;
     if (screen.name === "Reports") return <ReportsScreen orders={orders} onBack={back} />;
     if (screen.name === "Audit") return <AuditScreen onBack={back} />;
+    if (screen.name === "Returns") return <ReturnsScreen orders={orders} onBack={back} onSubmit={() => { notify("Return submitted for approval"); back(); }} />;
     // Main tabs
     if (screen.name === "Main") {
       const body =
@@ -248,7 +258,14 @@ function MposApp() {
     <PageShell title="MPOS App Preview" subtitle="Interactive cashier-side mobile app · purple/white theme">
       <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
         <div className="flex justify-center">
-          <Phone>{renderScreen()}</Phone>
+          <Phone>
+            {renderScreen()}
+            {toast && (
+              <div className="absolute left-1/2 -translate-x-1/2 bottom-24 z-40 bg-foreground text-background text-[11px] font-bold px-3 py-2 rounded-full shadow-elegant animate-fade-in">
+                {toast}
+              </div>
+            )}
+          </Phone>
         </div>
         <div className="space-y-4">
           <Card className="p-4 border-border/60 shadow-card space-y-3">
@@ -267,8 +284,9 @@ function MposApp() {
               <Button size="sm" variant="outline" onClick={() => push({ name: "Reports" })} disabled={!user || !branch}>Reports</Button>
               <Button size="sm" variant="outline" onClick={() => push({ name: "Audit" })} disabled={!user || !branch}>Audit</Button>
               <Button size="sm" variant="outline" onClick={() => push({ name: "TerminalOverview" })} disabled={!user || !branch}>Terminals</Button>
-              <Button size="sm" variant="destructive" onClick={reset}>Reset</Button>
+              <Button size="sm" variant="outline" onClick={() => push({ name: "Returns" })} disabled={!user || !branch}>Returns</Button>
             </div>
+            <Button size="sm" variant="destructive" className="w-full" onClick={reset}>Reset session</Button>
           </Card>
           <Card className="p-4 border-border/60 shadow-card text-xs space-y-2">
             <h3 className="font-bold text-sm">Demo accounts</h3>
@@ -287,20 +305,32 @@ function MposApp() {
 
 // ===================== Individual screens =====================
 
-function LoginScreen({ onLogin }: { onLogin: (u: PUser) => void }) {
+function LoginScreen({ onLogin, lang, setLang }: { onLogin: (u: PUser) => void; lang: "EN" | "AR"; setLang: (l: "EN" | "AR") => void }) {
+  const [mode, setMode] = useState<"email" | "phone">("email");
   return (
     <div className="flex-1 flex flex-col">
       <div className="gradient-primary text-primary-foreground px-6 pt-12 pb-10 text-center">
+        <div className="flex justify-end mb-2">
+          <button onClick={() => setLang(lang === "EN" ? "AR" : "EN")} className="flex items-center gap-1 bg-white/15 rounded-full px-2.5 py-1 text-[10px] font-bold">
+            <Globe className="h-3 w-3" /> {lang === "EN" ? "English" : "العربية"}
+          </button>
+        </div>
         <div className="mx-auto h-16 w-16 rounded-2xl bg-white flex items-center justify-center mb-3">
           <Smartphone className="h-8 w-8 text-primary" />
         </div>
-        <h1 className="text-2xl font-black tracking-wide">MART ECR</h1>
-        <p className="opacity-80 text-xs mt-1">MPOS · Saudi Baqala POS</p>
+        <h1 className="text-2xl font-black tracking-wide">{lang === "EN" ? "BAQALA MPOS" : "بقالة MPOS"}</h1>
+        <p className="opacity-80 text-xs mt-1">{lang === "EN" ? "Saudi Baqala POS" : "نقاط بيع بقالة"}</p>
       </div>
       <div className="flex-1 bg-muted/30 rounded-t-3xl -mt-4 p-4 space-y-3 overflow-y-auto">
         <Card className="p-4 space-y-2 border-border/60">
-          <p className="text-sm font-bold mb-1">Sign in</p>
-          <Input placeholder="name@mart.sa" className="h-9" defaultValue="sara@mart.sa" />
+          <p className="text-sm font-bold mb-1">{lang === "EN" ? "Sign in" : "تسجيل الدخول"}</p>
+          <div className="flex gap-1">
+            <button onClick={() => setMode("email")} className={`flex-1 text-[10px] font-bold py-1 rounded-md border ${mode === "email" ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>Email</button>
+            <button onClick={() => setMode("phone")} className={`flex-1 text-[10px] font-bold py-1 rounded-md border ${mode === "phone" ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>Phone</button>
+          </div>
+          {mode === "email"
+            ? <Input placeholder="name@mart.sa" className="h-9" defaultValue="sara@mart.sa" />
+            : <Input placeholder="+966 55 300 9003" className="h-9" defaultValue="+966 55 300 9003" />}
           <Input type="password" placeholder="••••••" className="h-9" defaultValue="demo" />
           <Button className="w-full gradient-primary text-primary-foreground border-0 h-9" onClick={() => onLogin(users[2])}>Login</Button>
         </Card>
@@ -339,6 +369,42 @@ function BranchSelectScreen({ user, onPick }: { user: PUser; onPick: (b: PBranch
             </Card>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function TerminalSelectScreen({ terminal, setTerminal, onDone, onBack }: { terminal: string; setTerminal: (t: string) => void; onDone: () => void; onBack: () => void }) {
+  return (
+    <div className="flex-1 flex flex-col">
+      <PHeader title="Select Terminal" subtitle="Pick your MPOS device" onBack={onBack} />
+      <div className="p-3 space-y-2 overflow-y-auto flex-1">
+        {terminals.map(t => {
+          const selected = terminal === t.id;
+          const live = t.status === "Active" || t.status === "Syncing";
+          return (
+            <button key={t.id} onClick={() => setTerminal(t.id)} className="w-full text-left">
+              <Card className={`p-3 border ${selected ? "border-primary ring-2 ring-primary/30" : "border-border/60"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="relative">
+                      <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center"><Cpu className="h-4 w-4 text-primary" /></div>
+                      {live && <span className={`absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ${t.status === "Active" ? "bg-success" : "bg-primary"} animate-pulse`} />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold truncate">{t.id}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{t.branch} · {t.type}</p>
+                    </div>
+                  </div>
+                  <Badge2 label={t.status} />
+                </div>
+              </Card>
+            </button>
+          );
+        })}
+      </div>
+      <div className="border-t bg-background p-3">
+        <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onDone}>Continue with {terminal}</Button>
       </div>
     </div>
   );
@@ -538,7 +604,7 @@ function POSScreen({ onAdd, cartCount, cartTotal, onCart, onHeld, heldCount }: a
   );
 }
 
-function CartScreen({ cart, onQty, onRemove, subtotal, tax, total, onHold, onPay, onBack }: any) {
+function CartScreen({ cart, onQty, onRemove, subtotal, tax, tobacco, total, onHold, onPay, onBack }: any) {
   return (
     <div className="flex-1 flex flex-col">
       <PHeader title="Cart" subtitle={`${cart.length} items`} onBack={onBack} />
@@ -567,6 +633,7 @@ function CartScreen({ cart, onQty, onRemove, subtotal, tax, total, onHold, onPay
       <div className="border-t bg-background p-3 space-y-1.5">
         <Row k="Subtotal" v={sar(subtotal)} />
         <Row k="VAT 15%" v={sar(tax)} />
+        {tobacco > 0 && <Row k="Tobacco tax" v={sar(tobacco)} />}
         <Row k="Total" v={sar(total)} highlight />
         <div className="flex gap-2 pt-1">
           <Button variant="outline" className="flex-1" onClick={onHold} disabled={!cart.length}>Hold</Button>
@@ -577,7 +644,7 @@ function CartScreen({ cart, onQty, onRemove, subtotal, tax, total, onHold, onPay
   );
 }
 
-function PaymentScreen({ total, subtotal, tax, onApprove, onBack }: any) {
+function PaymentScreen({ total, subtotal, tax, tobacco, onApprove, onBack }: any) {
   const [method, setMethod] = useState<"Cash" | "Card" | "Wallet" | "Split">("Cash");
   const [received, setReceived] = useState("");
   const change = Math.max(0, (parseFloat(received || "0") || 0) - total);
@@ -616,6 +683,7 @@ function PaymentScreen({ total, subtotal, tax, onApprove, onBack }: any) {
         <Card className="p-3 border-border/60 space-y-1.5">
           <Row k="Subtotal" v={sar(subtotal)} />
           <Row k="VAT 15%" v={sar(tax)} />
+          {tobacco > 0 && <Row k="Tobacco tax" v={sar(tobacco)} />}
           <Row k="Total" v={sar(total)} highlight />
         </Card>
         <Button className="w-full gradient-primary text-primary-foreground border-0 h-11" onClick={() => onApprove(method)}>Approve Payment</Button>
@@ -646,6 +714,7 @@ function InvoiceScreen({ order, onDone, onBack }: any) {
           <div className="my-2 border-t border-dashed" />
           <Row k="Subtotal" v={sar(order.subtotal)} />
           <Row k="VAT 15%" v={sar(order.tax)} />
+          {order.tobacco > 0 && <Row k="Tobacco tax" v={sar(order.tobacco)} />}
           <Row k="Total" v={sar(order.total)} highlight />
           <Row k="Payment" v={order.method} />
         </Card>
@@ -833,7 +902,12 @@ function TerminalOverviewScreen({ onOpen, onBack }: any) {
             <Card className="p-3 border-border/60">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Cpu className="h-4 w-4 text-primary" /></div>
+                  <div className="relative">
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Cpu className="h-4 w-4 text-primary" /></div>
+                    {(t.status === "Active" || t.status === "Syncing") && (
+                      <span className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${t.status === "Active" ? "bg-success" : "bg-primary"} animate-pulse`} />
+                    )}
+                  </div>
                   <div className="min-w-0">
                     <p className="text-xs font-bold truncate">{t.id}</p>
                     <p className="text-[10px] text-muted-foreground truncate">{t.branch} · {t.type}</p>
@@ -931,6 +1005,66 @@ function AuditScreen({ onBack }: any) {
             <p className="text-[10px] text-muted-foreground">{l.terminal} · {l.date}</p>
           </Card>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ReturnsScreen({ orders, onBack, onSubmit }: any) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [selected, setSelected] = useState<POrder | null>(null);
+  const [reason, setReason] = useState("Damaged item");
+  const [qty, setQty] = useState("1");
+  const reasons = ["Damaged item", "Expired item", "Wrong item", "Customer changed mind", "Price issue", "Duplicate billing"];
+  return (
+    <div className="flex-1 flex flex-col">
+      <PHeader title="Customer Returns" subtitle={`Step ${step} of 3`} onBack={onBack} />
+      <div className="p-3 space-y-3 overflow-y-auto">
+        {step === 1 && (
+          <>
+            <p className="text-xs font-bold">1. Pick the order</p>
+            {orders.slice(0, 6).map((o: POrder) => (
+              <button key={o.id} className="w-full text-left" onClick={() => { setSelected(o); setStep(2); }}>
+                <Card className="p-3 border-border/60 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-black text-primary">{o.id}</p>
+                    <p className="text-[10px] text-muted-foreground">{o.customer} · {o.date}</p>
+                  </div>
+                  <span className="text-sm font-black">{sar(o.total)}</span>
+                </Card>
+              </button>
+            ))}
+          </>
+        )}
+        {step === 2 && selected && (
+          <>
+            <p className="text-xs font-bold">2. Items in {selected.id}</p>
+            {products.slice(0, 3).map(p => (
+              <button key={p.id} className="w-full text-left" onClick={() => setStep(3)}>
+                <Card className="p-3 border-border/60 flex items-center justify-between">
+                  <div className="min-w-0"><p className="text-xs font-bold truncate">{p.name}</p><p className="text-[10px] text-muted-foreground">{p.sku}</p></div>
+                  <span className="text-xs font-black text-primary">{sar(p.price)}</span>
+                </Card>
+              </button>
+            ))}
+          </>
+        )}
+        {step === 3 && (
+          <Card className="p-3 border-border/60 space-y-2">
+            <p className="text-xs font-bold">3. Reason & refund</p>
+            <Field label="Quantity" value={qty} onChange={setQty} />
+            <p className="text-[10px] text-muted-foreground font-bold uppercase">Reason</p>
+            <div className="flex flex-wrap gap-1">
+              {reasons.map(r => (
+                <button key={r} onClick={() => setReason(r)} className={`text-[10px] font-bold px-2 py-1 rounded-full border ${reason === r ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>{r}</button>
+              ))}
+            </div>
+            <Row k="Refund method" v="Original (Cash)" />
+            <Row k="Refund amount" v={sar(15.5 * (parseFloat(qty) || 1))} highlight />
+            <div className="flex justify-end pt-1"><Badge2 label="pending" /></div>
+            <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSubmit}><Undo2 className="h-4 w-4 mr-1" />Submit Return</Button>
+          </Card>
+        )}
       </div>
     </div>
   );
