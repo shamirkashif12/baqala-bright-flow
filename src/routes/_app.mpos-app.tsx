@@ -342,42 +342,62 @@ function MposApp() {
 function LoginScreen({ onLogin, lang, setLang }: { onLogin: (u: PUser) => void; lang: "EN" | "AR"; setLang: (l: "EN" | "AR") => void }) {
   const [mode, setMode] = useState<"email" | "phone">("email");
   return (
-    <div className="flex-1 flex flex-col">
-      <div className="gradient-primary text-primary-foreground px-6 pt-12 pb-10 text-center">
-        <div className="flex justify-end mb-2">
-          <button onClick={() => setLang(lang === "EN" ? "AR" : "EN")} className="flex items-center gap-1 bg-white/15 rounded-full px-2.5 py-1 text-[10px] font-bold">
+    <div className="flex-1 flex flex-col relative overflow-hidden">
+      {/* Animated gradient backdrop */}
+      <div className="absolute inset-0 mpos-gradient-anim" />
+      {/* Floating decorative icons */}
+      <ShoppingBag className="absolute top-24 left-6 h-7 w-7 text-white/25 mpos-float" style={{ animationDelay: "0s" }} />
+      <Apple className="absolute top-40 right-8 h-6 w-6 text-white/25 mpos-float" style={{ animationDelay: "1.2s" }} />
+      <Coffee className="absolute top-64 left-10 h-5 w-5 text-white/20 mpos-float" style={{ animationDelay: "2s" }} />
+      <Milk className="absolute top-20 right-16 h-5 w-5 text-white/20 mpos-float" style={{ animationDelay: "0.6s" }} />
+      <Pizza className="absolute top-52 left-20 h-4 w-4 text-white/20 mpos-float" style={{ animationDelay: "2.8s" }} />
+      <Sparkles className="absolute top-32 right-4 h-4 w-4 text-white/30 mpos-float" style={{ animationDelay: "1.6s" }} />
+
+      <div className="relative text-primary-foreground px-6 pt-10 pb-8 text-center">
+        <div className="flex justify-end mb-3">
+          <button onClick={() => setLang(lang === "EN" ? "AR" : "EN")} className="flex items-center gap-1.5 bg-white/20 backdrop-blur rounded-full px-3 py-1.5 text-[11px] font-bold transition-all active:scale-95 hover:bg-white/30">
             <Globe className="h-3 w-3" /> {lang === "EN" ? "English" : "العربية"}
           </button>
         </div>
-        <div className="mx-auto h-16 w-16 rounded-2xl bg-white flex items-center justify-center mb-3">
-          <Smartphone className="h-8 w-8 text-primary" />
+        <div className="relative mx-auto h-20 w-20 rounded-3xl bg-white flex items-center justify-center mb-4 shadow-glow animate-scale-in">
+          <img src={mimonyLogo.url} alt="MI Money" className="h-12 w-auto object-contain" />
+          <span className="absolute inset-0 rounded-3xl mpos-ring-pulse" />
         </div>
-        <h1 className="text-2xl font-black tracking-wide">{lang === "EN" ? "BAQALA MPOS" : "بقالة MPOS"}</h1>
-        <p className="opacity-80 text-xs mt-1">{lang === "EN" ? "Saudi Baqala POS" : "نقاط بيع بقالة"}</p>
+        <p className="text-[11px] uppercase tracking-[0.3em] opacity-80 font-bold">MI Money</p>
+        <h1 className="text-3xl font-black tracking-wide mt-1 animate-fade-in">MART MPOS</h1>
+        <p className="opacity-85 text-xs mt-1.5 flex items-center justify-center gap-1.5">
+          <Sparkles className="h-3 w-3" /> {lang === "EN" ? "Premium Mart POS · KSA" : "نقاط بيع بقالة"}
+        </p>
       </div>
-      <div className="flex-1 bg-muted/30 rounded-t-3xl -mt-4 p-4 space-y-3 overflow-y-auto">
-        <Card className="p-4 space-y-2 border-border/60">
-          <p className="text-sm font-bold mb-1">{lang === "EN" ? "Sign in" : "تسجيل الدخول"}</p>
-          <div className="flex gap-1">
-            <button onClick={() => setMode("email")} className={`flex-1 text-[10px] font-bold py-1 rounded-md border ${mode === "email" ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>Email</button>
-            <button onClick={() => setMode("phone")} className={`flex-1 text-[10px] font-bold py-1 rounded-md border ${mode === "phone" ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>Phone</button>
+
+      <div className="relative flex-1 bg-muted/40 rounded-t-[2rem] -mt-2 p-4 space-y-3 overflow-y-auto animate-fade-in">
+        <Card className="mpos-glass p-4 space-y-2.5 shadow-elegant border-white/40">
+          <p className="text-sm font-black flex items-center gap-1.5">
+            <Zap className="h-4 w-4 text-primary" />
+            {lang === "EN" ? "Sign in" : "تسجيل الدخول"}
+          </p>
+          <div className="flex gap-1 bg-muted rounded-lg p-0.5">
+            <button onClick={() => setMode("email")} className={`flex-1 text-[11px] font-bold py-1.5 rounded-md transition-all ${mode === "email" ? "bg-white text-primary shadow-sm" : "text-muted-foreground"}`}>Email</button>
+            <button onClick={() => setMode("phone")} className={`flex-1 text-[11px] font-bold py-1.5 rounded-md transition-all ${mode === "phone" ? "bg-white text-primary shadow-sm" : "text-muted-foreground"}`}>Phone</button>
           </div>
           {mode === "email"
-            ? <Input placeholder="name@mart.sa" className="h-9" defaultValue="sara@mart.sa" />
-            : <Input placeholder="+966 55 300 9003" className="h-9" defaultValue="+966 55 300 9003" />}
-          <Input type="password" placeholder="••••••" className="h-9" defaultValue="demo" />
-          <Button className="w-full gradient-primary text-primary-foreground border-0 h-9" onClick={() => onLogin(users[2])}>Login</Button>
+            ? <Input placeholder="name@mart.sa" className="h-10 focus:ring-2 focus:ring-primary/40 transition-all" defaultValue="sara@mart.sa" />
+            : <Input placeholder="+966 55 300 9003" className="h-10 focus:ring-2 focus:ring-primary/40 transition-all" defaultValue="+966 55 300 9003" />}
+          <Input type="password" placeholder="••••••" className="h-10 focus:ring-2 focus:ring-primary/40 transition-all" defaultValue="demo" />
+          <Button className="w-full gradient-primary text-primary-foreground border-0 h-10 font-bold shadow-md hover:shadow-glow active:scale-[0.98] transition-all" onClick={() => onLogin(users[2])}>
+            <Zap className="h-4 w-4 mr-1" /> Login
+          </Button>
         </Card>
-        <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mt-2">Demo accounts</p>
-        {users.map(u => (
-          <button key={u.id} onClick={() => onLogin(u)} className="w-full">
-            <Card className="p-2.5 flex items-center gap-2.5 border-border/60 hover:border-primary/50">
-              <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-black">{u.name[0]}</div>
+        <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mt-3 px-1">Demo accounts</p>
+        {users.map((u, i) => (
+          <button key={u.id} onClick={() => onLogin(u)} className="w-full animate-fade-in" style={{ animationDelay: `${i * 60}ms` }}>
+            <Card className="p-2.5 flex items-center gap-2.5 border-border/60 hover:border-primary/60 transition-all active:scale-[0.98] hover:shadow-card">
+              <div className="h-10 w-10 rounded-full gradient-primary flex items-center justify-center text-white font-black shadow-md">{u.name[0]}</div>
               <div className="flex-1 text-left min-w-0">
                 <p className="text-xs font-bold truncate">{u.name}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{u.role}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{u.role} · {u.email}</p>
               </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              <ChevronRight className="h-4 w-4 text-primary" />
             </Card>
           </button>
         ))}
