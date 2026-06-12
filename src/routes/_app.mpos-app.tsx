@@ -13,7 +13,9 @@ import {
   Trash2, Plus, Minus, CheckCircle2, Bookmark, Cpu, AlertCircle, Hourglass,
   TrendingUp, BarChart3, ShieldCheck, LogOut, Smartphone, FileText,
   Banknote, Settings2, Cigarette, Undo2, Globe, Phone as PhoneIcon,
+  Sparkles, Zap, Apple, Coffee, Milk, Pizza, ShoppingBag,
 } from "lucide-react";
+import mimonyLogo from "@/assets/mimony-logo.png.asset.json";
 
 export const Route = createFileRoute("/_app/mpos-app")({ component: MposApp });
 
