@@ -53,6 +53,7 @@ export const dict: Dict = {
   "Expenses": { en: "Expenses", ar: "المصاريف" },
   "Expense Types": { en: "Expense Types", ar: "أنواع المصاريف" },
   "Coupons & Discounts": { en: "Coupons & Discounts", ar: "الكوبونات والخصومات" },
+  "Coupons, Discounts & Offers": { en: "Coupons, Discounts & Offers", ar: "الكوبونات والخصومات والعروض" },
   "Refunds": { en: "Refunds", ar: "المبالغ المستردة" },
   "Customer Returns": { en: "Customer Returns", ar: "مرتجعات العملاء" },
   "Tax, Fees & Tobacco": { en: "Tax, Fees & Tobacco", ar: "الضرائب والرسوم والتبغ" },
@@ -78,6 +79,7 @@ export const dict: Dict = {
   "Audit Logs": { en: "Audit Logs", ar: "سجلات التدقيق" },
   "Plans & Pricing": { en: "Plans & Pricing", ar: "الباقات والأسعار" },
   "Settings": { en: "Settings", ar: "الإعدادات" },
+  "Rules Engine": { en: "Rules Engine", ar: "محرك القواعد" },
 
   // Roles & footer
   "Owner": { en: "Owner", ar: "المالك" },
