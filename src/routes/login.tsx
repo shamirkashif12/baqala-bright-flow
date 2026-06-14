@@ -42,6 +42,7 @@ function Login() {
     setLoading(true);
     try {
       await login(email.trim(), password);
+      navigate({ to: redirect, replace: true });
     } catch (err: any) {
       setError(err?.message || "Sign in failed. Try again.");
     } finally {
