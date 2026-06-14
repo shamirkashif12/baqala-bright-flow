@@ -26,13 +26,14 @@ function Login() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/dashboard";
 
   // Already logged in? Redirect (must be in effect, not render).
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
-      navigate({ to: redirect, replace: true });
+      navigate({ to: safeRedirect, replace: true });
     }
-  }, [authLoading, isAuthenticated, navigate, redirect]);
+  }, [authLoading, isAuthenticated, navigate, safeRedirect]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -42,7 +43,7 @@ function Login() {
     setLoading(true);
     try {
       await login(email.trim(), password);
-      navigate({ to: redirect, replace: true });
+      window.location.replace(safeRedirect);
     } catch (err: any) {
       setError(err?.message || "Sign in failed. Try again.");
     } finally {
