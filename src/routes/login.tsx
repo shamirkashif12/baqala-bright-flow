@@ -14,15 +14,6 @@ export const Route = createFileRoute("/login")({
   validateSearch: (search) => ({
     redirect: (search.redirect as string) || "/dashboard",
   }),
-  beforeLoad: async ({ search }) => {
-    if (typeof window === "undefined") return;
-    const { data } = await supabase.auth.getUser();
-    const safeRedirect = search.redirect.startsWith("/") && !search.redirect.startsWith("//") ? search.redirect : "/dashboard";
-
-    if (data.user) {
-      window.location.replace(safeRedirect);
-    }
-  },
   component: Login,
 });
 
@@ -40,10 +31,17 @@ function Login() {
 
   // Already logged in? Redirect (must be in effect, not render).
   useEffect(() => {
-    if (!authLoading && isAuthenticated) {
-      navigate({ to: safeRedirect, replace: true });
+    if (authLoading) return;
+
+    if (isAuthenticated) {
+      window.location.replace(safeRedirect);
+      return;
     }
-  }, [authLoading, isAuthenticated, navigate, safeRedirect]);
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) window.location.replace(safeRedirect);
+    });
+  }, [authLoading, isAuthenticated, safeRedirect]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
