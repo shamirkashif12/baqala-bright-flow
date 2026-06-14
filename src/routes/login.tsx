@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect as routerRedirect, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,11 +8,21 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { BaqalaLogo } from "@/components/baqala-logo";
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 import { ShieldCheck, ScanBarcode, Smartphone, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
 export const Route = createFileRoute("/login")({
   validateSearch: (search) => ({
     redirect: (search.redirect as string) || "/dashboard",
   }),
+  beforeLoad: async ({ search }) => {
+    if (typeof window === "undefined") return;
+    const { data } = await supabase.auth.getUser();
+    const safeRedirect = search.redirect.startsWith("/") && !search.redirect.startsWith("//") ? search.redirect : "/dashboard";
+
+    if (data.user) {
+      throw routerRedirect({ to: safeRedirect, replace: true });
+    }
+  },
   component: Login,
 });
 
