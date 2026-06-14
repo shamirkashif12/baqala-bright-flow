@@ -1,4 +1,4 @@
-import { createFileRoute, Link, redirect as routerRedirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/login")({
     const safeRedirect = search.redirect.startsWith("/") && !search.redirect.startsWith("//") ? search.redirect : "/dashboard";
 
     if (data.user) {
-      throw routerRedirect({ to: safeRedirect, replace: true });
+      window.location.replace(safeRedirect);
     }
   },
   component: Login,
