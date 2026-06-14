@@ -17,7 +17,7 @@ export const Route = createFileRoute("/login")({
 });
 
 function Login() {
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { redirect } = Route.useSearch();
   const [email, setEmail] = useState("");
@@ -29,10 +29,10 @@ function Login() {
 
   // Already logged in? Redirect (must be in effect, not render).
   useEffect(() => {
-    if (isAuthenticated) {
+    if (!authLoading && isAuthenticated) {
       navigate({ to: redirect, replace: true });
     }
-  }, [isAuthenticated, navigate, redirect]);
+  }, [authLoading, isAuthenticated, navigate, redirect]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -42,7 +42,6 @@ function Login() {
     setLoading(true);
     try {
       await login(email.trim(), password);
-      navigate({ to: redirect });
     } catch (err: any) {
       setError(err?.message || "Sign in failed. Try again.");
     } finally {
