@@ -161,6 +161,11 @@ function Login() {
               <Button type="button" variant="outline" className="w-full h-11" disabled={loading}>
                 Use NAFATH ID
               </Button>
+              <Link to="/signup" className="block">
+                <Button type="button" variant="outline" className="w-full h-11 border-primary/30 text-primary hover:bg-primary/5" disabled={loading}>
+                  Create a new account
+                </Button>
+              </Link>
             </Card>
           </form>
 
