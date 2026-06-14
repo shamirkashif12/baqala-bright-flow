@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { BaqalaLogo } from "@/components/baqala-logo";
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 import { ShieldCheck, ScanBarcode, Smartphone, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
 export const Route = createFileRoute("/login")({
   validateSearch: (search) => ({
@@ -17,8 +18,7 @@ export const Route = createFileRoute("/login")({
 });
 
 function Login() {
-  const { login, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
+  const { login, isAuthenticated, loading: authLoading } = useAuth();
   const { redirect } = Route.useSearch();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,13 +26,21 @@ function Login() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/dashboard";
 
   // Already logged in? Redirect (must be in effect, not render).
   useEffect(() => {
+    if (authLoading) return;
+
     if (isAuthenticated) {
-      navigate({ to: redirect, replace: true });
+      window.location.replace(safeRedirect);
+      return;
     }
-  }, [isAuthenticated, navigate, redirect]);
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) window.location.replace(safeRedirect);
+    });
+  }, [authLoading, isAuthenticated, safeRedirect]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -42,7 +50,7 @@ function Login() {
     setLoading(true);
     try {
       await login(email.trim(), password);
-      navigate({ to: redirect });
+      window.location.replace(safeRedirect);
     } catch (err: any) {
       setError(err?.message || "Sign in failed. Try again.");
     } finally {

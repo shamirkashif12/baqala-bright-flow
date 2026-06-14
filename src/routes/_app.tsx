@@ -2,10 +2,14 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { I18nProvider } from "@/lib/i18n";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_app")({
-  beforeLoad: ({ context, location }) => {
-    if (!context.auth.isAuthenticated) {
+  ssr: false,
+  beforeLoad: async ({ location }) => {
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
       throw redirect({
         to: "/login",
         search: { redirect: location.href },
