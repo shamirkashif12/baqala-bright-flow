@@ -1,11 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { RoleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { Users, UserCheck, Clock, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-export const Route = createFileRoute("/_app/staff")({ component: Staff });
+export const Route = createFileRoute("/_app/staff")({
+  component: () => (
+    <RoleGate allow={["owner", "manager"]}>
+      <Staff />
+    </RoleGate>
+  ),
+});
 
 const staff = [
   { name: "Abdullah Al Faisal", role: "Owner", branch: "All", shift: "—", attendance: "—", access: "Full", status: "active" },

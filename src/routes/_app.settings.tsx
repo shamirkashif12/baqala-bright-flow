@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { RoleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,7 +8,13 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Building2, Languages, Bell, ShieldCheck, Receipt, CreditCard, Database, KeyRound } from "lucide-react";
 
-export const Route = createFileRoute("/_app/settings")({ component: Settings });
+export const Route = createFileRoute("/_app/settings")({
+  component: () => (
+    <RoleGate allow={["owner", "manager"]}>
+      <Settings />
+    </RoleGate>
+  ),
+});
 
 const sections = [
   { icon: Building2, title: "Business Profile", desc: "Legal name, CR, logo, contact" },

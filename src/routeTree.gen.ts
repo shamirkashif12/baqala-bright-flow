@@ -26,6 +26,7 @@ import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
+import { Route as AppRulesRouteImport } from './routes/_app.rules'
 import { Route as AppRolesRouteImport } from './routes/_app.roles'
 import { Route as AppReturnsRouteImport } from './routes/_app.returns'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
@@ -34,6 +35,7 @@ import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
 import { Route as AppPlansRouteImport } from './routes/_app.plans'
 import { Route as AppOrdersRouteImport } from './routes/_app.orders'
+import { Route as AppMposAppRouteImport } from './routes/_app.mpos-app'
 import { Route as AppMobilePosRouteImport } from './routes/_app.mobile-pos'
 import { Route as AppMartSuppliersRouteImport } from './routes/_app.mart-suppliers'
 import { Route as AppMaintenanceRouteImport } from './routes/_app.maintenance'
@@ -141,6 +143,11 @@ const AppSalesRoute = AppSalesRouteImport.update({
   path: '/sales',
   getParentRoute: () => AppRoute,
 } as any)
+const AppRulesRoute = AppRulesRouteImport.update({
+  id: '/rules',
+  path: '/rules',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppRolesRoute = AppRolesRouteImport.update({
   id: '/roles',
   path: '/roles',
@@ -179,6 +186,11 @@ const AppPlansRoute = AppPlansRouteImport.update({
 const AppOrdersRoute = AppOrdersRouteImport.update({
   id: '/orders',
   path: '/orders',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMposAppRoute = AppMposAppRouteImport.update({
+  id: '/mpos-app',
+  path: '/mpos-app',
   getParentRoute: () => AppRoute,
 } as any)
 const AppMobilePosRoute = AppMobilePosRouteImport.update({
@@ -317,6 +329,7 @@ export interface FileRoutesByFullPath {
   '/maintenance': typeof AppMaintenanceRoute
   '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
+  '/mpos-app': typeof AppMposAppRoute
   '/orders': typeof AppOrdersRoute
   '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
@@ -325,6 +338,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof AppReportsRoute
   '/returns': typeof AppReturnsRoute
   '/roles': typeof AppRolesRoute
+  '/rules': typeof AppRulesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
@@ -365,6 +379,7 @@ export interface FileRoutesByTo {
   '/maintenance': typeof AppMaintenanceRoute
   '/mart-suppliers': typeof AppMartSuppliersRoute
   '/mobile-pos': typeof AppMobilePosRoute
+  '/mpos-app': typeof AppMposAppRoute
   '/orders': typeof AppOrdersRoute
   '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
@@ -373,6 +388,7 @@ export interface FileRoutesByTo {
   '/reports': typeof AppReportsRoute
   '/returns': typeof AppReturnsRoute
   '/roles': typeof AppRolesRoute
+  '/rules': typeof AppRulesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
@@ -415,6 +431,7 @@ export interface FileRoutesById {
   '/_app/maintenance': typeof AppMaintenanceRoute
   '/_app/mart-suppliers': typeof AppMartSuppliersRoute
   '/_app/mobile-pos': typeof AppMobilePosRoute
+  '/_app/mpos-app': typeof AppMposAppRoute
   '/_app/orders': typeof AppOrdersRoute
   '/_app/plans': typeof AppPlansRoute
   '/_app/pos': typeof AppPosRoute
@@ -423,6 +440,7 @@ export interface FileRoutesById {
   '/_app/reports': typeof AppReportsRoute
   '/_app/returns': typeof AppReturnsRoute
   '/_app/roles': typeof AppRolesRoute
+  '/_app/rules': typeof AppRulesRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
@@ -465,6 +483,7 @@ export interface FileRouteTypes {
     | '/maintenance'
     | '/mart-suppliers'
     | '/mobile-pos'
+    | '/mpos-app'
     | '/orders'
     | '/plans'
     | '/pos'
@@ -473,6 +492,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/returns'
     | '/roles'
+    | '/rules'
     | '/sales'
     | '/settings'
     | '/staff'
@@ -513,6 +533,7 @@ export interface FileRouteTypes {
     | '/maintenance'
     | '/mart-suppliers'
     | '/mobile-pos'
+    | '/mpos-app'
     | '/orders'
     | '/plans'
     | '/pos'
@@ -521,6 +542,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/returns'
     | '/roles'
+    | '/rules'
     | '/sales'
     | '/settings'
     | '/staff'
@@ -562,6 +584,7 @@ export interface FileRouteTypes {
     | '/_app/maintenance'
     | '/_app/mart-suppliers'
     | '/_app/mobile-pos'
+    | '/_app/mpos-app'
     | '/_app/orders'
     | '/_app/plans'
     | '/_app/pos'
@@ -570,6 +593,7 @@ export interface FileRouteTypes {
     | '/_app/reports'
     | '/_app/returns'
     | '/_app/roles'
+    | '/_app/rules'
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
@@ -714,6 +738,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSalesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/rules': {
+      id: '/_app/rules'
+      path: '/rules'
+      fullPath: '/rules'
+      preLoaderRoute: typeof AppRulesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/roles': {
       id: '/_app/roles'
       path: '/roles'
@@ -768,6 +799,13 @@ declare module '@tanstack/react-router' {
       path: '/orders'
       fullPath: '/orders'
       preLoaderRoute: typeof AppOrdersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/mpos-app': {
+      id: '/_app/mpos-app'
+      path: '/mpos-app'
+      fullPath: '/mpos-app'
+      preLoaderRoute: typeof AppMposAppRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/mobile-pos': {
@@ -961,6 +999,7 @@ interface AppRouteChildren {
   AppMaintenanceRoute: typeof AppMaintenanceRoute
   AppMartSuppliersRoute: typeof AppMartSuppliersRoute
   AppMobilePosRoute: typeof AppMobilePosRoute
+  AppMposAppRoute: typeof AppMposAppRoute
   AppOrdersRoute: typeof AppOrdersRoute
   AppPlansRoute: typeof AppPlansRoute
   AppPosRoute: typeof AppPosRoute
@@ -969,6 +1008,7 @@ interface AppRouteChildren {
   AppReportsRoute: typeof AppReportsRoute
   AppReturnsRoute: typeof AppReturnsRoute
   AppRolesRoute: typeof AppRolesRoute
+  AppRulesRoute: typeof AppRulesRoute
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
@@ -1006,6 +1046,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppMaintenanceRoute: AppMaintenanceRoute,
   AppMartSuppliersRoute: AppMartSuppliersRoute,
   AppMobilePosRoute: AppMobilePosRoute,
+  AppMposAppRoute: AppMposAppRoute,
   AppOrdersRoute: AppOrdersRoute,
   AppPlansRoute: AppPlansRoute,
   AppPosRoute: AppPosRoute,
@@ -1014,6 +1055,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppReportsRoute: AppReportsRoute,
   AppReturnsRoute: AppReturnsRoute,
   AppRolesRoute: AppRolesRoute,
+  AppRulesRoute: AppRulesRoute,
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,

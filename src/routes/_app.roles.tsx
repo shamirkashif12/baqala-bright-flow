@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { RoleGate } from "@/components/role-gate";
 import { useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
@@ -10,7 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Lock, Plus, Shield, UserCog } from "lucide-react";
 
-export const Route = createFileRoute("/_app/roles")({ component: Roles });
+export const Route = createFileRoute("/_app/roles")({
+  component: () => (
+    <RoleGate allow={["owner"]}>
+      <Roles />
+    </RoleGate>
+  ),
+});
 
 const roles = ["Admin", "Manager", "Cashier", "Inventory Staff", "Warehouse Staff", "Accountant"];
 const modules: { name: string; perms: string[] }[] = [

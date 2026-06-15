@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { RoleGate } from "@/components/role-gate";
 import { useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
@@ -11,7 +12,13 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/_app/audit-logs")({ component: AuditLogs });
+export const Route = createFileRoute("/_app/audit-logs")({
+  component: () => (
+    <RoleGate allow={["owner", "manager"]}>
+      <AuditLogs />
+    </RoleGate>
+  ),
+});
 
 type Severity = "info" | "warning" | "critical";
 type Log = {

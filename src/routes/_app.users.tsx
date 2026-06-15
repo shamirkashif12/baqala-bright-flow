@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { RoleGate } from "@/components/role-gate";
 import { useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Toolbar, StatusBadge } from "@/components/module-placeholder";
@@ -12,7 +13,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Mail, Phone, Calendar, Pencil, ShieldCheck, Power } from "lucide-react";
 
-export const Route = createFileRoute("/_app/users")({ component: RegisteredUsers });
+export const Route = createFileRoute("/_app/users")({
+  component: () => (
+    <RoleGate allow={["owner", "manager"]}>
+      <RegisteredUsers />
+    </RoleGate>
+  ),
+});
 
 const users = [
   { id: "U-101", name: "Abdullah Al Faisal", phone: "+966 50 100 1010", email: "owner@mimoney.sa", role: "Owner", branch: "Olaya", status: "active", created: "01 Jan 26", by: "System", last: "Active now", activity: "Approved 4 POs · viewed reports" },
