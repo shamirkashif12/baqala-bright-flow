@@ -15,7 +15,8 @@ import {
   Banknote, Settings2, Cigarette, Undo2, Globe, Phone as PhoneIcon,
   Sparkles, Zap, Apple, Coffee, Milk, Pizza, ShoppingBag,
 } from "lucide-react";
-import mimonyLogo from "@/assets/mimony-logo.png.asset.json";
+import mimonyLogoSrc from "@/assets/mimony-logo.png";
+const mimonyLogo = { url: mimonyLogoSrc };
 
 export const Route = createFileRoute("/_app/mpos-app")({ component: MposApp });
 
