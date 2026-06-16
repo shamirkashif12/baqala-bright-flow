@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { RoleGate } from "@/components/role-gate";
 import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { MetricCard, StatusDot } from "@/components/metric-card";
@@ -18,7 +19,13 @@ import storePhoto from "@/assets/store-photo.jpg";
 import ownerPhoto from "@/assets/owner-photo.jpg";
 import { api, type AuditLog, type DashboardMetrics } from "@/lib/api";
 
-export const Route = createFileRoute("/_app/admin")({ component: AdminHome });
+export const Route = createFileRoute("/_app/admin")({
+  component: () => (
+    <RoleGate allow={["owner"]}>
+      <AdminHome />
+    </RoleGate>
+  ),
+});
 
 function useTicker(seed: number, min: number, max: number, intervalMs = 1800) {
   const [v, setV] = useState(seed);

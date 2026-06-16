@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { RoleGate } from "@/components/role-gate";
 import { useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
@@ -19,7 +20,13 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 
-export const Route = createFileRoute("/_app/zatca-settings")({ component: ZatcaSettings });
+export const Route = createFileRoute("/_app/zatca-settings")({
+  component: () => (
+    <RoleGate allow={["owner"]}>
+      <ZatcaSettings />
+    </RoleGate>
+  ),
+});
 
 const integrationLogs = [
   { id: "ZTC-LOG-9821", invoice: "INV-20260602-0142", type: "Simplified", branch: "Olaya", attempt: 1, time: "Today 14:42", status: "connected" },

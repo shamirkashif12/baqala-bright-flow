@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { RoleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Toolbar, StatusBadge } from "@/components/module-placeholder";
 import { Card } from "@/components/ui/card";
@@ -12,7 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Mail, Pencil, ShieldCheck, Power } from "lucide-react";
 import { api, type User } from "@/lib/api";
 
-export const Route = createFileRoute("/_app/users")({ component: RegisteredUsers });
+export const Route = createFileRoute("/_app/users")({
+  component: () => (
+    <RoleGate allow={["owner", "manager"]}>
+      <RegisteredUsers />
+    </RoleGate>
+  ),
+});
 
 function RegisteredUsers() {
   const [users, setUsers] = useState<User[]>([]);

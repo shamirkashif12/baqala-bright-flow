@@ -1,7 +1,18 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
-import { authStore } from "./lib/auth";
+import type { AuthState } from "./lib/auth";
+
+// Placeholder auth context for the router; real auth state lives in AuthProvider via useAuth().
+const authStore: AuthState = {
+  isAuthenticated: false,
+  user: null,
+  loading: true,
+  login: async () => {},
+  signup: async () => ({ needsVerification: false }),
+  logout: () => {},
+  hasRole: () => false,
+};
 
 export const getRouter = () => {
   const queryClient = new QueryClient();

@@ -30,7 +30,6 @@ import {
   Sliders,
   Lock,
   TicketPercent,
-  Undo2,
   Crown,
   Gauge,
   BarChart3,
@@ -41,6 +40,7 @@ import {
   History,
   FileCheck2,
   Coins,
+  Workflow,
 } from "lucide-react";
 import {
   Sidebar,
@@ -67,10 +67,10 @@ const navGroups = [
       { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
       { title: "POS Checkout", url: "/pos", icon: ScanBarcode },
       { title: "Mobile POS & Kiosk", url: "/mobile-pos", icon: Smartphone },
+      { title: "MPOS App Preview", url: "/mpos-app", icon: Smartphone },
       { title: "Orders", url: "/orders", icon: ShoppingBag },
       { title: "Cashier Workspace", url: "/cashier", icon: Briefcase },
       { title: "Cashier Shift", url: "/cashier-shift", icon: ClipboardCheck },
-      { title: "Terminal Sessions", url: "/terminal-sessions", icon: Terminal },
       { title: "Control Tower", url: "/control-tower", icon: Radar },
     ],
   },
@@ -86,20 +86,15 @@ const navGroups = [
     label: "Finance",
     items: [
       { title: "Expenses", url: "/expenses", icon: Wallet },
-      { title: "Expense Types", url: "/expense-types", icon: Tags },
-      { title: "Coupons & Discounts", url: "/coupons", icon: TicketPercent },
-      { title: "Refunds", url: "/refunds", icon: Undo2 },
+      { title: "Coupons, Discounts & Offers", url: "/coupons", icon: TicketPercent },
       { title: "Customer Returns", url: "/returns", icon: ReturnIcon },
       { title: "Tax, Fees & Tobacco", url: "/tax-fees", icon: Cigarette },
-      { title: "Tax & Fee Reports", url: "/tax-reports", icon: Coins },
     ],
   },
   {
     label: "Suppliers",
     items: [
       { title: "Suppliers", url: "/suppliers", icon: Truck },
-      { title: "Warehouse Suppliers", url: "/warehouse-suppliers", icon: Warehouse },
-      { title: "Mart-to-Mart", url: "/mart-suppliers", icon: Store },
     ],
   },
   {
@@ -108,7 +103,6 @@ const navGroups = [
       { title: "Branches", url: "/branches", icon: Building2 },
       { title: "Terminals", url: "/terminals", icon: Terminal },
       { title: "Devices", url: "/devices", icon: HardDrive },
-      { title: "Device Behavior", url: "/device-behavior", icon: Activity },
     ],
   },
   {
@@ -123,6 +117,7 @@ const navGroups = [
   {
     label: "Admin",
     items: [
+      { title: "Rules Engine", url: "/rules", icon: Workflow },
       { title: "Registered Users", url: "/users", icon: UserCog },
       { title: "Roles & Permissions", url: "/roles", icon: Lock },
       { title: "Staff & Roles", url: "/staff", icon: Users },

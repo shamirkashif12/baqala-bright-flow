@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { RoleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
@@ -7,7 +8,13 @@ import { Users, UserCheck, Clock, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { api, type User } from "@/lib/api";
 
-export const Route = createFileRoute("/_app/staff")({ component: Staff });
+export const Route = createFileRoute("/_app/staff")({
+  component: () => (
+    <RoleGate allow={["owner", "manager"]}>
+      <Staff />
+    </RoleGate>
+  ),
+});
 
 const roleColors: Record<string, string> = {
   owner: "bg-primary text-primary-foreground",

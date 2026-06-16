@@ -3,19 +3,52 @@ import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { MetricCard } from "@/components/metric-card";
-import { DataTable, StatusBadge } from "@/components/module-placeholder";
-import { Warehouse, ArrowLeftRight, Clock, CheckCircle2, Eye } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { api, type WarehouseRequest, type WarehouseRequestItem } from "@/lib/api";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Toolbar, StatusBadge } from "@/components/module-placeholder";
+import { Eye, CheckCircle, XCircle, Truck, Info, Package } from "lucide-react";
+import { api, type WarehouseRequest } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/warehouses")({ component: Warehouses });
+
+function F({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between border-b border-border/40 pb-2 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium">{value}</span>
+    </div>
+  );
+}
+
+function ApprovalBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    approved: "bg-success/15 text-success",
+    pending: "bg-warning/20 text-warning-foreground",
+    rejected: "bg-destructive/15 text-destructive",
+  };
+  return <Badge className={`${map[status] ?? "bg-muted"} border-0 text-xs capitalize`}>{status}</Badge>;
+}
+
+function DeliveryBadge({ status }: { status?: string | null }) {
+  if (!status) return <span className="text-xs text-muted-foreground">—</span>;
+  const map: Record<string, string> = {
+    pending: "bg-muted text-muted-foreground",
+    in_transit: "bg-primary/15 text-primary",
+    delivered: "bg-success/15 text-success",
+    failed: "bg-destructive/15 text-destructive",
+  };
+  return <Badge className={`${map[status] ?? "bg-muted"} border-0 text-xs`}>{status.replace("_", " ")}</Badge>;
+}
 
 function Warehouses() {
   const [requests, setRequests] = useState<WarehouseRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [active, setActive] = useState<WarehouseRequest | null>(null);
+  const [q, setQ] = useState("");
+  const [viewReq, setViewReq] = useState<WarehouseRequest | null>(null);
 
   useEffect(() => {
     api.getWarehouseRequests()
@@ -23,98 +56,140 @@ function Warehouses() {
       .finally(() => setLoading(false));
   }, []);
 
-  const pending = requests.filter(r => r.approvalStatus === "pending").length;
-  const inTransit = requests.filter(r => r.deliveryStatus === "in_transit").length;
-  const approved = requests.filter(r => r.approvalStatus === "approved").length;
+  const filtered = requests.filter(r => {
+    return !q
+      || r.requestNumber?.toLowerCase().includes(q.toLowerCase())
+      || r.sourceBranch?.name?.toLowerCase().includes(q.toLowerCase())
+      || r.destinationBranch?.name?.toLowerCase().includes(q.toLowerCase())
+      || r.supplier?.name?.toLowerCase().includes(q.toLowerCase());
+  });
 
   return (
-    <PageShell title="Warehouse Transfers" subtitle="Inter-branch stock transfer requests">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Requests" value={String(requests.length)} icon={Warehouse} accent="primary" />
-        <MetricCard label="Pending Approval" value={String(pending)} icon={Clock} accent="warning" />
-        <MetricCard label="In Transit" value={String(inTransit)} icon={ArrowLeftRight} accent="primary" />
-        <MetricCard label="Approved" value={String(approved)} icon={CheckCircle2} accent="success" />
+    <PageShell title="Warehouse Requests" subtitle="Inter-branch and supplier stock transfer requests">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search request#, branch, supplier…" className="h-9 w-64 flex-shrink-0" />
+        <div className="flex-1" />
+        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow h-9">+ New Request</Button>
       </div>
 
       {loading ? (
         <div className="text-muted-foreground text-sm">Loading…</div>
       ) : (
-        <DataTable
-          columns={[
-            { key: "requestNumber", label: "Request #", render: (r: WarehouseRequest) => <span className="font-mono text-xs font-semibold">{r.requestNumber}</span> },
-            { key: "sourceBranch", label: "From", render: (r: WarehouseRequest) => r.sourceBranch?.name ?? <span className="text-muted-foreground">—</span> },
-            { key: "destinationBranch", label: "To", render: (r: WarehouseRequest) => r.destinationBranch?.name ?? <span className="text-muted-foreground">—</span> },
-            { key: "supplier", label: "Supplier", render: (r: WarehouseRequest) => r.supplier?.name ?? <span className="text-muted-foreground">—</span> },
-            { key: "approvalStatus", label: "Approval", render: (r: WarehouseRequest) => <StatusBadge status={r.approvalStatus} /> },
-            { key: "deliveryStatus", label: "Delivery", render: (r: WarehouseRequest) => <StatusBadge status={r.deliveryStatus} /> },
-            { key: "createdAt", label: "Date", render: (r: WarehouseRequest) => new Date(r.createdAt).toLocaleDateString("en-SA") },
-            { key: "_a", label: "", render: (r: WarehouseRequest) => (
-              <Button size="sm" variant="outline" className="gap-1.5 h-7" onClick={() => setActive(r)}>
-                <Eye className="h-3.5 w-3.5" /> View
-              </Button>
-            )},
-          ]}
-          rows={requests}
-        />
+        <Card className="overflow-hidden border-border/60 shadow-card">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="px-3 py-3 font-semibold">Request#</th>
+                  <th className="px-3 py-3 font-semibold">Source</th>
+                  <th className="px-3 py-3 font-semibold">Destination</th>
+                  <th className="px-3 py-3 font-semibold">Supplier</th>
+                  <th className="px-3 py-3 font-semibold">Approval</th>
+                  <th className="px-3 py-3 font-semibold">Delivery</th>
+                  <th className="px-3 py-3 font-semibold">Date</th>
+                  <th className="px-3 py-3 font-semibold"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
+                    <td className="px-3 py-3 font-mono text-xs font-bold">{r.requestNumber}</td>
+                    <td className="px-3 py-3 text-xs">{r.sourceBranch?.name ?? "—"}</td>
+                    <td className="px-3 py-3 text-xs">{r.destinationBranch?.name ?? "—"}</td>
+                    <td className="px-3 py-3 text-xs">{r.supplier?.name ?? "—"}</td>
+                    <td className="px-3 py-3"><ApprovalBadge status={r.approvalStatus} /></td>
+                    <td className="px-3 py-3"><DeliveryBadge status={r.deliveryStatus} /></td>
+                    <td className="px-3 py-3 text-xs">{new Date(r.createdAt).toLocaleDateString("en-SA")}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex gap-1 justify-end">
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewReq(r)}>
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        {r.approvalStatus === "pending" && (
+                          <>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-success"><CheckCircle className="h-3.5 w-3.5" /></Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive"><XCircle className="h-3.5 w-3.5" /></Button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr><td colSpan={8} className="text-center py-10 text-muted-foreground text-sm">No requests found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
-      <Dialog open={!!active} onOpenChange={(v) => !v && setActive(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Transfer Request — {active?.requestNumber}</DialogTitle>
-            <p className="text-sm text-muted-foreground">
-              {active?.sourceBranch?.name ?? "External"} → {active?.destinationBranch?.name}
-              {active?.supplier ? ` · Supplier: ${active.supplier.name}` : ""}
-            </p>
-          </DialogHeader>
-          <div className="grid grid-cols-3 gap-3 mb-2">
-            <Stat label="Approval" value={active?.approvalStatus ?? "—"} />
-            <Stat label="Delivery" value={active?.deliveryStatus ?? "—"} />
-            <Stat label="Items" value={String(active?.items?.length ?? 0)} />
-          </div>
-          {active?.notes && (
-            <p className="text-sm text-muted-foreground rounded-xl bg-muted/40 p-3">{active.notes}</p>
-          )}
-          {active?.items && active.items.length > 0 && (
-            <div className="overflow-x-auto rounded-lg border mt-2">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/40 border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="px-3 py-2">Product</th>
-                    <th className="px-3 py-2">Requested</th>
-                    <th className="px-3 py-2">Approved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {active.items.map((item: WarehouseRequestItem) => (
-                    <tr key={item.id} className="border-b last:border-0">
-                      <td className="px-3 py-2.5">
-                        <p className="font-medium">{item.product?.name ?? item.productId}</p>
-                        {item.product?.sku && <p className="text-xs text-muted-foreground">{item.product.sku}</p>}
-                      </td>
-                      <td className="px-3 py-2.5 tabular-nums font-semibold">{item.requestedQuantity}</td>
-                      <td className="px-3 py-2.5 tabular-nums">
-                        {item.approvedQuantity != null
-                          ? <Badge variant="outline" className="bg-success/10 text-success border-success/30">{item.approvedQuantity}</Badge>
-                          : <span className="text-muted-foreground text-xs">—</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </PageShell>
-  );
-}
+      {/* Detail sheet */}
+      <Sheet open={!!viewReq} onOpenChange={v => !v && setViewReq(null)}>
+        <SheetContent className="w-[480px]">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <Truck className="h-5 w-5 text-primary" />
+              {viewReq?.requestNumber}
+            </SheetTitle>
+          </SheetHeader>
+          {viewReq && (
+            <Tabs defaultValue="items" className="mt-4">
+              <TabsList>
+                <TabsTrigger value="items" className="gap-1.5"><Package className="h-3.5 w-3.5" />Items</TabsTrigger>
+                <TabsTrigger value="notes" className="gap-1.5"><Info className="h-3.5 w-3.5" />Notes</TabsTrigger>
+                <TabsTrigger value="tracking" className="gap-1.5"><Truck className="h-3.5 w-3.5" />Tracking</TabsTrigger>
+              </TabsList>
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl p-3 bg-muted/40">
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
-      <p className="text-base font-bold mt-1 capitalize">{value.replace(/_/g, " ")}</p>
-    </div>
+              <TabsContent value="items" className="mt-4 space-y-3">
+                <F label="Source" value={viewReq.sourceBranch?.name ?? "—"} />
+                <F label="Destination" value={viewReq.destinationBranch?.name ?? "—"} />
+                <F label="Supplier" value={viewReq.supplier?.name ?? "—"} />
+                <F label="Approval" value={viewReq.approvalStatus} />
+                <F label="Delivery" value={viewReq.deliveryStatus ?? "—"} />
+                {viewReq.items && viewReq.items.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Items</p>
+                    <div className="space-y-2">
+                      {viewReq.items.map((item, i) => (
+                        <div key={i} className="flex items-center justify-between rounded-xl border border-border/40 p-3 text-sm">
+                          <div>
+                            <p className="font-medium">{item.product?.name ?? "—"}</p>
+                            <p className="text-xs text-muted-foreground font-mono">{item.product?.sku ?? ""}</p>
+                          </div>
+                          <div className="text-right text-xs text-muted-foreground">
+                            <p>Req: {item.requestedQuantity}</p>
+                            {item.approvedQuantity != null && <p>Approved: {item.approvedQuantity}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="notes" className="mt-4">
+                <p className="text-xs text-muted-foreground">No notes for this request.</p>
+              </TabsContent>
+
+              <TabsContent value="tracking" className="mt-4 space-y-3">
+                <div className="flex items-center gap-3 text-sm">
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center ${viewReq.approvalStatus !== "pending" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
+                    <CheckCircle className="h-4 w-4" />
+                  </div>
+                  <span>Approval: <strong className="capitalize">{viewReq.approvalStatus}</strong></span>
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center ${viewReq.deliveryStatus === "delivered" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
+                    <Truck className="h-4 w-4" />
+                  </div>
+                  <span>Delivery: <strong className="capitalize">{viewReq.deliveryStatus?.replace("_", " ") ?? "Pending"}</strong></span>
+                </div>
+              </TabsContent>
+            </Tabs>
+          )}
+        </SheetContent>
+      </Sheet>
+    </PageShell>
   );
 }

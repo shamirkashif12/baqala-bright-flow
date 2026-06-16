@@ -16,7 +16,8 @@
       "Bash(python3 -c ' *)",
       "Bash(python3 -c \"import sys; d=sys.stdin.read\\(\\); print\\(d[:600]\\)\")",
       "Bash(taskkill //F //IM \"BaqalaPOS.Api.exe\")",
-      "Bash(python3 -c \"import sys; d=sys.stdin.read\\(\\); print\\(d[:400]\\)\")"
+      "Bash(python3 -c \"import sys; d=sys.stdin.read\\(\\); print\\(d[:400]\\)\")",
+      "Bash(npm run *)"
     ]
   }
 }

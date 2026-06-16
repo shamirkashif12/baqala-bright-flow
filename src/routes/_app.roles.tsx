@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { RoleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Lock, Plus, Shield, UserCog } from "lucide-react";
 import { api, type Role } from "@/lib/api";
 
-export const Route = createFileRoute("/_app/roles")({ component: Roles });
+export const Route = createFileRoute("/_app/roles")({
+  component: () => (
+    <RoleGate allow={["owner"]}>
+      <Roles />
+    </RoleGate>
+  ),
+});
 
 const permFlags = ["canView", "canCreate", "canEdit", "canDelete", "canApprove", "canExport"] as const;
 const permLabels: Record<typeof permFlags[number], string> = {

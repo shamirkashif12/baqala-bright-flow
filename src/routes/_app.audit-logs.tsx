@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { RoleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,13 @@ import {
 import { cn } from "@/lib/utils";
 import { api, type AuditLog } from "@/lib/api";
 
-export const Route = createFileRoute("/_app/audit-logs")({ component: AuditLogs });
+export const Route = createFileRoute("/_app/audit-logs")({
+  component: () => (
+    <RoleGate allow={["owner", "manager"]}>
+      <AuditLogs />
+    </RoleGate>
+  ),
+});
 
 type Severity = "info" | "warning" | "critical";
 
