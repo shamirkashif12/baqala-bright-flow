@@ -150,7 +150,14 @@ export const api = {
   },
 
   // Dashboard aggregated metrics
-  getDashboard: () => request<DashboardMetrics>("/api/dashboard"),
+  getDashboard: (params?: { period?: string; branchId?: string }) => {
+    const q = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
+      ) as Record<string, string>
+    ).toString();
+    return request<DashboardMetrics>(`/api/dashboard${q ? `?${q}` : ""}`);
+  },
 
   // Compliance rules
   getComplianceRules: (params?: { ruleType?: string }) => {
