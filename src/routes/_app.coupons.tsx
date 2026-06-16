@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,71 +10,80 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { TicketPercent, BadgePercent, Plus } from "lucide-react";
+import { api, type Coupon } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/coupons")({ component: Coupons });
 
-const coupons = [
-  { id: "C-1001", name: "Ramadan Mega 20", code: "RAMADAN20", type: "Percentage", value: "20%", start: "2026-03-10", end: "2026-04-10", limit: 5000, used: 2841, status: "active", by: "Abdullah" },
-  { id: "C-1002", name: "Khobar Opening", code: "KHB50", type: "Fixed", value: "ر.س 50", start: "2026-05-01", end: "2026-06-30", limit: 1000, used: 412, status: "active", by: "Sara" },
-  { id: "C-1003", name: "Dairy Combo", code: "DAIRY15", type: "Category", value: "15% off Dairy", start: "2026-05-15", end: "2026-07-15", limit: 2000, used: 980, status: "active", by: "Abdullah" },
-  { id: "C-1004", name: "Eid Voucher", code: "EID30", type: "Percentage", value: "30%", start: "2026-04-09", end: "2026-04-13", limit: 3000, used: 2998, status: "closed", by: "Abdullah" },
-  { id: "C-1005", name: "Madinah Loyalty", code: "MED10", type: "Branch", value: "10% Madinah only", start: "2026-06-01", end: "2026-12-31", limit: 500, used: 14, status: "active", by: "Manager" },
-];
-
 function Coupons() {
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.getCoupons()
+      .then(setCoupons)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const active = coupons.filter(c => c.status === "active").length;
+  const totalUsed = coupons.reduce((s, c) => s + c.usedCount, 0);
+
   return (
     <PageShell title="Coupons & Discounts" subtitle="Promotional codes, discounts and offers">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Active Coupons" value="14" icon={TicketPercent} accent="primary" />
-        <MetricCard label="Used This Month" value="6,284" icon={BadgePercent} accent="success" delta="+18%" trend="up" />
-        <MetricCard label="Discount Given" value="ر.س 28,420" icon={BadgePercent} />
-        <MetricCard label="Avg Discount" value="ر.س 4.52" icon={BadgePercent} />
+        <MetricCard label="Active Coupons" value={String(active)} icon={TicketPercent} accent="primary" />
+        <MetricCard label="Total Used" value={String(totalUsed)} icon={BadgePercent} accent="success" />
+        <MetricCard label="Total Coupons" value={String(coupons.length)} icon={BadgePercent} />
+        <MetricCard label="Expired" value={String(coupons.filter(c => c.status === "expired").length)} icon={BadgePercent} />
       </div>
 
-      <div className="flex justify-end"><AddCoupon /></div>
+      <div className="flex justify-end">
+        <AddCoupon onCreated={() => api.getCoupons().then(setCoupons)} />
+      </div>
 
-      <Card className="overflow-hidden border-border/60 shadow-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th className="px-4 py-3 font-semibold">Coupon</th>
-                <th className="px-4 py-3 font-semibold">Code</th>
-                <th className="px-4 py-3 font-semibold">Type</th>
-                <th className="px-4 py-3 font-semibold">Value</th>
-                <th className="px-4 py-3 font-semibold">Validity</th>
-                <th className="px-4 py-3 font-semibold">Usage</th>
-                <th className="px-4 py-3 font-semibold">By</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {coupons.map((c) => (
-                <tr key={c.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
-                  <td className="px-4 py-3.5">
-                    <p className="font-semibold">{c.name}</p>
-                    <p className="text-xs text-muted-foreground">{c.id}</p>
-                  </td>
-                  <td className="px-4 py-3.5"><code className="rounded bg-primary/10 text-primary px-2 py-0.5 text-xs font-bold">{c.code}</code></td>
-                  <td className="px-4 py-3.5 text-xs">{c.type}</td>
-                  <td className="px-4 py-3.5 font-semibold">{c.value}</td>
-                  <td className="px-4 py-3.5 text-xs">{c.start}<br />{c.end}</td>
-                  <td className="px-4 py-3.5 text-xs tabular-nums">{c.used} / {c.limit}</td>
-                  <td className="px-4 py-3.5 text-xs">{c.by}</td>
-                  <td className="px-4 py-3.5"><StatusBadge status={c.status} /></td>
-                  <td className="px-4 py-3.5"><Button size="sm" variant="ghost">Edit</Button></td>
+      {loading ? (
+        <div className="text-muted-foreground text-sm">Loading…</div>
+      ) : (
+        <Card className="overflow-hidden border-border/60 shadow-card">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="px-4 py-3 font-semibold">Coupon</th>
+                  <th className="px-4 py-3 font-semibold">Code</th>
+                  <th className="px-4 py-3 font-semibold">Type</th>
+                  <th className="px-4 py-3 font-semibold">Value</th>
+                  <th className="px-4 py-3 font-semibold">Validity</th>
+                  <th className="px-4 py-3 font-semibold">Usage</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 font-semibold">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+              </thead>
+              <tbody>
+                {coupons.map((c) => (
+                  <tr key={c.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
+                    <td className="px-4 py-3.5 font-semibold">{c.name}</td>
+                    <td className="px-4 py-3.5"><code className="rounded bg-primary/10 text-primary px-2 py-0.5 text-xs font-bold">{c.code}</code></td>
+                    <td className="px-4 py-3.5 text-xs capitalize">{c.type.replace(/_/g, " ")}</td>
+                    <td className="px-4 py-3.5 font-semibold">{c.type === "percentage" ? `${c.value}%` : `ر.س ${c.value}`}</td>
+                    <td className="px-4 py-3.5 text-xs">{c.startDate}<br />{c.endDate}</td>
+                    <td className="px-4 py-3.5 text-xs tabular-nums">{c.usedCount} / {c.usageLimit ?? "∞"}</td>
+                    <td className="px-4 py-3.5"><StatusBadge status={c.status} /></td>
+                    <td className="px-4 py-3.5"><Button size="sm" variant="ghost">Edit</Button></td>
+                  </tr>
+                ))}
+                {coupons.length === 0 && (
+                  <tr><td colSpan={8} className="text-center py-10 text-muted-foreground text-sm">No coupons found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </PageShell>
   );
 }
 
-function AddCoupon() {
+function AddCoupon({ onCreated }: { onCreated?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -88,14 +97,11 @@ function AddCoupon() {
           <F label="Coupon Code" placeholder="e.g. SUMMER25" />
           <div className="space-y-1">
             <Label className="text-xs">Discount Type</Label>
-            <Select defaultValue="Percentage">
+            <Select defaultValue="percentage">
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="Percentage">Percentage</SelectItem>
-                <SelectItem value="Fixed">Fixed Amount</SelectItem>
-                <SelectItem value="Product">Product-based</SelectItem>
-                <SelectItem value="Category">Category-based</SelectItem>
-                <SelectItem value="Branch">Branch-based</SelectItem>
+                <SelectItem value="percentage">Percentage</SelectItem>
+                <SelectItem value="fixed">Fixed Amount</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -106,7 +112,7 @@ function AddCoupon() {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button className="gradient-primary text-primary-foreground border-0" onClick={() => setOpen(false)}>Create</Button>
+          <Button className="gradient-primary text-primary-foreground border-0" onClick={() => { setOpen(false); onCreated?.(); }}>Create</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

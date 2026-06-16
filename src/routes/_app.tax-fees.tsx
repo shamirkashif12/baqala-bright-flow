@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -12,42 +12,34 @@ import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { ShieldCheck, Cigarette, Receipt, Calculator, Plus } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { api, type TaxFeeRule } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/tax-fees")({ component: TaxFees });
 
-const customFees = [
-  { id: "FEE-001", name: "Plastic Bag Fee", type: "Fixed", value: "ر.س 0.25", applies: "Per bag", branches: "All", status: "active" },
-  { id: "FEE-002", name: "Delivery Service Fee", type: "Fixed", value: "ر.س 10.00", applies: "Per order", branches: "All", status: "active" },
-  { id: "FEE-003", name: "Card Surcharge", type: "Percent", value: "1.5%", applies: "Card payments", branches: "Olaya, Khobar", status: "active" },
-  { id: "FEE-004", name: "Holiday Surcharge", type: "Percent", value: "5%", applies: "Eid week", branches: "All", status: "inactive" },
-];
-
-const tobaccoItems = [
-  { sku: "TBC-001", name: "Marlboro Red 20s", base: "ر.س 18.00", excise: "100%", vat: "15%", final: "ر.س 41.40", stock: 240 },
-  { sku: "TBC-002", name: "Davidoff Gold 20s", base: "ر.س 22.00", excise: "100%", vat: "15%", final: "ر.س 50.60", stock: 180 },
-  { sku: "TBC-003", name: "Shisha Tobacco 250g", base: "ر.س 35.00", excise: "100%", vat: "15%", final: "ر.س 80.50", stock: 96 },
-  { sku: "TBC-004", name: "Heated Tobacco Sticks", base: "ر.س 25.00", excise: "100%", vat: "15%", final: "ر.س 57.50", stock: 320 },
-];
-
 function TaxFees() {
+  const [rules, setRules] = useState<TaxFeeRule[]>([]);
   const [zatca, setZatca] = useState(true);
   const [phase2, setPhase2] = useState(true);
+
+  useEffect(() => {
+    api.getTaxRules().then(setRules);
+  }, []);
+
+  const customFees = rules.filter(r => r.ruleType === "custom_fee");
+  const tobaccoRules = rules.filter(r => r.isTobacco);
+  const activeCustomFees = customFees.filter(r => r.status === "active").length;
+
   return (
-    <PageShell title="Tax, Fees & Tobacco" subtitle="ZATCA-2 enablement, custom fees and tobacco excise — applied at billing & orders">
+    <PageShell title="Tax, Fees & Tobacco" subtitle="ZATCA-2 enablement, custom fees and tobacco excise">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="ZATCA Status" value={zatca ? "Enabled" : "Disabled"} icon={ShieldCheck} accent={zatca ? "success" : "warning"} />
-        <MetricCard label="Active Custom Fees" value="3" icon={Receipt} accent="primary" />
-        <MetricCard label="Tobacco SKUs" value="42" icon={Cigarette} accent="warning" />
-        <MetricCard label="Excise Collected (mo)" value="ر.س 18,420" icon={Calculator} accent="primary" />
+        <MetricCard label="Active Custom Fees" value={String(activeCustomFees)} icon={Receipt} accent="primary" />
+        <MetricCard label="Tobacco Rules" value={String(tobaccoRules.length)} icon={Cigarette} accent="warning" />
+        <MetricCard label="Total Rules" value={String(rules.length)} icon={Calculator} accent="primary" />
       </div>
 
-      {/* Fee calculation preview */}
       <Card className="p-5 border-primary/30 bg-primary/5 shadow-card">
         <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
           <div>
@@ -115,17 +107,16 @@ function TaxFees() {
         <TabsContent value="fees" className="space-y-3 mt-4">
           <div className="flex justify-between items-center">
             <p className="text-sm text-muted-foreground">Custom fees are added at checkout and printed on the invoice.</p>
-            <FeeDialog />
+            <FeeDialog onCreated={() => api.getTaxRules().then(setRules)} />
           </div>
           <DataTable
             columns={[
-              { key: "id", label: "ID", render: r => <span className="font-mono text-xs">{r.id}</span> },
-              { key: "name", label: "Fee Name", render: r => <span className="font-semibold">{r.name}</span> },
-              { key: "type", label: "Type" },
-              { key: "value", label: "Value" },
-              { key: "applies", label: "Applies to" },
-              { key: "branches", label: "Branches" },
-              { key: "status", label: "Status", render: r => <StatusBadge status={r.status} /> },
+              { key: "ruleName", label: "Fee Name", render: (r: TaxFeeRule) => <span className="font-semibold">{r.ruleName}</span> },
+              { key: "ruleType", label: "Type", render: (r: TaxFeeRule) => r.ruleType.replace(/_/g, " ") },
+              { key: "customFeeAmount", label: "Fixed Fee", render: (r: TaxFeeRule) => r.customFeeAmount > 0 ? `ر.س ${r.customFeeAmount}` : "—" },
+              { key: "vatPercentage", label: "VAT %", render: (r: TaxFeeRule) => r.vatPercentage > 0 ? `${r.vatPercentage}%` : "—" },
+              { key: "applicableTo", label: "Applies to", render: (r: TaxFeeRule) => r.applicableTo.replace(/_/g, " ") },
+              { key: "status", label: "Status", render: (r: TaxFeeRule) => <StatusBadge status={r.status} /> },
             ]}
             rows={customFees}
           />
@@ -149,15 +140,12 @@ function TaxFees() {
           </Card>
           <DataTable
             columns={[
-              { key: "sku", label: "SKU", render: r => <span className="font-mono text-xs">{r.sku}</span> },
-              { key: "name", label: "Product", render: r => <span className="font-semibold">{r.name}</span> },
-              { key: "base", label: "Base" },
-              { key: "excise", label: "Excise" },
-              { key: "vat", label: "VAT" },
-              { key: "final", label: "Selling Price", render: r => <span className="font-bold text-primary">{r.final}</span> },
-              { key: "stock", label: "Stock" },
+              { key: "ruleName", label: "Rule", render: (r: TaxFeeRule) => <span className="font-semibold">{r.ruleName}</span> },
+              { key: "excisePercentage", label: "Excise %", render: (r: TaxFeeRule) => `${r.excisePercentage}%` },
+              { key: "vatPercentage", label: "VAT %", render: (r: TaxFeeRule) => `${r.vatPercentage}%` },
+              { key: "status", label: "Status", render: (r: TaxFeeRule) => <StatusBadge status={r.status} /> },
             ]}
-            rows={tobaccoItems}
+            rows={tobaccoRules}
           />
         </TabsContent>
       </Tabs>
@@ -165,7 +153,7 @@ function TaxFees() {
   );
 }
 
-function FeeDialog() {
+function FeeDialog({ onCreated }: { onCreated?: () => void }) {
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -181,7 +169,8 @@ function FeeDialog() {
         <div className="grid gap-3">
           <div className="space-y-1"><Label className="text-xs">Fee name</Label><Input className="h-9" placeholder="e.g. Service fee" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1"><Label className="text-xs">Type</Label>
+            <div className="space-y-1">
+              <Label className="text-xs">Type</Label>
               <Select defaultValue="fixed"><SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="fixed">Fixed (ر.س)</SelectItem>
@@ -191,19 +180,19 @@ function FeeDialog() {
             </div>
             <div className="space-y-1"><Label className="text-xs">Value</Label><Input className="h-9" placeholder="0.00" /></div>
           </div>
-          <div className="space-y-1"><Label className="text-xs">Applies to</Label>
+          <div className="space-y-1">
+            <Label className="text-xs">Applies to</Label>
             <Select defaultValue="order"><SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="order">Every order</SelectItem>
                 <SelectItem value="card">Card payments</SelectItem>
                 <SelectItem value="delivery">Delivery orders</SelectItem>
-                <SelectItem value="bag">Per plastic bag</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </div>
         <DialogFooter>
-          <Button className="gradient-primary text-primary-foreground border-0">Save fee</Button>
+          <Button className="gradient-primary text-primary-foreground border-0" onClick={onCreated}>Save fee</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

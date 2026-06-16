@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,83 +7,137 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
-import { Clock, Wallet, Banknote, CreditCard, Smartphone, Undo2, LogIn, LogOut } from "lucide-react";
+import { Clock, Banknote, CreditCard, Smartphone, LogIn, LogOut } from "lucide-react";
+import { api, type CashierShift, type User, type Branch, type Terminal } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/cashier-shift")({ component: Shift });
 
-const sessions = [
-  { cashier: "Fahad Al-Qahtani", terminal: "TML-RYD-001", branch: "Olaya", open: 500, cash: 4820, card: 2840, wallet: 760, refund: 180, withdraw: 400, expected: 8340, actual: 8330, diff: -10, txns: 142, scans: 1180, start: "07:55", end: "—", status: "active" },
-  { cashier: "Mohammed Al-Harbi", terminal: "TML-RYD-002", branch: "Olaya", open: 500, cash: 3210, card: 1980, wallet: 540, refund: 90, withdraw: 200, expected: 5940, actual: 5945, diff: 5, txns: 128, scans: 980, start: "08:10", end: "—", status: "active" },
-  { cashier: "Khalid Al-Otaibi", terminal: "TML-KHB-001", branch: "Khobar", open: 500, cash: 2810, card: 1420, wallet: 360, refund: 60, withdraw: 200, expected: 4830, actual: 4830, diff: 0, txns: 96, scans: 720, start: "07:00", end: "15:00", status: "closed" },
-];
-
 function Shift() {
+  const [shifts, setShifts] = useState<CashierShift[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refetch = () => {
+    setLoading(true);
+    api.getShifts()
+      .then(setShifts)
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { refetch(); }, []);
+
+  const active = shifts.filter(s => s.status === "open").length;
+  const totalCash = shifts.reduce((acc, s) => acc + s.cashSales, 0);
+  const totalCard = shifts.reduce((acc, s) => acc + s.cardSales, 0);
+  const totalDigital = shifts.reduce((acc, s) => acc + s.digitalSales, 0);
+  const fmt = (n: number) => `ر.س ${n.toLocaleString("en-SA", { minimumFractionDigits: 2 })}`;
+
   return (
     <PageShell title="Cashier Shift" subtitle="Check-in, check-out and shift totals">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Active Shifts" value="9" icon={Clock} accent="primary" />
-        <MetricCard label="Total Cash" value="ر.س 18,240" icon={Banknote} accent="success" />
-        <MetricCard label="Total Card" value="ر.س 11,820" icon={CreditCard} />
-        <MetricCard label="Total Wallet" value="ر.س 3,240" icon={Smartphone} />
+        <MetricCard label="Active Shifts" value={String(active)} icon={Clock} accent="primary" />
+        <MetricCard label="Total Cash" value={fmt(totalCash)} icon={Banknote} accent="success" />
+        <MetricCard label="Total Card" value={fmt(totalCard)} icon={CreditCard} />
+        <MetricCard label="Total Wallet" value={fmt(totalDigital)} icon={Smartphone} />
       </div>
 
       <div className="flex flex-wrap gap-2 justify-end">
-        <CheckInDialog />
-        <CheckOutDialog />
+        <CheckInDialog onSuccess={refetch} />
+        <CheckOutDialog onSuccess={refetch} activeShifts={shifts.filter(s => s.status === "open")} />
       </div>
 
-      <Card className="overflow-hidden border-border/60 shadow-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th className="px-3 py-3 font-semibold">Cashier</th>
-                <th className="px-3 py-3 font-semibold">Terminal</th>
-                <th className="px-3 py-3 font-semibold">Open</th>
-                <th className="px-3 py-3 font-semibold">Cash</th>
-                <th className="px-3 py-3 font-semibold">Card</th>
-                <th className="px-3 py-3 font-semibold">Wallet</th>
-                <th className="px-3 py-3 font-semibold">Refund</th>
-                <th className="px-3 py-3 font-semibold">Withdraw</th>
-                <th className="px-3 py-3 font-semibold">Expected</th>
-                <th className="px-3 py-3 font-semibold">Actual</th>
-                <th className="px-3 py-3 font-semibold">Diff</th>
-                <th className="px-3 py-3 font-semibold">Txns / Scans</th>
-                <th className="px-3 py-3 font-semibold">Shift</th>
-                <th className="px-3 py-3 font-semibold">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((s) => (
-                <tr key={s.cashier} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
-                  <td className="px-3 py-3 font-medium">{s.cashier}<p className="text-xs text-muted-foreground">{s.branch}</p></td>
-                  <td className="px-3 py-3 text-xs">{s.terminal}</td>
-                  <td className="px-3 py-3 tabular-nums">{s.open}</td>
-                  <td className="px-3 py-3 tabular-nums">{s.cash}</td>
-                  <td className="px-3 py-3 tabular-nums">{s.card}</td>
-                  <td className="px-3 py-3 tabular-nums">{s.wallet}</td>
-                  <td className="px-3 py-3 tabular-nums text-destructive">{s.refund}</td>
-                  <td className="px-3 py-3 tabular-nums">{s.withdraw}</td>
-                  <td className="px-3 py-3 tabular-nums font-semibold">{s.expected}</td>
-                  <td className="px-3 py-3 tabular-nums font-semibold">{s.actual}</td>
-                  <td className={`px-3 py-3 tabular-nums font-semibold ${s.diff < 0 ? "text-destructive" : s.diff > 0 ? "text-success" : ""}`}>{s.diff > 0 ? `+${s.diff}` : s.diff}</td>
-                  <td className="px-3 py-3 text-xs">{s.txns} / {s.scans}</td>
-                  <td className="px-3 py-3 text-xs">{s.start}–{s.end}</td>
-                  <td className="px-3 py-3"><StatusBadge status={s.status} /></td>
+      {loading ? (
+        <div className="text-muted-foreground text-sm">Loading…</div>
+      ) : (
+        <Card className="overflow-hidden border-border/60 shadow-card">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="px-3 py-3 font-semibold">Cashier</th>
+                  <th className="px-3 py-3 font-semibold">Terminal</th>
+                  <th className="px-3 py-3 font-semibold">Opening</th>
+                  <th className="px-3 py-3 font-semibold">Cash</th>
+                  <th className="px-3 py-3 font-semibold">Card</th>
+                  <th className="px-3 py-3 font-semibold">Wallet</th>
+                  <th className="px-3 py-3 font-semibold">Total</th>
+                  <th className="px-3 py-3 font-semibold">Variance</th>
+                  <th className="px-3 py-3 font-semibold">Opened</th>
+                  <th className="px-3 py-3 font-semibold">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+              </thead>
+              <tbody>
+                {shifts.map((s) => (
+                  <tr key={s.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
+                    <td className="px-3 py-3 font-medium">{s.cashier?.fullName ?? s.cashierId.slice(0, 8)}</td>
+                    <td className="px-3 py-3 text-xs font-mono">{s.terminal?.terminalCode ?? "—"}</td>
+                    <td className="px-3 py-3 tabular-nums">{s.openingAmount.toFixed(2)}</td>
+                    <td className="px-3 py-3 tabular-nums">{s.cashSales.toFixed(2)}</td>
+                    <td className="px-3 py-3 tabular-nums">{s.cardSales.toFixed(2)}</td>
+                    <td className="px-3 py-3 tabular-nums">{s.digitalSales.toFixed(2)}</td>
+                    <td className="px-3 py-3 tabular-nums font-semibold">{s.totalSales.toFixed(2)}</td>
+                    <td className={`px-3 py-3 tabular-nums font-semibold ${(s.variance ?? 0) < 0 ? "text-destructive" : (s.variance ?? 0) > 0 ? "text-success" : ""}`}>
+                      {s.variance != null ? (s.variance > 0 ? `+${s.variance.toFixed(2)}` : s.variance.toFixed(2)) : "—"}
+                    </td>
+                    <td className="px-3 py-3 text-xs">{new Date(s.openedAt).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })}</td>
+                    <td className="px-3 py-3"><StatusBadge status={s.status} /></td>
+                  </tr>
+                ))}
+                {shifts.length === 0 && (
+                  <tr><td colSpan={10} className="text-center py-10 text-muted-foreground text-sm">No shifts found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </PageShell>
   );
 }
 
-function CheckInDialog() {
+function CheckInDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [cashierId, setCashierId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [terminalId, setTerminalId] = useState("");
+  const [openingAmount, setOpeningAmount] = useState("500");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    Promise.all([api.getUsers(), api.getBranches(), api.getTerminals()])
+      .then(([u, b, t]) => {
+        setUsers(u.filter(u => u.status === "active"));
+        setBranches(b.filter(b => b.status === "active"));
+        setTerminals(t);
+      })
+      .catch(() => {});
+  }, [open]);
+
+  const branchTerminals = terminals.filter(t => t.branchId === branchId);
+
+  const handleSubmit = async () => {
+    if (!cashierId || !branchId) { setError("Cashier and branch are required."); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.openShift({ cashierId, branchId, terminalId: terminalId || undefined, openingAmount: parseFloat(openingAmount) || 0 });
+      setOpen(false);
+      setCashierId(""); setBranchId(""); setTerminalId(""); setOpeningAmount("500");
+      onSuccess();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to open shift.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -92,25 +146,70 @@ function CheckInDialog() {
       <DialogContent>
         <DialogHeader><DialogTitle>Cashier Check-In</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <F label="Cashier Name" placeholder="Fahad Al-Qahtani" />
-          <div className="grid grid-cols-2 gap-3">
-            <F label="Branch" placeholder="Olaya" />
-            <F label="Terminal ID" placeholder="TML-RYD-001" />
+          <div className="space-y-1">
+            <Label className="text-xs">Cashier</Label>
+            <Select value={cashierId} onValueChange={setCashierId}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select cashier" /></SelectTrigger>
+              <SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}</SelectContent>
+            </Select>
           </div>
-          <F label="Opening Amount (SAR)" placeholder="500.00" />
-          <F label="Shift Start Time" placeholder="07:55" />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Branch</Label>
+              <Select value={branchId} onValueChange={v => { setBranchId(v); setTerminalId(""); }}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Terminal (optional)</Label>
+              <Select value={terminalId} onValueChange={setTerminalId} disabled={!branchId}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select terminal" /></SelectTrigger>
+                <SelectContent>{branchTerminals.map(t => <SelectItem key={t.id} value={t.id}>{t.terminalCode} — {t.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Opening Amount (SAR)</Label>
+            <Input className="h-9" type="number" min="0" step="0.01" value={openingAmount} onChange={e => setOpeningAmount(e.target.value)} placeholder="500.00" />
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button className="gradient-primary text-primary-foreground border-0" onClick={() => setOpen(false)}>Check In</Button>
+          <Button disabled={submitting} className="gradient-primary text-primary-foreground border-0" onClick={handleSubmit}>
+            {submitting ? "Opening…" : "Check In"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function CheckOutDialog() {
+function CheckOutDialog({ onSuccess, activeShifts }: { onSuccess: () => void; activeShifts: CashierShift[] }) {
   const [open, setOpen] = useState(false);
+  const [shiftId, setShiftId] = useState("");
+  const [closingAmount, setClosingAmount] = useState("");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async () => {
+    if (!shiftId || !closingAmount) { setError("Select a shift and enter closing amount."); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.closeShift(shiftId, { closingAmount: parseFloat(closingAmount), notes: notes || undefined });
+      setOpen(false);
+      setShiftId(""); setClosingAmount(""); setNotes("");
+      onSuccess();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to close shift.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -118,38 +217,37 @@ function CheckOutDialog() {
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Cashier Check-Out</DialogTitle></DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <F label="Cashier Name" placeholder="Fahad Al-Qahtani" />
-          <F label="Terminal ID" placeholder="TML-RYD-001" />
-          <F label="Opening Amount" placeholder="500.00" />
-          <F label="Cash Sales" placeholder="4820.00" />
-          <F label="Card Sales" placeholder="2840.00" />
-          <F label="Wallet Sales" placeholder="760.00" />
-          <F label="Refund Amount" placeholder="180.00" />
-          <F label="Withdrawal Amount" placeholder="400.00" />
-          <F label="Expected Closing" placeholder="8340.00" />
-          <F label="Actual Closing" placeholder="8330.00" />
-          <F label="Difference" placeholder="-10.00" />
-          <F label="Shift End Time" placeholder="15:30" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Notes</Label>
-          <Textarea placeholder="Any notes about the shift…" rows={2} />
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Active Shift</Label>
+            <Select value={shiftId} onValueChange={setShiftId}>
+              <SelectTrigger className="h-9"><SelectValue placeholder={activeShifts.length === 0 ? "No open shifts" : "Select shift to close"} /></SelectTrigger>
+              <SelectContent>
+                {activeShifts.map(s => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.cashier?.fullName ?? s.cashierId.slice(0, 8)} — {s.terminal?.terminalCode ?? "No terminal"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Actual Closing Amount (SAR)</Label>
+            <Input className="h-9" type="number" min="0" step="0.01" value={closingAmount} onChange={e => setClosingAmount(e.target.value)} placeholder="8330.00" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Notes</Label>
+            <Textarea placeholder="Any notes about the shift…" rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button className="gradient-primary text-primary-foreground border-0" onClick={() => setOpen(false)}>Submit Closing</Button>
+          <Button disabled={submitting || activeShifts.length === 0} className="gradient-primary text-primary-foreground border-0" onClick={handleSubmit}>
+            {submitting ? "Closing…" : "Submit Closing"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function F({ label, placeholder }: { label: string; placeholder?: string }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      <Input className="h-9" placeholder={placeholder} />
-    </div>
   );
 }

@@ -18,6 +18,7 @@ import {
   Undo2, Cigarette, LayoutDashboard,
 } from "lucide-react";
 import { FilterBar } from "@/components/filter-bar";
+import { api, type DashboardMetrics } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: Dashboard,
@@ -29,17 +30,92 @@ type StatCardData = {
   accent?: "primary" | "success" | "warning" | "destructive";
 };
 
-const cards: StatCardData[] = [
-  { label: "Pending Orders", value: "24", desc: "Orders awaiting confirmation", delta: "+8%", trend: "up", updated: "5 min ago", icon: Clock3, href: "/orders", action: "View orders", accent: "warning" },
-  { label: "Processing Orders", value: "16", desc: "Currently being prepared", delta: "+3%", trend: "up", updated: "2 min ago", icon: ShoppingBag, href: "/orders", action: "Manage", accent: "primary" },
-  { label: "Ready to Deliver", value: "12", desc: "Packed & waiting for pickup", delta: "-2%", trend: "down", updated: "1 min ago", icon: PackageCheck, href: "/orders", action: "Dispatch", accent: "primary" },
-  { label: "Delivered Orders", value: "189", desc: "Completed deliveries today", delta: "+14%", trend: "up", updated: "just now", icon: Truck, href: "/orders", action: "History", accent: "success" },
-  { label: "Today's Sales", value: "ر.س 48,920", desc: "Gross sales across 4 branches", delta: "+18%", trend: "up", updated: "live", icon: Wallet, href: "/sales", action: "Sales report", accent: "primary" },
-  { label: "Today's Delivery", value: "ر.س 9,140", desc: "Delivery revenue collected", delta: "+22%", trend: "up", updated: "3 min ago", icon: Truck, href: "/orders", action: "Open", accent: "success" },
-  { label: "Active Cashiers", value: "9 / 12", desc: "Checked-in this shift", delta: "+1", trend: "up", updated: "live", icon: Users, href: "/cashier-shift", action: "Shifts", accent: "primary" },
-  { label: "Active Terminals", value: "11 / 12", desc: "Connected POS terminals", delta: "1 offline", trend: "down", updated: "30 sec ago", icon: TerminalIcon, href: "/terminals", action: "Terminals", accent: "warning" },
-  { label: "Low Stock Items", value: "23", desc: "Need reorder soon", delta: "6 critical", trend: "down", updated: "10 min ago", icon: PackageX, href: "/inventory", action: "Restock", accent: "destructive" },
-  { label: "Close to Expiry", value: "41", desc: "Expiring in next 7 days", delta: "+5", trend: "down", updated: "20 min ago", icon: CalendarClock, href: "/batches", action: "Review", accent: "warning" },
+function buildCards(data: DashboardMetrics): StatCardData[] {
+  return [
+    {
+      label: "Pending Orders",
+      value: String(data.orders.pending),
+      desc: "Orders awaiting confirmation",
+      delta: "+8%", trend: "up", updated: "5 min ago",
+      icon: Clock3, href: "/orders", action: "View orders", accent: "warning",
+    },
+    {
+      label: "Processing Orders",
+      value: String(data.orders.processing),
+      desc: "Currently being prepared",
+      delta: "+3%", trend: "up", updated: "2 min ago",
+      icon: ShoppingBag, href: "/orders", action: "Manage", accent: "primary",
+    },
+    {
+      label: "Ready to Deliver",
+      value: String(data.orders.readyToDeliver),
+      desc: "Packed & waiting for pickup",
+      delta: "-2%", trend: "down", updated: "1 min ago",
+      icon: PackageCheck, href: "/orders", action: "Dispatch", accent: "primary",
+    },
+    {
+      label: "Delivered Orders",
+      value: String(data.orders.delivered),
+      desc: "Completed deliveries today",
+      delta: "+14%", trend: "up", updated: "just now",
+      icon: Truck, href: "/orders", action: "History", accent: "success",
+    },
+    {
+      label: "Today's Sales",
+      value: "ر.س " + data.sales.totalToday.toLocaleString("en-SA", { minimumFractionDigits: 2 }),
+      desc: "Gross sales across all branches",
+      delta: "+18%", trend: "up", updated: "live",
+      icon: Wallet, href: "/sales", action: "Sales report", accent: "primary",
+    },
+    {
+      label: "Today's Delivery",
+      value: "—",
+      desc: "Delivery revenue collected",
+      delta: "+22%", trend: "up", updated: "3 min ago",
+      icon: Truck, href: "/orders", action: "Open", accent: "success",
+    },
+    {
+      label: "Active Cashiers",
+      value: data.shifts.active + " / " + data.shifts.totalCashiers,
+      desc: "Checked-in this shift",
+      delta: "+1", trend: "up", updated: "live",
+      icon: Users, href: "/cashier-shift", action: "Shifts", accent: "primary",
+    },
+    {
+      label: "Active Terminals",
+      value: data.terminals.active + " / " + data.terminals.total,
+      desc: "Connected POS terminals",
+      delta: "1 offline", trend: "down", updated: "30 sec ago",
+      icon: TerminalIcon, href: "/terminals", action: "Terminals", accent: "warning",
+    },
+    {
+      label: "Low Stock Items",
+      value: String(data.inventory.lowStockCount),
+      desc: "Need reorder soon",
+      delta: "6 critical", trend: "down", updated: "10 min ago",
+      icon: PackageX, href: "/inventory", action: "Restock", accent: "destructive",
+    },
+    {
+      label: "Close to Expiry",
+      value: String(data.inventory.expiringCount),
+      desc: "Expiring in next 7 days",
+      delta: "+5", trend: "down", updated: "20 min ago",
+      icon: CalendarClock, href: "/batches", action: "Review", accent: "warning",
+    },
+  ];
+}
+
+const FALLBACK_CARDS: StatCardData[] = [
+  { label: "Pending Orders", value: "—", desc: "Orders awaiting confirmation", delta: "+8%", trend: "up", updated: "5 min ago", icon: Clock3, href: "/orders", action: "View orders", accent: "warning" },
+  { label: "Processing Orders", value: "—", desc: "Currently being prepared", delta: "+3%", trend: "up", updated: "2 min ago", icon: ShoppingBag, href: "/orders", action: "Manage", accent: "primary" },
+  { label: "Ready to Deliver", value: "—", desc: "Packed & waiting for pickup", delta: "-2%", trend: "down", updated: "1 min ago", icon: PackageCheck, href: "/orders", action: "Dispatch", accent: "primary" },
+  { label: "Delivered Orders", value: "—", desc: "Completed deliveries today", delta: "+14%", trend: "up", updated: "just now", icon: Truck, href: "/orders", action: "History", accent: "success" },
+  { label: "Today's Sales", value: "—", desc: "Gross sales across all branches", delta: "+18%", trend: "up", updated: "live", icon: Wallet, href: "/sales", action: "Sales report", accent: "primary" },
+  { label: "Today's Delivery", value: "—", desc: "Delivery revenue collected", delta: "+22%", trend: "up", updated: "3 min ago", icon: Truck, href: "/orders", action: "Open", accent: "success" },
+  { label: "Active Cashiers", value: "—", desc: "Checked-in this shift", delta: "+1", trend: "up", updated: "live", icon: Users, href: "/cashier-shift", action: "Shifts", accent: "primary" },
+  { label: "Active Terminals", value: "—", desc: "Connected POS terminals", delta: "1 offline", trend: "down", updated: "30 sec ago", icon: TerminalIcon, href: "/terminals", action: "Terminals", accent: "warning" },
+  { label: "Low Stock Items", value: "—", desc: "Need reorder soon", delta: "6 critical", trend: "down", updated: "10 min ago", icon: PackageX, href: "/inventory", action: "Restock", accent: "destructive" },
+  { label: "Close to Expiry", value: "—", desc: "Expiring in next 7 days", delta: "+5", trend: "down", updated: "20 min ago", icon: CalendarClock, href: "/batches", action: "Review", accent: "warning" },
 ];
 
 function StatCard({ c, editing, onRemove }: { c: StatCardData; editing?: boolean; onRemove?: () => void }) {
@@ -99,8 +175,21 @@ const STORAGE_KEY = "baqala_dashboard_visible_cards";
 
 function Dashboard() {
   const [filter, setFilter] = useState<(typeof filters)[number]>("Daily");
+  const [dashData, setDashData] = useState<DashboardMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.getDashboard()
+      .then((d) => { if (!cancelled) { setDashData(d); setLoading(false); } })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const cards = dashData ? buildCards(dashData) : FALLBACK_CARDS;
   const allLabels = cards.map((c) => c.label);
-  const [visible, setVisible] = useState<string[]>(allLabels);
+  const [visible, setVisible] = useState<string[]>(() => FALLBACK_CARDS.map((c) => c.label));
   const [editing, setEditing] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
 
@@ -133,7 +222,7 @@ function Dashboard() {
   const visibleCards = cards.filter((c) => visible.includes(c.label));
 
   return (
-    <PageShell title="Dashboard" subtitle="Live snapshot across 4 branches">
+    <PageShell title="Dashboard" subtitle="Live snapshot across all branches">
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2 -mt-1">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mr-1">Range</span>
@@ -217,19 +306,37 @@ function Dashboard() {
       {/* Universal filter bar */}
       <FilterBar placeholder="Search by item, SKU, branch, cashier…" />
 
-      {/* Stat cards */}
-      {visibleCards.length > 0 ? (
+      {/* Loading skeleton */}
+      {loading && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {visibleCards.map((c) => (
-            <StatCard key={c.label} c={c} editing={editing} onRemove={() => removeCard(c.label)} />
+          {Array.from({ length: 10 }).map((_, i) => (
+            <Card key={i} className="p-5 border-border/60 shadow-card animate-pulse flex flex-col gap-3">
+              <div className="h-10 w-10 rounded-xl bg-muted" />
+              <div className="space-y-2">
+                <div className="h-3 w-24 rounded bg-muted" />
+                <div className="h-8 w-16 rounded bg-muted" />
+                <div className="h-3 w-32 rounded bg-muted" />
+              </div>
+            </Card>
           ))}
         </div>
-      ) : (
-        <Card className="p-8 border-dashed border-border/60 text-center space-y-2">
-          <p className="text-sm font-semibold">No KPI cards visible</p>
-          <p className="text-xs text-muted-foreground">Click "Add / Remove" above to choose cards to display.</p>
-          <Button size="sm" variant="outline" onClick={() => setCustomizeOpen(true)}>Add cards</Button>
-        </Card>
+      )}
+
+      {/* Stat cards */}
+      {!loading && (
+        visibleCards.length > 0 ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {visibleCards.map((c) => (
+              <StatCard key={c.label} c={c} editing={editing} onRemove={() => removeCard(c.label)} />
+            ))}
+          </div>
+        ) : (
+          <Card className="p-8 border-dashed border-border/60 text-center space-y-2">
+            <p className="text-sm font-semibold">No KPI cards visible</p>
+            <p className="text-xs text-muted-foreground">Click "Add / Remove" above to choose cards to display.</p>
+            <Button size="sm" variant="outline" onClick={() => setCustomizeOpen(true)}>Add cards</Button>
+          </Card>
+        )
       )}
 
       {/* Tabbed BI sections (merged from /bi) */}
@@ -248,11 +355,11 @@ function Dashboard() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Widget title="Order Status Summary" link={{ to: "/orders", label: "All orders" }}>
           {[
-            { l: "Pending", v: 24, c: "bg-warning" },
-            { l: "Processing", v: 16, c: "bg-primary" },
-            { l: "Ready", v: 12, c: "bg-primary" },
-            { l: "Delivered", v: 189, c: "bg-success" },
-            { l: "Cancelled", v: 3, c: "bg-destructive" },
+            { l: "Pending", v: dashData?.orders.pending ?? 0, c: "bg-warning" },
+            { l: "Processing", v: dashData?.orders.processing ?? 0, c: "bg-primary" },
+            { l: "Ready", v: dashData?.orders.readyToDeliver ?? 0, c: "bg-primary" },
+            { l: "Delivered", v: dashData?.orders.delivered ?? 0, c: "bg-success" },
+            { l: "Cancelled", v: dashData?.orders.cancelled ?? 0, c: "bg-destructive" },
           ].map((s) => (
             <div key={s.l} className="flex items-center gap-3">
               <span className={cn("h-2 w-2 rounded-full", s.c)} />
@@ -298,17 +405,27 @@ function Dashboard() {
         </Card>
         <Card className="p-5 border-border/60 shadow-card space-y-3">
           <h3 className="text-sm font-semibold">Payment Mix</h3>
-          {[
-            { m: "Cash", v: 58, c: "bg-primary" },
-            { m: "Card", v: 28, c: "bg-success" },
-            { m: "Wallet", v: 11, c: "bg-warning" },
-            { m: "Transfer", v: 3, c: "bg-muted-foreground" },
-          ].map(p => (
-            <div key={p.m}>
-              <div className="flex justify-between text-xs mb-1"><span>{p.m}</span><span className="font-semibold">{p.v}%</span></div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden"><div className={cn("h-full", p.c)} style={{ width: `${p.v}%` }} /></div>
+          {(dashData?.sales.paymentBreakdown ?? []).map(p => (
+            <div key={p.method}>
+              <div className="flex justify-between text-xs mb-1"><span>{p.method}</span><span className="font-semibold">{p.pct}%</span></div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${p.pct}%` }} /></div>
             </div>
           ))}
+          {!dashData && (
+            <>
+              {[
+                { m: "Cash", v: 58, c: "bg-primary" },
+                { m: "Card", v: 28, c: "bg-success" },
+                { m: "Wallet", v: 11, c: "bg-warning" },
+                { m: "Transfer", v: 3, c: "bg-muted-foreground" },
+              ].map(p => (
+                <div key={p.m}>
+                  <div className="flex justify-between text-xs mb-1"><span>{p.m}</span><span className="font-semibold">{p.v}%</span></div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden"><div className={cn("h-full", p.c)} style={{ width: `${p.v}%` }} /></div>
+                </div>
+              ))}
+            </>
+          )}
           <Link to="/bi" className="text-xs text-primary font-semibold inline-flex items-center gap-0.5 pt-1">Open full BI <ArrowRight className="h-3 w-3" /></Link>
         </Card>
       </div>
@@ -316,23 +433,38 @@ function Dashboard() {
       {/* Performance widgets row */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Widget title="Cashier Performance" link={{ to: "/kpi", label: "KPI" }}>
-          {[
-            { n: "Fahad Al-Qahtani", t: "TML-RYD-001", o: 142, s: "ر.س 8,420" },
-            { n: "Mohammed Al-Harbi", t: "TML-RYD-002", o: 128, s: "ر.س 7,180" },
-            { n: "Khalid Al-Otaibi", t: "TML-KHB-001", o: 96, s: "ر.س 5,310" },
-            { n: "Sultan Al-Dossari", t: "TML-JED-001", o: 88, s: "ر.س 4,920" },
-          ].map((r) => (
-            <div key={r.n} className="flex items-center justify-between text-sm">
+          {(dashData?.cashierPerformance ?? []).map((r) => (
+            <div key={r.name} className="flex items-center justify-between text-sm">
               <div className="min-w-0">
-                <p className="font-medium truncate">{r.n}</p>
-                <p className="text-xs text-muted-foreground">{r.t}</p>
+                <p className="font-medium truncate">{r.name}</p>
+                <p className="text-xs text-muted-foreground">{r.status}</p>
               </div>
               <div className="text-right">
-                <p className="font-semibold">{r.s}</p>
-                <p className="text-xs text-muted-foreground">{r.o} orders</p>
+                <p className="font-semibold">{"ر.س " + r.sales.toLocaleString("en-SA", { minimumFractionDigits: 2 })}</p>
               </div>
             </div>
           ))}
+          {!dashData && (
+            <>
+              {[
+                { n: "Fahad Al-Qahtani", t: "TML-RYD-001", o: 142, s: "ر.س 8,420" },
+                { n: "Mohammed Al-Harbi", t: "TML-RYD-002", o: 128, s: "ر.س 7,180" },
+                { n: "Khalid Al-Otaibi", t: "TML-KHB-001", o: 96, s: "ر.س 5,310" },
+                { n: "Sultan Al-Dossari", t: "TML-JED-001", o: 88, s: "ر.س 4,920" },
+              ].map((r) => (
+                <div key={r.n} className="flex items-center justify-between text-sm">
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{r.n}</p>
+                    <p className="text-xs text-muted-foreground">{r.t}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold">{r.s}</p>
+                    <p className="text-xs text-muted-foreground">{r.o} orders</p>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </Widget>
 
         <Widget title="Terminal Performance" link={{ to: "/terminals", label: "Terminals" }}>
@@ -358,43 +490,75 @@ function Dashboard() {
       {/* Alerts row */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Widget title="Low Stock Alerts" link={{ to: "/inventory", label: "Inventory" }}>
-          {[
-            { n: "Sugar 1kg Al Osra", q: 8, b: "Khobar" },
-            { n: "Nadec Milk 2L", q: 18, b: "Olaya" },
-            { n: "Sadia Chicken 1kg", q: 14, b: "Madinah" },
-            { n: "Lay's Classic 75g", q: 6, b: "Jeddah" },
-          ].map((p) => (
-            <div key={p.n} className="flex items-center gap-3">
+          {(dashData?.inventory.lowStockItems ?? []).map((p) => (
+            <div key={p.name} className="flex items-center gap-3">
               <div className="h-8 w-8 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center">
                 <Package className="h-4 w-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{p.n}</p>
-                <p className="text-xs text-muted-foreground">{p.b}</p>
+                <p className="text-sm font-medium truncate">{p.name}</p>
+                <p className="text-xs text-muted-foreground">{p.branch}</p>
               </div>
-              <Badge variant="outline" className="text-destructive border-destructive/30 bg-destructive/10">{p.q} left</Badge>
+              <Badge variant="outline" className="text-destructive border-destructive/30 bg-destructive/10">{p.qty} left</Badge>
             </div>
           ))}
+          {!dashData && (
+            <>
+              {[
+                { n: "Sugar 1kg Al Osra", q: 8, b: "Khobar" },
+                { n: "Nadec Milk 2L", q: 18, b: "Olaya" },
+                { n: "Sadia Chicken 1kg", q: 14, b: "Madinah" },
+                { n: "Lay's Classic 75g", q: 6, b: "Jeddah" },
+              ].map((p) => (
+                <div key={p.n} className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center">
+                    <Package className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{p.n}</p>
+                    <p className="text-xs text-muted-foreground">{p.b}</p>
+                  </div>
+                  <Badge variant="outline" className="text-destructive border-destructive/30 bg-destructive/10">{p.q} left</Badge>
+                </div>
+              ))}
+            </>
+          )}
         </Widget>
 
         <Widget title="Close to Expiry Alerts" link={{ to: "/batches", label: "Batches" }}>
-          {[
-            { n: "Almarai Yogurt 170g", d: 2, b: "Olaya" },
-            { n: "L'usine Croissant", d: 3, b: "Jeddah" },
-            { n: "Al Marai Cheese Slices", d: 5, b: "Olaya" },
-            { n: "Arabic Bread Tamees", d: 1, b: "Khobar" },
-          ].map((p) => (
-            <div key={p.n} className="flex items-center gap-3">
+          {(dashData?.inventory.expiringItems ?? []).map((p) => (
+            <div key={p.name} className="flex items-center gap-3">
               <div className="h-8 w-8 rounded-lg bg-warning/20 text-warning-foreground flex items-center justify-center">
                 <CalendarClock className="h-4 w-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{p.n}</p>
-                <p className="text-xs text-muted-foreground">{p.b}</p>
+                <p className="text-sm font-medium truncate">{p.name}</p>
+                <p className="text-xs text-muted-foreground">{p.branch}</p>
               </div>
-              <Badge variant="outline" className="text-warning-foreground border-warning/40 bg-warning/20">{p.d}d left</Badge>
+              <Badge variant="outline" className="text-warning-foreground border-warning/40 bg-warning/20">{p.daysLeft}d left</Badge>
             </div>
           ))}
+          {!dashData && (
+            <>
+              {[
+                { n: "Almarai Yogurt 170g", d: 2, b: "Olaya" },
+                { n: "L'usine Croissant", d: 3, b: "Jeddah" },
+                { n: "Al Marai Cheese Slices", d: 5, b: "Olaya" },
+                { n: "Arabic Bread Tamees", d: 1, b: "Khobar" },
+              ].map((p) => (
+                <div key={p.n} className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-lg bg-warning/20 text-warning-foreground flex items-center justify-center">
+                    <CalendarClock className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{p.n}</p>
+                    <p className="text-xs text-muted-foreground">{p.b}</p>
+                  </div>
+                  <Badge variant="outline" className="text-warning-foreground border-warning/40 bg-warning/20">{p.d}d left</Badge>
+                </div>
+              ))}
+            </>
+          )}
         </Widget>
       </div>
         </TabsContent>
@@ -402,11 +566,11 @@ function Dashboard() {
         <TabsContent value="orders" className="mt-4 grid gap-4 lg:grid-cols-3">
           <Widget title="Today's order flow" link={{ to: "/orders", label: "All orders" }}>
             {[
-              { l: "Pending", v: 24, c: "bg-warning" },
-              { l: "Processing", v: 16, c: "bg-primary" },
-              { l: "Ready", v: 12, c: "bg-primary" },
-              { l: "Delivered", v: 189, c: "bg-success" },
-              { l: "Cancelled", v: 3, c: "bg-destructive" },
+              { l: "Pending", v: dashData?.orders.pending ?? 0, c: "bg-warning" },
+              { l: "Processing", v: dashData?.orders.processing ?? 0, c: "bg-primary" },
+              { l: "Ready", v: dashData?.orders.readyToDeliver ?? 0, c: "bg-primary" },
+              { l: "Delivered", v: dashData?.orders.delivered ?? 0, c: "bg-success" },
+              { l: "Cancelled", v: dashData?.orders.cancelled ?? 0, c: "bg-destructive" },
             ].map(s => (<div key={s.l} className="flex items-center gap-3"><span className={cn("h-2 w-2 rounded-full", s.c)} /><span className="text-sm flex-1">{s.l}</span><span className="text-sm font-bold tabular-nums">{s.v}</span></div>))}
           </Widget>
           <Widget title="Avg basket & discount impact" link={{ to: "/bi", label: "BI" }}>
@@ -416,9 +580,16 @@ function Dashboard() {
             <Mini label="Online orders" value="58%" tone="success" />
           </Widget>
           <Widget title="Payment method breakdown">
-            {[{m:"Cash",v:58,c:"bg-primary"},{m:"Card",v:28,c:"bg-success"},{m:"Wallet",v:11,c:"bg-warning"},{m:"Transfer",v:3,c:"bg-muted-foreground"}].map(p => (
-              <div key={p.m}><div className="flex justify-between text-xs mb-1"><span>{p.m}</span><span className="font-semibold">{p.v}%</span></div><div className="h-2 rounded-full bg-muted overflow-hidden"><div className={cn("h-full", p.c)} style={{ width: `${p.v}%` }} /></div></div>
+            {(dashData?.sales.paymentBreakdown ?? []).map(p => (
+              <div key={p.method}><div className="flex justify-between text-xs mb-1"><span>{p.method}</span><span className="font-semibold">{p.pct}%</span></div><div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${p.pct}%` }} /></div></div>
             ))}
+            {!dashData && (
+              <>
+                {[{m:"Cash",v:58,c:"bg-primary"},{m:"Card",v:28,c:"bg-success"},{m:"Wallet",v:11,c:"bg-warning"},{m:"Transfer",v:3,c:"bg-muted-foreground"}].map(p => (
+                  <div key={p.m}><div className="flex justify-between text-xs mb-1"><span>{p.m}</span><span className="font-semibold">{p.v}%</span></div><div className="h-2 rounded-full bg-muted overflow-hidden"><div className={cn("h-full", p.c)} style={{ width: `${p.v}%` }} /></div></div>
+                ))}
+              </>
+            )}
           </Widget>
         </TabsContent>
 
@@ -443,9 +614,16 @@ function Dashboard() {
 
         <TabsContent value="cashiers" className="mt-4 grid gap-4 lg:grid-cols-2">
           <Widget title="Cashier performance" link={{to:"/kpi",label:"KPI"}}>
-            {[{n:"Fahad Al-Qahtani",t:"TML-RYD-001",o:142,s:"ر.س 8,420"},{n:"Mohammed Al-Harbi",t:"TML-RYD-002",o:128,s:"ر.س 7,180"},{n:"Khalid Al-Otaibi",t:"TML-KHB-001",o:96,s:"ر.س 5,310"},{n:"Sultan Al-Dossari",t:"TML-JED-001",o:88,s:"ر.س 4,920"}].map(r=>(
-              <div key={r.n} className="flex items-center justify-between text-sm"><div className="min-w-0"><p className="font-medium truncate">{r.n}</p><p className="text-xs text-muted-foreground">{r.t}</p></div><div className="text-right"><p className="font-semibold">{r.s}</p><p className="text-xs text-muted-foreground">{r.o} orders</p></div></div>
+            {(dashData?.cashierPerformance ?? []).map(r=>(
+              <div key={r.name} className="flex items-center justify-between text-sm"><div className="min-w-0"><p className="font-medium truncate">{r.name}</p><p className="text-xs text-muted-foreground">{r.status}</p></div><div className="text-right"><p className="font-semibold">{"ر.س " + r.sales.toLocaleString("en-SA", { minimumFractionDigits: 2 })}</p></div></div>
             ))}
+            {!dashData && (
+              <>
+                {[{n:"Fahad Al-Qahtani",t:"TML-RYD-001",o:142,s:"ر.س 8,420"},{n:"Mohammed Al-Harbi",t:"TML-RYD-002",o:128,s:"ر.س 7,180"},{n:"Khalid Al-Otaibi",t:"TML-KHB-001",o:96,s:"ر.س 5,310"},{n:"Sultan Al-Dossari",t:"TML-JED-001",o:88,s:"ر.س 4,920"}].map(r=>(
+                  <div key={r.n} className="flex items-center justify-between text-sm"><div className="min-w-0"><p className="font-medium truncate">{r.n}</p><p className="text-xs text-muted-foreground">{r.t}</p></div><div className="text-right"><p className="font-semibold">{r.s}</p><p className="text-xs text-muted-foreground">{r.o} orders</p></div></div>
+                ))}
+              </>
+            )}
           </Widget>
           <Widget title="Product scan KPI">
             <Mini label="Items scanned (today)" value="2,408" />
@@ -462,16 +640,23 @@ function Dashboard() {
             ))}
           </Widget>
           <Widget title="Branch performance" link={{to:"/branches",label:"Branches"}}>
-            {[{b:"Olaya — Riyadh",s:"ر.س 22,140",pct:92},{b:"Khobar — Eastern",s:"ر.س 12,820",pct:64},{b:"Jeddah — Western",s:"ر.س 9,140",pct:54},{b:"Madinah — Western",s:"ر.س 4,820",pct:38}].map(r=>(
-              <div key={r.b}><div className="flex justify-between text-xs mb-1"><span className="font-medium truncate">{r.b}</span><span className="font-semibold">{r.s}</span></div><div className="h-1.5 rounded-full bg-muted overflow-hidden"><div className="h-full gradient-primary" style={{width:`${r.pct}%`}}/></div></div>
+            {(dashData?.branchPerformance ?? []).map(r=>(
+              <div key={r.branch}><div className="flex justify-between text-xs mb-1"><span className="font-medium truncate">{r.branch}</span><span className="font-semibold">{"ر.س " + r.sales.toLocaleString("en-SA", { minimumFractionDigits: 2 })}</span></div><div className="h-1.5 rounded-full bg-muted overflow-hidden"><div className="h-full gradient-primary" style={{width:`${Math.min(100, (r.sales / (dashData?.sales.totalToday || 1)) * 100)}%`}}/></div></div>
             ))}
+            {!dashData && (
+              <>
+                {[{b:"Olaya — Riyadh",s:"ر.س 22,140",pct:92},{b:"Khobar — Eastern",s:"ر.س 12,820",pct:64},{b:"Jeddah — Western",s:"ر.س 9,140",pct:54},{b:"Madinah — Western",s:"ر.س 4,820",pct:38}].map(r=>(
+                  <div key={r.b}><div className="flex justify-between text-xs mb-1"><span className="font-medium truncate">{r.b}</span><span className="font-semibold">{r.s}</span></div><div className="h-1.5 rounded-full bg-muted overflow-hidden"><div className="h-full gradient-primary" style={{width:`${r.pct}%`}}/></div></div>
+                ))}
+              </>
+            )}
           </Widget>
         </TabsContent>
 
         <TabsContent value="returns" className="mt-4 grid gap-4 lg:grid-cols-3">
           <Widget title="Returns summary" link={{to:"/returns",label:"Returns"}}>
-            <Mini label="Returns today" value="8" />
-            <Mini label="Refunded amount" value="ر.س 410" tone="warning" />
+            <Mini label="Returns today" value={dashData ? String(dashData.returns.count) : "8"} />
+            <Mini label="Refunded amount" value={dashData ? "ر.س " + dashData.returns.refundedAmount.toLocaleString("en-SA", { minimumFractionDigits: 2 }) : "ر.س 410"} tone="warning" />
             <Mini label="Items restocked" value="14" tone="success" />
             <Mini label="Pending approval" value="3" tone="destructive" />
           </Widget>

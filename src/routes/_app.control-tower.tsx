@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState, type ReactElement } from "react";
+import { useMemo, useState, useEffect, type ReactElement } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,120 +42,17 @@ import {
   Sparkles,
   ShieldCheck,
 } from "lucide-react";
+import { api, type Branch, type Terminal, type User } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/control-tower")({
   component: ControlTower,
 });
 
-/* ──────────────────────────── pseudo data ──────────────────────────── */
-
-type Status = "active" | "syncing" | "offline" | "idle";
-type DeviceType = "POS" | "Mobile POS";
-
-type Employee = {
-  id: string;
-  name: string;
-  role: string;
-  loggedIn: boolean;
-  loginTime?: string;
-  logoutTime?: string;
-  device: DeviceType;
-  terminalId?: string;
-  alert?: "none" | "no-logout" | "multi-session" | "device-switched";
-};
-
-type Terminal = {
-  id: string;
-  type: DeviceType;
-  status: Status;
-  lastSync: string;
-  sessionMins: number;
-  employeeId?: string;
-  alert?: "unassigned-active" | "stale";
-};
-
-type Branch = {
-  id: string;
-  name: string;
-  location: string;
-  manager: string;
-  terminals: Terminal[];
-  employees: Employee[];
-};
-
-const BRANCHES: Branch[] = [
-  {
-    id: "ryd-central",
-    name: "Riyadh Central Bakala",
-    location: "Olaya, Riyadh",
-    manager: "Abdullah Al-Faisal",
-    employees: [
-      { id: "E-101", name: "Fahad Al-Qahtani", role: "Cashier", loggedIn: true, loginTime: "07:55", device: "POS", terminalId: "TML-RYD-001" },
-      { id: "E-102", name: "Mohammed Al-Harbi", role: "Cashier", loggedIn: true, loginTime: "08:10", device: "POS", terminalId: "TML-RYD-002" },
-      { id: "E-103", name: "Saad Al-Shehri", role: "Senior Cashier", loggedIn: true, loginTime: "07:40", device: "Mobile POS", terminalId: "MPOS-RYD-001", alert: "multi-session" },
-      { id: "E-104", name: "Yousef Al-Ghamdi", role: "Supervisor", loggedIn: false, logoutTime: "—", device: "POS", alert: "no-logout" },
-    ],
-    terminals: [
-      { id: "TML-RYD-001", type: "POS", status: "active", lastSync: "12s ago", sessionMins: 184, employeeId: "E-101" },
-      { id: "TML-RYD-002", type: "POS", status: "syncing", lastSync: "now", sessionMins: 142, employeeId: "E-102" },
-      { id: "TML-RYD-003", type: "POS", status: "idle", lastSync: "6m ago", sessionMins: 0 },
-      { id: "MPOS-RYD-001", type: "Mobile POS", status: "active", lastSync: "8s ago", sessionMins: 96, employeeId: "E-103" },
-      { id: "MPOS-RYD-002", type: "Mobile POS", status: "offline", lastSync: "22m ago", sessionMins: 0, alert: "stale" },
-    ],
-  },
-  {
-    id: "jed-mart-02",
-    name: "Jeddah Mart 02",
-    location: "Al Hamra, Jeddah",
-    manager: "Sultan Al-Dossari",
-    employees: [
-      { id: "E-201", name: "Sultan Al-Dossari", role: "Manager", loggedIn: true, loginTime: "09:00", device: "POS", terminalId: "TML-JED-001" },
-      { id: "E-202", name: "Khalid Al-Otaibi", role: "Cashier", loggedIn: true, loginTime: "08:30", device: "POS", terminalId: "TML-JED-002" },
-      { id: "E-203", name: "Nawaf Al-Mutairi", role: "Cashier", loggedIn: true, loginTime: "09:15", device: "Mobile POS", terminalId: "MPOS-JED-001" },
-    ],
-    terminals: [
-      { id: "TML-JED-001", type: "POS", status: "active", lastSync: "4s ago", sessionMins: 132, employeeId: "E-201" },
-      { id: "TML-JED-002", type: "POS", status: "active", lastSync: "11s ago", sessionMins: 168, employeeId: "E-202" },
-      { id: "TML-JED-003", type: "POS", status: "syncing", lastSync: "now", sessionMins: 24, alert: "unassigned-active" },
-      { id: "MPOS-JED-001", type: "Mobile POS", status: "active", lastSync: "5s ago", sessionMins: 78, employeeId: "E-203" },
-    ],
-  },
-  {
-    id: "dmm-express",
-    name: "Dammam Express Bakala",
-    location: "Al Shati, Dammam",
-    manager: "Bandar Al-Anzi",
-    employees: [
-      { id: "E-301", name: "Bandar Al-Anzi", role: "Manager", loggedIn: true, loginTime: "10:15", device: "POS", terminalId: "TML-DMM-001" },
-      { id: "E-302", name: "Turki Al-Rashid", role: "Cashier", loggedIn: true, loginTime: "10:20", device: "Mobile POS", terminalId: "MPOS-DMM-002" },
-    ],
-    terminals: [
-      { id: "TML-DMM-001", type: "POS", status: "active", lastSync: "9s ago", sessionMins: 72, employeeId: "E-301" },
-      { id: "TML-DMM-002", type: "POS", status: "offline", lastSync: "1h ago", sessionMins: 0, alert: "stale" },
-      { id: "MPOS-DMM-002", type: "Mobile POS", status: "syncing", lastSync: "now", sessionMins: 36, employeeId: "E-302" },
-    ],
-  },
-  {
-    id: "mak-neighborhood",
-    name: "Makkah Neighborhood Mart",
-    location: "Al Aziziyah, Makkah",
-    manager: "Rakan Al-Subaie",
-    employees: [
-      { id: "E-401", name: "Rakan Al-Subaie", role: "Manager", loggedIn: true, loginTime: "07:00", device: "POS", terminalId: "TML-MAK-001" },
-      { id: "E-402", name: "Hassan Al-Zahrani", role: "Cashier", loggedIn: true, loginTime: "07:05", device: "POS", terminalId: "TML-MAK-002" },
-      { id: "E-403", name: "Majed Al-Balawi", role: "Cashier", loggedIn: false, device: "Mobile POS" },
-    ],
-    terminals: [
-      { id: "TML-MAK-001", type: "POS", status: "active", lastSync: "3s ago", sessionMins: 240, employeeId: "E-401" },
-      { id: "TML-MAK-002", type: "POS", status: "active", lastSync: "6s ago", sessionMins: 235, employeeId: "E-402" },
-      { id: "MPOS-MAK-001", type: "Mobile POS", status: "idle", lastSync: "11m ago", sessionMins: 0 },
-    ],
-  },
-];
-
 /* ──────────────────────────── helpers ──────────────────────────── */
 
-const STATUS_META: Record<Status, { label: string; dot: string; chip: string; ring: string }> = {
+type TerminalStatus = "active" | "syncing" | "offline" | "idle" | string;
+
+const STATUS_META: Record<string, { label: string; dot: string; chip: string; ring: string }> = {
   active: {
     label: "Active",
     dot: "bg-success",
@@ -182,20 +79,25 @@ const STATUS_META: Record<Status, { label: string; dot: string; chip: string; ri
   },
 };
 
-function StatusPill({ status }: { status: Status }) {
-  const m = STATUS_META[status];
+function getStatusMeta(status: string) {
+  return STATUS_META[status] ?? STATUS_META["idle"];
+}
+
+function StatusPill({ status }: { status: string }) {
+  const m = getStatusMeta(status);
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${m.chip}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${m.dot} ${status === "active" || status === "syncing" ? "animate-pulse" : ""}`} />
-      {m.label}
+      {m.label ?? status}
     </span>
   );
 }
 
-function branchHealth(b: Branch): "Fully Operational" | "Partially Active" | "Attention Required" | "Offline Issue" {
-  const off = b.terminals.filter((t) => t.status === "offline").length;
-  const total = b.terminals.length;
-  if (off === 0) return "Fully Operational";
+function branchHealth(branchId: string, terminals: Terminal[]): "Fully Operational" | "Partially Active" | "Attention Required" | "Offline Issue" {
+  const bt = terminals.filter((t) => t.branchId === branchId);
+  const off = bt.filter((t) => t.status === "offline").length;
+  const total = bt.length;
+  if (total === 0 || off === 0) return "Fully Operational";
   if (off === total) return "Offline Issue";
   if (off >= Math.ceil(total / 2)) return "Attention Required";
   return "Partially Active";
@@ -217,69 +119,74 @@ function ControlTower() {
   const [tab, setTab] = useState("map");
   const [branchFilter, setBranchFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [deviceFilter, setDeviceFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
 
-  const totals = useMemo(() => {
-    const terms = BRANCHES.flatMap((b) => b.terminals);
-    const emps = BRANCHES.flatMap((b) => b.employees);
-    return {
-      branches: BRANCHES.length,
-      active: terms.filter((t) => t.status === "active").length,
-      syncing: terms.filter((t) => t.status === "syncing").length,
-      offline: terms.filter((t) => t.status === "offline").length,
-      idle: terms.filter((t) => t.status === "idle").length,
-      loggedIn: emps.filter((e) => e.loggedIn).length,
-      pos: terms.filter((t) => t.type === "POS" && t.status !== "offline" && t.status !== "idle").length,
-      mpos: terms.filter((t) => t.type === "Mobile POS" && t.status !== "offline" && t.status !== "idle").length,
-    };
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([api.getBranches(), api.getTerminals(), api.getUsers()])
+      .then(([b, t, u]) => {
+        setBranches(b);
+        setTerminals(t);
+        setUsers(u);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
-  const ALL_CARDS = [
-    "Branches", "Active Terminals", "Syncing", "Offline",
-    "Idle", "Employees Logged In", "POS In Use", "Mobile POS In Use",
-  ];
+  const totals = useMemo(() => ({
+    activeBranches: branches.filter((b) => b.status === "active").length,
+    activeTerminals: terminals.filter((t) => t.status === "active").length,
+    staffOnline: users.filter((u) => u.status === "active").length,
+    alerts: terminals.filter((t) => t.status === "offline").length,
+  }), [branches, terminals, users]);
+
+  const ALL_CARDS = ["Active Branches", "Active Terminals", "Staff Online", "Alerts"];
   const cards = useCustomizableCards("baqala_control_tower_cards", ALL_CARDS);
 
   const cardMap: Record<string, ReactElement> = {
-    "Branches": <MetricCard label="Branches" value={String(totals.branches)} icon={Building2} accent="primary" hint="all KSA" editing={cards.editing} onRemove={() => cards.remove("Branches")} />,
-    "Active Terminals": <MetricCard label="Active Terminals" value={String(totals.active)} icon={Activity} accent="success" delta="+3" trend="up" editing={cards.editing} onRemove={() => cards.remove("Active Terminals")} />,
-    "Syncing": <MetricCard label="Syncing" value={String(totals.syncing)} icon={RefreshCw} accent="primary" hint="live sync" editing={cards.editing} onRemove={() => cards.remove("Syncing")} />,
-    "Offline": <MetricCard label="Offline" value={String(totals.offline)} icon={WifiOff} accent="destructive" delta="−1" trend="down" editing={cards.editing} onRemove={() => cards.remove("Offline")} />,
-    "Idle": <MetricCard label="Idle" value={String(totals.idle)} icon={CircleDot} hint="no activity" editing={cards.editing} onRemove={() => cards.remove("Idle")} />,
-    "Employees Logged In": <MetricCard label="Employees Logged In" value={String(totals.loggedIn)} icon={Users} accent="primary" editing={cards.editing} onRemove={() => cards.remove("Employees Logged In")} />,
-    "POS In Use": <MetricCard label="POS In Use" value={String(totals.pos)} icon={ScanBarcode} accent="success" editing={cards.editing} onRemove={() => cards.remove("POS In Use")} />,
-    "Mobile POS In Use": <MetricCard label="Mobile POS In Use" value={String(totals.mpos)} icon={Smartphone} accent="success" editing={cards.editing} onRemove={() => cards.remove("Mobile POS In Use")} />,
+    "Active Branches": <MetricCard label="Active Branches" value={String(totals.activeBranches)} icon={Building2} accent="primary" hint="all KSA" editing={cards.editing} onRemove={() => cards.remove("Active Branches")} />,
+    "Active Terminals": <MetricCard label="Active Terminals" value={String(totals.activeTerminals)} icon={Activity} accent="success" editing={cards.editing} onRemove={() => cards.remove("Active Terminals")} />,
+    "Staff Online": <MetricCard label="Staff Online" value={String(totals.staffOnline)} icon={Users} accent="primary" editing={cards.editing} onRemove={() => cards.remove("Staff Online")} />,
+    "Alerts": <MetricCard label="Alerts" value={String(totals.alerts)} icon={WifiOff} accent="destructive" editing={cards.editing} onRemove={() => cards.remove("Alerts")} />,
   };
 
   const filteredBranches = useMemo(() => {
-    return BRANCHES.filter((b) => branchFilter === "all" || b.id === branchFilter);
-  }, [branchFilter]);
+    return branches.filter((b) => branchFilter === "all" || b.id === branchFilter);
+  }, [branches, branchFilter]);
 
-  const filteredEmployees = useMemo(() => {
+  const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return BRANCHES.flatMap((b) =>
-      b.employees.map((e) => ({ ...e, branch: b.name, branchId: b.id })),
-    ).filter((e) => {
-      if (branchFilter !== "all" && e.branchId !== branchFilter) return false;
-      if (deviceFilter !== "all" && e.device !== deviceFilter) return false;
-      if (statusFilter === "logged-in" && !e.loggedIn) return false;
-      if (statusFilter === "logged-out" && e.loggedIn) return false;
-      if (q && !`${e.name} ${e.id} ${e.role}`.toLowerCase().includes(q)) return false;
+    return users.filter((u) => {
+      if (branchFilter !== "all" && u.branchId !== branchFilter) return false;
+      if (statusFilter === "active" && u.status !== "active") return false;
+      if (statusFilter === "inactive" && u.status !== "inactive") return false;
+      if (q && !`${u.fullName} ${u.email} ${u.roleName ?? ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [branchFilter, deviceFilter, statusFilter, search]);
+  }, [users, branchFilter, statusFilter, search]);
 
   const filteredTerminals = useMemo(() => {
-    return BRANCHES.flatMap((b) =>
-      b.terminals.map((t) => ({ ...t, branch: b.name, branchId: b.id, emp: b.employees.find((e) => e.id === t.employeeId) })),
-    ).filter((t) => {
+    return terminals.filter((t) => {
       if (branchFilter !== "all" && t.branchId !== branchFilter) return false;
-      if (deviceFilter !== "all" && t.type !== deviceFilter) return false;
-      if (statusFilter !== "all" && statusFilter !== "logged-in" && statusFilter !== "logged-out" && t.status !== statusFilter) return false;
+      if (statusFilter !== "all" && statusFilter !== "active" && statusFilter !== "inactive" && t.status !== statusFilter) return false;
       return true;
     });
-  }, [branchFilter, deviceFilter, statusFilter]);
+  }, [terminals, branchFilter, statusFilter]);
+
+  if (loading) {
+    return (
+      <PageShell title="Operations Visibility Center" subtitle="Live branch · terminal · workforce control tower">
+        <div className="flex items-center justify-center h-64 text-muted-foreground">
+          <RefreshCw className="h-6 w-6 animate-spin mr-2" /> Loading live data…
+        </div>
+      </PageShell>
+    );
+  }
 
   return (
     <PageShell
@@ -289,9 +196,17 @@ function ControlTower() {
         <div className="flex items-center gap-2">
           {cards.Controls}
           <span className="inline-flex items-center gap-2 rounded-full border border-success/30 bg-success/10 px-3 py-1 text-xs font-semibold text-success">
-            <span className="h-2 w-2 rounded-full bg-success animate-pulse" /> Live · updated 4s ago
+            <span className="h-2 w-2 rounded-full bg-success animate-pulse" /> Live
           </span>
-          <Button variant="outline" size="sm" className="gap-1.5"><RefreshCw className="h-3.5 w-3.5" />Refresh</Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
+            setLoading(true);
+            Promise.all([api.getBranches(), api.getTerminals(), api.getUsers()])
+              .then(([b, t, u]) => { setBranches(b); setTerminals(t); setUsers(u); })
+              .catch(() => {})
+              .finally(() => setLoading(false));
+          }}>
+            <RefreshCw className="h-3.5 w-3.5" />Refresh
+          </Button>
         </div>
       }
     >
@@ -311,14 +226,14 @@ function ControlTower() {
                 <Sparkles className="h-3.5 w-3.5" /> Live Control Tower
               </div>
               <h2 className="mt-1 text-2xl md:text-3xl font-bold tracking-tight">All systems in view</h2>
-              <p className="text-sm text-white/80 mt-0.5">{totals.branches} branches · {totals.active + totals.syncing} live terminals · {totals.loggedIn} employees on shift</p>
+              <p className="text-sm text-white/80 mt-0.5">{branches.length} branches · {totals.activeTerminals} live terminals · {totals.staffOnline} staff online</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <HeroPill icon={ShieldCheck} label="Uptime" value="99.8%" />
-            <HeroPill icon={Activity} label="Active" value={String(totals.active)} />
-            <HeroPill icon={WifiOff} label="Offline" value={String(totals.offline)} tone="danger" />
-            <HeroPill icon={Users} label="On Shift" value={String(totals.loggedIn)} />
+            <HeroPill icon={ShieldCheck} label="Branches" value={String(totals.activeBranches)} />
+            <HeroPill icon={Activity} label="Active" value={String(totals.activeTerminals)} />
+            <HeroPill icon={WifiOff} label="Offline" value={String(totals.alerts)} tone="danger" />
+            <HeroPill icon={Users} label="Online" value={String(totals.staffOnline)} />
           </div>
         </div>
       </div>
@@ -329,7 +244,7 @@ function ControlTower() {
           <p className="text-sm text-muted-foreground">No KPI cards visible. Click <span className="font-semibold">Add / Remove</span> to add some back.</p>
         </Card>
       ) : (
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           {ALL_CARDS.filter(cards.isVisible).map((label) => (
             <div key={label}>{cardMap[label]}</div>
           ))}
@@ -344,7 +259,7 @@ function ControlTower() {
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search employee, terminal, branch…"
+              placeholder="Search user, terminal, branch…"
               className="pl-9 h-9 bg-muted/40 border-transparent focus-visible:bg-card"
             />
           </div>
@@ -352,7 +267,7 @@ function ControlTower() {
             <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Branch" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Branches</SelectItem>
-              {BRANCHES.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -363,16 +278,7 @@ function ControlTower() {
               <SelectItem value="syncing">Syncing</SelectItem>
               <SelectItem value="offline">Offline</SelectItem>
               <SelectItem value="idle">Idle</SelectItem>
-              <SelectItem value="logged-in">Logged In</SelectItem>
-              <SelectItem value="logged-out">Logged Out</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={deviceFilter} onValueChange={setDeviceFilter}>
-            <SelectTrigger className="h-9 w-[150px]"><SelectValue placeholder="Device" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Devices</SelectItem>
-              <SelectItem value="POS">POS</SelectItem>
-              <SelectItem value="Mobile POS">Mobile POS</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -383,22 +289,26 @@ function ControlTower() {
           <TabsTrigger value="map">Live Map</TabsTrigger>
           <TabsTrigger value="branches">Branches</TabsTrigger>
           <TabsTrigger value="terminals">Terminals</TabsTrigger>
-          <TabsTrigger value="employees">Employees</TabsTrigger>
+          <TabsTrigger value="staff">Staff</TabsTrigger>
           <TabsTrigger value="alerts">Alerts</TabsTrigger>
         </TabsList>
 
         {/* ── MAP ── */}
         <TabsContent value="map" className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-2">
-            {filteredBranches.map((b) => <BranchDiagram key={b.id} branch={b} />)}
+            {filteredBranches.map((b) => (
+              <BranchDiagram key={b.id} branch={b} terminals={terminals.filter((t) => t.branchId === b.id)} users={users.filter((u) => u.branchId === b.id)} />
+            ))}
           </div>
-          <MiniInsights />
+          <MiniInsights branches={branches} terminals={terminals} users={users} />
         </TabsContent>
 
         {/* ── BRANCHES ── */}
         <TabsContent value="branches">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {filteredBranches.map((b) => <BranchCard key={b.id} branch={b} />)}
+            {filteredBranches.map((b) => (
+              <BranchCard key={b.id} branch={b} terminals={terminals.filter((t) => t.branchId === b.id)} users={users.filter((u) => u.branchId === b.id)} />
+            ))}
           </div>
         </TabsContent>
 
@@ -411,43 +321,33 @@ function ControlTower() {
                   <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
                     <th className="px-4 py-3 font-semibold">Terminal</th>
                     <th className="px-4 py-3 font-semibold">Branch</th>
-                    <th className="px-4 py-3 font-semibold">Type</th>
-                    <th className="px-4 py-3 font-semibold">Current Employee</th>
+                    <th className="px-4 py-3 font-semibold">Name</th>
+                    <th className="px-4 py-3 font-semibold">Assigned Cashier</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
                     <th className="px-4 py-3 font-semibold">Last Sync</th>
-                    <th className="px-4 py-3 font-semibold">Session</th>
                     <th className="px-4 py-3 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredTerminals.map((t) => (
                     <tr key={t.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
-                      <td className="px-4 py-3 font-semibold tabular-nums">{t.id}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{t.branch}</td>
+                      <td className="px-4 py-3 font-semibold tabular-nums">{t.terminalCode}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{t.branch?.name ?? branches.find((b) => b.id === t.branchId)?.name ?? "—"}</td>
+                      <td className="px-4 py-3 text-xs">{t.name}</td>
                       <td className="px-4 py-3">
-                        <Badge variant="outline" className="gap-1 font-normal">
-                          {t.type === "POS" ? <ScanBarcode className="h-3 w-3" /> : <Smartphone className="h-3 w-3" />}
-                          {t.type}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        {t.emp ? (
+                        {t.assignedCashier ? (
                           <div className="flex items-center gap-2">
                             <div className="h-7 w-7 rounded-full gradient-primary flex items-center justify-center text-primary-foreground text-[10px] font-bold">
-                              {t.emp.name.split(" ").map((p) => p[0]).slice(0, 2).join("")}
+                              {t.assignedCashier.fullName.split(" ").map((p) => p[0]).slice(0, 2).join("")}
                             </div>
-                            <div className="leading-tight">
-                              <div className="font-medium text-xs">{t.emp.name}</div>
-                              <div className="text-[10px] text-muted-foreground">{t.emp.role}</div>
-                            </div>
+                            <span className="text-xs font-medium">{t.assignedCashier.fullName}</span>
                           </div>
                         ) : (
                           <span className="text-xs text-muted-foreground italic">— unassigned —</span>
                         )}
                       </td>
                       <td className="px-4 py-3"><StatusPill status={t.status} /></td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{t.lastSync}</td>
-                      <td className="px-4 py-3 text-xs tabular-nums">{t.sessionMins > 0 ? `${Math.floor(t.sessionMins / 60)}h ${t.sessionMins % 60}m` : "—"}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{t.lastSync ?? "—"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
                           <Button size="sm" variant="ghost" className="h-7 px-2"><Eye className="h-3.5 w-3.5" /></Button>
@@ -457,71 +357,66 @@ function ControlTower() {
                       </td>
                     </tr>
                   ))}
+                  {filteredTerminals.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">No terminals found.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </Card>
         </TabsContent>
 
-        {/* ── EMPLOYEES ── */}
-        <TabsContent value="employees">
+        {/* ── STAFF ── */}
+        <TabsContent value="staff">
           <Card className="overflow-hidden border-border/60 shadow-card">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="px-4 py-3 font-semibold">Employee</th>
+                    <th className="px-4 py-3 font-semibold">User</th>
                     <th className="px-4 py-3 font-semibold">Branch</th>
-                    <th className="px-4 py-3 font-semibold">Device</th>
-                    <th className="px-4 py-3 font-semibold">Terminal</th>
-                    <th className="px-4 py-3 font-semibold">Login</th>
+                    <th className="px-4 py-3 font-semibold">Role</th>
+                    <th className="px-4 py-3 font-semibold">Last Login</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredEmployees.map((e) => (
-                    <tr key={e.id + e.branchId} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
+                  {filteredUsers.map((u) => (
+                    <tr key={u.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <div className="h-8 w-8 rounded-full gradient-primary flex items-center justify-center text-primary-foreground text-xs font-bold">
-                            {e.name.split(" ").map((p) => p[0]).slice(0, 2).join("")}
+                            {u.fullName.split(" ").map((p) => p[0]).slice(0, 2).join("")}
                           </div>
                           <div>
-                            <div className="font-medium text-xs">{e.name}</div>
-                            <div className="text-[10px] text-muted-foreground">{e.id} · {e.role}</div>
+                            <div className="font-medium text-xs">{u.fullName}</div>
+                            <div className="text-[10px] text-muted-foreground">{u.email}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">{e.branch}</td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs">{u.branchName ?? branches.find((b) => b.id === u.branchId)?.name ?? "—"}</td>
+                      <td className="px-4 py-3 text-xs">{u.roleName ?? "—"}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{u.lastLogin ? new Date(u.lastLogin).toLocaleString() : "—"}</td>
                       <td className="px-4 py-3">
-                        <Badge variant="outline" className="gap-1 font-normal">
-                          {e.device === "POS" ? <ScanBarcode className="h-3 w-3" /> : <Smartphone className="h-3 w-3" />}
-                          {e.device}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-xs tabular-nums">{e.terminalId ?? "—"}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{e.loginTime ?? "—"}</td>
-                      <td className="px-4 py-3">
-                        {e.alert === "no-logout" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">
-                            <AlertTriangle className="h-3 w-3" /> Action Required
-                          </span>
-                        ) : e.alert === "multi-session" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/15 px-2 py-0.5 text-[10px] font-semibold text-warning-foreground">
-                            <Zap className="h-3 w-3" /> Multiple Sessions
-                          </span>
-                        ) : e.loggedIn ? (
+                        {u.status === "active" ? (
                           <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
-                            <LogIn className="h-3 w-3" /> Active Session
+                            <LogIn className="h-3 w-3" /> Active
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                            <LogOut className="h-3 w-3" /> Signed Off
+                            <LogOut className="h-3 w-3" /> Inactive
                           </span>
                         )}
                       </td>
                     </tr>
                   ))}
+                  {filteredUsers.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">No staff found.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -530,7 +425,7 @@ function ControlTower() {
 
         {/* ── ALERTS ── */}
         <TabsContent value="alerts">
-          <AlertsPanel />
+          <AlertsPanel terminals={terminals} />
         </TabsContent>
       </Tabs>
     </PageShell>
@@ -551,9 +446,8 @@ function HeroPill({ icon: Icon, label, value, tone }: { icon: typeof Radio; labe
 
 /* ──────────────────────────── branch diagram ──────────────────────────── */
 
-function BranchDiagram({ branch }: { branch: Branch }) {
-  const health = branchHealth(branch);
-  const loggedIn = branch.employees.filter((e) => e.loggedIn).length;
+function BranchDiagram({ branch, terminals, users }: { branch: Branch; terminals: Terminal[]; users: User[] }) {
+  const health = branchHealth(branch.id, terminals);
   return (
     <Card className="relative overflow-hidden border-border/60 shadow-card hover:shadow-elegant transition-all">
       <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-primary/5" />
@@ -567,7 +461,7 @@ function BranchDiagram({ branch }: { branch: Branch }) {
               <h3 className="font-bold text-sm">{branch.name}</h3>
               <span className={healthChip(health)}>{health}</span>
             </div>
-            <p className="text-[11px] text-muted-foreground">{branch.location} · {branch.manager}</p>
+            <p className="text-[11px] text-muted-foreground">{branch.city ?? "—"} · {branch.branchCode}</p>
           </div>
         </div>
         <Button asChild size="sm" variant="outline" className="gap-1.5">
@@ -578,70 +472,64 @@ function BranchDiagram({ branch }: { branch: Branch }) {
       </div>
 
       <div className="relative p-5">
-        {/* mini stats */}
-        <div className="grid grid-cols-4 gap-2 mb-5">
-          <MiniStat label="Terminals" value={branch.terminals.length} />
-          <MiniStat label="Working" value={loggedIn} />
-          <MiniStat label="POS" value={branch.terminals.filter((t) => t.type === "POS").length} />
-          <MiniStat label="MPOS" value={branch.terminals.filter((t) => t.type === "Mobile POS").length} />
+        <div className="grid grid-cols-3 gap-2 mb-5">
+          <MiniStat label="Terminals" value={terminals.length} />
+          <MiniStat label="Active" value={terminals.filter((t) => t.status === "active").length} />
+          <MiniStat label="Staff" value={users.length} />
         </div>
 
-        {/* connection diagram */}
-        <div className="relative">
-          <div className="space-y-3">
-            {branch.terminals.map((t) => {
-              const emp = branch.employees.find((e) => e.id === t.employeeId);
-              const meta = STATUS_META[t.status];
-              return (
-                <div key={t.id} className="relative flex items-center gap-3">
-                  {/* terminal node */}
-                  <div className={`relative flex items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2 min-w-[170px] ring-1 ${meta.ring}`}>
-                    {(t.status === "active" || t.status === "syncing") && (
-                      <span className={`absolute -inset-px rounded-xl ${meta.dot} opacity-10 animate-pulse pointer-events-none`} />
-                    )}
-                    <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${t.type === "POS" ? "bg-primary/10 text-primary" : "bg-accent/40 text-foreground"}`}>
-                      {t.type === "POS" ? <ScanBarcode className="h-4 w-4" /> : <Smartphone className="h-4 w-4" />}
-                    </div>
-                    <div className="leading-tight">
-                      <div className="text-xs font-semibold tabular-nums">{t.id}</div>
-                      <StatusPill status={t.status} />
-                    </div>
+        <div className="space-y-3">
+          {terminals.map((t) => {
+            const meta = getStatusMeta(t.status);
+            return (
+              <div key={t.id} className="relative flex items-center gap-3">
+                <div className={`relative flex items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2 min-w-[170px] ring-1 ${meta.ring}`}>
+                  {(t.status === "active" || t.status === "syncing") && (
+                    <span className={`absolute -inset-px rounded-xl ${meta.dot} opacity-10 animate-pulse pointer-events-none`} />
+                  )}
+                  <div className="h-8 w-8 rounded-lg flex items-center justify-center bg-primary/10 text-primary">
+                    <ScanBarcode className="h-4 w-4" />
                   </div>
-
-                  {/* connector */}
-                  <div className="flex-1 relative h-px">
-                    <div className="absolute inset-0 border-t border-dashed border-border" />
-                    {(t.status === "active" || t.status === "syncing") && (
-                      <span
-                        className={`absolute top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full ${meta.dot} shadow-[0_0_8px_currentColor] animate-[ping_1.6s_ease-in-out_infinite]`}
-                        style={{ left: "30%" }}
-                      />
-                    )}
+                  <div className="leading-tight">
+                    <div className="text-xs font-semibold tabular-nums">{t.terminalCode}</div>
+                    <StatusPill status={t.status} />
                   </div>
+                </div>
 
-                  {/* employee node */}
-                  {emp ? (
-                    <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 min-w-[180px]">
-                      <div className="h-8 w-8 rounded-full gradient-primary flex items-center justify-center text-primary-foreground text-[10px] font-bold">
-                        {emp.name.split(" ").map((p) => p[0]).slice(0, 2).join("")}
-                      </div>
-                      <div className="leading-tight min-w-0">
-                        <div className="text-xs font-semibold truncate">{emp.name}</div>
-                        <div className="text-[10px] text-muted-foreground">{emp.role} · {emp.loginTime ?? "—"}</div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 rounded-xl border border-dashed border-warning/40 bg-warning/5 px-3 py-2 min-w-[180px]">
-                      <AlertTriangle className="h-4 w-4 text-warning-foreground" />
-                      <div className="text-[11px] text-warning-foreground font-medium">
-                        {t.status === "active" ? "Unassigned Active" : "No employee"}
-                      </div>
-                    </div>
+                <div className="flex-1 relative h-px">
+                  <div className="absolute inset-0 border-t border-dashed border-border" />
+                  {(t.status === "active" || t.status === "syncing") && (
+                    <span
+                      className={`absolute top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full ${meta.dot} shadow-[0_0_8px_currentColor] animate-[ping_1.6s_ease-in-out_infinite]`}
+                      style={{ left: "30%" }}
+                    />
                   )}
                 </div>
-              );
-            })}
-          </div>
+
+                {t.assignedCashier ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 min-w-[180px]">
+                    <div className="h-8 w-8 rounded-full gradient-primary flex items-center justify-center text-primary-foreground text-[10px] font-bold">
+                      {t.assignedCashier.fullName.split(" ").map((p) => p[0]).slice(0, 2).join("")}
+                    </div>
+                    <div className="leading-tight min-w-0">
+                      <div className="text-xs font-semibold truncate">{t.assignedCashier.fullName}</div>
+                      <div className="text-[10px] text-muted-foreground">{t.name}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-xl border border-dashed border-warning/40 bg-warning/5 px-3 py-2 min-w-[180px]">
+                    <AlertTriangle className="h-4 w-4 text-warning-foreground" />
+                    <div className="text-[11px] text-warning-foreground font-medium">
+                      {t.status === "active" ? "Unassigned Active" : "No cashier"}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {terminals.length === 0 && (
+            <p className="text-xs text-muted-foreground italic">No terminals for this branch.</p>
+          )}
         </div>
       </div>
     </Card>
@@ -659,11 +547,10 @@ function MiniStat({ label, value }: { label: string; value: number }) {
 
 /* ──────────────────────────── branch cards ──────────────────────────── */
 
-function BranchCard({ branch }: { branch: Branch }) {
-  const health = branchHealth(branch);
-  const loggedIn = branch.employees.filter((e) => e.loggedIn).length;
-  const active = branch.terminals.filter((t) => t.status === "active").length;
-  const offline = branch.terminals.filter((t) => t.status === "offline").length;
+function BranchCard({ branch, terminals, users }: { branch: Branch; terminals: Terminal[]; users: User[] }) {
+  const health = branchHealth(branch.id, terminals);
+  const active = terminals.filter((t) => t.status === "active").length;
+  const offline = terminals.filter((t) => t.status === "offline").length;
   return (
     <Card className="p-5 border-border/60 shadow-card hover:shadow-elegant transition-all">
       <div className="flex items-start justify-between">
@@ -671,25 +558,23 @@ function BranchCard({ branch }: { branch: Branch }) {
           <div className="h-10 w-10 rounded-xl gradient-primary text-primary-foreground flex items-center justify-center"><Building2 className="h-5 w-5" /></div>
           <div>
             <h3 className="font-bold text-sm">{branch.name}</h3>
-            <p className="text-[11px] text-muted-foreground">{branch.id} · {branch.location}</p>
+            <p className="text-[11px] text-muted-foreground">{branch.branchCode} · {branch.city ?? "—"}</p>
           </div>
         </div>
         <span className={healthChip(health)}>{health}</span>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-        <Row label="Manager" value={branch.manager} />
-        <Row label="Employees" value={`${loggedIn} / ${branch.employees.length}`} />
-        <Row label="Active Terminals" value={`${active} / ${branch.terminals.length}`} />
+        <Row label="Status" value={branch.status} />
+        <Row label="Staff" value={String(users.length)} />
+        <Row label="Active Terminals" value={`${active} / ${terminals.length}`} />
         <Row label="Offline" value={String(offline)} tone={offline > 0 ? "warn" : undefined} />
-        <Row label="POS" value={String(branch.terminals.filter((t) => t.type === "POS").length)} />
-        <Row label="Mobile POS" value={String(branch.terminals.filter((t) => t.type === "Mobile POS").length)} />
       </div>
       <div className="mt-4 flex flex-wrap gap-1.5">
         <Button asChild size="sm" variant="outline" className="h-8">
           <Link to="/control-tower/$branchId" params={{ branchId: branch.id }}>View Details</Link>
         </Button>
         <Button size="sm" variant="ghost" className="h-8">Terminals</Button>
-        <Button size="sm" variant="ghost" className="h-8">Employees</Button>
+        <Button size="sm" variant="ghost" className="h-8">Staff</Button>
       </div>
     </Card>
   );
@@ -706,14 +591,19 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: "war
 
 /* ──────────────────────────── mini insights & alerts ──────────────────────────── */
 
-function MiniInsights() {
+function MiniInsights({ branches, terminals, users }: { branches: Branch[]; terminals: Terminal[]; users: User[] }) {
+  const fullyOp = branches.filter((b) => {
+    const bt = terminals.filter((t) => t.branchId === b.id);
+    return bt.length === 0 || bt.every((t) => t.status !== "offline");
+  }).length;
+
   const insights = [
-    { label: "Employees on TML-RYD-001", value: "1", icon: Users },
-    { label: "Riyadh Active Employees", value: "3", icon: Users },
-    { label: "Jeddah Active Terminals", value: "3", icon: TerminalIcon },
-    { label: "Mobile POS in Use Today", value: "3", icon: Smartphone },
-    { label: "Branches Fully Operational", value: "2 / 4", icon: Building2 },
-    { label: "Unassigned Active Terminals", value: "1", icon: AlertTriangle },
+    { label: "Total Branches", value: String(branches.length), icon: Building2 },
+    { label: "Active Terminals", value: String(terminals.filter((t) => t.status === "active").length), icon: Activity },
+    { label: "Offline Terminals", value: String(terminals.filter((t) => t.status === "offline").length), icon: WifiOff },
+    { label: "Total Staff", value: String(users.length), icon: Users },
+    { label: "Staff Online", value: String(users.filter((u) => u.status === "active").length), icon: LogIn },
+    { label: "Fully Operational", value: `${fullyOp} / ${branches.length}`, icon: Building2 },
   ];
   return (
     <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
@@ -729,36 +619,48 @@ function MiniInsights() {
   );
 }
 
-function AlertsPanel() {
-  const alerts = [
-    { type: "Unassigned Active Terminal", terminal: "TML-JED-003", branch: "Jeddah Mart 02", level: "warn", icon: AlertTriangle },
-    { type: "Employee Not Logged Out", terminal: "—", branch: "Riyadh Central Bakala", emp: "Yousef Al-Ghamdi", level: "danger", icon: LogOut },
-    { type: "Device Offline During Active Shift", terminal: "TML-DMM-002", branch: "Dammam Express Bakala", level: "danger", icon: WifiOff },
-    { type: "Multiple Active Sessions", terminal: "MPOS-RYD-001", branch: "Riyadh Central Bakala", emp: "Saad Al-Shehri", level: "warn", icon: Zap },
-    { type: "Sync Pending", terminal: "MPOS-DMM-002", branch: "Dammam Express Bakala", level: "info", icon: RefreshCw },
-    { type: "Terminal Inactive Too Long", terminal: "TML-RYD-003", branch: "Riyadh Central Bakala", level: "info", icon: CircleDot },
-  ];
+function AlertsPanel({ terminals }: { terminals: Terminal[] }) {
+  const offlineTerminals = terminals.filter((t) => t.status === "offline");
+  const unassignedActive = terminals.filter((t) => t.status === "active" && !t.assignedCashierId);
+
   const toneMap: Record<string, string> = {
     danger: "border-destructive/30 bg-destructive/5 text-destructive",
     warn: "border-warning/40 bg-warning/10 text-warning-foreground",
-    info: "border-primary/30 bg-primary/5 text-primary",
   };
+
+  if (offlineTerminals.length === 0 && unassignedActive.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-32 rounded-2xl border border-success/30 bg-success/5 text-success text-sm font-medium gap-2">
+        <ShieldCheck className="h-5 w-5" /> No active alerts — all systems nominal.
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {alerts.map((a, i) => (
-        <div key={i} className={`rounded-2xl border p-4 ${toneMap[a.level]}`}>
+      {offlineTerminals.map((t) => (
+        <div key={t.id} className={`rounded-2xl border p-4 ${toneMap["danger"]}`}>
           <div className="flex items-center gap-2 font-semibold text-sm">
-            <a.icon className="h-4 w-4" /> {a.type}
+            <WifiOff className="h-4 w-4" /> Terminal Offline
           </div>
           <div className="mt-2 text-xs text-foreground/80 space-y-0.5">
-            <div><span className="text-muted-foreground">Branch:</span> {a.branch}</div>
-            {a.terminal !== "—" && <div><span className="text-muted-foreground">Terminal:</span> <span className="tabular-nums">{a.terminal}</span></div>}
-            {a.emp && <div><span className="text-muted-foreground">Employee:</span> {a.emp}</div>}
+            <div><span className="text-muted-foreground">Terminal:</span> <span className="tabular-nums">{t.terminalCode}</span></div>
+            <div><span className="text-muted-foreground">Name:</span> {t.name}</div>
+            {t.lastSync && <div><span className="text-muted-foreground">Last Sync:</span> {t.lastSync}</div>}
+          </div>
+        </div>
+      ))}
+      {unassignedActive.map((t) => (
+        <div key={t.id} className={`rounded-2xl border p-4 ${toneMap["warn"]}`}>
+          <div className="flex items-center gap-2 font-semibold text-sm">
+            <AlertTriangle className="h-4 w-4" /> Unassigned Active Terminal
+          </div>
+          <div className="mt-2 text-xs text-foreground/80 space-y-0.5">
+            <div><span className="text-muted-foreground">Terminal:</span> <span className="tabular-nums">{t.terminalCode}</span></div>
+            <div><span className="text-muted-foreground">Name:</span> {t.name}</div>
           </div>
         </div>
       ))}
     </div>
   );
 }
-
-export { BRANCHES };

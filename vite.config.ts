@@ -12,5 +12,7 @@ export default defineConfig({
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    // Custom client entry: omits React StrictMode so useEffect API calls don't fire twice in dev
+    client: { entry: "client" },
   },
 });

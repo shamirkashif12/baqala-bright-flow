@@ -9,52 +9,38 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Search, ScanBarcode, Pause, RotateCcw, Printer, MessageSquare, Plus, Minus, Trash2, CreditCard, Banknote, Wallet, Split, QrCode, Info, CheckCircle2, Loader2, ShoppingCart } from "lucide-react";
+import { api, type Product } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/pos")({
   component: POS,
 });
 
-type Prod = { name: string; price: number; sku: string; cat: string; stock: number; days: number; permissible: boolean };
+type CartItem = { name: string; sku: string; qty: number; price: number };
 
-const products: Prod[] = [
-  { name: "Almarai Laban 1L", price: 6.5, sku: "1234567", cat: "Dairy", stock: 240, days: 102, permissible: true },
-  { name: "Nadec Milk 2L", price: 12, sku: "1234568", cat: "Dairy", stock: 18, days: 16, permissible: true },
-  { name: "Al Rabie Mango 1L", price: 7.75, sku: "1234569", cat: "Beverages", stock: 64, days: 50, permissible: true },
-  { name: "Lipton Tea 100 Bags", price: 18.5, sku: "1234570", cat: "Beverages", stock: 92, days: 240, permissible: true },
-  { name: "Pepsi 330ml Can", price: 2.5, sku: "1234571", cat: "Beverages", stock: 412, days: 180, permissible: true },
-  { name: "L'usine Croissant", price: 4, sku: "1234572", cat: "Bakery", stock: 64, days: 3, permissible: true },
-  { name: "Arabic Bread Tamees", price: 3, sku: "1234573", cat: "Bakery", stock: 120, days: 1, permissible: true },
-  { name: "Lay's Classic 75g", price: 3.5, sku: "1234574", cat: "Snacks", stock: 6, days: -8, permissible: false },
-  { name: "KitKat Chunky", price: 4.5, sku: "1234575", cat: "Snacks", stock: 920, days: 280, permissible: true },
-  { name: "Sadia Chicken 1kg", price: 28, sku: "1234576", cat: "Meat", stock: 14, days: 6, permissible: true },
-  { name: "Tomato 1kg", price: 5.25, sku: "1234577", cat: "Produce", stock: 80, days: 4, permissible: true },
-  { name: "Banana 1kg", price: 6, sku: "1234578", cat: "Produce", stock: 70, days: 5, permissible: true },
-];
-
-function ExpiryChip({ days, permissible }: { days: number; permissible: boolean }) {
-  if (!permissible) return <Badge className="bg-destructive text-destructive-foreground border-0 text-[10px]">Blocked</Badge>;
-  if (days < 0) return <Badge className="bg-destructive text-destructive-foreground border-0 text-[10px]">Expired</Badge>;
-  if (days <= 7) return <Badge className="bg-warning text-warning-foreground border-0 text-[10px]">{days}d left</Badge>;
-  return <Badge variant="outline" className="bg-success/10 text-success border-success/30 text-[10px]">Safe</Badge>;
+function StatusBadge({ status }: { status: string }) {
+  if (status === "active") return <Badge variant="outline" className="text-[10px]">Active</Badge>;
+  return <Badge className="bg-destructive text-destructive-foreground border-0 text-[10px]">Inactive</Badge>;
 }
 
-type CartItem = { name: string; sku: string; qty: number; price: number };
-const initialCart: CartItem[] = [];
-
 function POS() {
-  const [cart, setCart] = useState<CartItem[]>(initialCart);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [cart, setCart] = useState<CartItem[]>([]);
   const [query, setQuery] = useState("");
   const [showResults, setShowResults] = useState(false);
   const [flashSku, setFlashSku] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const [holds, setHolds] = useState<{ id: string; items: CartItem[]; total: number; at: string }[]>([
-    { id: "HOLD-014", items: [{ name: "Lipton Tea 100 Bags", sku: "1234570", qty: 1, price: 18.5 }, { name: "Pepsi 330ml Can", sku: "1234571", qty: 6, price: 2.5 }], total: 33.5, at: "09:42" },
-    { id: "HOLD-015", items: [{ name: "Sadia Chicken 1kg", sku: "1234576", qty: 2, price: 28 }], total: 56, at: "10:08" },
-  ]);
+  const [holds, setHolds] = useState<{ id: string; items: CartItem[]; total: number; at: string }[]>([]);
   const [orderOpen, setOrderOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
+
+  useEffect(() => {
+    api.getProducts().then(setProducts).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { searchRef.current?.focus(); }, []);
 
   const subtotal = cart.reduce((s, i) => s + i.qty * i.price, 0);
   const discount = subtotal > 0 ? 5 : 0;
@@ -63,12 +49,12 @@ function POS() {
 
   const updateQty = (sku: string, d: number) => setCart(c => c.map(i => i.sku === sku ? { ...i, qty: Math.max(1, i.qty + d) } : i));
   const remove = (sku: string) => setCart(c => c.filter(i => i.sku !== sku));
-  const addToCart = (p: Prod) => {
-    if (!p.permissible) return;
+
+  const addToCart = (p: Product) => {
     setCart(c => {
       const ex = c.find(i => i.sku === p.sku);
       if (ex) return c.map(i => i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i);
-      return [...c, { name: p.name, sku: p.sku, qty: 1, price: p.price }];
+      return [...c, { name: p.name, sku: p.sku, qty: 1, price: p.basePrice }];
     });
     setFlashSku(p.sku);
     setTimeout(() => setFlashSku(null), 600);
@@ -76,26 +62,35 @@ function POS() {
     setShowResults(false);
     searchRef.current?.focus();
   };
+
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return products.filter(p => p.name.toLowerCase().includes(q) || p.sku.includes(q)).slice(0, 6);
-  }, [query]);
+    return products.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      (p.barcode && p.barcode.toLowerCase().includes(q))
+    ).slice(0, 6);
+  }, [query, products]);
+
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
-      const exact = products.find(p => p.sku === query.trim());
-      if (exact) { addToCart(exact); return; }
+      const trimmed = query.trim();
+      const byBarcode = products.find(p => p.barcode === trimmed);
+      if (byBarcode) { addToCart(byBarcode); return; }
+      const bySku = products.find(p => p.sku === trimmed);
+      if (bySku) { addToCart(bySku); return; }
       if (matches[0]) addToCart(matches[0]);
     }
     if (e.key === "Escape") setShowResults(false);
   };
-  // Keep focus on the search bar so a barcode scanner just types into it
-  useEffect(() => { searchRef.current?.focus(); }, []);
+
   const hold = () => {
     if (!cart.length) return;
     setHolds(h => [{ id: `HOLD-${String(16 + h.length).padStart(3, "0")}`, items: cart, total, at: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) }, ...h]);
     setCart([]);
   };
+
   const reopen = (id: string) => {
     const h = holds.find(x => x.id === id);
     if (!h) return;
@@ -107,7 +102,6 @@ function POS() {
   return (
     <PageShell title="POS Checkout" subtitle="Terminal POS-01 · Cashier: Fahad · Shift open">
       <div className="grid lg:grid-cols-[1fr_420px] gap-4 -mt-2">
-        {/* Scan / Search column */}
         <div className="space-y-4">
           <Card className="p-4 border-border/60 shadow-card">
             <div className="flex items-center gap-2">
@@ -129,7 +123,12 @@ function POS() {
                 <ScanBarcode className="h-5 w-5" /> Scan
               </Button>
             </div>
-            {showResults && matches.length > 0 && (
+            {loading && (
+              <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground px-1">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading products…
+              </div>
+            )}
+            {!loading && showResults && matches.length > 0 && (
               <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden">
                 {matches.map((p) => (
                   <button
@@ -140,21 +139,20 @@ function POS() {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">SKU {p.sku} · {p.cat} · Stock {p.stock}</p>
+                      <p className="text-xs text-muted-foreground">SKU {p.sku}{p.barcode ? ` · Barcode ${p.barcode}` : ""} · Cat {p.categoryId ?? "—"} · Stock —</p>
                     </div>
-                    <ExpiryChip days={p.days} permissible={p.permissible} />
-                    <span className="font-bold text-primary tabular-nums w-20 text-right">ر.س {p.price.toFixed(2)}</span>
+                    <StatusBadge status={p.status} />
+                    <span className="font-bold text-primary tabular-nums w-20 text-right">ر.س {p.basePrice.toFixed(2)}</span>
                   </button>
                 ))}
               </div>
             )}
-            {showResults && query && matches.length === 0 && (
+            {!loading && showResults && query && matches.length === 0 && (
               <p className="mt-2 text-sm text-muted-foreground px-1">No product matches "{query}"</p>
             )}
             <p className="text-[11px] text-muted-foreground mt-2 px-1">Tip: just scan — items drop straight into the order. Press Enter to add the first match.</p>
           </Card>
 
-          {/* Scanned items list */}
           <Card className="border-border/60 shadow-card">
             <div className="flex items-center justify-between p-3 border-b border-border/60">
               <div className="flex items-center gap-2">
@@ -198,7 +196,6 @@ function POS() {
           </Card>
         </div>
 
-        {/* Checkout summary panel */}
         <Card className="border-border/60 shadow-elegant flex flex-col lg:h-[calc(100vh-180px)] lg:sticky lg:top-20">
           <div className="p-4 border-b border-border/60 flex items-center justify-between">
             <div>
@@ -248,7 +245,6 @@ function POS() {
         </Card>
       </div>
 
-      {/* Order details dialog */}
       <Dialog open={orderOpen} onOpenChange={setOrderOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Order #INV-20260602-0142</DialogTitle></DialogHeader>
@@ -277,10 +273,8 @@ function POS() {
         </DialogContent>
       </Dialog>
 
-      {/* Payment dialog */}
       <PaymentDialog open={payOpen} onOpenChange={setPayOpen} total={total} onDone={() => { setPayOpen(false); setInvOpen(true); setCart([]); }} />
 
-      {/* Held orders dialog */}
       <Dialog open={holdOpen} onOpenChange={setHoldOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Held Orders ({holds.length})</DialogTitle></DialogHeader>
@@ -307,7 +301,6 @@ function POS() {
         </DialogContent>
       </Dialog>
 
-      {/* Invoice preview */}
       <Dialog open={invOpen} onOpenChange={setInvOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Invoice Preview</DialogTitle></DialogHeader>

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -6,10 +7,18 @@ import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
 import { TrendingUp, Wallet, ShoppingBag, Undo2, BadgePercent, Building2, Truck, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api, type DashboardMetrics } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/bi")({ component: BI });
 
 const trend = [12, 18, 16, 22, 28, 24, 30, 26, 34, 32, 40, 38, 44, 48];
+
+const PAYMENT_COLORS: Record<string, string> = {
+  cash: "bg-primary",
+  card: "bg-success",
+  wallet: "bg-warning",
+  bank_transfer: "bg-muted-foreground",
+};
 
 function Sparkline({ data, color = "var(--primary)" }: { data: number[]; color?: string }) {
   const max = Math.max(...data), min = Math.min(...data);
@@ -29,13 +38,28 @@ function Sparkline({ data, color = "var(--primary)" }: { data: number[]; color?:
 }
 
 function BI() {
+  const [dashboard, setDashboard] = useState<DashboardMetrics | null>(null);
+
+  useEffect(() => {
+    api.getDashboard().then(setDashboard).catch(console.error);
+  }, []);
+
+  const totalRevenue = dashboard?.sales.totalToday ?? 0;
+  const totalOrders = dashboard?.orders.totalToday ?? 0;
+  const returnsCount = dashboard?.returns.count ?? 0;
+  const refundRate = totalOrders > 0 ? ((returnsCount / totalOrders) * 100).toFixed(1) + "%" : "0%";
+  const payBreakdown = dashboard?.sales.paymentBreakdown ?? [];
+  const branchPerf = dashboard?.branchPerformance ?? [];
+  const maxBranchSales = branchPerf.reduce((mx, b) => Math.max(mx, b.sales), 1);
+  const fmt = (n: number) => `ر.س ${n.toLocaleString("en-SA", { minimumFractionDigits: 0 })}`;
+
   return (
     <PageShell title="Business Intelligence" subtitle="Performance, trends and analytics across the chain">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Revenue (week)" value="ر.س 312,480" delta="+14%" trend="up" icon={Wallet} accent="primary" />
-        <MetricCard label="Orders (week)" value="8,142" delta="+9%" trend="up" icon={ShoppingBag} />
-        <MetricCard label="Refund Rate" value="1.8%" delta="-0.3%" trend="up" icon={Undo2} accent="success" />
-        <MetricCard label="Discount Given" value="ر.س 28,420" icon={BadgePercent} accent="warning" />
+        <MetricCard label="Revenue (today)" value={fmt(totalRevenue)} icon={Wallet} accent="primary" />
+        <MetricCard label="Orders (today)" value={String(totalOrders)} icon={ShoppingBag} />
+        <MetricCard label="Refund Rate" value={refundRate} icon={Undo2} accent="success" />
+        <MetricCard label="Returns Today" value={String(returnsCount)} icon={BadgePercent} accent="warning" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -53,14 +77,17 @@ function BI() {
         <Card className="p-6 border-border/60 shadow-card">
           <h3 className="text-base font-semibold mb-3">Payment Method Mix</h3>
           <div className="space-y-3">
-            {[
-              { m: "Cash", v: 58, c: "bg-primary" },
-              { m: "Card", v: 28, c: "bg-success" },
-              { m: "Wallet (STC/Apple)", v: 11, c: "bg-warning" },
-              { m: "Bank Transfer", v: 3, c: "bg-muted-foreground" },
-            ].map((p) => (
+            {(payBreakdown.length > 0
+              ? payBreakdown.map(p => ({ m: p.method, v: p.pct, c: PAYMENT_COLORS[p.method] ?? "bg-primary" }))
+              : [
+                  { m: "Cash", v: 58, c: "bg-primary" },
+                  { m: "Card", v: 28, c: "bg-success" },
+                  { m: "Wallet (STC/Apple)", v: 11, c: "bg-warning" },
+                  { m: "Bank Transfer", v: 3, c: "bg-muted-foreground" },
+                ]
+            ).map((p) => (
               <div key={p.m}>
-                <div className="flex justify-between text-sm mb-1"><span>{p.m}</span><span className="font-semibold">{p.v}%</span></div>
+                <div className="flex justify-between text-sm mb-1"><span className="capitalize">{p.m.replace(/_/g, " ")}</span><span className="font-semibold">{p.v}%</span></div>
                 <div className="h-2 rounded-full bg-muted overflow-hidden"><div className={cn("h-full", p.c)} style={{ width: `${p.v}%` }} /></div>
               </div>
             ))}
@@ -106,13 +133,17 @@ function BI() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="p-6 border-border/60 shadow-card">
-          <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" />Branch Performance</h3>
-          {[
-            { b: "Olaya", v: 92 }, { b: "Khobar", v: 85 }, { b: "Jeddah", v: 80 }, { b: "Madinah", v: 68 },
-          ].map(b => (
-            <div key={b.b} className="mb-3">
-              <div className="flex justify-between text-sm mb-1"><span>{b.b}</span><span className="font-semibold">{b.v}%</span></div>
-              <Progress value={b.v} className="h-1.5" />
+          <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" />Branch Performance (today)</h3>
+          {(branchPerf.length > 0
+            ? branchPerf
+            : [{ branch: "Olaya", orders: 0, sales: 92 }, { branch: "Khobar", orders: 0, sales: 85 }, { branch: "Jeddah", orders: 0, sales: 80 }, { branch: "Madinah", orders: 0, sales: 68 }]
+          ).map(b => (
+            <div key={b.branch} className="mb-3">
+              <div className="flex justify-between text-sm mb-1">
+                <span>{b.branch}</span>
+                <span className="font-semibold">{branchPerf.length > 0 ? fmt(b.sales) : `${b.sales}%`}</span>
+              </div>
+              <Progress value={Math.round(b.sales / maxBranchSales * 100)} className="h-1.5" />
             </div>
           ))}
         </Card>

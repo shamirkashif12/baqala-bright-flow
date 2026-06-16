@@ -16,6 +16,7 @@ import {
 import heroBg from "@/assets/admin-hero.jpg";
 import storePhoto from "@/assets/store-photo.jpg";
 import ownerPhoto from "@/assets/owner-photo.jpg";
+import { api, type AuditLog, type DashboardMetrics } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/admin")({ component: AdminHome });
 
@@ -64,32 +65,47 @@ function PulseDot() {
   );
 }
 
-const allActivity = [
-  { who: "Fahad Al Otaibi", what: "Approved supplier PO #1284", when: "just now", color: "bg-success/15 text-success", icon: CircleCheck },
-  { who: "POS-04 · Jeddah", what: "Terminal reconnected after sync", when: "2m", color: "bg-primary/10 text-primary", icon: Server },
-  { who: "ZATCA Gateway", what: "147 e-invoices cleared", when: "5m", color: "bg-success/15 text-success", icon: ShieldCheck },
-  { who: "Mona Al Saud", what: "Updated price list for Olaya", when: "12m", color: "bg-accent text-accent-foreground", icon: ReceiptText },
-  { who: "Inventory bot", what: "Reorder draft created · 23 items", when: "18m", color: "bg-warning/20 text-warning-foreground", icon: AlertTriangle },
-  { who: "Khalid Operator", what: "Closed cash drawer · ر.س 6,420", when: "22m", color: "bg-primary/10 text-primary", icon: Lock },
-  { who: "API · /branches", what: "New branch onboarded: Madinah Quba", when: "1h", color: "bg-success/15 text-success", icon: Building2 },
-  { who: "Sara Al Qahtani", what: "Granted Manager role to 2 users", when: "1h", color: "bg-accent text-accent-foreground", icon: Crown },
-];
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  if (diffSecs < 60) return "just now";
+  const diffMins = Math.floor(diffSecs / 60);
+  if (diffMins < 60) return `${diffMins}m`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d`;
+}
+
+function getInitials(fullName: string): string {
+  return fullName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+}
 
 function AdminHome() {
-  const sales = useTicker(48920, 48000, 52000);
-  const orders = useTicker(1284, 1200, 1450, 2200);
   const apiRps = useTicker(312, 240, 480, 900);
   const uptime = useTicker(99.98, 99.9, 100, 4000);
 
-  const [feedIdx, setFeedIdx] = useState(0);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardMetrics | null>(null);
+  const [activeUsers, setActiveUsers] = useState<import("@/lib/api").User[]>([]);
+
   useEffect(() => {
-    const id = setInterval(() => setFeedIdx((i) => (i + 1) % allActivity.length), 2600);
-    return () => clearInterval(id);
+    api.getAuditLogs({ page: 1 }).then((res) => setAuditLogs(res.items)).catch(() => {});
+    api.getDashboard().then(setDashboard).catch(() => {});
+    api.getUsers({ status: "active" }).then(setActiveUsers).catch(() => {});
   }, []);
-  const feed = useMemo(
-    () => [...allActivity.slice(feedIdx), ...allActivity.slice(0, feedIdx)].slice(0, 6),
-    [feedIdx]
-  );
+
+  const feed = useMemo(() => auditLogs.slice(0, 6), [auditLogs]);
+
+  const salesValue = dashboard?.sales.totalToday ?? 0;
+  const ordersValue = dashboard?.orders.totalToday ?? 0;
 
   return (
     <PageShell title="Admin Portal" subtitle="Live operations · tenant control center">
@@ -128,7 +144,7 @@ function AdminHome() {
                 <div className="flex items-center gap-2">
                   <PulseDot />
                   <span className="text-xs font-semibold">Olaya HQ · Live</span>
-                  <span className="text-xs text-muted-foreground ml-auto">ر.س {Math.round(sales).toLocaleString()}</span>
+                  <span className="text-xs text-muted-foreground ml-auto">ر.س {Math.round(salesValue).toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -138,8 +154,8 @@ function AdminHome() {
 
       {/* Live metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Live Sales" value={`ر.س ${Math.round(sales).toLocaleString()}`} delta="+18%" trend="up" hint="updating" icon={TrendingUp} accent="primary" />
-        <MetricCard label="Orders Today" value={Math.round(orders).toLocaleString()} delta="+12%" trend="up" hint={`${Math.round(orders/420)}/min`} icon={ReceiptText} />
+        <MetricCard label="Live Sales" value={`ر.س ${Math.round(salesValue).toLocaleString()}`} delta="+18%" trend="up" hint="today" icon={TrendingUp} accent="primary" />
+        <MetricCard label="Orders Today" value={ordersValue.toLocaleString()} delta="+12%" trend="up" hint="total" icon={ReceiptText} />
         <MetricCard label="API Throughput" value={`${Math.round(apiRps)} rps`} delta="healthy" trend="flat" icon={Activity} accent="success" />
         <MetricCard label="Platform Uptime" value={`${uptime.toFixed(2)}%`} delta="30d" trend="up" icon={ShieldCheck} accent="success" />
       </div>
@@ -184,21 +200,27 @@ function AdminHome() {
             <Badge variant="outline" className="text-xs">streaming</Badge>
           </div>
           <div className="space-y-3">
-            {feed.map((a, i) => (
-              <div
-                key={`${a.who}-${i}`}
-                className="flex gap-3 transition-all duration-500"
-                style={{ opacity: 1 - i * 0.08, transform: `translateY(${i * 0}px)` }}
-              >
-                <div className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 ${a.color}`}>
-                  <a.icon className="h-4 w-4" />
+            {feed.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Loading activity…</p>
+            ) : (
+              feed.map((log, i) => (
+                <div
+                  key={log.id}
+                  className="flex gap-3 transition-all duration-500"
+                  style={{ opacity: 1 - i * 0.08 }}
+                >
+                  <div className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0 bg-muted/60 text-muted-foreground">
+                    <Activity className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium leading-tight truncate">{log.action}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {log.entityType ?? "System"} · {formatRelativeTime(log.createdAt)}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium leading-tight truncate">{a.what}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{a.who} · {a.when}</p>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </Card>
       </div>
@@ -234,7 +256,7 @@ function AdminHome() {
         </div>
       </Card>
 
-      {/* System health + tenants + photo */}
+      {/* System health + active operators + photo */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="p-6 border-border/60 shadow-card">
           <div className="flex items-center gap-2 mb-4">
@@ -263,28 +285,31 @@ function AdminHome() {
               <h3 className="text-base font-semibold">Active Operators</h3>
               <p className="text-xs text-muted-foreground">Signed in across all terminals right now</p>
             </div>
-            <Badge className="bg-success/15 text-success border-0">7 online</Badge>
+            <Badge className="bg-success/15 text-success border-0">
+              {activeUsers.length > 0 ? `${activeUsers.length} online` : "—"}
+            </Badge>
           </div>
           <div className="space-y-2.5">
-            {[
-              { n: "Abdullah Al Faisal", r: "Owner · Riyadh HQ", c: "AF", s: "online", t: "POS-01" },
-              { n: "Fahad Al Otaibi", r: "Manager · Olaya", c: "FO", s: "online", t: "POS-02" },
-              { n: "Mona Al Saud", r: "Cashier · Olaya", c: "MS", s: "online", t: "KIOSK-01" },
-              { n: "Ali Al Ghamdi", r: "Cashier · Khobar", c: "AG", s: "syncing", t: "POS-03" },
-              { n: "Yousef Al Dossari", r: "Cashier · Madinah", c: "YD", s: "online", t: "POS-05" },
-            ].map((u) => (
-              <div key={u.n} className="flex items-center gap-3 rounded-xl p-2.5 hover:bg-muted/60 transition-colors">
-                <Avatar className="h-9 w-9">
-                  <AvatarFallback className="gradient-primary text-primary-foreground text-xs font-bold">{u.c}</AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">{u.n}</p>
-                  <p className="text-xs text-muted-foreground truncate">{u.r}</p>
+            {activeUsers.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Loading operators…</p>
+            ) : (
+              activeUsers.slice(0, 6).map((u) => (
+                <div key={u.id} className="flex items-center gap-3 rounded-xl p-2.5 hover:bg-muted/60 transition-colors">
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback className="gradient-primary text-primary-foreground text-xs font-bold">
+                      {getInitials(u.fullName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate">{u.fullName}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {[u.roleName, u.branchName].filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                  <StatusDot status="online" />
                 </div>
-                <Badge variant="outline" className="text-[10px] font-mono">{u.t}</Badge>
-                <StatusDot status={u.s as any} />
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </Card>
       </div>

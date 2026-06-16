@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "Bash(dotnet ef *)",
+      "Bash(dotnet run *)",
+      "Bash(curl -s http://localhost:5008/api/finance/tax-rules)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'{len\\(d\\)} rules'\\); [print\\(r['ruleName'], r['ruleType']\\) for r in d]\")",
+      "Bash(curl -s http://localhost:5008/api/returns)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'{len\\(d\\)} returns'\\); [print\\(r['returnNumber'], r['status']\\) for r in d]\")",
+      "Bash(curl -s http://localhost:5008/api/devices)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'{len\\(d\\)} devices'\\)\")",
+      "Bash(curl -s http://localhost:5008/api/suppliers)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'{len\\(d\\)} suppliers'\\); [print\\(s['supplierCode'], s['supplyType']\\) for s in d]\")",
+      "Bash(curl -s http://localhost:5008/api/dashboard)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import sys; d=sys.stdin.read\\(\\); print\\(d[:600]\\)\")",
+      "Bash(taskkill //F //IM \"BaqalaPOS.Api.exe\")",
+      "Bash(python3 -c \"import sys; d=sys.stdin.read\\(\\); print\\(d[:400]\\)\")"
+    ]
+  }
+}
