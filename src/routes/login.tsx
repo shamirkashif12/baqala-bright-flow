@@ -86,7 +86,7 @@ function Login() {
         </div>
         <div className="relative z-10 space-y-6 max-w-md">
           <Badge className="bg-white/15 text-primary-foreground border-white/20 backdrop-blur gap-1.5">
-            <ShieldCheck className="h-3 w-3" />ZATCA Phase 2 ready
+            <ShieldCheck className="h-3 w-3" />ZATCA invoice ready
           </Badge>
           <h1 className="text-4xl xl:text-5xl font-bold leading-tight">Manage your Mart <span className="block">smartly with MI Money.</span></h1>
           <p className="text-primary-foreground/80">POS, inventory, suppliers, delivery, devices — one Arabic-friendly cloud for every Saudi mart, kiosk and multi-branch operation.</p>

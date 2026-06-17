@@ -19,41 +19,61 @@ export const Route = createFileRoute("/_app/roles")({
   ),
 });
 
-const roles = ["Admin", "Manager", "Cashier", "Inventory Staff", "Warehouse Staff", "Accountant"];
+const roles = ["Admin", "Manager", "Cashier", "Inventory Staff", "Warehouse Staff", "Accountant", "Auditor"];
+const roleDesc: Record<string, string> = {
+  Admin: "Full system access",
+  Manager: "Branch operations and approvals",
+  Cashier: "POS, checkout, orders, returns request, shift reports",
+  "Inventory Staff": "Inventory, scanner, stock in/out, stock receiving",
+  "Warehouse Staff": "Warehouse stock, stock transfer, supplier return request",
+  Accountant: "Purchase orders, supplier invoices, payments, finance reports",
+  Auditor: "Read-only reports and audit logs",
+};
 const modules: { name: string; perms: string[] }[] = [
-  { name: "Orders", perms: ["View", "Add", "Edit", "Refund"] },
-  { name: "POS", perms: ["Use POS", "Apply Discount", "Apply Coupon", "Manage Settings"] },
-  { name: "Inventory", perms: ["View", "Add", "Edit", "Delete"] },
-  { name: "Warehouse", perms: ["View", "Add Item", "Transfer", "Adjust"] },
-  { name: "Cashier Closing", perms: ["View Own", "View All", "Approve"] },
-  { name: "Coupons & Discounts", perms: ["View", "Create", "Edit"] },
-  { name: "BI Reports", perms: ["View Summary", "View Detailed", "Export"] },
-  { name: "Users & Roles", perms: ["View", "Add", "Edit", "Delete"] },
+  { name: "POS", perms: ["Access POS", "Process Checkout", "Hold Order", "Reopen Held Order", "Apply Discount", "Apply Coupon", "Print Receipt", "Process Refund Request"] },
+  { name: "Orders", perms: ["View Orders", "Add Order", "Edit Order", "Remove Order", "Cancel Order", "Print Order Receipt"] },
+  { name: "Inventory", perms: ["View Inventory", "Add Inventory", "Remove Inventory", "Edit Inventory", "Scan Inventory", "Stock-In", "Stock-Out", "Adjust Stock", "Mark Damaged", "Mark Expired", "View Stock Movement"] },
+  { name: "Warehouse", perms: ["View Warehouse", "View Warehouse Items", "Transfer Stock", "Receive Stock", "Dispatch Stock", "View Movement Logs"] },
+  { name: "Purchase Orders", perms: ["View Purchase Orders", "Create Purchase Order", "Edit Purchase Order", "Approve Purchase Order", "Cancel Purchase Order", "Send PO to Supplier", "Convert PO to Goods Receiving"] },
+  { name: "Supplier Returns", perms: ["Create Supplier Return", "Approve Supplier Return", "Dispatch Return to Supplier", "Mark Replacement Received", "View Supplier Return Notes"] },
+  { name: "Accounting & Finance", perms: ["View Finance Dashboard", "View Supplier Payables", "View Purchase Orders", "View Supplier Credits", "View Supplier Return Amounts", "Mark Supplier Payment", "Export Finance Report"] },
+  { name: "Staff & Roles", perms: ["View Staff", "Create Staff", "Edit Staff", "Remove Staff", "Assign Role", "Assign Permissions"] },
+  { name: "Reports", perms: ["View Reports", "Add Report", "Remove Report", "Configure Report Visibility", "Export PDF", "Export Excel"] },
+  { name: "Settings", perms: ["View Settings", "Edit Policies", "Edit POS Settings", "Edit Payment Settings", "Edit Staff Settings"] },
 ];
 
+const allKeys = modules.flatMap((m) => m.perms.map((p) => `${m.name}::${p}`));
 const defaultGrants: Record<string, Set<string>> = {
-  Admin: new Set(modules.flatMap(m => m.perms.map(p => `${m.name}::${p}`))),
-  Manager: new Set([
-    "Orders::View", "Orders::Edit", "Orders::Refund", "POS::Use POS",
-    "Inventory::View", "Inventory::Edit", "Warehouse::View", "Warehouse::Transfer",
-    "Cashier Closing::View All", "Cashier Closing::Approve",
-    "Coupons & Discounts::View", "Coupons & Discounts::Create",
-    "BI Reports::View Summary", "BI Reports::View Detailed",
-  ]),
+  Admin: new Set(allKeys),
+  Manager: new Set(allKeys.filter((k) => !k.startsWith("Staff & Roles::") && !k.startsWith("Settings::Edit Staff Settings"))),
   Cashier: new Set([
-    "Orders::View", "Orders::Add", "POS::Use POS", "POS::Apply Discount", "POS::Apply Coupon",
-    "Cashier Closing::View Own",
+    "POS::Access POS", "POS::Process Checkout", "POS::Hold Order", "POS::Reopen Held Order", "POS::Apply Discount", "POS::Apply Coupon", "POS::Print Receipt", "POS::Process Refund Request",
+    "Orders::View Orders", "Orders::Add Order", "Orders::Print Order Receipt",
   ]),
-  "Inventory Staff": new Set(["Inventory::View", "Inventory::Add", "Inventory::Edit", "Warehouse::View"]),
-  "Warehouse Staff": new Set(["Warehouse::View", "Warehouse::Add Item", "Warehouse::Transfer", "Warehouse::Adjust", "Inventory::View"]),
-  Accountant: new Set(["Orders::View", "Coupons & Discounts::View", "BI Reports::View Detailed", "BI Reports::Export"]),
+  "Inventory Staff": new Set([
+    "Inventory::View Inventory", "Inventory::Add Inventory", "Inventory::Edit Inventory", "Inventory::Scan Inventory", "Inventory::Stock-In", "Inventory::Stock-Out", "Inventory::Adjust Stock", "Inventory::Mark Damaged", "Inventory::Mark Expired", "Inventory::View Stock Movement",
+    "Warehouse::View Warehouse", "Warehouse::View Warehouse Items", "Warehouse::Receive Stock",
+  ]),
+  "Warehouse Staff": new Set([
+    "Warehouse::View Warehouse", "Warehouse::View Warehouse Items", "Warehouse::Transfer Stock", "Warehouse::Receive Stock", "Warehouse::Dispatch Stock", "Warehouse::View Movement Logs",
+    "Supplier Returns::Create Supplier Return", "Supplier Returns::Dispatch Return to Supplier",
+  ]),
+  Accountant: new Set([
+    ...modules.find((m) => m.name === "Purchase Orders")!.perms.map((p) => `Purchase Orders::${p}`),
+    ...modules.find((m) => m.name === "Accounting & Finance")!.perms.map((p) => `Accounting & Finance::${p}`),
+    "Reports::View Reports", "Reports::Export PDF", "Reports::Export Excel",
+  ]),
+  Auditor: new Set([
+    "Reports::View Reports", "Orders::View Orders", "Inventory::View Inventory", "Warehouse::View Warehouse",
+    "Purchase Orders::View Purchase Orders", "Accounting & Finance::View Finance Dashboard", "Staff & Roles::View Staff",
+  ]),
 };
 
 function Roles() {
   const [active, setActive] = useState<string>("Admin");
   const grants = defaultGrants[active] ?? new Set();
   return (
-    <PageShell title="Roles & Permissions" subtitle="Access control & permission matrix">
+    <PageShell title="Roles & Permissions" subtitle="Access control · permission matrix · custom roles">
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         <Card className="p-3 border-border/60 shadow-card h-fit">
           <div className="flex items-center justify-between mb-3 px-2">
@@ -78,7 +98,7 @@ function Roles() {
           <div className="p-4 border-b border-border/60 flex items-center justify-between">
             <div>
               <h3 className="font-semibold flex items-center gap-2"><Lock className="h-4 w-4 text-primary" />{active} Permissions</h3>
-              <p className="text-xs text-muted-foreground">Toggle module-level access for this role</p>
+              <p className="text-xs text-muted-foreground">{roleDesc[active] ?? "Custom role"}</p>
             </div>
             <Button size="sm" className="gradient-primary text-primary-foreground border-0">Save</Button>
           </div>
