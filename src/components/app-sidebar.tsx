@@ -20,10 +20,7 @@ import {
   LogOut,
   ShoppingBag,
   Wallet,
-  Tags,
   Warehouse,
-  Store,
-  Activity,
   UserCog,
   ChevronDown,
   ClipboardCheck,
@@ -38,10 +35,10 @@ import {
   Cigarette,
   Undo2 as ReturnIcon,
   History,
-  Coins,
   Workflow,
   Boxes,
-  ShoppingCart,
+  ClipboardList,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   Sidebar,
@@ -49,7 +46,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
+
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -70,6 +67,7 @@ const navGroups = [
       { title: "Mobile POS & Kiosk", url: "/mobile-pos", icon: Smartphone },
       { title: "MPOS App Preview", url: "/mpos-app", icon: Smartphone },
       { title: "Orders", url: "/orders", icon: ShoppingBag },
+      { title: "Customers", url: "/customers", icon: Users },
       { title: "Cashier Workspace", url: "/cashier", icon: Briefcase },
       { title: "Cashier Shift", url: "/cashier-shift", icon: ClipboardCheck },
       { title: "Control Tower", url: "/control-tower", icon: Radar },
@@ -82,12 +80,12 @@ const navGroups = [
       { title: "Inventory", url: "/inventory", icon: Package },
       { title: "Expiry & Permissible", url: "/batches", icon: CalendarClock },
       { title: "Warehouses", url: "/warehouses", icon: Warehouse },
+      { title: "Stock Transfers", url: "/stock-transfers", icon: ArrowLeftRight },
     ],
   },
   {
     label: "Finance",
     items: [
-      { title: "Purchase Orders", url: "/purchase-orders", icon: ShoppingCart },
       { title: "Expenses", url: "/expenses", icon: Wallet },
       { title: "Coupons, Discounts & Offers", url: "/coupons", icon: TicketPercent },
       { title: "Customer Returns", url: "/returns", icon: ReturnIcon },
@@ -98,6 +96,7 @@ const navGroups = [
     label: "Suppliers",
     items: [
       { title: "Suppliers", url: "/suppliers", icon: Truck },
+      { title: "Purchase Orders", url: "/purchase-orders", icon: ClipboardList },
     ],
   },
   {

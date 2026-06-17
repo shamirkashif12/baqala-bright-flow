@@ -66,10 +66,10 @@ public class InventoryBatch
     public decimal? PurchaseCost { get; set; }
 
     [Column("expiry_date")]
-    public DateOnly? ExpiryDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
 
     [Required, Column("received_date")]
-    public DateOnly ReceivedDate { get; set; }
+    public DateTime ReceivedDate { get; set; }
 
     [MaxLength(255), Column("receiving_location")]
     public string? ReceivingLocation { get; set; }

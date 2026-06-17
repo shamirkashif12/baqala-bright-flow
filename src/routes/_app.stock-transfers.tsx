@@ -1,0 +1,1102 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState, useMemo } from "react";
+import { PageShell } from "@/components/app-topbar";
+import { MetricCard } from "@/components/metric-card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import {
+  ArrowRight, Warehouse, Building2, Truck, Package, RefreshCcw,
+  CheckCircle2, Clock, Plus, Trash2, Eye, ArrowLeftRight, Loader2,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  api,
+  type StockTransfer, type StockTransferItem,
+  type Branch, type Warehouse as WarehouseType, type Supplier, type Product,
+} from "@/lib/api";
+
+export const Route = createFileRoute("/_app/stock-transfers")({ component: StockTransfers });
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+type TransferType =
+  | "supplier_to_warehouse"
+  | "warehouse_to_branch"
+  | "branch_to_warehouse"
+  | "branch_to_branch"
+  | "warehouse_to_warehouse"
+  | "warehouse_to_supplier";
+
+const TRANSFER_TYPES: { value: TransferType; label: string; description: string; icon: React.ElementType }[] = [
+  { value: "supplier_to_warehouse", label: "Supplier → Warehouse", description: "Inbound from supplier to warehouse (linked to PO)", icon: Truck },
+  { value: "warehouse_to_branch", label: "Warehouse → Branch", description: "Replenish branch from warehouse", icon: Warehouse },
+  { value: "branch_to_warehouse", label: "Branch → Warehouse", description: "Return expired/damaged stock to warehouse", icon: Building2 },
+  { value: "branch_to_branch", label: "Branch → Branch (Mart to Mart)", description: "Inter-branch transfer", icon: ArrowLeftRight },
+  { value: "warehouse_to_warehouse", label: "Warehouse → Warehouse", description: "Redistribute between warehouses", icon: RefreshCcw },
+  { value: "warehouse_to_supplier", label: "Warehouse → Supplier (RTS)", description: "Return to supplier (defective/overstocked)", icon: Package },
+];
+
+const STATUS_OPTIONS = [
+  { value: "", label: "All Statuses" },
+  { value: "draft", label: "Draft" },
+  { value: "pending_approval", label: "Pending Approval" },
+  { value: "approved", label: "Approved" },
+  { value: "in_transit", label: "In Transit" },
+  { value: "completed", label: "Completed" },
+  { value: "rejected", label: "Rejected" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+const RETURN_REASONS = [
+  { value: "expired", label: "Expired" },
+  { value: "damaged", label: "Damaged" },
+  { value: "quality_issue", label: "Quality Issue" },
+  { value: "overstock", label: "Overstock" },
+  { value: "other", label: "Other" },
+];
+
+const STATUS_FLOW = ["draft", "pending_approval", "approved", "in_transit", "completed"];
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function getSourceLabel(t: StockTransfer): string {
+  if (t.sourceSupplier) return `Supplier: ${t.sourceSupplier.name}`;
+  if (t.sourceWarehouse) return `WH: ${t.sourceWarehouse.name}`;
+  if (t.sourceBranch) return `Branch: ${t.sourceBranch.name}`;
+  return "—";
+}
+
+function getDestLabel(t: StockTransfer): string {
+  if (t.destSupplier) return `Supplier: ${t.destSupplier.name}`;
+  if (t.destWarehouse) return `WH: ${t.destWarehouse.name}`;
+  if (t.destBranch) return `Branch: ${t.destBranch.name}`;
+  return "—";
+}
+
+function getTypeLabel(value: string): string {
+  return TRANSFER_TYPES.find(x => x.value === value)?.label ?? value;
+}
+
+function needsReturnReason(type: string) {
+  return type === "branch_to_warehouse" || type === "warehouse_to_supplier";
+}
+
+function todayStr() {
+  return new Date().toISOString().split("T")[0];
+}
+
+// ─── Status Badge ─────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const classes: Record<string, string> = {
+    draft: "bg-muted text-muted-foreground",
+    pending_approval: "bg-warning/20 text-warning-foreground",
+    approved: "bg-primary/15 text-primary",
+    in_transit: "bg-primary/15 text-primary",
+    completed: "bg-success/15 text-success",
+    rejected: "bg-destructive/15 text-destructive",
+    cancelled: "bg-muted text-muted-foreground",
+  };
+  const label: Record<string, string> = {
+    draft: "Draft",
+    pending_approval: "Pending Approval",
+    approved: "Approved",
+    in_transit: "In Transit",
+    completed: "Completed",
+    rejected: "Rejected",
+    cancelled: "Cancelled",
+  };
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold", classes[status] ?? "bg-muted text-muted-foreground")}>
+      {status === "in_transit" && <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />}
+      {label[status] ?? status}
+    </span>
+  );
+}
+
+// ─── Type Selector Step ───────────────────────────────────────────────────────
+
+function TypeSelectorStep({
+  selected,
+  onSelect,
+}: {
+  selected: TransferType | null;
+  onSelect: (t: TransferType) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">Select the direction of the stock transfer.</p>
+      <div className="grid grid-cols-2 gap-3">
+        {TRANSFER_TYPES.map(({ value, label, description, icon: Icon }) => (
+          <Card
+            key={value}
+            className={cn(
+              "cursor-pointer border-2 transition-all hover:border-primary/50",
+              selected === value ? "border-primary shadow-sm" : "border-border/60",
+            )}
+            onClick={() => onSelect(value)}
+          >
+            <CardContent className="p-3 flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <div className={cn("h-7 w-7 rounded-lg flex items-center justify-center", selected === value ? "gradient-primary text-primary-foreground" : "bg-muted")}>
+                  <Icon className="h-3.5 w-3.5" />
+                </div>
+                <span className="text-xs font-semibold leading-tight">{label}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-tight">{description}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Source/Dest Step ─────────────────────────────────────────────────────────
+
+function SourceDestStep({
+  transferType,
+  branches,
+  warehouses,
+  suppliers,
+  form,
+  onChange,
+}: {
+  transferType: TransferType;
+  branches: Branch[];
+  warehouses: WarehouseType[];
+  suppliers: Supplier[];
+  form: CreateForm;
+  onChange: (patch: Partial<CreateForm>) => void;
+}) {
+  const branchOptions = branches.map(b => ({ value: b.id, label: b.name }));
+  const warehouseOptions = warehouses.map(w => ({ value: w.id, label: w.name }));
+  const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }));
+
+  const FieldRow = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="space-y-1">
+      <Label className="text-xs font-medium">{label}</Label>
+      {children}
+    </div>
+  );
+
+  const SelectField = ({
+    label,
+    value,
+    placeholder,
+    options,
+    onValueChange,
+  }: {
+    label: string;
+    value: string;
+    placeholder: string;
+    options: { value: string; label: string }[];
+    onValueChange: (v: string) => void;
+  }) => (
+    <FieldRow label={label}>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className="h-9">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(o => (
+            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </FieldRow>
+  );
+
+  return (
+    <div className="space-y-4">
+      {transferType === "supplier_to_warehouse" && (
+        <>
+          <SelectField label="Source — Supplier" value={form.sourceSupplierId} placeholder="Select supplier" options={supplierOptions} onValueChange={v => onChange({ sourceSupplierId: v })} />
+          <SelectField label="Destination — Warehouse" value={form.destWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ destWarehouseId: v })} />
+        </>
+      )}
+      {transferType === "warehouse_to_branch" && (
+        <>
+          <SelectField label="Source — Warehouse" value={form.sourceWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ sourceWarehouseId: v })} />
+          <SelectField label="Destination — Branch" value={form.destBranchId} placeholder="Select branch" options={branchOptions} onValueChange={v => onChange({ destBranchId: v })} />
+        </>
+      )}
+      {transferType === "branch_to_warehouse" && (
+        <>
+          <SelectField label="Source — Branch" value={form.sourceBranchId} placeholder="Select branch" options={branchOptions} onValueChange={v => onChange({ sourceBranchId: v })} />
+          <SelectField label="Destination — Warehouse" value={form.destWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ destWarehouseId: v })} />
+          <SelectField label="Return Reason" value={form.returnReason} placeholder="Select reason" options={RETURN_REASONS} onValueChange={v => onChange({ returnReason: v })} />
+        </>
+      )}
+      {transferType === "branch_to_branch" && (
+        <>
+          <SelectField label="Source — Branch" value={form.sourceBranchId} placeholder="Select source branch" options={branchOptions} onValueChange={v => onChange({ sourceBranchId: v })} />
+          <SelectField label="Destination — Branch" value={form.destBranchId} placeholder="Select destination branch" options={branchOptions.filter(b => b.value !== form.sourceBranchId)} onValueChange={v => onChange({ destBranchId: v })} />
+        </>
+      )}
+      {transferType === "warehouse_to_warehouse" && (
+        <>
+          <SelectField label="Source — Warehouse" value={form.sourceWarehouseId} placeholder="Select source warehouse" options={warehouseOptions} onValueChange={v => onChange({ sourceWarehouseId: v })} />
+          <SelectField label="Destination — Warehouse" value={form.destWarehouseId} placeholder="Select destination warehouse" options={warehouseOptions.filter(w => w.value !== form.sourceWarehouseId)} onValueChange={v => onChange({ destWarehouseId: v })} />
+        </>
+      )}
+      {transferType === "warehouse_to_supplier" && (
+        <>
+          <SelectField label="Source — Warehouse" value={form.sourceWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ sourceWarehouseId: v })} />
+          <SelectField label="Destination — Supplier" value={form.destSupplierId} placeholder="Select supplier" options={supplierOptions} onValueChange={v => onChange({ destSupplierId: v })} />
+          <SelectField label="Return Reason" value={form.returnReason} placeholder="Select reason" options={RETURN_REASONS} onValueChange={v => onChange({ returnReason: v })} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Items Step ───────────────────────────────────────────────────────────────
+
+interface ItemRow {
+  productId: string;
+  requestedQuantity: number;
+  unitCost: string;
+  expiryDate: string;
+  returnReason: string;
+}
+
+function ItemsStep({
+  items,
+  products,
+  showReturnReason,
+  onChange,
+}: {
+  items: ItemRow[];
+  products: Product[];
+  showReturnReason: boolean;
+  onChange: (items: ItemRow[]) => void;
+}) {
+  const addItem = () =>
+    onChange([...items, { productId: "", requestedQuantity: 1, unitCost: "", expiryDate: "", returnReason: "" }]);
+
+  const removeItem = (i: number) => onChange(items.filter((_, idx) => idx !== i));
+
+  const updateItem = (i: number, patch: Partial<ItemRow>) =>
+    onChange(items.map((item, idx) => (idx === i ? { ...item, ...patch } : item)));
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Items ({items.length})</span>
+        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={addItem}>
+          <Plus className="h-3.5 w-3.5" /> Add Item
+        </Button>
+      </div>
+      {items.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border/60 py-8 text-center text-sm text-muted-foreground">
+          No items yet. Click "Add Item" to begin.
+        </div>
+      )}
+      <div className="space-y-2">
+        {items.map((item, i) => (
+          <Card key={i} className="border-border/60">
+            <CardContent className="p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-[11px]">Product</Label>
+                  <Select value={item.productId} onValueChange={v => updateItem(i, { productId: v })}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="w-20 space-y-1">
+                  <Label className="text-[11px]">Qty</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    className="h-8 text-xs"
+                    value={item.requestedQuantity}
+                    onChange={e => updateItem(i, { requestedQuantity: Number(e.target.value) })}
+                  />
+                </div>
+                <button
+                  className="mt-5 text-muted-foreground hover:text-destructive transition-colors"
+                  onClick={() => removeItem(i)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Unit Cost (optional)</Label>
+                  <Input
+                    className="h-8 text-xs"
+                    placeholder="0.00"
+                    value={item.unitCost}
+                    onChange={e => updateItem(i, { unitCost: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Expiry Date (optional)</Label>
+                  <Input
+                    type="date"
+                    className="h-8 text-xs"
+                    value={item.expiryDate}
+                    onChange={e => updateItem(i, { expiryDate: e.target.value })}
+                  />
+                </div>
+              </div>
+              {showReturnReason && (
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Return Reason (optional)</Label>
+                  <Select value={item.returnReason} onValueChange={v => updateItem(i, { returnReason: v })}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select reason" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RETURN_REASONS.map(r => (
+                        <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      {items.length > 0 && (
+        <p className="text-xs text-muted-foreground text-right">{items.length} item{items.length !== 1 ? "s" : ""} total</p>
+      )}
+    </div>
+  );
+}
+
+// ─── Create Transfer Form State ───────────────────────────────────────────────
+
+interface CreateForm {
+  sourceBranchId: string;
+  sourceWarehouseId: string;
+  sourceSupplierId: string;
+  destBranchId: string;
+  destWarehouseId: string;
+  destSupplierId: string;
+  returnReason: string;
+  expectedDate: string;
+  notes: string;
+}
+
+const emptyForm: CreateForm = {
+  sourceBranchId: "",
+  sourceWarehouseId: "",
+  sourceSupplierId: "",
+  destBranchId: "",
+  destWarehouseId: "",
+  destSupplierId: "",
+  returnReason: "",
+  expectedDate: "",
+  notes: "",
+};
+
+// ─── Create Transfer Sheet ────────────────────────────────────────────────────
+
+function CreateTransferSheet({
+  open,
+  onClose,
+  branches,
+  warehouses,
+  suppliers,
+  products,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  branches: Branch[];
+  warehouses: WarehouseType[];
+  suppliers: Supplier[];
+  products: Product[];
+  onCreated: () => void;
+}) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [transferType, setTransferType] = useState<TransferType | null>(null);
+  const [form, setForm] = useState<CreateForm>(emptyForm);
+  const [items, setItems] = useState<ItemRow[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setStep(1);
+    setTransferType(null);
+    setForm(emptyForm);
+    setItems([]);
+    setSaving(false);
+  };
+
+  const handleClose = () => {
+    reset();
+    onClose();
+  };
+
+  const handleCreate = async () => {
+    if (!transferType) return;
+    setSaving(true);
+    try {
+      const payload: Partial<StockTransfer> = {
+        transferType,
+        status: "draft",
+        sourceBranchId: form.sourceBranchId || undefined,
+        sourceWarehouseId: form.sourceWarehouseId || undefined,
+        sourceSupplierId: form.sourceSupplierId || undefined,
+        destBranchId: form.destBranchId || undefined,
+        destWarehouseId: form.destWarehouseId || undefined,
+        destSupplierId: form.destSupplierId || undefined,
+        returnReason: form.returnReason || undefined,
+        expectedDate: form.expectedDate || undefined,
+        notes: form.notes || undefined,
+        createdBy: "current-user",
+        items: items
+          .filter(item => item.productId)
+          .map(item => ({
+            productId: item.productId,
+            requestedQuantity: item.requestedQuantity,
+            unitCost: item.unitCost ? Number(item.unitCost) : undefined,
+            expiryDate: item.expiryDate || undefined,
+            returnReason: item.returnReason || undefined,
+          })) as StockTransferItem[],
+      };
+      await api.createStockTransfer(payload);
+      onCreated();
+      handleClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canAdvanceStep1 = transferType !== null;
+  const canAdvanceStep2 = (() => {
+    if (!transferType) return false;
+    if (transferType === "supplier_to_warehouse") return !!form.sourceSupplierId && !!form.destWarehouseId;
+    if (transferType === "warehouse_to_branch") return !!form.sourceWarehouseId && !!form.destBranchId;
+    if (transferType === "branch_to_warehouse") return !!form.sourceBranchId && !!form.destWarehouseId;
+    if (transferType === "branch_to_branch") return !!form.sourceBranchId && !!form.destBranchId && form.sourceBranchId !== form.destBranchId;
+    if (transferType === "warehouse_to_warehouse") return !!form.sourceWarehouseId && !!form.destWarehouseId && form.sourceWarehouseId !== form.destWarehouseId;
+    if (transferType === "warehouse_to_supplier") return !!form.sourceWarehouseId && !!form.destSupplierId;
+    return false;
+  })();
+
+  const stepTitle = step === 1 ? "Step 1: Transfer Type" : step === 2 ? "Step 2: Source & Destination" : "Step 3: Items & Details";
+
+  return (
+    <Sheet open={open} onOpenChange={v => { if (!v) handleClose(); }}>
+      <SheetContent side="right" className="w-full sm:max-w-[500px] overflow-y-auto">
+        <SheetHeader className="pb-4">
+          <SheetTitle>New Stock Transfer</SheetTitle>
+          <p className="text-xs text-muted-foreground">{stepTitle}</p>
+          <div className="flex gap-1 mt-1">
+            {[1, 2, 3].map(s => (
+              <div key={s} className={cn("h-1 flex-1 rounded-full transition-colors", s <= step ? "bg-primary" : "bg-muted")} />
+            ))}
+          </div>
+        </SheetHeader>
+
+        <div className="space-y-5 pb-6">
+          {step === 1 && (
+            <TypeSelectorStep selected={transferType} onSelect={t => setTransferType(t)} />
+          )}
+
+          {step === 2 && transferType && (
+            <SourceDestStep
+              transferType={transferType}
+              branches={branches}
+              warehouses={warehouses}
+              suppliers={suppliers}
+              form={form}
+              onChange={patch => setForm(p => ({ ...p, ...patch }))}
+            />
+          )}
+
+          {step === 3 && transferType && (
+            <div className="space-y-5">
+              <ItemsStep
+                items={items}
+                products={products}
+                showReturnReason={needsReturnReason(transferType)}
+                onChange={setItems}
+              />
+              <Separator />
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">Expected Date</Label>
+                  <Input
+                    type="date"
+                    className="h-9"
+                    value={form.expectedDate}
+                    min={todayStr()}
+                    onChange={e => setForm(p => ({ ...p, expectedDate: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">Notes</Label>
+                  <Input
+                    className="h-9"
+                    placeholder="Optional notes…"
+                    value={form.notes}
+                    onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            {step > 1 && (
+              <Button variant="outline" className="flex-1" onClick={() => setStep(s => (s - 1) as 1 | 2 | 3)}>
+                Back
+              </Button>
+            )}
+            {step < 3 && (
+              <Button
+                className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
+                disabled={step === 1 ? !canAdvanceStep1 : !canAdvanceStep2}
+                onClick={() => setStep(s => (s + 1) as 1 | 2 | 3)}
+              >
+                Next <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+              </Button>
+            )}
+            {step === 3 && (
+              <Button
+                className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
+                disabled={saving || items.filter(i => i.productId).length === 0}
+                onClick={handleCreate}
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+                Create Transfer
+              </Button>
+            )}
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─── Timeline Tab ─────────────────────────────────────────────────────────────
+
+function TimelineTab({ transfer }: { transfer: StockTransfer }) {
+  const currentIdx = STATUS_FLOW.indexOf(transfer.status);
+  const isTerminal = transfer.status === "rejected" || transfer.status === "cancelled";
+
+  return (
+    <div className="py-4">
+      {isTerminal && (
+        <div className="mb-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm text-destructive font-medium capitalize">
+          Transfer {transfer.status}
+        </div>
+      )}
+      <div className="relative flex flex-col gap-0">
+        {STATUS_FLOW.map((status, idx) => {
+          const completed = idx <= currentIdx && !isTerminal;
+          const isCurrent = idx === currentIdx && !isTerminal;
+          const dateStr =
+            idx === 0 ? new Date(transfer.createdAt).toLocaleDateString()
+            : idx === STATUS_FLOW.length - 1 && transfer.completedDate
+            ? new Date(transfer.completedDate).toLocaleDateString()
+            : undefined;
+
+          return (
+            <div key={status} className="flex items-start gap-4">
+              <div className="flex flex-col items-center">
+                <div className={cn(
+                  "h-8 w-8 rounded-full border-2 flex items-center justify-center transition-all",
+                  completed
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : isCurrent
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-background text-muted-foreground",
+                )}>
+                  {completed ? <CheckCircle2 className="h-4 w-4" /> : <Clock className="h-3.5 w-3.5" />}
+                </div>
+                {idx < STATUS_FLOW.length - 1 && (
+                  <div className={cn("w-0.5 h-8", completed && idx < currentIdx ? "bg-primary" : "bg-border")} />
+                )}
+              </div>
+              <div className="pt-1 pb-6">
+                <p className={cn("text-sm font-medium capitalize", completed ? "text-foreground" : "text-muted-foreground")}>
+                  {status.replace(/_/g, " ")}
+                </p>
+                {dateStr && <p className="text-xs text-muted-foreground mt-0.5">{dateStr}</p>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── View Transfer Sheet ──────────────────────────────────────────────────────
+
+function ViewTransferSheet({
+  transfer,
+  onClose,
+  onStatusUpdate,
+}: {
+  transfer: StockTransfer | null;
+  onClose: () => void;
+  onStatusUpdate: () => void;
+}) {
+  const [updating, setUpdating] = useState(false);
+
+  if (!transfer) return null;
+
+  const updateStatus = async (newStatus: string) => {
+    setUpdating(true);
+    try {
+      await api.updateTransferStatus(transfer.id, newStatus, newStatus === "approved" ? "admin" : undefined);
+      onStatusUpdate();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <Sheet open={!!transfer} onOpenChange={v => { if (!v) onClose(); }}>
+      <SheetContent side="right" className="w-full sm:max-w-[540px] overflow-y-auto">
+        <SheetHeader className="pb-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <SheetTitle>{transfer.transferNumber}</SheetTitle>
+            <StatusBadge status={transfer.status} />
+          </div>
+          <p className="text-xs text-muted-foreground">{getTypeLabel(transfer.transferType)}</p>
+        </SheetHeader>
+
+        <Tabs defaultValue="details">
+          <TabsList className="w-full mb-4">
+            <TabsTrigger value="details" className="flex-1">Details</TabsTrigger>
+            <TabsTrigger value="items" className="flex-1">Items ({transfer.items?.length ?? 0})</TabsTrigger>
+            <TabsTrigger value="timeline" className="flex-1">Timeline</TabsTrigger>
+          </TabsList>
+
+          {/* Details Tab */}
+          <TabsContent value="details" className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground mb-0.5">Transfer #</p>
+                <p className="font-mono font-medium">{transfer.transferNumber}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-0.5">Type</p>
+                <Badge variant="outline" className="text-xs gap-1">
+                  <ArrowLeftRight className="h-3 w-3" />
+                  {getTypeLabel(transfer.transferType)}
+                </Badge>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-0.5">Source</p>
+                <p className="font-medium">{getSourceLabel(transfer)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-0.5">Destination</p>
+                <p className="font-medium">{getDestLabel(transfer)}</p>
+              </div>
+              {transfer.returnReason && (
+                <div className="col-span-2">
+                  <p className="text-xs text-muted-foreground mb-0.5">Return Reason</p>
+                  <Badge variant="outline" className="text-xs capitalize">{transfer.returnReason.replace(/_/g, " ")}</Badge>
+                </div>
+              )}
+              <div>
+                <p className="text-xs text-muted-foreground mb-0.5">Created</p>
+                <p>{new Date(transfer.createdAt).toLocaleDateString()}</p>
+              </div>
+              {transfer.expectedDate && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Expected Date</p>
+                  <p>{new Date(transfer.expectedDate).toLocaleDateString()}</p>
+                </div>
+              )}
+              {transfer.completedDate && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Completed</p>
+                  <p>{new Date(transfer.completedDate).toLocaleDateString()}</p>
+                </div>
+              )}
+              {transfer.approvedBy && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Approved By</p>
+                  <p>{transfer.approvedBy}</p>
+                </div>
+              )}
+            </div>
+            {transfer.notes && (
+              <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                {transfer.notes}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Items Tab */}
+          <TabsContent value="items">
+            {(!transfer.items || transfer.items.length === 0) ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">No items recorded.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border/60">
+                      <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Product</th>
+                      <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Requested</th>
+                      <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Approved</th>
+                      <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Received</th>
+                      <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Unit Cost</th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transfer.items.map(item => (
+                      <tr key={item.id} className="border-b border-border/40 hover:bg-muted/30 transition-colors">
+                        <td className="py-2 px-2 font-medium">{item.product?.name ?? item.productId}</td>
+                        <td className="py-2 px-2 text-right">{item.requestedQuantity}</td>
+                        <td className="py-2 px-2 text-right">{item.approvedQuantity ?? "—"}</td>
+                        <td className="py-2 px-2 text-right">{item.receivedQuantity ?? "—"}</td>
+                        <td className="py-2 px-2 text-right">{item.unitCost != null ? `SAR ${item.unitCost.toFixed(2)}` : "—"}</td>
+                        <td className="py-2 px-2">
+                          {item.returnReason ? (
+                            <Badge variant="outline" className="text-[10px] capitalize">{item.returnReason.replace(/_/g, " ")}</Badge>
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Timeline Tab */}
+          <TabsContent value="timeline">
+            <TimelineTab transfer={transfer} />
+          </TabsContent>
+        </Tabs>
+
+        {/* Action buttons based on status */}
+        <div className="mt-4 flex gap-2 flex-wrap">
+          {transfer.status === "draft" && (
+            <Button
+              className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
+              disabled={updating}
+              onClick={() => updateStatus("pending_approval")}
+            >
+              {updating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              Submit for Approval
+            </Button>
+          )}
+          {transfer.status === "pending_approval" && (
+            <>
+              <Button
+                className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
+                disabled={updating}
+                onClick={() => updateStatus("approved")}
+              >
+                {updating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+                Approve
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1 border-destructive/50 text-destructive hover:bg-destructive/10"
+                disabled={updating}
+                onClick={() => updateStatus("rejected")}
+              >
+                Reject
+              </Button>
+            </>
+          )}
+          {transfer.status === "approved" && (
+            <Button
+              className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
+              disabled={updating}
+              onClick={() => updateStatus("in_transit")}
+            >
+              {updating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              <Truck className="mr-1.5 h-4 w-4" /> Mark In Transit
+            </Button>
+          )}
+          {transfer.status === "in_transit" && (
+            <Button
+              className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
+              disabled={updating}
+              onClick={() => updateStatus("completed")}
+            >
+              {updating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              <CheckCircle2 className="mr-1.5 h-4 w-4" /> Mark Received
+            </Button>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─── Row Actions (inline) ─────────────────────────────────────────────────────
+
+function RowStatusAction({
+  transfer,
+  onAction,
+}: {
+  transfer: StockTransfer;
+  onAction: (id: string, status: string) => void;
+}) {
+  if (transfer.status === "draft") {
+    return (
+      <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => onAction(transfer.id, "pending_approval")}>
+        Submit
+      </Button>
+    );
+  }
+  if (transfer.status === "pending_approval") {
+    return (
+      <div className="flex gap-1">
+        <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onAction(transfer.id, "approved")}>
+          Approve
+        </Button>
+        <Button size="sm" variant="outline" className="h-7 text-xs px-2 border-destructive/50 text-destructive" onClick={() => onAction(transfer.id, "rejected")}>
+          Reject
+        </Button>
+      </div>
+    );
+  }
+  if (transfer.status === "approved") {
+    return (
+      <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => onAction(transfer.id, "in_transit")}>
+        <Truck className="h-3 w-3 mr-1" /> In Transit
+      </Button>
+    );
+  }
+  if (transfer.status === "in_transit") {
+    return (
+      <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onAction(transfer.id, "completed")}>
+        <CheckCircle2 className="h-3 w-3 mr-1" /> Received
+      </Button>
+    );
+  }
+  return null;
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+function StockTransfers() {
+  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [viewTransfer, setViewTransfer] = useState<StockTransfer | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    api.getStockTransfers().then(setTransfers).finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+    api.getBranches().then(setBranches).catch(() => {});
+    api.getWarehouses().then(setWarehouses).catch(() => {});
+    api.getSuppliers().then(setSuppliers).catch(() => {});
+    api.getProducts().then(setProducts).catch(() => {});
+  }, []);
+
+  const handleStatusAction = async (id: string, status: string) => {
+    try {
+      await api.updateTransferStatus(id, status, status === "approved" ? "admin" : undefined);
+      load();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const s = search.toLowerCase();
+    return transfers.filter(t => {
+      if (s && !t.transferNumber.toLowerCase().includes(s) && !getSourceLabel(t).toLowerCase().includes(s) && !getDestLabel(t).toLowerCase().includes(s)) return false;
+      if (typeFilter && t.transferType !== typeFilter) return false;
+      if (statusFilter && t.status !== statusFilter) return false;
+      return true;
+    });
+  }, [transfers, search, typeFilter, statusFilter]);
+
+  const today = todayStr();
+  const totalTransfers = transfers.length;
+  const inTransit = transfers.filter(t => t.status === "in_transit").length;
+  const pendingApproval = transfers.filter(t => t.status === "pending_approval").length;
+  const completedToday = transfers.filter(t => t.status === "completed" && t.completedDate?.startsWith(today)).length;
+
+  return (
+    <PageShell
+      title="Stock Transfers"
+      subtitle="Manage inbound, outbound, and inter-location stock movements"
+      actions={
+        <Button
+          className="gradient-primary text-primary-foreground border-0 shadow-glow"
+          onClick={() => setCreateOpen(true)}
+        >
+          <Plus className="h-4 w-4 mr-1.5" /> New Transfer
+        </Button>
+      }
+    >
+      {/* Metric Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard label="Total Transfers" value={String(totalTransfers)} icon={ArrowLeftRight} accent="default" />
+        <MetricCard label="In Transit" value={String(inTransit)} icon={Truck} accent="primary" />
+        <MetricCard label="Pending Approval" value={String(pendingApproval)} icon={Clock} accent="warning" />
+        <MetricCard label="Completed Today" value={String(completedToday)} icon={CheckCircle2} accent="success" />
+      </div>
+
+      {/* Filter Bar */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Package className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by transfer #, source, or destination…"
+            className="pl-9 h-9"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="w-56 h-9">
+            <SelectValue placeholder="All Transfer Types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">All Types</SelectItem>
+            {TRANSFER_TYPES.map(t => (
+              <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-44 h-9">
+            <SelectValue placeholder="All Statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map(s => (
+              <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Table */}
+      <Card className="border-border/60 shadow-card">
+        <div className="overflow-x-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span>Loading transfers…</span>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-20 text-center text-sm text-muted-foreground">
+              {transfers.length === 0 ? "No stock transfers yet. Create your first one." : "No transfers match your filters."}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border/60 bg-muted/30">
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Transfer #</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Source</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Destination</th>
+                  <th className="text-center py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
+                  <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(t => (
+                  <tr key={t.id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
+                    <td className="py-3 px-4">
+                      <span className="font-mono text-xs font-semibold">{t.transferNumber}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="text-xs text-muted-foreground">{getTypeLabel(t.transferType)}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="text-sm">{getSourceLabel(t)}</span>
+                      {needsReturnReason(t.transferType) && t.returnReason && (
+                        <Badge variant="outline" className="ml-1.5 text-[10px] capitalize">
+                          {t.returnReason.replace(/_/g, " ")}
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="text-sm">{getDestLabel(t)}</span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <span className="text-sm font-medium">{t.items?.length ?? 0}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <StatusBadge status={t.status} />
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="text-xs text-muted-foreground">{new Date(t.createdAt).toLocaleDateString()}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0"
+                          onClick={() => setViewTransfer(t)}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        <RowStatusAction transfer={t} onAction={handleStatusAction} />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+
+      {/* Create Sheet */}
+      <CreateTransferSheet
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        branches={branches}
+        warehouses={warehouses}
+        suppliers={suppliers}
+        products={products}
+        onCreated={load}
+      />
+
+      {/* View Sheet */}
+      <ViewTransferSheet
+        transfer={viewTransfer}
+        onClose={() => setViewTransfer(null)}
+        onStatusUpdate={() => { load(); setViewTransfer(null); }}
+      />
+    </PageShell>
+  );
+}

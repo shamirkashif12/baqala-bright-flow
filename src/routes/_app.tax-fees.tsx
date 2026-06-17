@@ -12,24 +12,56 @@ import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { ShieldCheck, Cigarette, Receipt, Calculator, Plus } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, type TaxFeeRule } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/tax-fees")({ component: TaxFees });
 
+type FeeForm = { ruleName: string; ruleType: string; vatPercentage: string; customFeeAmount: string; excisePercentage: string; applicableTo: string; isTobacco: boolean; status: string; };
+const emptyFeeForm: FeeForm = { ruleName: "", ruleType: "custom_fee", vatPercentage: "15", customFeeAmount: "0", excisePercentage: "0", applicableTo: "all_orders", isTobacco: false, status: "active" };
+
 function TaxFees() {
   const [rules, setRules] = useState<TaxFeeRule[]>([]);
   const [zatca, setZatca] = useState(true);
   const [phase2, setPhase2] = useState(true);
+  const [feeDialogOpen, setFeeDialogOpen] = useState(false);
+  const [editRule, setEditRule] = useState<TaxFeeRule | null>(null);
+  const [form, setForm] = useState<FeeForm>(emptyFeeForm);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    api.getTaxRules().then(setRules);
-  }, []);
+  const load = () => api.getTaxRules().then(setRules);
+  useEffect(() => { load(); }, []);
 
   const customFees = rules.filter(r => r.ruleType === "custom_fee");
   const tobaccoRules = rules.filter(r => r.isTobacco);
   const activeCustomFees = customFees.filter(r => r.status === "active").length;
+
+  const openCreate = () => { setEditRule(null); setForm(emptyFeeForm); setFeeDialogOpen(true); };
+  const openEdit = (r: TaxFeeRule) => {
+    setEditRule(r);
+    setForm({ ruleName: r.ruleName, ruleType: r.ruleType, vatPercentage: String(r.vatPercentage), customFeeAmount: String(r.customFeeAmount), excisePercentage: String(r.excisePercentage), applicableTo: r.applicableTo, isTobacco: r.isTobacco, status: r.status });
+    setFeeDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const payload = { ruleName: form.ruleName, ruleType: form.ruleType, vatPercentage: Number(form.vatPercentage), customFeeAmount: Number(form.customFeeAmount), excisePercentage: Number(form.excisePercentage), applicableTo: form.applicableTo, isTobacco: form.isTobacco, status: form.status, effectiveDate: new Date().toISOString().slice(0, 10) };
+      if (editRule) {
+        await api.updateTaxRule(editRule.id, payload);
+      } else {
+        await api.createTaxRule(payload);
+      }
+      setFeeDialogOpen(false);
+      load();
+    } catch (e) { console.error(e); } finally { setSaving(false); }
+  };
+
+  const set = (k: keyof FeeForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(p => ({ ...p, [k]: e.target.value }));
+  const setS = (k: keyof FeeForm) => (v: string) =>
+    setForm(p => ({ ...p, [k]: v }));
 
   return (
     <PageShell title="Tax, Fees & Tobacco" subtitle="ZATCA-2 enablement, custom fees and tobacco excise">
@@ -80,7 +112,7 @@ function TaxFees() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2"><h3 className="font-semibold">ZATCA e-Invoicing</h3><Badge className="bg-success text-success-foreground border-0">Live</Badge></div>
-                  <p className="text-sm text-muted-foreground">Applied automatically on every billing & order</p>
+                  <p className="text-sm text-muted-foreground">Applied automatically on every billing &amp; order</p>
                 </div>
               </div>
               <Switch checked={zatca} onCheckedChange={setZatca} />
@@ -106,7 +138,9 @@ function TaxFees() {
         <TabsContent value="fees" className="space-y-3 mt-4">
           <div className="flex justify-between items-center">
             <p className="text-sm text-muted-foreground">Custom fees are added at checkout and printed on the invoice.</p>
-            <FeeDialog onCreated={() => api.getTaxRules().then(setRules)} />
+            <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={openCreate}>
+              <Plus className="h-4 w-4" /> New Fee
+            </Button>
           </div>
           <DataTable
             columns={[
@@ -116,6 +150,7 @@ function TaxFees() {
               { key: "vatPercentage", label: "VAT %", render: (r: TaxFeeRule) => r.vatPercentage > 0 ? `${r.vatPercentage}%` : "—" },
               { key: "applicableTo", label: "Applies to", render: (r: TaxFeeRule) => r.applicableTo.replace(/_/g, " ") },
               { key: "status", label: "Status", render: (r: TaxFeeRule) => <StatusBadge status={r.status} /> },
+              { key: "actions", label: "", render: (r: TaxFeeRule) => <Button size="sm" variant="ghost" className="h-7" onClick={() => openEdit(r)}>Edit</Button> },
             ]}
             rows={customFees}
           />
@@ -148,52 +183,65 @@ function TaxFees() {
           />
         </TabsContent>
       </Tabs>
-    </PageShell>
-  );
-}
 
-function FeeDialog({ onCreated }: { onCreated?: () => void }) {
-  return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow">
-          <Plus className="h-4 w-4" /> New Fee
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add custom fee</DialogTitle>
-          <DialogDescription>Applied automatically on billing & order checkout.</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="space-y-1"><Label className="text-xs">Fee name</Label><Input className="h-9" placeholder="e.g. Service fee" /></div>
-          <div className="grid grid-cols-2 gap-3">
+      {/* Create / Edit fee dialog */}
+      <Dialog open={feeDialogOpen} onOpenChange={v => !v && setFeeDialogOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editRule ? "Edit Fee Rule" : "Add Custom Fee"}</DialogTitle>
+            <DialogDescription>Applied automatically at checkout.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="space-y-1"><Label className="text-xs">Fee name</Label><Input value={form.ruleName} onChange={set("ruleName")} className="h-9" placeholder="e.g. Service fee" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Rule Type</Label>
+                <Select value={form.ruleType} onValueChange={setS("ruleType")}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="custom_fee">Custom Fee</SelectItem>
+                    <SelectItem value="vat">VAT</SelectItem>
+                    <SelectItem value="excise">Excise</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Status</Label>
+                <Select value={form.status} onValueChange={setS("status")}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1"><Label className="text-xs">Fixed Fee (SAR)</Label><Input type="number" value={form.customFeeAmount} onChange={set("customFeeAmount")} className="h-9" /></div>
+              <div className="space-y-1"><Label className="text-xs">VAT %</Label><Input type="number" value={form.vatPercentage} onChange={set("vatPercentage")} className="h-9" /></div>
+              <div className="space-y-1"><Label className="text-xs">Excise %</Label><Input type="number" value={form.excisePercentage} onChange={set("excisePercentage")} className="h-9" /></div>
+            </div>
             <div className="space-y-1">
-              <Label className="text-xs">Type</Label>
-              <Select defaultValue="fixed"><SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <Label className="text-xs">Applies to</Label>
+              <Select value={form.applicableTo} onValueChange={setS("applicableTo")}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="fixed">Fixed (ر.س)</SelectItem>
-                  <SelectItem value="percent">Percent (%)</SelectItem>
+                  <SelectItem value="all_orders">Every order</SelectItem>
+                  <SelectItem value="card_payments">Card payments</SelectItem>
+                  <SelectItem value="delivery_orders">Delivery orders</SelectItem>
+                  <SelectItem value="tobacco_products">Tobacco products</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1"><Label className="text-xs">Value</Label><Input className="h-9" placeholder="0.00" /></div>
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Applies to</Label>
-            <Select defaultValue="order"><SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="order">Every order</SelectItem>
-                <SelectItem value="card">Card payments</SelectItem>
-                <SelectItem value="delivery">Delivery orders</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button className="gradient-primary text-primary-foreground border-0" onClick={onCreated}>Save fee</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFeeDialogOpen(false)}>Cancel</Button>
+            <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving || !form.ruleName}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageShell>
   );
 }

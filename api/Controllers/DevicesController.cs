@@ -38,6 +38,21 @@ public class DevicesController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = device.Id }, device);
     }
 
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] Device updated)
+    {
+        var device = await db.Devices.FindAsync(id);
+        if (device is null) return NotFound();
+        device.DeviceName = updated.DeviceName;
+        device.BranchId = updated.BranchId;
+        device.TerminalId = updated.TerminalId;
+        device.Status = updated.Status;
+        device.BehaviourProfile = updated.BehaviourProfile;
+        device.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(device);
+    }
+
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] DeviceStatusRequest req)
     {

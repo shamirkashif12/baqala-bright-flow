@@ -43,6 +43,16 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<Supplier> Suppliers { get; set; }
     public DbSet<WarehouseRequest> WarehouseRequests { get; set; }
     public DbSet<WarehouseRequestItem> WarehouseRequestItems { get; set; }
+    public DbSet<Warehouse> Warehouses { get; set; }
+    public DbSet<WarehouseSupplier> WarehouseSuppliers { get; set; }
+    public DbSet<BranchWarehouse> BranchWarehouses { get; set; }
+    public DbSet<WarehouseStock> WarehouseStocks { get; set; }
+    public DbSet<PurchaseOrder> PurchaseOrders { get; set; }
+    public DbSet<PurchaseOrderItem> PurchaseOrderItems { get; set; }
+    public DbSet<SupplierPayment> SupplierPayments { get; set; }
+    public DbSet<StockTransfer> StockTransfers { get; set; }
+    public DbSet<StockTransferItem> StockTransferItems { get; set; }
+    public DbSet<ProductVariant> ProductVariants { get; set; }
 
     // Finance
     public DbSet<ExpenseType> ExpenseTypes { get; set; }
@@ -81,6 +91,12 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
         modelBuilder.Entity<InventoryStock>()
             .HasIndex(i => new { i.ProductId, i.BranchId }).IsUnique();
+
+        modelBuilder.Entity<Warehouse>().HasIndex(w => w.Code).IsUnique();
+        modelBuilder.Entity<WarehouseStock>()
+            .HasIndex(ws => new { ws.WarehouseId, ws.ProductId }).IsUnique();
+        modelBuilder.Entity<StockTransfer>().HasIndex(st => st.TransferNumber).IsUnique();
+        modelBuilder.Entity<PurchaseOrder>().HasIndex(po => po.PoNumber).IsUnique();
 
         modelBuilder.Entity<ZatcaSettings>()
             .HasIndex(z => z.BranchId).IsUnique();
@@ -210,6 +226,78 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasOne(a => a.RecordedByUser)
             .WithMany()
             .HasForeignKey(a => a.RecordedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── PurchaseOrder: multiple User FKs ────────────────────────────────────
+        modelBuilder.Entity<PurchaseOrder>()
+            .HasOne(po => po.OrderedByUser)
+            .WithMany()
+            .HasForeignKey(po => po.OrderedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PurchaseOrder>()
+            .HasOne(po => po.ApprovedByUser)
+            .WithMany()
+            .HasForeignKey(po => po.ApprovedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── SupplierPayment: User FK ─────────────────────────────────────────
+        modelBuilder.Entity<SupplierPayment>()
+            .HasOne(sp => sp.RecordedByUser)
+            .WithMany()
+            .HasForeignKey(sp => sp.RecordedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── StockTransfer: multiple User FKs ────────────────────────────────
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(st => st.CreatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.ApprovedByUser)
+            .WithMany()
+            .HasForeignKey(st => st.ApprovedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── StockTransfer: multiple Branch FKs ──────────────────────────────
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.SourceBranch)
+            .WithMany()
+            .HasForeignKey(st => st.SourceBranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.DestBranch)
+            .WithMany()
+            .HasForeignKey(st => st.DestBranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── StockTransfer: multiple Supplier FKs ────────────────────────────
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.SourceSupplier)
+            .WithMany()
+            .HasForeignKey(st => st.SourceSupplierId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.DestSupplier)
+            .WithMany()
+            .HasForeignKey(st => st.DestSupplierId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── StockTransfer: multiple Warehouse FKs ───────────────────────────
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.SourceWarehouse)
+            .WithMany()
+            .HasForeignKey(st => st.SourceWarehouseId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.DestWarehouse)
+            .WithMany()
+            .HasForeignKey(st => st.DestWarehouseId)
             .OnDelete(DeleteBehavior.Restrict);
 
         // ─── DateOnly → DateTime converters (MySql.Data doesn't support DateOnly) ─

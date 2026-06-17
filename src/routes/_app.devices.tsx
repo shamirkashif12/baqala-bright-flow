@@ -6,30 +6,51 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Progress } from "@/components/ui/progress";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { HardDrive, Activity, Power, Wifi, Plus, Eye, Pencil, Battery, Thermometer, Signal } from "lucide-react";
-import { api, type DeviceRecord } from "@/lib/api";
+import { api, type DeviceRecord, type Branch, type Terminal } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/devices")({ component: Devices });
 
+function Field({ label, value, placeholder, onChange }: { label: string; value?: string; placeholder?: string; onChange?: (v: string) => void }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      <Input className="h-9" value={value ?? ""} placeholder={placeholder} onChange={onChange ? e => onChange(e.target.value) : undefined} readOnly={!onChange} />
+    </div>
+  );
+}
+
+type DeviceForm = { deviceName: string; deviceType: string; serialNumber: string; branchId: string; terminalId: string; behaviourProfile: string; status: string; };
+const emptyForm: DeviceForm = { deviceName: "", deviceType: "Receipt Printer", serialNumber: "", branchId: "", terminalId: "", behaviourProfile: "", status: "active" };
+
+const DEVICE_TYPES = ["Receipt Printer", "Barcode Scanner", "Cash Drawer", "Card Machine", "Kiosk Display", "Tablet (mPOS)"];
+
 function Devices() {
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<DeviceRecord | null>(null);
   const [edit, setEdit] = useState<DeviceRecord | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState<DeviceForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
   const [br, setBr] = useState("All");
   const [st, setSt] = useState("All");
 
-  useEffect(() => {
-    api.getDevices()
-      .then(setDevices)
+  const load = () => {
+    setLoading(true);
+    Promise.all([api.getDevices(), api.getBranches(), api.getTerminals()])
+      .then(([d, b, t]) => { setDevices(d); setBranches(b); setTerminals(t); })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  };
+  useEffect(load, []);
 
   const filtered = useMemo(() => devices.filter(d =>
     (!q || `${d.deviceName} ${d.deviceType} ${d.serialNumber ?? ""}`.toLowerCase().includes(q.toLowerCase())) &&
@@ -41,11 +62,79 @@ function Devices() {
   const healthy = devices.filter(d => d.status === "active").length;
   const maintenance = devices.filter(d => d.status === "maintenance" || d.status === "offline").length;
   const synced = devices.filter(d => d.syncStatus === "synced").length;
+  const branchList = ["All", ...Array.from(new Set(devices.map(d => d.branch?.name).filter((n): n is string => !!n)))];
 
-  const branches = ["All", ...Array.from(new Set(devices.map(d => d.branch?.name).filter((n): n is string => !!n)))];
+  const openEdit = (d: DeviceRecord) => {
+    setEdit(d);
+    setForm({ deviceName: d.deviceName, deviceType: d.deviceType, serialNumber: d.serialNumber ?? "", branchId: d.branchId, terminalId: d.terminalId ?? "", behaviourProfile: d.behaviourProfile ?? "", status: d.status });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const payload = { deviceName: form.deviceName, deviceType: form.deviceType, serialNumber: form.serialNumber || undefined, branchId: form.branchId, terminalId: form.terminalId || undefined, behaviourProfile: form.behaviourProfile || undefined, status: form.status };
+      if (edit) {
+        await api.updateDevice(edit.id, payload);
+        setEdit(null);
+      } else {
+        await api.createDevice(payload);
+        setCreateOpen(false);
+      }
+      load();
+    } catch (e) { console.error(e); } finally { setSaving(false); }
+  };
+
+  const set = (k: keyof DeviceForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
+
+  const FormFields = () => (
+    <div className="space-y-3 mt-4">
+      <Field label="Device Name" value={form.deviceName} placeholder="Olaya Printer #4" onChange={set("deviceName")} />
+      <div className="space-y-1">
+        <Label className="text-xs">Device Type</Label>
+        <Select value={form.deviceType} onValueChange={set("deviceType")}>
+          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {DEVICE_TYPES.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <Field label="Serial Number" value={form.serialNumber} placeholder="SN-…" onChange={set("serialNumber")} />
+      <div className="space-y-1">
+        <Label className="text-xs">Branch</Label>
+        <Select value={form.branchId} onValueChange={set("branchId")}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+          <SelectContent>
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Terminal Mapping</Label>
+        <Select value={form.terminalId} onValueChange={set("terminalId")}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="None" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">None</SelectItem>
+            {terminals.map(t => <SelectItem key={t.id} value={t.id}>{t.terminalCode} — {t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Status</Label>
+        <Select value={form.status} onValueChange={set("status")}>
+          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="maintenance">Maintenance</SelectItem>
+            <SelectItem value="offline">Offline</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <Field label="Behavior Profile" value={form.behaviourProfile} placeholder="Alert on idle > 10m" onChange={set("behaviourProfile")} />
+    </div>
+  );
 
   return (
-    <PageShell title="Devices" subtitle="Hardware fleet + behavior in one place" actions={<RegisterDeviceSheet />}>
+    <PageShell title="Devices" subtitle="Hardware fleet + behavior in one place">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Total Devices" value={String(total)} icon={HardDrive} accent="primary" />
         <MetricCard label="Healthy" value={String(healthy)} icon={Activity} accent="success" />
@@ -72,12 +161,15 @@ function Devices() {
           <Input placeholder="Search by name, type, serial…" value={q} onChange={e => setQ(e.target.value)} className="h-9 flex-1 min-w-[180px]" />
           <Select value={br} onValueChange={setBr}>
             <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>{branches.map(o => <SelectItem key={o} value={o}>{o === "All" ? "All Branches" : o}</SelectItem>)}</SelectContent>
+            <SelectContent>{branchList.map(o => <SelectItem key={o} value={o}>{o === "All" ? "All Branches" : o}</SelectItem>)}</SelectContent>
           </Select>
           <Select value={st} onValueChange={setSt}>
             <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
             <SelectContent>{["All", "active", "maintenance", "offline"].map(o => <SelectItem key={o} value={o}>{o === "All" ? "All Status" : o}</SelectItem>)}</SelectContent>
           </Select>
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
+            <Plus className="h-4 w-4" /> Register Device
+          </Button>
         </div>
       </Card>
 
@@ -92,18 +184,18 @@ function Devices() {
           { key: "status", label: "Status", render: (r: DeviceRecord) => <StatusBadge status={r.status} /> },
           { key: "syncStatus", label: "Sync", render: (r: DeviceRecord) => <StatusBadge status={r.syncStatus} /> },
           { key: "lastActivity", label: "Last Activity", render: (r: DeviceRecord) => r.lastActivity ? new Date(r.lastActivity).toLocaleString("en-SA", { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" }) : "—" },
-          { key: "behaviourProfile", label: "Behavior", render: (r: DeviceRecord) => <span className="text-xs">{r.behaviourProfile ?? "—"}</span> },
           {
             key: "a", label: "", render: (r: DeviceRecord) => (
               <div className="flex gap-1 justify-end">
                 <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setView(r)}><Eye className="h-4 w-4" /></Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEdit(r)}><Pencil className="h-4 w-4" /></Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
               </div>
             )
           },
         ]} rows={filtered} />
       )}
 
+      {/* View sheet */}
       <Sheet open={!!view} onOpenChange={v => !v && setView(null)}>
         <SheetContent className="w-full sm:max-w-md overflow-y-auto">
           <SheetHeader><SheetTitle>{view?.deviceName} · Details</SheetTitle></SheetHeader>
@@ -129,65 +221,31 @@ function Devices() {
         </SheetContent>
       </Sheet>
 
+      {/* Edit sheet */}
       <Sheet open={!!edit} onOpenChange={v => !v && setEdit(null)}>
         <SheetContent className="w-full sm:max-w-md">
           <SheetHeader><SheetTitle>Edit {edit?.deviceName}</SheetTitle></SheetHeader>
-          <div className="space-y-3 mt-4">
-            <Field label="Device name" defaultValue={edit?.deviceName} />
-            <Field label="Branch" defaultValue={edit?.branch?.name} />
-            <Field label="Terminal mapping" defaultValue={edit?.terminal?.terminalCode} />
-            <Field label="Behavior alert threshold" placeholder="e.g. temp > 45°C" />
-          </div>
+          <FormFields />
           <SheetFooter className="mt-4">
-            <Button className="gradient-primary text-primary-foreground border-0" onClick={() => setEdit(null)}>Save</Button>
+            <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      {/* Create sheet */}
+      <Sheet open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
+        <SheetContent className="w-full sm:max-w-md">
+          <SheetHeader><SheetTitle>Register New Device</SheetTitle></SheetHeader>
+          <FormFields />
+          <SheetFooter className="mt-4">
+            <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
+              {saving ? "Registering…" : "Register"}
+            </Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
     </PageShell>
-  );
-}
-
-function RegisterDeviceSheet() {
-  return (
-    <Sheet>
-      <SheetTrigger asChild>
-        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow">
-          <Plus className="h-4 w-4" />Register Device
-        </Button>
-      </SheetTrigger>
-      <SheetContent className="w-full sm:max-w-md">
-        <SheetHeader><SheetTitle>Register new device</SheetTitle></SheetHeader>
-        <div className="space-y-3 mt-4">
-          <Field label="Device name" placeholder="e.g. Olaya Printer #4" />
-          <div className="space-y-1">
-            <Label className="text-xs">Device type</Label>
-            <Select defaultValue="Receipt Printer">
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {["Receipt Printer", "Barcode Scanner", "Cash Drawer", "Card Machine", "Kiosk Display", "Tablet (mPOS)"].map(o => (
-                  <SelectItem key={o} value={o}>{o}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Field label="Serial number" placeholder="SN-…" />
-          <Field label="Branch" placeholder="Olaya" />
-          <Field label="Terminal mapping" placeholder="TML-RYD-001" />
-          <Field label="Behavior settings" placeholder="Alert on idle > 10m" />
-        </div>
-        <SheetFooter className="mt-4">
-          <Button className="gradient-primary text-primary-foreground border-0">Register</Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-function Field({ label, defaultValue, placeholder }: { label: string; defaultValue?: string; placeholder?: string }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      <Input className="h-9" defaultValue={defaultValue} placeholder={placeholder} />
-    </div>
   );
 }

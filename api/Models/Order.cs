@@ -10,8 +10,8 @@ public class Order
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("order_number")]
-    public string OrderNumber { get; set; } = default!;
+    [MaxLength(50), Column("order_number")]
+    public string OrderNumber { get; set; } = string.Empty;
 
     [Required, MaxLength(20), Column("source")]
     public string Source { get; set; } = "pos"; // pos | online | kiosk
@@ -67,7 +67,7 @@ public class Order
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Branch Branch { get; set; } = default!;
+    public Branch? Branch { get; set; }
     public Customer? Customer { get; set; }
     public User? Cashier { get; set; }
     public Terminal? Terminal { get; set; }
@@ -84,7 +84,7 @@ public class OrderItem
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, Column("order_id")]
+    [Column("order_id")]
     public Guid OrderId { get; set; }
 
     [Required, Column("product_id")]
@@ -115,8 +115,8 @@ public class OrderItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    [JsonIgnore] public Order Order { get; set; } = default!;
-    public Product Product { get; set; } = default!;
+    [JsonIgnore] public Order? Order { get; set; }
+    public Product? Product { get; set; }
     public InventoryBatch? Batch { get; set; }
 }
 
@@ -126,7 +126,7 @@ public class OrderPayment
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, Column("order_id")]
+    [Column("order_id")]
     public Guid OrderId { get; set; }
 
     [Required, MaxLength(20), Column("payment_method")]
@@ -145,5 +145,5 @@ public class OrderPayment
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    [JsonIgnore] public Order Order { get; set; } = default!;
+    [JsonIgnore] public Order? Order { get; set; }
 }

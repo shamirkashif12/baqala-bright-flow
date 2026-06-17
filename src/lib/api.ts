@@ -7,9 +7,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status} ${text}`);
+    // Strip raw HTML/JSON problem-details from user-visible messages
+    let msg = text;
+    try { msg = (JSON.parse(text) as { title?: string }).title ?? text; } catch { /* not JSON */ }
+    throw new Error(msg || res.statusText);
   }
-  return res.json() as Promise<T>;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("json")) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export const api = {
@@ -20,6 +27,8 @@ export const api = {
     request<Branch>("/api/branches", { method: "POST", body: JSON.stringify(data) }),
   updateBranch: (id: string, data: Partial<Branch>) =>
     request<Branch>(`/api/branches/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteBranch: (id: string) =>
+    request<void>(`/api/branches/${id}`, { method: "DELETE" }),
 
   // Users
   getUsers: (params?: { branchId?: string; status?: string }) => {
@@ -30,9 +39,15 @@ export const api = {
     request<User>("/api/users", { method: "POST", body: JSON.stringify(data) }),
   updateUser: (id: string, data: Partial<User>) =>
     request<User>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteUser: (id: string) =>
+    request<User>(`/api/users/${id}`, { method: "DELETE" }),
 
   // Roles
   getRoles: () => request<Role[]>("/api/roles"),
+  createRole: (data: Partial<Role>) =>
+    request<Role>("/api/roles", { method: "POST", body: JSON.stringify(data) }),
+  updateRole: (id: string, data: Partial<Role>) =>
+    request<Role>(`/api/roles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   // Products
   getProducts: (params?: { categoryId?: string; status?: string; search?: string }) => {
@@ -45,9 +60,15 @@ export const api = {
     request<Product>("/api/products", { method: "POST", body: JSON.stringify(data) }),
   updateProduct: (id: string, data: Partial<Product>) =>
     request<Product>(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteProduct: (id: string) =>
+    request<void>(`/api/products/${id}`, { method: "DELETE" }),
 
   // Categories
   getCategories: () => request<Category[]>("/api/categories"),
+  createCategory: (data: Partial<Category>) =>
+    request<Category>("/api/categories", { method: "POST", body: JSON.stringify(data) }),
+  updateCategory: (id: string, data: Partial<Category>) =>
+    request<Category>(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   // Inventory
   getStock: (params?: { branchId?: string; lowStock?: boolean }) => {
@@ -62,10 +83,15 @@ export const api = {
     const q = new URLSearchParams({ ...(branchId && { branchId }), daysAhead: String(daysAhead) }).toString();
     return request<InventoryBatch[]>(`/api/inventory/batches/expiring?${q}`);
   },
+  receiveBatch: (data: Partial<InventoryBatch>) =>
+    request<InventoryBatch>("/api/inventory/batches", { method: "POST", body: JSON.stringify(data) }),
+  adjustInventory: (data: AdjustInventoryPayload) =>
+    request<{ id: string }>("/api/inventory/adjustments", { method: "POST", body: JSON.stringify(data) }),
 
   // Orders
-  getOrders: (params?: { branchId?: string; status?: string; paymentStatus?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+  getOrders: (params?: { branchId?: string; status?: string; paymentStatus?: string; from?: string; to?: string }) => {
+    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
+    const q = new URLSearchParams(filtered).toString();
     return request<Order[]>(`/api/orders${q ? `?${q}` : ""}`);
   },
   getOrder: (id: string) => request<Order>(`/api/orders/${id}`),
@@ -89,6 +115,12 @@ export const api = {
   // Terminals
   getTerminals: (branchId?: string) =>
     request<Terminal[]>(`/api/terminals${branchId ? `?branchId=${branchId}` : ""}`),
+  createTerminal: (data: Partial<Terminal>) =>
+    request<Terminal>("/api/terminals", { method: "POST", body: JSON.stringify(data) }),
+  updateTerminal: (id: string, data: Partial<Terminal>) =>
+    request<Terminal>(`/api/terminals/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  updateTerminalStatus: (id: string, status: string) =>
+    request<Terminal>(`/api/terminals/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
 
   // Suppliers
   getSuppliers: (params?: { status?: string; supplyType?: string }) => {
@@ -97,6 +129,10 @@ export const api = {
   },
   createSupplier: (data: Partial<Supplier>) =>
     request<Supplier>("/api/suppliers", { method: "POST", body: JSON.stringify(data) }),
+  updateSupplier: (id: string, data: Partial<Supplier>) =>
+    request<Supplier>(`/api/suppliers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteSupplier: (id: string) =>
+    request<void>(`/api/suppliers/${id}`, { method: "DELETE" }),
 
   // Customers
   getCustomers: (params?: { tier?: string; search?: string }) => {
@@ -105,37 +141,126 @@ export const api = {
   },
   getCustomerByPhone: (phone: string) =>
     request<Customer>(`/api/customers/by-phone/${encodeURIComponent(phone)}`),
+  createCustomer: (data: Partial<Customer>) =>
+    request<Customer>("/api/customers", { method: "POST", body: JSON.stringify(data) }),
+  updateCustomer: (id: string, data: Partial<Customer>) =>
+    request<Customer>(`/api/customers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  getCustomerLoyalty: (id: string) =>
+    request<LoyaltyTransaction[]>(`/api/customers/${id}/loyalty`),
 
   // Finance
   getExpenses: (params?: { branchId?: string; status?: string }) => {
     const q = new URLSearchParams(params as Record<string, string>).toString();
     return request<Expense[]>(`/api/finance/expenses${q ? `?${q}` : ""}`);
   },
+  createExpense: (data: Partial<Expense>) =>
+    request<Expense>("/api/finance/expenses", { method: "POST", body: JSON.stringify(data) }),
+  approveExpense: (id: string, approved: boolean, approvedBy: string) =>
+    request<Expense>(`/api/finance/expenses/${id}/approve`, { method: "PATCH", body: JSON.stringify({ approved, approvedBy }) }),
   getExpenseTypes: () => request<ExpenseType[]>("/api/finance/expense-types"),
   getCoupons: (status?: string) =>
     request<Coupon[]>(`/api/finance/coupons${status ? `?status=${status}` : ""}`),
+  createCoupon: (data: Partial<Coupon>) =>
+    request<Coupon>("/api/finance/coupons", { method: "POST", body: JSON.stringify(data) }),
+  updateCoupon: (id: string, data: Partial<Coupon>) =>
+    request<Coupon>(`/api/finance/coupons/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteCoupon: (id: string) =>
+    request<void>(`/api/finance/coupons/${id}`, { method: "DELETE" }),
   validateCoupon: (code: string) =>
     request<Coupon>(`/api/finance/coupons/validate/${code}`),
   getTaxRules: (branchId?: string) =>
     request<TaxFeeRule[]>(`/api/finance/tax-rules${branchId ? `?branchId=${branchId}` : ""}`),
+  createTaxRule: (data: Partial<TaxFeeRule>) =>
+    request<TaxFeeRule>("/api/finance/tax-rules", { method: "POST", body: JSON.stringify(data) }),
+  updateTaxRule: (id: string, data: Partial<TaxFeeRule>) =>
+    request<TaxFeeRule>(`/api/finance/tax-rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   // Warehouse
   getWarehouseRequests: (params?: { branchId?: string; approvalStatus?: string; deliveryStatus?: string }) => {
     const q = new URLSearchParams(params as Record<string, string>).toString();
     return request<WarehouseRequest[]>(`/api/warehouse/requests${q ? `?${q}` : ""}`);
   },
+  createWarehouseRequest: (data: Partial<WarehouseRequest>) =>
+    request<WarehouseRequest>("/api/warehouse/requests", { method: "POST", body: JSON.stringify(data) }),
+  approveWarehouseRequest: (id: string, approved: boolean, approvedBy: string) =>
+    request<WarehouseRequest>(`/api/warehouse/requests/${id}/approve`, { method: "PATCH", body: JSON.stringify({ approved, approvedBy }) }),
+  updateWarehouseDelivery: (id: string, status: string) =>
+    request<WarehouseRequest>(`/api/warehouse/requests/${id}/delivery`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  // Warehouses (entity)
+  getWarehouses: () => request<Warehouse[]>("/api/warehouses"),
+  getWarehouse: (id: string) => request<Warehouse>(`/api/warehouses/${id}`),
+  createWarehouse: (data: Partial<Warehouse>) =>
+    request<Warehouse>("/api/warehouses", { method: "POST", body: JSON.stringify(data) }),
+  updateWarehouse: (id: string, data: Partial<Warehouse>) =>
+    request<Warehouse>(`/api/warehouses/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  addWarehouseSupplier: (warehouseId: string, data: { supplierId: string; isPrimary: boolean; notes?: string }) =>
+    request<void>(`/api/warehouses/${warehouseId}/suppliers`, { method: "POST", body: JSON.stringify(data) }),
+  removeWarehouseSupplier: (warehouseId: string, supplierId: string) =>
+    request<void>(`/api/warehouses/${warehouseId}/suppliers/${supplierId}`, { method: "DELETE" }),
+  addWarehouseBranch: (warehouseId: string, data: { branchId: string; isPrimary: boolean }) =>
+    request<void>(`/api/warehouses/${warehouseId}/branches`, { method: "POST", body: JSON.stringify(data) }),
+  removeWarehouseBranch: (warehouseId: string, branchId: string) =>
+    request<void>(`/api/warehouses/${warehouseId}/branches/${branchId}`, { method: "DELETE" }),
+  getWarehouseStock: (warehouseId: string) =>
+    request<WarehouseStock[]>(`/api/warehouses/${warehouseId}/stock`),
+
+  // Purchase Orders
+  getPurchaseOrders: (params?: { supplierId?: string; warehouseId?: string; status?: string; paymentStatus?: string }) => {
+    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
+    const q = new URLSearchParams(filtered).toString();
+    return request<PurchaseOrder[]>(`/api/purchase-orders${q ? `?${q}` : ""}`);
+  },
+  getPurchaseOrder: (id: string) => request<PurchaseOrder>(`/api/purchase-orders/${id}`),
+  createPurchaseOrder: (data: Partial<PurchaseOrder>) =>
+    request<PurchaseOrder>("/api/purchase-orders", { method: "POST", body: JSON.stringify(data) }),
+  updatePoStatus: (id: string, status: string, approvedBy?: string) =>
+    request<PurchaseOrder>(`/api/purchase-orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, approvedBy }) }),
+  receivePurchaseOrder: (id: string, items: { productId: string; quantity: number; expiryDate?: string }[]) =>
+    request<PurchaseOrder>(`/api/purchase-orders/${id}/receive`, { method: "POST", body: JSON.stringify(items) }),
+  addSupplierPayment: (poId: string, data: Partial<SupplierPayment>) =>
+    request<SupplierPayment>(`/api/purchase-orders/${poId}/payments`, { method: "POST", body: JSON.stringify(data) }),
+
+  // Stock Transfers
+  getStockTransfers: (params?: { transferType?: string; status?: string }) => {
+    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
+    const q = new URLSearchParams(filtered).toString();
+    return request<StockTransfer[]>(`/api/stock-transfers${q ? `?${q}` : ""}`);
+  },
+  getStockTransfer: (id: string) => request<StockTransfer>(`/api/stock-transfers/${id}`),
+  createStockTransfer: (data: Partial<StockTransfer>) =>
+    request<StockTransfer>("/api/stock-transfers", { method: "POST", body: JSON.stringify(data) }),
+  updateTransferStatus: (id: string, status: string, approvedBy?: string) =>
+    request<StockTransfer>(`/api/stock-transfers/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, approvedBy }) }),
+
+  // Product Variants
+  getProductVariants: (productId: string) =>
+    request<ProductVariant[]>(`/api/products/${productId}/variants`),
+  addProductVariant: (productId: string, data: Partial<ProductVariant>) =>
+    request<ProductVariant>(`/api/products/${productId}/variants`, { method: "POST", body: JSON.stringify(data) }),
+  deleteProductVariant: (productId: string, variantId: string) =>
+    request<void>(`/api/products/${productId}/variants/${variantId}`, { method: "DELETE" }),
 
   // Returns
   getReturns: (params?: { branchId?: string; status?: string }) => {
     const q = new URLSearchParams(params as Record<string, string>).toString();
     return request<CustomerReturn[]>(`/api/returns${q ? `?${q}` : ""}`);
   },
+  createReturn: (data: Partial<CustomerReturn>) =>
+    request<CustomerReturn>("/api/returns", { method: "POST", body: JSON.stringify(data) }),
 
   // Compliance / ZATCA
   getZatcaInvoices: (params?: { branchId?: string; status?: string }) => {
     const q = new URLSearchParams(params as Record<string, string>).toString();
     return request<ZatcaInvoice[]>(`/api/compliance/zatca/invoices${q ? `?${q}` : ""}`);
   },
+  getZatcaSettings: (branchId: string) =>
+    request<ZatcaSettings>(`/api/compliance/zatca/settings/${branchId}`),
+  updateZatcaSettings: (branchId: string, data: Partial<ZatcaSettings>) =>
+    request<ZatcaSettings>(`/api/compliance/zatca/settings/${branchId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 
   // Audit Logs
   getAuditLogs: (params?: { entityType?: string; page?: number }) => {
@@ -172,6 +297,12 @@ export const api = {
     const q = new URLSearchParams(params as Record<string, string>).toString();
     return request<DeviceRecord[]>(`/api/devices${q ? `?${q}` : ""}`);
   },
+  createDevice: (data: Partial<DeviceRecord>) =>
+    request<DeviceRecord>("/api/devices", { method: "POST", body: JSON.stringify(data) }),
+  updateDevice: (id: string, data: Partial<DeviceRecord>) =>
+    request<DeviceRecord>(`/api/devices/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  updateDeviceStatus: (id: string, status: string, syncStatus?: string) =>
+    request<DeviceRecord>(`/api/devices/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, syncStatus }) }),
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -239,14 +370,16 @@ export interface Order {
   createdAt: string; items?: OrderItem[]; payments?: OrderPayment[];
   branch?: { id: string; name: string };
   cashier?: { id: string; fullName: string };
+  customer?: { id: string; fullName: string; phone: string; email?: string };
 }
 
 export interface OrderItem {
-  id: string; productId: string; quantity: number; unitPrice: number; totalPrice: number;
+  id?: string; productId: string; quantity: number; unitPrice: number; totalPrice: number;
+  product?: { id: string; name: string; sku: string };
 }
 
 export interface OrderPayment {
-  id: string; paymentMethod: string; amount: number; status: string;
+  id?: string; paymentMethod: string; amount: number; status: string;
 }
 
 export interface CashierShift {
@@ -280,7 +413,14 @@ export interface Supplier {
 
 export interface Customer {
   id: string; customerCode: string; fullName: string; phone: string;
-  loyaltyBalance: number; totalSpend: number; tier: string; status: string;
+  email?: string; loyaltyBalance: number; totalSpend: number;
+  visitCount?: number; tier: string; status: string;
+}
+
+export interface LoyaltyTransaction {
+  id: string; customerId: string; orderId?: string; branchId?: string;
+  transactionType: string; points: number; balanceAfter: number;
+  description?: string; expiryDate?: string; createdAt: string;
 }
 
 export interface ExpenseType {
@@ -339,6 +479,11 @@ export interface CustomerReturnItem {
   product?: Product;
 }
 
+export interface ZatcaSettings {
+  id?: string; branchId: string; vatRegistrationNumber?: string; sellerName?: string;
+  phase2Enabled: boolean; environment: string; createdAt?: string; updatedAt?: string;
+}
+
 export interface ZatcaInvoice {
   id: string; invoiceNumber: string; orderId: string; branchId: string;
   invoiceType: string; issueDate: string; totalAmount: number; taxAmount: number;
@@ -369,6 +514,87 @@ export interface DeviceRecord {
   behaviourProfile?: string; lastActivity?: string; createdAt: string;
   branch?: { id: string; name: string };
   terminal?: { id: string; terminalCode: string; name: string };
+}
+
+export interface AdjustInventoryPayload {
+  productId: string; branchId: string; quantity: number;
+  adjustmentType: string; reason?: string;
+}
+
+export interface Warehouse {
+  id: string; code: string; name: string; nameAr?: string;
+  address?: string; city?: string; capacity?: number;
+  contactPerson?: string; contactNumber?: string; status: string;
+  createdAt: string; updatedAt: string;
+  warehouseSuppliers?: { id: string; supplierId: string; isPrimary: boolean; notes?: string; supplier?: Supplier }[];
+  branchWarehouses?: { id: string; branchId: string; isPrimary: boolean; branch?: { id: string; name: string } }[];
+  stock?: WarehouseStock[];
+}
+
+export interface WarehouseStock {
+  id: string; warehouseId: string; productId: string;
+  quantity: number; reservedQuantity: number; reorderLevel: number;
+  lastUpdated: string; createdAt: string; updatedAt: string;
+  product?: Product;
+}
+
+export interface PurchaseOrder {
+  id: string; poNumber: string; supplierId: string;
+  warehouseId?: string; branchId?: string; orderedBy: string; approvedBy?: string;
+  status: string; paymentStatus: string; paymentTerms?: string;
+  totalAmount: number; paidAmount: number; taxAmount: number; discountAmount: number;
+  expectedDeliveryDate?: string; receivedDate?: string; notes?: string;
+  createdAt: string; updatedAt: string;
+  supplier?: Supplier;
+  warehouse?: { id: string; name: string; code: string };
+  branch?: { id: string; name: string };
+  orderedByUser?: { id: string; fullName: string };
+  items?: PurchaseOrderItem[];
+  payments?: SupplierPayment[];
+}
+
+export interface PurchaseOrderItem {
+  id: string; poId: string; productId: string;
+  orderedQuantity: number; receivedQuantity: number;
+  unitCost: number; subtotal: number;
+  expiryDate?: string; notes?: string; status: string; createdAt: string;
+  product?: Product;
+}
+
+export interface SupplierPayment {
+  id: string; poId: string; supplierId: string; amount: number;
+  paymentDate: string; paymentMethod: string; referenceNumber?: string;
+  notes?: string; recordedBy: string; status: string; createdAt: string;
+  supplier?: Supplier;
+}
+
+export interface StockTransfer {
+  id: string; transferNumber: string; transferType: string;
+  sourceBranchId?: string; sourceWarehouseId?: string; sourceSupplierId?: string;
+  destBranchId?: string; destWarehouseId?: string; destSupplierId?: string;
+  purchaseOrderId?: string; createdBy: string; approvedBy?: string;
+  status: string; returnReason?: string; notes?: string;
+  expectedDate?: string; completedDate?: string; createdAt: string; updatedAt: string;
+  sourceBranch?: { id: string; name: string };
+  sourceWarehouse?: { id: string; name: string; code: string };
+  sourceSupplier?: { id: string; name: string };
+  destBranch?: { id: string; name: string };
+  destWarehouse?: { id: string; name: string; code: string };
+  destSupplier?: { id: string; name: string };
+  items?: StockTransferItem[];
+}
+
+export interface StockTransferItem {
+  id: string; transferId: string; productId: string; batchId?: string;
+  requestedQuantity: number; approvedQuantity?: number; receivedQuantity?: number;
+  unitCost?: number; expiryDate?: string; returnReason?: string; notes?: string; createdAt: string;
+  product?: Product;
+}
+
+export interface ProductVariant {
+  id: string; productId: string; variantType: string; variantValue: string;
+  skuSuffix?: string; barcode?: string; priceModifier: number;
+  status: string; createdAt: string; updatedAt: string;
 }
 
 export interface DashboardMetrics {

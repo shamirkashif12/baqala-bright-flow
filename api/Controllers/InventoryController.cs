@@ -41,7 +41,7 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
     [HttpGet("batches/expiring")]
     public async Task<IActionResult> GetExpiringBatches([FromQuery] Guid? branchId, [FromQuery] int daysAhead = 30)
     {
-        var cutoff = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(daysAhead));
+        var cutoff = DateTime.UtcNow.AddDays(daysAhead);
         var query = db.InventoryBatches
             .Include(b => b.Product)
             .Where(b => b.ExpiryDate != null && b.ExpiryDate <= cutoff && b.RemainingQuantity > 0);

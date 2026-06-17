@@ -72,25 +72,27 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
             .ToListAsync();
 
         // Expiring batches (next 7 days)
-        var cutoff7 = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7));
-        var today2 = DateOnly.FromDateTime(DateTime.UtcNow);
+        var cutoff7 = DateTime.UtcNow.AddDays(7);
+        var today2 = DateTime.UtcNow;
         var expiringCount = await db.InventoryBatches
             .CountAsync(b => b.ExpiryDate != null && b.ExpiryDate >= today2 && b.ExpiryDate <= cutoff7 && b.RemainingQuantity > 0);
 
-        // Expiring detail (top 5 soonest)
-        var expiringItems = await db.InventoryBatches
+        // Expiring detail (top 5 soonest) — compute daysLeft in memory to avoid EF/MySQL TimeSpan coercion
+        var expiringRaw = await db.InventoryBatches
             .Include(b => b.Product)
             .Include(b => b.Branch)
             .Where(b => b.ExpiryDate != null && b.ExpiryDate >= today2 && b.ExpiryDate <= cutoff7 && b.RemainingQuantity > 0)
             .OrderBy(b => b.ExpiryDate)
             .Take(5)
-            .Select(b => new
-            {
-                name = b.Product.Name,
-                daysLeft = (int)(b.ExpiryDate!.Value.DayNumber - today2.DayNumber),
-                branch = b.Branch.Name
-            })
+            .Select(b => new { name = b.Product.Name, expiryDate = b.ExpiryDate!.Value, branch = b.Branch.Name })
             .ToListAsync();
+
+        var expiringItems = expiringRaw.Select(b => new
+        {
+            name = b.name,
+            daysLeft = (int)((b.expiryDate - today2).TotalDays),
+            branch = b.branch
+        }).ToList();
 
         // Cashier performance from shifts (today)
         var cashierPerf = await db.CashierShifts

@@ -26,7 +26,7 @@ public class ZatcaInvoice
     public DateTime IssueDate { get; set; } = DateTime.UtcNow;
 
     [Column("supply_date")]
-    public DateOnly? SupplyDate { get; set; }
+    public DateTime? SupplyDate { get; set; }
 
     [Column("total_amount")]
     public decimal TotalAmount { get; set; }

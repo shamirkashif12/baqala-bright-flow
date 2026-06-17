@@ -83,7 +83,7 @@ public static class DataSeeder
 
         // ─── Inventory stock & batches ────────────────────────────────────────
         var productList = await db.Products.ToListAsync();
-        var batchDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-30));
+        var batchDate = DateTime.UtcNow.AddDays(-30);
 
         var stockData = new[]
         {
@@ -104,8 +104,8 @@ public static class DataSeeder
         foreach (var s in stockData)
         {
             var prod = productList.First(p => p.Sku == s.sku);
-            var expiryDate = DateOnly.Parse(s.expiry);
-            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var expiryDate = DateTime.Parse(s.expiry);
+            var today = DateTime.UtcNow;
             var batchStatus = expiryDate < today ? "expired"
                             : expiryDate < today.AddDays(30) ? "near_expiry"
                             : "active";
@@ -238,6 +238,12 @@ public static class DataSeeder
 
         if (!await db.TaxFeeRules.AnyAsync())
             await SeedTaxRulesAsync(db);
+
+        if (!await db.RulesEngine.AnyAsync())
+            await SeedRulesEngineAsync(db);
+
+        if (!await db.AuditLogs.AnyAsync())
+            await SeedAuditLogsAsync(db);
     }
 
     // ─── Backfill: Warehouse Requests ────────────────────────────────────────
@@ -362,7 +368,7 @@ public static class DataSeeder
                 Id = Guid.NewGuid(), ExpenseTypeId = typeUtils.Id, BranchId = brOlaya.Id,
                 Amount = 1250.00m, Description = "Monthly electricity bill — Olaya branch",
                 ReferenceNumber = "ELEC-JUN-001", RecordedBy = uAbdullah.Id,
-                ExpenseDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-10)),
+                ExpenseDate = DateTime.UtcNow.AddDays(-10),
                 Status = "approved", ApprovedBy = uAbdullah.Id,
                 CreatedAt = DateTime.UtcNow.AddDays(-10), UpdatedAt = DateTime.UtcNow.AddDays(-8)
             });
@@ -373,7 +379,7 @@ public static class DataSeeder
                 Id = Guid.NewGuid(), ExpenseTypeId = typeMaint.Id, BranchId = brKhobar.Id,
                 Amount = 450.00m, Description = "Air conditioning maintenance service",
                 ReferenceNumber = "MAINT-AC-002", RecordedBy = uAbdullah.Id,
-                ExpenseDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-5)),
+                ExpenseDate = DateTime.UtcNow.AddDays(-5),
                 Status = "pending",
                 CreatedAt = DateTime.UtcNow.AddDays(-5), UpdatedAt = DateTime.UtcNow.AddDays(-5)
             });
@@ -384,7 +390,7 @@ public static class DataSeeder
                 Id = Guid.NewGuid(), ExpenseTypeId = typeMeals.Id, BranchId = brJeddah.Id,
                 Amount = 185.00m, Description = "Staff lunch — peak shift team",
                 RecordedBy = uSara.Id,
-                ExpenseDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-2)),
+                ExpenseDate = DateTime.UtcNow.AddDays(-2),
                 Status = "approved", ApprovedBy = uSara.Id,
                 CreatedAt = DateTime.UtcNow.AddDays(-2), UpdatedAt = DateTime.UtcNow.AddDays(-1)
             });
@@ -395,7 +401,7 @@ public static class DataSeeder
                 Id = Guid.NewGuid(), ExpenseTypeId = typeMkt.Id, BranchId = brOlaya.Id,
                 Amount = 3200.00m, Description = "Social media ads — Ramadan campaign",
                 ReferenceNumber = "MKT-RAM-003", RecordedBy = uAbdullah.Id,
-                ExpenseDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-14)),
+                ExpenseDate = DateTime.UtcNow.AddDays(-14),
                 Status = "approved", ApprovedBy = uAbdullah.Id,
                 CreatedAt = DateTime.UtcNow.AddDays(-14), UpdatedAt = DateTime.UtcNow.AddDays(-12)
             });
@@ -410,7 +416,7 @@ public static class DataSeeder
         var uAbdullah = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
         if (uAbdullah is null) return;
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateTime.UtcNow;
 
         db.Coupons.AddRange(
             new Coupon
@@ -613,7 +619,7 @@ public static class DataSeeder
         var uAbdullah = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
         if (uAbdullah is null) return;
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateTime.UtcNow;
 
         db.TaxFeeRules.AddRange(
             new TaxFeeRule
@@ -621,7 +627,7 @@ public static class DataSeeder
                 Id = Guid.NewGuid(), RuleName = "Standard VAT 15%", RuleType = "vat",
                 VatPercentage = 15, ApplicableTo = "all_products",
                 ZatcaEnabled = true, IsTobacco = false,
-                EffectiveDate = DateOnly.Parse("2020-07-01"), Status = "active",
+                EffectiveDate = DateTime.Parse("2020-07-01"), Status = "active",
                 CreatedBy = uAbdullah.Id,
                 CreatedAt = DateTime.UtcNow.AddDays(-365), UpdatedAt = DateTime.UtcNow
             },
@@ -630,7 +636,7 @@ public static class DataSeeder
                 Id = Guid.NewGuid(), RuleName = "Tobacco Excise Tax (100%)", RuleType = "tobacco_excise",
                 ExcisePercentage = 100, VatPercentage = 15,
                 ApplicableTo = "all_products", IsTobacco = true, ZatcaEnabled = true,
-                EffectiveDate = DateOnly.Parse("2020-07-01"), Status = "active",
+                EffectiveDate = DateTime.Parse("2020-07-01"), Status = "active",
                 CreatedBy = uAbdullah.Id,
                 CreatedAt = DateTime.UtcNow.AddDays(-365), UpdatedAt = DateTime.UtcNow
             },
@@ -652,6 +658,39 @@ public static class DataSeeder
                 CreatedBy = uAbdullah.Id,
                 CreatedAt = DateTime.UtcNow.AddDays(-180), UpdatedAt = DateTime.UtcNow
             }
+        );
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: Rules Engine ──────────────────────────────────────────────
+    private static async Task SeedRulesEngineAsync(BaqalaDbContext db)
+    {
+        var uAbdullah = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
+        if (uAbdullah is null) return;
+
+        db.RulesEngine.AddRange(
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Auto-block expired items", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"blockSale\": true, \"reason\": \"expired\"}", Priority = 100, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Warn 7 days before expiry", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"warnDays\": 7}", Priority = 90, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Require manager approval for refund > 100 SAR", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"threshold\": 100, \"requireManagerPin\": true}", Priority = 80, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Max return period 7 days", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"maxDays\": 7}", Priority = 70, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Loyalty points on paid orders", RuleType = "discount", AppliesTo = "all", RuleConfig = "{\"pointsPerSar\": 1}", Priority = 60, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+        );
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: Audit Logs ────────────────────────────────────────────────
+    private static async Task SeedAuditLogsAsync(BaqalaDbContext db)
+    {
+        var uAbdullah = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
+        var uKhalid   = await db.Users.FirstOrDefaultAsync(u => u.Username == "khalid.alotaibi");
+        if (uAbdullah is null) return;
+
+        db.AuditLogs.AddRange(
+            new AuditLog { Id = Guid.NewGuid(), UserId = uAbdullah.Id, Action = "System initialized and seeded", EntityType = "System", CreatedAt = DateTime.UtcNow },
+            new AuditLog { Id = Guid.NewGuid(), UserId = uAbdullah.Id, Action = "Branches created: Olaya, Khobar, Jeddah, Madinah", EntityType = "Branch", CreatedAt = DateTime.UtcNow },
+            new AuditLog { Id = Guid.NewGuid(), UserId = uAbdullah.Id, Action = "Staff users created and roles assigned", EntityType = "User", CreatedAt = DateTime.UtcNow },
+            new AuditLog { Id = Guid.NewGuid(), UserId = uKhalid?.Id ?? uAbdullah.Id, Action = "Cashier shift opened at Olaya branch", EntityType = "CashierShift", CreatedAt = DateTime.UtcNow },
+            new AuditLog { Id = Guid.NewGuid(), UserId = uAbdullah.Id, Action = "Inventory stock seeded: 12 SKUs across 4 branches", EntityType = "Inventory", CreatedAt = DateTime.UtcNow }
         );
         await db.SaveChangesAsync();
     }

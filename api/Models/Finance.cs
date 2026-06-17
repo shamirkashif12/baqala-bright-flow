@@ -55,7 +55,7 @@ public class Expense
     public Guid RecordedBy { get; set; }
 
     [Required, Column("expense_date")]
-    public DateOnly ExpenseDate { get; set; }
+    public DateTime ExpenseDate { get; set; }
 
     [Required, MaxLength(20), Column("status")]
     public string Status { get; set; } = "pending"; // pending | approved | rejected
@@ -117,10 +117,10 @@ public class Coupon
     public Guid? ApplicableId { get; set; }
 
     [Required, Column("start_date")]
-    public DateOnly StartDate { get; set; }
+    public DateTime StartDate { get; set; }
 
     [Required, Column("end_date")]
-    public DateOnly EndDate { get; set; }
+    public DateTime EndDate { get; set; }
 
     [Required, MaxLength(20), Column("status")]
     public string Status { get; set; } = "active"; // active | inactive | expired
@@ -176,10 +176,10 @@ public class TaxFeeRule
     public bool IsTobacco { get; set; } = false;
 
     [Required, Column("effective_date")]
-    public DateOnly EffectiveDate { get; set; }
+    public DateTime EffectiveDate { get; set; }
 
     [Column("end_date")]
-    public DateOnly? EndDate { get; set; }
+    public DateTime? EndDate { get; set; }
 
     [Required, MaxLength(20), Column("status")]
     public string Status { get; set; } = "active";

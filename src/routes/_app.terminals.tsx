@@ -5,13 +5,12 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Toolbar, StatusBadge } from "@/components/module-placeholder";
-import { Eye, Pencil, X, Monitor, Wifi, Activity } from "lucide-react";
-import { api, type Terminal } from "@/lib/api";
+import { StatusBadge } from "@/components/module-placeholder";
+import { Eye, Pencil, X, Monitor, Activity, Plus } from "lucide-react";
+import { api, type Terminal, type Branch } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/terminals")({ component: Terminals });
 
@@ -28,22 +27,31 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+type TerminalForm = { name: string; terminalCode: string; branchId: string; status: string; };
+const emptyForm: TerminalForm = { name: "", terminalCode: "", branchId: "", status: "active" };
+
 function Terminals() {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [br, setBr] = useState("all");
   const [st, setSt] = useState("all");
   const [viewTerm, setViewTerm] = useState<Terminal | null>(null);
   const [editTerm, setEditTerm] = useState<Terminal | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState<TerminalForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    api.getTerminals()
-      .then(setTerminals)
+  const load = () => {
+    setLoading(true);
+    Promise.all([api.getTerminals(), api.getBranches()])
+      .then(([t, b]) => { setTerminals(t); setBranches(b); })
       .finally(() => setLoading(false));
-  }, []);
+  };
+  useEffect(load, []);
 
-  const branches = [...new Set(terminals.map(t => t.branch?.name).filter(Boolean))];
+  const branchNames = [...new Set(terminals.map(t => t.branch?.name).filter(Boolean))];
 
   const filtered = terminals.filter(t => {
     const matchQ = !q || t.terminalCode?.toLowerCase().includes(q.toLowerCase()) || t.name?.toLowerCase().includes(q.toLowerCase());
@@ -51,6 +59,63 @@ function Terminals() {
     const matchSt = st === "all" || t.status === st;
     return matchQ && matchBr && matchSt;
   });
+
+  const openEdit = (t: Terminal) => {
+    setEditTerm(t);
+    setForm({ name: t.name, terminalCode: t.terminalCode, branchId: t.branchId, status: t.status });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (editTerm) {
+        await api.updateTerminal(editTerm.id, form);
+        setEditTerm(null);
+      } else {
+        await api.createTerminal(form);
+        setCreateOpen(false);
+      }
+      load();
+    } catch (e) { console.error(e); } finally { setSaving(false); }
+  };
+
+  const handleDeactivate = async (t: Terminal) => {
+    await api.updateTerminalStatus(t.id, "inactive");
+    load();
+  };
+
+  const set = (k: keyof TerminalForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(p => ({ ...p, [k]: e.target.value }));
+  const setS = (k: keyof TerminalForm) => (v: string) =>
+    setForm(p => ({ ...p, [k]: v }));
+
+  const FormFields = () => (
+    <div className="mt-4 space-y-4">
+      <FieldRow label="Terminal Code"><Input value={form.terminalCode} onChange={set("terminalCode")} className="h-9 font-mono" placeholder="TML-RYD-001" /></FieldRow>
+      <FieldRow label="Name"><Input value={form.name} onChange={set("name")} className="h-9" placeholder="Olaya Cashier 1" /></FieldRow>
+      <FieldRow label="Branch">
+        <Select value={form.branchId} onValueChange={setS("branchId")}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+          <SelectContent>
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </FieldRow>
+      <FieldRow label="Status">
+        <Select value={form.status} onValueChange={setS("status")}>
+          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Inactive</SelectItem>
+            <SelectItem value="maintenance">Maintenance</SelectItem>
+          </SelectContent>
+        </Select>
+      </FieldRow>
+      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
+        {saving ? "Saving…" : "Save"}
+      </Button>
+    </div>
+  );
 
   return (
     <PageShell title="Terminals" subtitle="POS terminal registry, sessions and sync status">
@@ -60,7 +125,7 @@ function Terminals() {
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b!} value={b!}>{b}</SelectItem>)}
+            {branchNames.map(b => <SelectItem key={b!} value={b!}>{b}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={st} onValueChange={setSt}>
@@ -72,6 +137,10 @@ function Terminals() {
             <SelectItem value="maintenance">Maintenance</SelectItem>
           </SelectContent>
         </Select>
+        <div className="flex-1" />
+        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
+          <Plus className="h-4 w-4" /> Add Terminal
+        </Button>
       </div>
 
       {loading ? (
@@ -103,9 +172,9 @@ function Terminals() {
                     <td className="px-3 py-3">
                       <div className="flex gap-1 justify-end">
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTerm(t)}><Eye className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditTerm(t)}><Pencil className="h-3.5 w-3.5" /></Button>
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>
                         {t.status === "active" && (
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive"><X className="h-3.5 w-3.5" /></Button>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => handleDeactivate(t)}><X className="h-3.5 w-3.5" /></Button>
                         )}
                       </div>
                     </td>
@@ -120,7 +189,7 @@ function Terminals() {
         </Card>
       )}
 
-      {/* View sheet with tabs */}
+      {/* View sheet */}
       <Sheet open={!!viewTerm} onOpenChange={v => !v && setViewTerm(null)}>
         <SheetContent className="w-[440px]">
           <SheetHeader>
@@ -134,7 +203,6 @@ function Terminals() {
               <TabsList>
                 <TabsTrigger value="info">Info</TabsTrigger>
                 <TabsTrigger value="session">Session</TabsTrigger>
-                <TabsTrigger value="logs">Logs</TabsTrigger>
               </TabsList>
               <TabsContent value="info" className="mt-4 space-y-3">
                 <Row label="Code" value={viewTerm.terminalCode} />
@@ -153,9 +221,6 @@ function Terminals() {
                   <p className="text-xs text-muted-foreground">Cashier: {viewTerm.assignedCashier?.fullName ?? "—"}</p>
                 </div>
               </TabsContent>
-              <TabsContent value="logs" className="mt-4">
-                <p className="text-xs text-muted-foreground">No recent log entries.</p>
-              </TabsContent>
             </Tabs>
           )}
         </SheetContent>
@@ -165,20 +230,15 @@ function Terminals() {
       <Sheet open={!!editTerm} onOpenChange={v => !v && setEditTerm(null)}>
         <SheetContent>
           <SheetHeader><SheetTitle>Edit Terminal</SheetTitle></SheetHeader>
-          <div className="mt-4 space-y-4">
-            <FieldRow label="Name"><Input defaultValue={editTerm?.name ?? ""} /></FieldRow>
-            <FieldRow label="Status">
-              <Select defaultValue={editTerm?.status ?? "active"}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                  <SelectItem value="maintenance">Maintenance</SelectItem>
-                </SelectContent>
-              </Select>
-            </FieldRow>
-            <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={() => setEditTerm(null)}>Save</Button>
-          </div>
+          <FormFields />
+        </SheetContent>
+      </Sheet>
+
+      {/* Create sheet */}
+      <Sheet open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
+        <SheetContent>
+          <SheetHeader><SheetTitle>Add Terminal</SheetTitle></SheetHeader>
+          <FormFields />
         </SheetContent>
       </Sheet>
     </PageShell>

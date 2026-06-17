@@ -9,8 +9,8 @@ public class Supplier
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("supplier_code")]
-    public string SupplierCode { get; set; } = default!;
+    [MaxLength(50), Column("supplier_code")]
+    public string SupplierCode { get; set; } = "";
 
     [Required, MaxLength(255), Column("name")]
     public string Name { get; set; } = default!;
@@ -40,7 +40,7 @@ public class Supplier
     public string Status { get; set; } = "active";
 
     [Column("last_supply_date")]
-    public DateOnly? LastSupplyDate { get; set; }
+    public DateTime? LastSupplyDate { get; set; }
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

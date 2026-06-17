@@ -1,0 +1,181 @@
+using BaqalaPOS.Api.Data;
+using BaqalaPOS.Api.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace BaqalaPOS.Api.Controllers;
+
+[ApiController]
+[Route("api/purchase-orders")]
+public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> GetAll(
+        [FromQuery] Guid? supplierId,
+        [FromQuery] Guid? warehouseId,
+        [FromQuery] string? status,
+        [FromQuery] string? paymentStatus)
+    {
+        var query = db.PurchaseOrders
+            .Include(p => p.Supplier)
+            .Include(p => p.Warehouse)
+            .Include(p => p.Branch)
+            .Include(p => p.Items).ThenInclude(i => i.Product)
+            .Include(p => p.Payments)
+            .AsQueryable();
+        if (supplierId.HasValue) query = query.Where(p => p.SupplierId == supplierId);
+        if (warehouseId.HasValue) query = query.Where(p => p.WarehouseId == warehouseId);
+        if (!string.IsNullOrEmpty(status)) query = query.Where(p => p.Status == status);
+        if (!string.IsNullOrEmpty(paymentStatus)) query = query.Where(p => p.PaymentStatus == paymentStatus);
+        return Ok(await query.OrderByDescending(p => p.CreatedAt).ToListAsync());
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id)
+    {
+        var po = await db.PurchaseOrders
+            .Include(p => p.Supplier)
+            .Include(p => p.Warehouse)
+            .Include(p => p.Branch)
+            .Include(p => p.Items).ThenInclude(i => i.Product)
+            .Include(p => p.Payments)
+            .FirstOrDefaultAsync(p => p.Id == id);
+        return po is null ? NotFound() : Ok(po);
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] PurchaseOrder po)
+    {
+        po.Id = Guid.NewGuid();
+        po.PoNumber = $"PO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+        po.Status = "draft";
+        po.PaymentStatus = "unpaid";
+        po.CreatedAt = po.UpdatedAt = DateTime.UtcNow;
+        po.TotalAmount = po.Items.Sum(i => i.OrderedQuantity * i.UnitCost);
+        foreach (var item in po.Items)
+        {
+            item.Id = Guid.NewGuid();
+            item.PoId = po.Id;
+            item.Subtotal = item.OrderedQuantity * item.UnitCost;
+            item.Status = "pending";
+            item.CreatedAt = DateTime.UtcNow;
+        }
+        db.PurchaseOrders.Add(po);
+        await db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetById), new { id = po.Id }, po);
+    }
+
+    [HttpPatch("{id:guid}/status")]
+    public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdatePoStatusRequest req)
+    {
+        var po = await db.PurchaseOrders.FindAsync(id);
+        if (po is null) return NotFound();
+        po.Status = req.Status;
+        if (req.ApprovedBy.HasValue) po.ApprovedBy = req.ApprovedBy;
+        po.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(po);
+    }
+
+    // Receive stock against PO — updates item received quantities + creates InventoryBatch + updates stock
+    [HttpPost("{id:guid}/receive")]
+    public async Task<IActionResult> Receive(Guid id, [FromBody] List<ReceiveItemRequest> items)
+    {
+        var po = await db.PurchaseOrders
+            .Include(p => p.Items)
+            .FirstOrDefaultAsync(p => p.Id == id);
+        if (po is null) return NotFound();
+        if (po.Status == "cancelled") return BadRequest("PO is cancelled.");
+
+        foreach (var recv in items)
+        {
+            var item = po.Items.FirstOrDefault(i => i.ProductId == recv.ProductId);
+            if (item is null) continue;
+
+            item.ReceivedQuantity += recv.Quantity;
+            item.Status = item.ReceivedQuantity >= item.OrderedQuantity ? "received" : "partial";
+
+            // Create inventory batch
+            var batch = new InventoryBatch
+            {
+                Id = Guid.NewGuid(),
+                BatchNumber = $"BATCH-{po.PoNumber}-{recv.ProductId.ToString()[..4].ToUpper()}",
+                ProductId = recv.ProductId,
+                BranchId = po.BranchId ?? Guid.Empty,
+                SupplierId = po.SupplierId,
+                Quantity = recv.Quantity,
+                RemainingQuantity = recv.Quantity,
+                PurchaseCost = item.UnitCost,
+                ExpiryDate = recv.ExpiryDate ?? item.ExpiryDate,
+                ReceivedDate = DateTime.UtcNow,
+                Status = "active",
+                Notes = $"Received via PO {po.PoNumber}",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+
+            // If destination is warehouse, handle WarehouseStock instead
+            if (po.WarehouseId.HasValue)
+            {
+                var wStock = await db.WarehouseStocks
+                    .FirstOrDefaultAsync(s => s.WarehouseId == po.WarehouseId && s.ProductId == recv.ProductId);
+                if (wStock is null)
+                {
+                    wStock = new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = po.WarehouseId.Value, ProductId = recv.ProductId };
+                    db.WarehouseStocks.Add(wStock);
+                }
+                wStock.Quantity += recv.Quantity;
+                wStock.LastUpdated = wStock.UpdatedAt = DateTime.UtcNow;
+                batch.BranchId = (await db.BranchWarehouses.Where(bw => bw.WarehouseId == po.WarehouseId).Select(bw => bw.BranchId).FirstOrDefaultAsync());
+            }
+            else if (po.BranchId.HasValue)
+            {
+                // Update branch stock
+                var bStock = await db.InventoryStocks
+                    .FirstOrDefaultAsync(s => s.BranchId == po.BranchId && s.ProductId == recv.ProductId);
+                if (bStock is null)
+                {
+                    bStock = new InventoryStock { Id = Guid.NewGuid(), BranchId = po.BranchId.Value, ProductId = recv.ProductId };
+                    db.InventoryStocks.Add(bStock);
+                }
+                bStock.Quantity += recv.Quantity;
+                bStock.LastUpdated = bStock.UpdatedAt = DateTime.UtcNow;
+            }
+            db.InventoryBatches.Add(batch);
+        }
+
+        // Update PO status
+        var allReceived = po.Items.All(i => i.Status == "received");
+        var anyReceived = po.Items.Any(i => i.ReceivedQuantity > 0);
+        po.Status = allReceived ? "fully_received" : (anyReceived ? "partial_received" : po.Status);
+        if (allReceived) po.ReceivedDate = DateTime.UtcNow;
+        po.UpdatedAt = DateTime.UtcNow;
+
+        // Update supplier's last supply date
+        var supplier = await db.Suppliers.FindAsync(po.SupplierId);
+        if (supplier != null) supplier.LastSupplyDate = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+        return Ok(po);
+    }
+
+    [HttpPost("{id:guid}/payments")]
+    public async Task<IActionResult> AddPayment(Guid id, [FromBody] SupplierPayment payment)
+    {
+        var po = await db.PurchaseOrders.FindAsync(id);
+        if (po is null) return NotFound();
+        payment.Id = Guid.NewGuid();
+        payment.PoId = id;
+        payment.SupplierId = po.SupplierId;
+        payment.CreatedAt = DateTime.UtcNow;
+        db.SupplierPayments.Add(payment);
+        po.PaidAmount += payment.Amount;
+        po.PaymentStatus = po.PaidAmount >= po.TotalAmount ? "paid" : (po.PaidAmount > 0 ? "partial" : "unpaid");
+        po.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(payment);
+    }
+}
+
+public record UpdatePoStatusRequest(string Status, Guid? ApprovedBy);
+public record ReceiveItemRequest(Guid ProductId, decimal Quantity, DateTime? ExpiryDate);

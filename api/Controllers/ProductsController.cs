@@ -94,4 +94,33 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         await db.SaveChangesAsync();
         return Created($"/api/categories/{category.Id}", category);
     }
+
+    // ─── Product Variants ────────────────────────────────────────────────────
+
+    [HttpGet("{id:guid}/variants")]
+    public async Task<IActionResult> GetVariants(Guid id)
+    {
+        return Ok(await db.ProductVariants.Where(v => v.ProductId == id).ToListAsync());
+    }
+
+    [HttpPost("{id:guid}/variants")]
+    public async Task<IActionResult> AddVariant(Guid id, [FromBody] ProductVariant variant)
+    {
+        variant.Id = Guid.NewGuid();
+        variant.ProductId = id;
+        variant.CreatedAt = variant.UpdatedAt = DateTime.UtcNow;
+        db.ProductVariants.Add(variant);
+        await db.SaveChangesAsync();
+        return Ok(variant);
+    }
+
+    [HttpDelete("{id:guid}/variants/{variantId:guid}")]
+    public async Task<IActionResult> DeleteVariant(Guid id, Guid variantId)
+    {
+        var v = await db.ProductVariants.FirstOrDefaultAsync(v => v.ProductId == id && v.Id == variantId);
+        if (v is null) return NotFound();
+        db.ProductVariants.Remove(v);
+        await db.SaveChangesAsync();
+        return NoContent();
+    }
 }

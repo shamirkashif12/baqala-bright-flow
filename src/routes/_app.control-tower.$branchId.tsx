@@ -2,7 +2,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
 import { api, type Branch, type Terminal, type User } from "@/lib/api";
@@ -12,7 +12,6 @@ import {
   Users,
   Terminal as TerminalIcon,
   ScanBarcode,
-  Smartphone,
   Activity,
   WifiOff,
   Loader2,
@@ -101,9 +100,9 @@ function BranchDetail() {
       title={branch.name}
       subtitle={`${branch.city ?? branch.address ?? "—"} · ${branch.branchCode}`}
       actions={
-        <Button asChild variant="outline" size="sm" className="gap-1.5">
-          <Link to="/control-tower"><ArrowLeft className="h-3.5 w-3.5" /> Back to Control Tower</Link>
-        </Button>
+        <Link to="/control-tower" className={buttonVariants({ variant: "outline", size: "sm" }) + " gap-1.5"}>
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to Control Tower
+        </Link>
       }
     >
       <div className="grid gap-3 grid-cols-2 md:grid-cols-4 xl:grid-cols-5">

@@ -23,6 +23,7 @@ import { Route as AppTaxReportsRouteImport } from './routes/_app.tax-reports'
 import { Route as AppTaxFeesRouteImport } from './routes/_app.tax-fees'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
 import { Route as AppStocksRouteImport } from './routes/_app.stocks'
+import { Route as AppStockTransfersRouteImport } from './routes/_app.stock-transfers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
@@ -48,6 +49,7 @@ import { Route as AppExpenseTypesRouteImport } from './routes/_app.expense-types
 import { Route as AppDevicesRouteImport } from './routes/_app.devices'
 import { Route as AppDeviceBehaviorRouteImport } from './routes/_app.device-behavior'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppCustomersRouteImport } from './routes/_app.customers'
 import { Route as AppCouponsRouteImport } from './routes/_app.coupons'
 import { Route as AppControlTowerRouteImport } from './routes/_app.control-tower'
 import { Route as AppComplianceRouteImport } from './routes/_app.compliance'
@@ -127,6 +129,11 @@ const AppSuppliersRoute = AppSuppliersRouteImport.update({
 const AppStocksRoute = AppStocksRouteImport.update({
   id: '/stocks',
   path: '/stocks',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppStockTransfersRoute = AppStockTransfersRouteImport.update({
+  id: '/stock-transfers',
+  path: '/stock-transfers',
   getParentRoute: () => AppRoute,
 } as any)
 const AppStaffRoute = AppStaffRouteImport.update({
@@ -254,6 +261,11 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCustomersRoute = AppCustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppCouponsRoute = AppCouponsRouteImport.update({
   id: '/coupons',
   path: '/coupons',
@@ -324,6 +336,7 @@ export interface FileRoutesByFullPath {
   '/compliance': typeof AppComplianceRoute
   '/control-tower': typeof AppControlTowerRouteWithChildren
   '/coupons': typeof AppCouponsRoute
+  '/customers': typeof AppCustomersRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
@@ -349,6 +362,7 @@ export interface FileRoutesByFullPath {
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
+  '/stock-transfers': typeof AppStockTransfersRoute
   '/stocks': typeof AppStocksRoute
   '/suppliers': typeof AppSuppliersRoute
   '/tax-fees': typeof AppTaxFeesRoute
@@ -375,6 +389,7 @@ export interface FileRoutesByTo {
   '/compliance': typeof AppComplianceRoute
   '/control-tower': typeof AppControlTowerRouteWithChildren
   '/coupons': typeof AppCouponsRoute
+  '/customers': typeof AppCustomersRoute
   '/dashboard': typeof AppDashboardRoute
   '/device-behavior': typeof AppDeviceBehaviorRoute
   '/devices': typeof AppDevicesRoute
@@ -400,6 +415,7 @@ export interface FileRoutesByTo {
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
+  '/stock-transfers': typeof AppStockTransfersRoute
   '/stocks': typeof AppStocksRoute
   '/suppliers': typeof AppSuppliersRoute
   '/tax-fees': typeof AppTaxFeesRoute
@@ -428,6 +444,7 @@ export interface FileRoutesById {
   '/_app/compliance': typeof AppComplianceRoute
   '/_app/control-tower': typeof AppControlTowerRouteWithChildren
   '/_app/coupons': typeof AppCouponsRoute
+  '/_app/customers': typeof AppCustomersRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/device-behavior': typeof AppDeviceBehaviorRoute
   '/_app/devices': typeof AppDevicesRoute
@@ -453,6 +470,7 @@ export interface FileRoutesById {
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
+  '/_app/stock-transfers': typeof AppStockTransfersRoute
   '/_app/stocks': typeof AppStocksRoute
   '/_app/suppliers': typeof AppSuppliersRoute
   '/_app/tax-fees': typeof AppTaxFeesRoute
@@ -481,6 +499,7 @@ export interface FileRouteTypes {
     | '/compliance'
     | '/control-tower'
     | '/coupons'
+    | '/customers'
     | '/dashboard'
     | '/device-behavior'
     | '/devices'
@@ -506,6 +525,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/staff'
+    | '/stock-transfers'
     | '/stocks'
     | '/suppliers'
     | '/tax-fees'
@@ -532,6 +552,7 @@ export interface FileRouteTypes {
     | '/compliance'
     | '/control-tower'
     | '/coupons'
+    | '/customers'
     | '/dashboard'
     | '/device-behavior'
     | '/devices'
@@ -557,6 +578,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/staff'
+    | '/stock-transfers'
     | '/stocks'
     | '/suppliers'
     | '/tax-fees'
@@ -584,6 +606,7 @@ export interface FileRouteTypes {
     | '/_app/compliance'
     | '/_app/control-tower'
     | '/_app/coupons'
+    | '/_app/customers'
     | '/_app/dashboard'
     | '/_app/device-behavior'
     | '/_app/devices'
@@ -609,6 +632,7 @@ export interface FileRouteTypes {
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
+    | '/_app/stock-transfers'
     | '/_app/stocks'
     | '/_app/suppliers'
     | '/_app/tax-fees'
@@ -727,6 +751,13 @@ declare module '@tanstack/react-router' {
       path: '/stocks'
       fullPath: '/stocks'
       preLoaderRoute: typeof AppStocksRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/stock-transfers': {
+      id: '/_app/stock-transfers'
+      path: '/stock-transfers'
+      fullPath: '/stock-transfers'
+      preLoaderRoute: typeof AppStockTransfersRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/staff': {
@@ -904,6 +935,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/customers': {
+      id: '/_app/customers'
+      path: '/customers'
+      fullPath: '/customers'
+      preLoaderRoute: typeof AppCustomersRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/coupons': {
       id: '/_app/coupons'
       path: '/coupons'
@@ -1007,6 +1045,7 @@ interface AppRouteChildren {
   AppComplianceRoute: typeof AppComplianceRoute
   AppControlTowerRoute: typeof AppControlTowerRouteWithChildren
   AppCouponsRoute: typeof AppCouponsRoute
+  AppCustomersRoute: typeof AppCustomersRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppDeviceBehaviorRoute: typeof AppDeviceBehaviorRoute
   AppDevicesRoute: typeof AppDevicesRoute
@@ -1032,6 +1071,7 @@ interface AppRouteChildren {
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
+  AppStockTransfersRoute: typeof AppStockTransfersRoute
   AppStocksRoute: typeof AppStocksRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
   AppTaxFeesRoute: typeof AppTaxFeesRoute
@@ -1055,6 +1095,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppComplianceRoute: AppComplianceRoute,
   AppControlTowerRoute: AppControlTowerRouteWithChildren,
   AppCouponsRoute: AppCouponsRoute,
+  AppCustomersRoute: AppCustomersRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppDeviceBehaviorRoute: AppDeviceBehaviorRoute,
   AppDevicesRoute: AppDevicesRoute,
@@ -1080,6 +1121,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,
+  AppStockTransfersRoute: AppStockTransfersRoute,
   AppStocksRoute: AppStocksRoute,
   AppSuppliersRoute: AppSuppliersRoute,
   AppTaxFeesRoute: AppTaxFeesRoute,

@@ -30,6 +30,17 @@ public class SuppliersController(BaqalaDbContext db) : ControllerBase
     {
         supplier.Id = Guid.NewGuid();
         supplier.CreatedAt = supplier.UpdatedAt = DateTime.UtcNow;
+
+        // Auto-generate supplier code: SUP-NNN
+        var lastCode = await db.Suppliers
+            .Where(s => s.SupplierCode.StartsWith("SUP-"))
+            .OrderByDescending(s => s.SupplierCode)
+            .Select(s => s.SupplierCode)
+            .FirstOrDefaultAsync();
+        int next = 1;
+        if (lastCode is not null && int.TryParse(lastCode[4..], out int n)) next = n + 1;
+        supplier.SupplierCode = $"SUP-{next:D3}";
+
         db.Suppliers.Add(supplier);
         await db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = supplier.Id }, supplier);

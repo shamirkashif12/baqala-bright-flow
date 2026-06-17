@@ -70,10 +70,11 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
     [HttpGet("coupons/validate/{code}")]
     public async Task<IActionResult> ValidateCoupon(string code)
     {
+        var now = DateTime.UtcNow;
         var coupon = await db.Coupons.FirstOrDefaultAsync(c =>
             c.Code == code && c.Status == "active" &&
-            c.StartDate <= DateOnly.FromDateTime(DateTime.UtcNow) &&
-            c.EndDate >= DateOnly.FromDateTime(DateTime.UtcNow) &&
+            c.StartDate <= now &&
+            c.EndDate >= now &&
             (c.UsageLimit == null || c.UsedCount < c.UsageLimit));
         return coupon is null ? NotFound("Coupon invalid or expired.") : Ok(coupon);
     }
@@ -87,6 +88,34 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         db.Coupons.Add(coupon);
         await db.SaveChangesAsync();
         return Created($"/api/finance/coupons/{coupon.Id}", coupon);
+    }
+
+    [HttpPut("coupons/{id:guid}")]
+    public async Task<IActionResult> UpdateCoupon(Guid id, [FromBody] Coupon updated)
+    {
+        var coupon = await db.Coupons.FindAsync(id);
+        if (coupon is null) return NotFound();
+        coupon.Name = updated.Name;
+        coupon.Code = updated.Code;
+        coupon.Type = updated.Type;
+        coupon.Value = updated.Value;
+        coupon.UsageLimit = updated.UsageLimit;
+        coupon.StartDate = updated.StartDate;
+        coupon.EndDate = updated.EndDate;
+        coupon.Status = updated.Status;
+        coupon.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(coupon);
+    }
+
+    [HttpDelete("coupons/{id:guid}")]
+    public async Task<IActionResult> DeleteCoupon(Guid id)
+    {
+        var coupon = await db.Coupons.FindAsync(id);
+        if (coupon is null) return NotFound();
+        db.Coupons.Remove(coupon);
+        await db.SaveChangesAsync();
+        return NoContent();
     }
 
     // ─── Tax/Fee Rules ────────────────────────────────────────────────────────
@@ -106,6 +135,24 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         db.TaxFeeRules.Add(rule);
         await db.SaveChangesAsync();
         return Created($"/api/finance/tax-rules/{rule.Id}", rule);
+    }
+
+    [HttpPut("tax-rules/{id:guid}")]
+    public async Task<IActionResult> UpdateTaxRule(Guid id, [FromBody] TaxFeeRule updated)
+    {
+        var rule = await db.TaxFeeRules.FindAsync(id);
+        if (rule is null) return NotFound();
+        rule.RuleName = updated.RuleName;
+        rule.RuleType = updated.RuleType;
+        rule.VatPercentage = updated.VatPercentage;
+        rule.CustomFeeAmount = updated.CustomFeeAmount;
+        rule.ExcisePercentage = updated.ExcisePercentage;
+        rule.IsTobacco = updated.IsTobacco;
+        rule.ApplicableTo = updated.ApplicableTo;
+        rule.Status = updated.Status;
+        rule.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(rule);
     }
 }
 

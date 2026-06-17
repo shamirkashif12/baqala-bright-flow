@@ -1,4 +1,5 @@
 using BaqalaPOS.Api.Data;
+using BaqalaPOS.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,6 +42,7 @@ builder.Services.AddControllers()
             System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
     });
 
+builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
@@ -51,7 +53,7 @@ if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
-    db.Database.Migrate();
+    try { db.Database.Migrate(); } catch { /* tables already exist */ }
     await DataSeeder.SeedAsync(db);
     app.MapOpenApi();
 }

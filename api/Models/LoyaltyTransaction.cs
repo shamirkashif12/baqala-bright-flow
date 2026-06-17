@@ -33,7 +33,7 @@ public class LoyaltyTransaction
     public string? Description { get; set; }
 
     [Column("expiry_date")]
-    public DateOnly? ExpiryDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

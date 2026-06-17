@@ -1,5 +1,6 @@
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,7 +8,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll(
@@ -38,6 +39,8 @@ public class OrdersController(BaqalaDbContext db) : ControllerBase
             .Include(o => o.Items).ThenInclude(i => i.Product)
             .Include(o => o.Payments)
             .Include(o => o.Customer)
+            .Include(o => o.Branch)
+            .Include(o => o.Cashier)
             .FirstOrDefaultAsync(o => o.Id == id);
         return order is null ? NotFound() : Ok(order);
     }
@@ -51,7 +54,76 @@ public class OrdersController(BaqalaDbContext db) : ControllerBase
         foreach (var item in order.Items) { item.Id = Guid.NewGuid(); item.OrderId = order.Id; }
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
         db.Orders.Add(order);
+
+        // ── Reduce inventory stock for each item ───────────────────────────────
+        foreach (var item in order.Items)
+        {
+            // Prefer exact branch match; fall back to any stock record for the product
+            var stock = await db.InventoryStocks
+                            .FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == order.BranchId)
+                        ?? await db.InventoryStocks
+                            .FirstOrDefaultAsync(s => s.ProductId == item.ProductId);
+            if (stock != null)
+            {
+                stock.Quantity = Math.Max(0, stock.Quantity - item.Quantity);
+                stock.LastUpdated = DateTime.UtcNow;
+                stock.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await db.SaveChangesAsync();
+
+        // ── Loyalty points: earn 1 point per SAR spent ────────────────────────
+        if (order.CustomerId.HasValue)
+        {
+            const decimal PointsPerSar = 1m;
+            var customer = await db.Customers.FindAsync(order.CustomerId.Value);
+            if (customer != null)
+            {
+                var earned = Math.Floor(order.TotalAmount * PointsPerSar);
+                if (earned > 0)
+                {
+                    customer.LoyaltyBalance += earned;
+                    customer.TotalSpend += order.TotalAmount;
+                    customer.Tier = customer.TotalSpend switch
+                    {
+                        >= 10000 => "platinum",
+                        >= 5000  => "gold",
+                        >= 1000  => "silver",
+                        _        => "standard",
+                    };
+                    db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                    {
+                        Id = Guid.NewGuid(),
+                        CustomerId = customer.Id,
+                        OrderId = order.Id,
+                        BranchId = order.BranchId,
+                        TransactionType = "earn",
+                        Points = earned,
+                        BalanceAfter = customer.LoyaltyBalance,
+                        Description = $"Earned from order {order.OrderNumber}",
+                        CreatedAt = DateTime.UtcNow,
+                    });
+                    await db.SaveChangesAsync();
+                }
+
+                // ── Send invoice email ─────────────────────────────────────────
+                if (!string.IsNullOrWhiteSpace(customer.Email))
+                {
+                    foreach (var item in order.Items)
+                        item.Product = await db.Products.FindAsync(item.ProductId);
+
+                    var zatca = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == order.BranchId);
+                    _ = emailService.SendInvoiceAsync(
+                        customer.Email,
+                        customer.FullName ?? customer.Email,
+                        order,
+                        zatca?.VatRegistrationNumber,
+                        zatca?.SellerName ?? order.Branch?.Name);
+                }
+            }
+        }
+
         return CreatedAtAction(nameof(GetById), new { id = order.Id }, order);
     }
 

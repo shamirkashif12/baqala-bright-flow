@@ -29,7 +29,8 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
     [HttpGet("by-phone/{phone}")]
     public async Task<IActionResult> GetByPhone(string phone)
     {
-        var customer = await db.Customers.FirstOrDefaultAsync(c => c.Phone == phone);
+        var customer = await db.Customers.FirstOrDefaultAsync(c =>
+            c.Phone == phone || c.Phone.Contains(phone) || phone.Contains(c.Phone));
         return customer is null ? NotFound() : Ok(customer);
     }
 

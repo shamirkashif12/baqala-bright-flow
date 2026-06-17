@@ -34,6 +34,20 @@ public class TerminalsController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = terminal.Id }, terminal);
     }
 
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] Terminal updated)
+    {
+        var terminal = await db.Terminals.FindAsync(id);
+        if (terminal is null) return NotFound();
+        terminal.Name = updated.Name;
+        terminal.BranchId = updated.BranchId;
+        terminal.AssignedCashierId = updated.AssignedCashierId;
+        terminal.Status = updated.Status;
+        terminal.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(terminal);
+    }
+
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateStatusRequest req)
     {
