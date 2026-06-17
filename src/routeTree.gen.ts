@@ -13,7 +13,6 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AppZatcaSettingsRouteImport } from './routes/_app.zatca-settings'
 import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
 import { Route as AppWarehousesRouteImport } from './routes/_app.warehouses'
 import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehouse-suppliers'
@@ -23,6 +22,7 @@ import { Route as AppTerminalSessionsRouteImport } from './routes/_app.terminal-
 import { Route as AppTaxReportsRouteImport } from './routes/_app.tax-reports'
 import { Route as AppTaxFeesRouteImport } from './routes/_app.tax-fees'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
+import { Route as AppStocksRouteImport } from './routes/_app.stocks'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
@@ -31,6 +31,7 @@ import { Route as AppRolesRouteImport } from './routes/_app.roles'
 import { Route as AppReturnsRouteImport } from './routes/_app.returns'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppRefundsRouteImport } from './routes/_app.refunds'
+import { Route as AppPurchaseOrdersRouteImport } from './routes/_app.purchase-orders'
 import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
 import { Route as AppPlansRouteImport } from './routes/_app.plans'
@@ -78,11 +79,6 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppZatcaSettingsRoute = AppZatcaSettingsRouteImport.update({
-  id: '/zatca-settings',
-  path: '/zatca-settings',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppZatcaRoute = AppZatcaRouteImport.update({
   id: '/zatca',
   path: '/zatca',
@@ -128,6 +124,11 @@ const AppSuppliersRoute = AppSuppliersRouteImport.update({
   path: '/suppliers',
   getParentRoute: () => AppRoute,
 } as any)
+const AppStocksRoute = AppStocksRouteImport.update({
+  id: '/stocks',
+  path: '/stocks',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppStaffRoute = AppStaffRouteImport.update({
   id: '/staff',
   path: '/staff',
@@ -166,6 +167,11 @@ const AppReportsRoute = AppReportsRouteImport.update({
 const AppRefundsRoute = AppRefundsRouteImport.update({
   id: '/refunds',
   path: '/refunds',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPurchaseOrdersRoute = AppPurchaseOrdersRouteImport.update({
+  id: '/purchase-orders',
+  path: '/purchase-orders',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPosSettingsRoute = AppPosSettingsRouteImport.update({
@@ -334,6 +340,7 @@ export interface FileRoutesByFullPath {
   '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
   '/pos-settings': typeof AppPosSettingsRoute
+  '/purchase-orders': typeof AppPurchaseOrdersRoute
   '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
   '/returns': typeof AppReturnsRoute
@@ -342,6 +349,7 @@ export interface FileRoutesByFullPath {
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
+  '/stocks': typeof AppStocksRoute
   '/suppliers': typeof AppSuppliersRoute
   '/tax-fees': typeof AppTaxFeesRoute
   '/tax-reports': typeof AppTaxReportsRoute
@@ -351,7 +359,6 @@ export interface FileRoutesByFullPath {
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
-  '/zatca-settings': typeof AppZatcaSettingsRoute
   '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRoutesByTo {
@@ -384,6 +391,7 @@ export interface FileRoutesByTo {
   '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
   '/pos-settings': typeof AppPosSettingsRoute
+  '/purchase-orders': typeof AppPurchaseOrdersRoute
   '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
   '/returns': typeof AppReturnsRoute
@@ -392,6 +400,7 @@ export interface FileRoutesByTo {
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
+  '/stocks': typeof AppStocksRoute
   '/suppliers': typeof AppSuppliersRoute
   '/tax-fees': typeof AppTaxFeesRoute
   '/tax-reports': typeof AppTaxReportsRoute
@@ -401,7 +410,6 @@ export interface FileRoutesByTo {
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
-  '/zatca-settings': typeof AppZatcaSettingsRoute
   '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRoutesById {
@@ -436,6 +444,7 @@ export interface FileRoutesById {
   '/_app/plans': typeof AppPlansRoute
   '/_app/pos': typeof AppPosRoute
   '/_app/pos-settings': typeof AppPosSettingsRoute
+  '/_app/purchase-orders': typeof AppPurchaseOrdersRoute
   '/_app/refunds': typeof AppRefundsRoute
   '/_app/reports': typeof AppReportsRoute
   '/_app/returns': typeof AppReturnsRoute
@@ -444,6 +453,7 @@ export interface FileRoutesById {
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
+  '/_app/stocks': typeof AppStocksRoute
   '/_app/suppliers': typeof AppSuppliersRoute
   '/_app/tax-fees': typeof AppTaxFeesRoute
   '/_app/tax-reports': typeof AppTaxReportsRoute
@@ -453,7 +463,6 @@ export interface FileRoutesById {
   '/_app/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/_app/warehouses': typeof AppWarehousesRoute
   '/_app/zatca': typeof AppZatcaRoute
-  '/_app/zatca-settings': typeof AppZatcaSettingsRoute
   '/_app/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRouteTypes {
@@ -488,6 +497,7 @@ export interface FileRouteTypes {
     | '/plans'
     | '/pos'
     | '/pos-settings'
+    | '/purchase-orders'
     | '/refunds'
     | '/reports'
     | '/returns'
@@ -496,6 +506,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/staff'
+    | '/stocks'
     | '/suppliers'
     | '/tax-fees'
     | '/tax-reports'
@@ -505,7 +516,6 @@ export interface FileRouteTypes {
     | '/warehouse-suppliers'
     | '/warehouses'
     | '/zatca'
-    | '/zatca-settings'
     | '/control-tower/$branchId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -538,6 +548,7 @@ export interface FileRouteTypes {
     | '/plans'
     | '/pos'
     | '/pos-settings'
+    | '/purchase-orders'
     | '/refunds'
     | '/reports'
     | '/returns'
@@ -546,6 +557,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/settings'
     | '/staff'
+    | '/stocks'
     | '/suppliers'
     | '/tax-fees'
     | '/tax-reports'
@@ -555,7 +567,6 @@ export interface FileRouteTypes {
     | '/warehouse-suppliers'
     | '/warehouses'
     | '/zatca'
-    | '/zatca-settings'
     | '/control-tower/$branchId'
   id:
     | '__root__'
@@ -589,6 +600,7 @@ export interface FileRouteTypes {
     | '/_app/plans'
     | '/_app/pos'
     | '/_app/pos-settings'
+    | '/_app/purchase-orders'
     | '/_app/refunds'
     | '/_app/reports'
     | '/_app/returns'
@@ -597,6 +609,7 @@ export interface FileRouteTypes {
     | '/_app/sales'
     | '/_app/settings'
     | '/_app/staff'
+    | '/_app/stocks'
     | '/_app/suppliers'
     | '/_app/tax-fees'
     | '/_app/tax-reports'
@@ -606,7 +619,6 @@ export interface FileRouteTypes {
     | '/_app/warehouse-suppliers'
     | '/_app/warehouses'
     | '/_app/zatca'
-    | '/_app/zatca-settings'
     | '/_app/control-tower/$branchId'
   fileRoutesById: FileRoutesById
 }
@@ -646,13 +658,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/_app/zatca-settings': {
-      id: '/_app/zatca-settings'
-      path: '/zatca-settings'
-      fullPath: '/zatca-settings'
-      preLoaderRoute: typeof AppZatcaSettingsRouteImport
-      parentRoute: typeof AppRoute
     }
     '/_app/zatca': {
       id: '/_app/zatca'
@@ -717,6 +722,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSuppliersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/stocks': {
+      id: '/_app/stocks'
+      path: '/stocks'
+      fullPath: '/stocks'
+      preLoaderRoute: typeof AppStocksRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/staff': {
       id: '/_app/staff'
       path: '/staff'
@@ -771,6 +783,13 @@ declare module '@tanstack/react-router' {
       path: '/refunds'
       fullPath: '/refunds'
       preLoaderRoute: typeof AppRefundsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/purchase-orders': {
+      id: '/_app/purchase-orders'
+      path: '/purchase-orders'
+      fullPath: '/purchase-orders'
+      preLoaderRoute: typeof AppPurchaseOrdersRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/pos-settings': {
@@ -1004,6 +1023,7 @@ interface AppRouteChildren {
   AppPlansRoute: typeof AppPlansRoute
   AppPosRoute: typeof AppPosRoute
   AppPosSettingsRoute: typeof AppPosSettingsRoute
+  AppPurchaseOrdersRoute: typeof AppPurchaseOrdersRoute
   AppRefundsRoute: typeof AppRefundsRoute
   AppReportsRoute: typeof AppReportsRoute
   AppReturnsRoute: typeof AppReturnsRoute
@@ -1012,6 +1032,7 @@ interface AppRouteChildren {
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
+  AppStocksRoute: typeof AppStocksRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
   AppTaxFeesRoute: typeof AppTaxFeesRoute
   AppTaxReportsRoute: typeof AppTaxReportsRoute
@@ -1021,7 +1042,6 @@ interface AppRouteChildren {
   AppWarehouseSuppliersRoute: typeof AppWarehouseSuppliersRoute
   AppWarehousesRoute: typeof AppWarehousesRoute
   AppZatcaRoute: typeof AppZatcaRoute
-  AppZatcaSettingsRoute: typeof AppZatcaSettingsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -1051,6 +1071,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPlansRoute: AppPlansRoute,
   AppPosRoute: AppPosRoute,
   AppPosSettingsRoute: AppPosSettingsRoute,
+  AppPurchaseOrdersRoute: AppPurchaseOrdersRoute,
   AppRefundsRoute: AppRefundsRoute,
   AppReportsRoute: AppReportsRoute,
   AppReturnsRoute: AppReturnsRoute,
@@ -1059,6 +1080,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,
+  AppStocksRoute: AppStocksRoute,
   AppSuppliersRoute: AppSuppliersRoute,
   AppTaxFeesRoute: AppTaxFeesRoute,
   AppTaxReportsRoute: AppTaxReportsRoute,
@@ -1068,7 +1090,6 @@ const AppRouteChildren: AppRouteChildren = {
   AppWarehouseSuppliersRoute: AppWarehouseSuppliersRoute,
   AppWarehousesRoute: AppWarehousesRoute,
   AppZatcaRoute: AppZatcaRoute,
-  AppZatcaSettingsRoute: AppZatcaSettingsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

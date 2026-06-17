@@ -38,9 +38,10 @@ import {
   Cigarette,
   Undo2 as ReturnIcon,
   History,
-  FileCheck2,
   Coins,
   Workflow,
+  Boxes,
+  ShoppingCart,
 } from "lucide-react";
 import {
   Sidebar,
@@ -77,6 +78,7 @@ const navGroups = [
   {
     label: "Stock",
     items: [
+      { title: "Stocks", url: "/stocks", icon: Boxes },
       { title: "Inventory", url: "/inventory", icon: Package },
       { title: "Expiry & Permissible", url: "/batches", icon: CalendarClock },
       { title: "Warehouses", url: "/warehouses", icon: Warehouse },
@@ -85,6 +87,7 @@ const navGroups = [
   {
     label: "Finance",
     items: [
+      { title: "Purchase Orders", url: "/purchase-orders", icon: ShoppingCart },
       { title: "Expenses", url: "/expenses", icon: Wallet },
       { title: "Coupons, Discounts & Offers", url: "/coupons", icon: TicketPercent },
       { title: "Customer Returns", url: "/returns", icon: ReturnIcon },
@@ -119,11 +122,10 @@ const navGroups = [
     items: [
       { title: "Rules Engine", url: "/rules", icon: Workflow },
       { title: "Registered Users", url: "/users", icon: UserCog },
-      { title: "Roles & Permissions", url: "/roles", icon: Lock },
       { title: "Staff & Roles", url: "/staff", icon: Users },
+      { title: "Roles & Permissions", url: "/roles", icon: Lock },
       { title: "Maintenance", url: "/maintenance", icon: Wrench },
       { title: "ZATCA Invoices", url: "/zatca", icon: ReceiptText },
-      { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2 },
       { title: "Compliance", url: "/compliance", icon: ShieldCheck },
       { title: "POS Settings", url: "/pos-settings", icon: Sliders },
       { title: "Audit Logs", url: "/audit-logs", icon: History },
