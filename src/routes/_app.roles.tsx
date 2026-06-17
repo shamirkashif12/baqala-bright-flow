@@ -26,6 +26,7 @@ const permLabels: Record<typeof permFlags[number], string> = {
   canDelete: "Delete", canApprove: "Approve", canExport: "Export",
 };
 
+
 function Roles() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);

@@ -238,6 +238,12 @@ public static class DataSeeder
 
         if (!await db.TaxFeeRules.AnyAsync())
             await SeedTaxRulesAsync(db);
+
+        if (!await db.RolePermissions.AnyAsync())
+            await SeedRolePermissionsAsync(db);
+
+        if (!await db.RulesEngine.AnyAsync())
+            await SeedRulesEngineAsync(db);
     }
 
     // ─── Backfill: Warehouse Requests ────────────────────────────────────────
@@ -752,4 +758,260 @@ public static class DataSeeder
     private static string Hash(string plain) =>
         Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(plain + "baqala_salt")));
+
+    // ─── Backfill: Role Permissions ──────────────────────────────────────────
+    private static async Task SeedRolePermissionsAsync(BaqalaDbContext db)
+    {
+        var roles = await db.Roles.ToListAsync();
+        if (!roles.Any()) return;
+
+        var allPerms = new List<RolePermission>();
+        foreach (var role in roles)
+            allPerms.AddRange(BuildPermissions(role.Id, role.Name));
+
+        if (!allPerms.Any()) return;
+        db.RolePermissions.AddRange(allPerms);
+        await db.SaveChangesAsync();
+    }
+
+    private static IEnumerable<RolePermission> BuildPermissions(Guid roleId, string roleName)
+    {
+        static RolePermission P(Guid id, string mod,
+            bool v, bool c, bool e, bool d, bool a, bool x)
+            => new() { Id = Guid.NewGuid(), RoleId = id, Module = mod,
+                       CanView = v, CanCreate = c, CanEdit = e,
+                       CanDelete = d, CanApprove = a, CanExport = x };
+
+        var r = roleId;
+        // Matrix columns: View, Create, Edit, Delete, Approve, Export
+        return roleName switch
+        {
+            "Tenant Administrator" => new[]
+            {
+                P(r, "Dashboard",      true,  true,  true,  true,  true,  true),
+                P(r, "Orders",         true,  true,  true,  true,  true,  true),
+                P(r, "Inventory",      true,  true,  true,  true,  true,  true),
+                P(r, "Batches",        true,  true,  true,  true,  true,  true),
+                P(r, "Warehouses",     true,  true,  true,  true,  true,  true),
+                P(r, "Branches",       true,  true,  true,  true,  true,  true),
+                P(r, "Users",          true,  true,  true,  true,  true,  true),
+                P(r, "Cashier Shifts", true,  true,  true,  true,  true,  true),
+                P(r, "Terminals",      true,  true,  true,  true,  true,  true),
+                P(r, "Suppliers",      true,  true,  true,  true,  true,  true),
+                P(r, "Customers",      true,  true,  true,  true,  true,  true),
+                P(r, "Finance",        true,  true,  true,  true,  true,  true),
+                P(r, "Tax & Fees",     true,  true,  true,  true,  true,  true),
+                P(r, "Returns",        true,  true,  true,  true,  true,  true),
+                P(r, "Reports",        true,  true,  true,  true,  true,  true),
+                P(r, "Compliance",     true,  true,  true,  true,  true,  true),
+                P(r, "Audit Logs",     true,  true,  true,  true,  true,  true),
+                P(r, "Devices",        true,  true,  true,  true,  true,  true),
+                P(r, "Rules Engine",   true,  true,  true,  true,  true,  true),
+                P(r, "Settings",       true,  true,  true,  true,  true,  true),
+                P(r, "Roles",          true,  true,  true,  true,  true,  true),
+            },
+            "Branch Manager" => new[]
+            {
+                P(r, "Dashboard",      true,  false, false, false, false, true),
+                P(r, "Orders",         true,  true,  true,  false, true,  true),
+                P(r, "Inventory",      true,  true,  true,  false, true,  true),
+                P(r, "Batches",        true,  true,  true,  false, false, true),
+                P(r, "Warehouses",     true,  true,  true,  false, true,  false),
+                P(r, "Branches",       true,  false, true,  false, false, false),
+                P(r, "Users",          true,  true,  true,  false, false, false),
+                P(r, "Cashier Shifts", true,  false, false, false, true,  true),
+                P(r, "Terminals",      true,  false, true,  false, false, false),
+                P(r, "Suppliers",      true,  false, false, false, false, true),
+                P(r, "Customers",      true,  true,  true,  false, false, true),
+                P(r, "Finance",        true,  true,  true,  false, true,  true),
+                P(r, "Tax & Fees",     true,  false, false, false, false, false),
+                P(r, "Returns",        true,  true,  true,  false, true,  true),
+                P(r, "Reports",        true,  false, false, false, false, true),
+                P(r, "Compliance",     true,  false, false, false, false, false),
+                P(r, "Audit Logs",     true,  false, false, false, false, true),
+                P(r, "Devices",        true,  false, true,  false, false, false),
+                P(r, "Rules Engine",   true,  false, false, false, false, false),
+                P(r, "Settings",       true,  false, true,  false, false, false),
+                P(r, "Roles",          false, false, false, false, false, false),
+            },
+            "Cashier" => new[]
+            {
+                P(r, "Dashboard",      true,  false, false, false, false, false),
+                P(r, "Orders",         true,  true,  false, false, false, false),
+                P(r, "Inventory",      true,  false, false, false, false, false),
+                P(r, "Batches",        false, false, false, false, false, false),
+                P(r, "Warehouses",     false, false, false, false, false, false),
+                P(r, "Branches",       false, false, false, false, false, false),
+                P(r, "Users",          false, false, false, false, false, false),
+                P(r, "Cashier Shifts", true,  true,  false, false, false, false),
+                P(r, "Terminals",      true,  false, false, false, false, false),
+                P(r, "Suppliers",      false, false, false, false, false, false),
+                P(r, "Customers",      true,  true,  false, false, false, false),
+                P(r, "Finance",        false, false, false, false, false, false),
+                P(r, "Tax & Fees",     true,  false, false, false, false, false),
+                P(r, "Returns",        true,  true,  false, false, true,  false),
+                P(r, "Reports",        true,  false, false, false, false, false),
+                P(r, "Compliance",     false, false, false, false, false, false),
+                P(r, "Audit Logs",     false, false, false, false, false, false),
+                P(r, "Devices",        false, false, false, false, false, false),
+                P(r, "Rules Engine",   false, false, false, false, false, false),
+                P(r, "Settings",       false, false, false, false, false, false),
+                P(r, "Roles",          false, false, false, false, false, false),
+            },
+            "Storekeeper" => new[]
+            {
+                P(r, "Dashboard",      true,  false, false, false, false, false),
+                P(r, "Orders",         true,  false, false, false, false, false),
+                P(r, "Inventory",      true,  true,  true,  false, true,  true),
+                P(r, "Batches",        true,  true,  true,  false, false, true),
+                P(r, "Warehouses",     true,  true,  true,  false, true,  false),
+                P(r, "Branches",       false, false, false, false, false, false),
+                P(r, "Users",          false, false, false, false, false, false),
+                P(r, "Cashier Shifts", false, false, false, false, false, false),
+                P(r, "Terminals",      false, false, false, false, false, false),
+                P(r, "Suppliers",      true,  false, false, false, false, false),
+                P(r, "Customers",      false, false, false, false, false, false),
+                P(r, "Finance",        false, false, false, false, false, false),
+                P(r, "Tax & Fees",     false, false, false, false, false, false),
+                P(r, "Returns",        false, false, false, false, false, false),
+                P(r, "Reports",        true,  false, false, false, false, true),
+                P(r, "Compliance",     false, false, false, false, false, false),
+                P(r, "Audit Logs",     false, false, false, false, false, false),
+                P(r, "Devices",        true,  false, true,  false, false, false),
+                P(r, "Rules Engine",   false, false, false, false, false, false),
+                P(r, "Settings",       false, false, false, false, false, false),
+                P(r, "Roles",          false, false, false, false, false, false),
+            },
+            "Supervisor" => new[]
+            {
+                P(r, "Dashboard",      true,  false, false, false, false, true),
+                P(r, "Orders",         true,  true,  true,  false, true,  true),
+                P(r, "Inventory",      true,  true,  true,  false, true,  true),
+                P(r, "Batches",        true,  false, false, false, false, true),
+                P(r, "Warehouses",     true,  true,  true,  false, true,  false),
+                P(r, "Branches",       true,  false, false, false, false, false),
+                P(r, "Users",          true,  false, false, false, false, false),
+                P(r, "Cashier Shifts", true,  true,  true,  false, true,  true),
+                P(r, "Terminals",      true,  false, false, false, false, false),
+                P(r, "Suppliers",      true,  false, false, false, false, false),
+                P(r, "Customers",      true,  true,  true,  false, false, false),
+                P(r, "Finance",        true,  false, false, false, true,  true),
+                P(r, "Tax & Fees",     true,  false, false, false, false, false),
+                P(r, "Returns",        true,  true,  true,  false, true,  true),
+                P(r, "Reports",        true,  false, false, false, false, true),
+                P(r, "Compliance",     true,  false, false, false, false, false),
+                P(r, "Audit Logs",     true,  false, false, false, false, false),
+                P(r, "Devices",        true,  false, true,  false, false, false),
+                P(r, "Rules Engine",   false, false, false, false, false, false),
+                P(r, "Settings",       true,  false, false, false, false, false),
+                P(r, "Roles",          false, false, false, false, false, false),
+            },
+            "Finance User" => new[]
+            {
+                P(r, "Dashboard",      true,  false, false, false, false, true),
+                P(r, "Orders",         true,  false, false, false, false, true),
+                P(r, "Inventory",      true,  false, false, false, false, true),
+                P(r, "Batches",        false, false, false, false, false, false),
+                P(r, "Warehouses",     true,  false, false, false, false, false),
+                P(r, "Branches",       true,  false, false, false, false, false),
+                P(r, "Users",          true,  false, false, false, false, false),
+                P(r, "Cashier Shifts", true,  false, false, false, false, true),
+                P(r, "Terminals",      false, false, false, false, false, false),
+                P(r, "Suppliers",      true,  false, false, false, false, true),
+                P(r, "Customers",      true,  false, false, false, false, true),
+                P(r, "Finance",        true,  true,  true,  true,  true,  true),
+                P(r, "Tax & Fees",     true,  true,  true,  true,  true,  true),
+                P(r, "Returns",        true,  false, false, false, true,  true),
+                P(r, "Reports",        true,  false, false, false, false, true),
+                P(r, "Compliance",     true,  false, false, false, false, true),
+                P(r, "Audit Logs",     true,  false, false, false, false, true),
+                P(r, "Devices",        false, false, false, false, false, false),
+                P(r, "Rules Engine",   true,  false, false, false, false, false),
+                P(r, "Settings",       false, false, false, false, false, false),
+                P(r, "Roles",          false, false, false, false, false, false),
+            },
+            "Marketing User" => new[]
+            {
+                P(r, "Dashboard",      true,  false, false, false, false, true),
+                P(r, "Orders",         true,  false, false, false, false, true),
+                P(r, "Inventory",      true,  false, false, false, false, true),
+                P(r, "Batches",        false, false, false, false, false, false),
+                P(r, "Warehouses",     false, false, false, false, false, false),
+                P(r, "Branches",       true,  false, false, false, false, false),
+                P(r, "Users",          false, false, false, false, false, false),
+                P(r, "Cashier Shifts", false, false, false, false, false, false),
+                P(r, "Terminals",      false, false, false, false, false, false),
+                P(r, "Suppliers",      false, false, false, false, false, false),
+                P(r, "Customers",      true,  true,  true,  false, false, true),
+                P(r, "Finance",        true,  false, false, false, false, true),
+                P(r, "Tax & Fees",     false, false, false, false, false, false),
+                P(r, "Returns",        true,  false, false, false, false, true),
+                P(r, "Reports",        true,  false, false, false, false, true),
+                P(r, "Compliance",     false, false, false, false, false, false),
+                P(r, "Audit Logs",     false, false, false, false, false, false),
+                P(r, "Devices",        false, false, false, false, false, false),
+                P(r, "Rules Engine",   true,  false, false, false, false, false),
+                P(r, "Settings",       false, false, false, false, false, false),
+                P(r, "Roles",          false, false, false, false, false, false),
+            },
+            "Picker" => new[]
+            {
+                P(r, "Dashboard",      false, false, false, false, false, false),
+                P(r, "Orders",         true,  false, false, false, false, false),
+                P(r, "Inventory",      true,  false, false, false, false, false),
+                P(r, "Batches",        false, false, false, false, false, false),
+                P(r, "Warehouses",     true,  false, false, false, false, false),
+                P(r, "Branches",       false, false, false, false, false, false),
+                P(r, "Users",          false, false, false, false, false, false),
+                P(r, "Cashier Shifts", false, false, false, false, false, false),
+                P(r, "Terminals",      false, false, false, false, false, false),
+                P(r, "Suppliers",      false, false, false, false, false, false),
+                P(r, "Customers",      false, false, false, false, false, false),
+                P(r, "Finance",        false, false, false, false, false, false),
+                P(r, "Tax & Fees",     false, false, false, false, false, false),
+                P(r, "Returns",        false, false, false, false, false, false),
+                P(r, "Reports",        false, false, false, false, false, false),
+                P(r, "Compliance",     false, false, false, false, false, false),
+                P(r, "Audit Logs",     false, false, false, false, false, false),
+                P(r, "Devices",        false, false, false, false, false, false),
+                P(r, "Rules Engine",   false, false, false, false, false, false),
+                P(r, "Settings",       false, false, false, false, false, false),
+                P(r, "Roles",          false, false, false, false, false, false),
+            },
+            _ => Array.Empty<RolePermission>()
+        };
+    }
+
+    // ─── Backfill: Rules Engine ──────────────────────────────────────────────
+    private static async Task SeedRulesEngineAsync(BaqalaDbContext db)
+    {
+        var uAdmin = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
+        if (uAdmin is null) return;
+
+        db.RulesEngine.AddRange(
+            // FR-RET: Return Rules
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Max return period — 7 days", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"condition\":\"Days since purchase ≤ 7\",\"action\":\"Allow return with valid receipt\"}", Priority = 100, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Perishables — 24h return window", RuleType = "return", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Perishable AND hours since purchase ≤ 24\",\"action\":\"Allow return with inspection\"}", Priority = 95, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Block sale of expired items", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"condition\":\"Batch expiry date < today\",\"action\":\"Block sale and alert cashier\"}", Priority = 90, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+
+            // FR-APR: Approval Rules
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Manager approval — refund > SAR 100", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"Refund amount > 100\",\"action\":\"Require manager PIN approval\"}", Priority = 85, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Supervisor approval — void or discount > SAR 50", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"Void or discount amount > 50\",\"action\":\"Require supervisor override PIN\"}", Priority = 80, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Cash variance > SAR 200 — manager review", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"End-of-shift cash variance > 200\",\"action\":\"Flag shift for manager review before close\"}", Priority = 75, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+
+            // FR-DSC: Discount & Loyalty Rules
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "VIP customer — 10% automatic discount", RuleType = "discount", AppliesTo = "customer_tier", RuleConfig = "{\"condition\":\"Customer tier = VIP or Platinum\",\"action\":\"Apply 10% discount automatically\"}", Priority = 70, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Loyalty points — 1 point per SAR spent", RuleType = "discount", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order payment status = paid\",\"action\":\"Award 1 loyalty point per SAR spent\"}", Priority = 60, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "No discount on tobacco items", RuleType = "discount", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Tobacco\",\"action\":\"Block all discount applications on tobacco SKUs\"}", Priority = 55, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+
+            // FR-COUP: Coupon Acceptance Rules
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Coupon — single use per customer", RuleType = "coupon", AppliesTo = "all", RuleConfig = "{\"condition\":\"Customer has not used this coupon before\",\"action\":\"Accept coupon and mark as used for this customer\"}", Priority = 50, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Coupon — validate active date range", RuleType = "coupon", AppliesTo = "all", RuleConfig = "{\"condition\":\"Current date between coupon startDate and endDate\",\"action\":\"Accept coupon if within validity window\"}", Priority = 45, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+
+            // FR-FEE: Custom Fee Rules
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Delivery service fee — SAR 10", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order channel = Delivery\",\"action\":\"Add SAR 10 delivery service fee to order total\"}", Priority = 40, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Eid week — 5% holiday surcharge", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Date falls within Eid holiday week\",\"action\":\"Add 5% surcharge to all orders\"}", Priority = 35, IsActive = false, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+        );
+        await db.SaveChangesAsync();
+    }
 }
