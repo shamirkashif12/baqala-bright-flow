@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/_app/pos-settings")({
   component: () => (
-    <RoleGate allow={["owner", "manager"]}>
+    <RoleGate allow={["tenant_admin", "branch_manager"]}>
       <PosSettings />
     </RoleGate>
   ),

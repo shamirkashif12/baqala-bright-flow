@@ -9,7 +9,6 @@ const authStore: AuthState = {
   user: null,
   loading: true,
   login: async () => {},
-  signup: async () => ({ needsVerification: false }),
   logout: () => {},
   hasRole: () => false,
 };

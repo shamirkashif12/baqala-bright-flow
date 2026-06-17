@@ -2,18 +2,16 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { I18nProvider } from "@/lib/i18n";
-import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_app")({
   ssr: false,
-  beforeLoad: async ({ location }) => {
-    const { data, error } = await supabase.auth.getUser();
-
-    if (error || !data.user) {
-      throw redirect({
-        to: "/login",
-        search: { redirect: location.href },
-      });
+  beforeLoad: ({ location }) => {
+    if (typeof window === "undefined") return;
+    const token  = localStorage.getItem("baqala_token");
+    const expiry = localStorage.getItem("baqala_session_expires");
+    const expired = expiry ? Date.now() > parseInt(expiry, 10) : false;
+    if (!token || expired) {
+      throw redirect({ to: "/login", search: { redirect: location.href } });
     }
   },
   component: AppLayout,

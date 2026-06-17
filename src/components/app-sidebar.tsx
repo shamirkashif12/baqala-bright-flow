@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, type ElementType } from "react";
 import {
   LayoutDashboard,
   ScanBarcode,
@@ -35,6 +35,7 @@ import {
   Cigarette,
   Undo2 as ReturnIcon,
   History,
+  FileCheck2,
   Workflow,
   Boxes,
   ClipboardList,
@@ -46,7 +47,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -54,82 +54,102 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useAuth } from "@/lib/auth";
+import { useAuth, ROLE_LABELS, type AppRole } from "@/lib/auth";
 import { BaqalaLogo } from "./baqala-logo";
 import { useI18n } from "@/lib/i18n";
 
-const navGroups = [
+type NavItem = {
+  title: string;
+  url: string;
+  icon: ElementType;
+  // module: checked against the live DB permission map (canView). Takes priority over roles.
+  module?: string;
+  // roles: fallback for items with no DB module (admin-only screens, POS terminal UI, etc.)
+  // tenant_admin always sees everything regardless of both fields.
+  roles?: AppRole[];
+};
+
+type NavGroup = { label: string; items: NavItem[] };
+
+const navGroups: NavGroup[] = [
   {
     label: "Operate",
     items: [
-      { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-      { title: "POS Checkout", url: "/pos", icon: ScanBarcode },
-      { title: "Mobile POS & Kiosk", url: "/mobile-pos", icon: Smartphone },
-      { title: "MPOS App Preview", url: "/mpos-app", icon: Smartphone },
-      { title: "Orders", url: "/orders", icon: ShoppingBag },
-      { title: "Customers", url: "/customers", icon: Users },
-      { title: "Cashier Workspace", url: "/cashier", icon: Briefcase },
-      { title: "Cashier Shift", url: "/cashier-shift", icon: ClipboardCheck },
-      { title: "Control Tower", url: "/control-tower", icon: Radar },
+      { title: "Dashboard",           url: "/dashboard",     icon: LayoutDashboard, module: "Dashboard" },
+      { title: "POS Checkout",        url: "/pos",           icon: ScanBarcode,
+        roles: ["tenant_admin","branch_manager","cashier","supervisor"] },
+      { title: "Mobile POS & Kiosk",  url: "/mobile-pos",    icon: Smartphone,
+        roles: ["tenant_admin","branch_manager"] },
+      { title: "MPOS App Preview",    url: "/mpos-app",      icon: Smartphone,
+        roles: ["tenant_admin"] },
+      { title: "Orders",              url: "/orders",        icon: ShoppingBag,    module: "Orders" },
+      { title: "Customers",           url: "/customers",     icon: Users,          module: "Customers" },
+      { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,
+        roles: ["tenant_admin","branch_manager","cashier","supervisor"] },
+      { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts" },
+      { title: "Control Tower",       url: "/control-tower", icon: Radar,
+        roles: ["tenant_admin","branch_manager","supervisor"] },
     ],
   },
   {
     label: "Stock",
     items: [
-      { title: "Stocks", url: "/stocks", icon: Boxes },
-      { title: "Inventory", url: "/inventory", icon: Package },
-      { title: "Expiry & Permissible", url: "/batches", icon: CalendarClock },
-      { title: "Warehouses", url: "/warehouses", icon: Warehouse },
-      { title: "Stock Transfers", url: "/stock-transfers", icon: ArrowLeftRight },
+      { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Inventory" },
+      { title: "Inventory",            url: "/inventory",       icon: Package,       module: "Inventory" },
+      { title: "Expiry & Permissible", url: "/batches",         icon: CalendarClock, module: "Batches" },
+      { title: "Warehouses",           url: "/warehouses",      icon: Warehouse,     module: "Warehouses" },
+      { title: "Stock Transfers",      url: "/stock-transfers", icon: ArrowLeftRight, module: "Warehouses" },
     ],
   },
   {
     label: "Finance",
     items: [
-      { title: "Expenses", url: "/expenses", icon: Wallet },
-      { title: "Coupons, Discounts & Offers", url: "/coupons", icon: TicketPercent },
-      { title: "Customer Returns", url: "/returns", icon: ReturnIcon },
-      { title: "Tax, Fees & Tobacco", url: "/tax-fees", icon: Cigarette },
+      { title: "Expenses",                    url: "/expenses",        icon: Wallet,       module: "Finance" },
+      { title: "Purchase Orders",             url: "/purchase-orders", icon: ClipboardList, module: "Suppliers" },
+      { title: "Coupons, Discounts & Offers", url: "/coupons",         icon: TicketPercent,
+        roles: ["tenant_admin","branch_manager","supervisor","marketing_user"] },
+      { title: "Customer Returns",            url: "/returns",         icon: ReturnIcon,   module: "Returns" },
+      { title: "Tax, Fees & Tobacco",         url: "/tax-fees",        icon: Cigarette,    module: "Tax & Fees" },
     ],
   },
   {
     label: "Suppliers",
     items: [
-      { title: "Suppliers", url: "/suppliers", icon: Truck },
-      { title: "Purchase Orders", url: "/purchase-orders", icon: ClipboardList },
+      { title: "Suppliers", url: "/suppliers", icon: Truck, module: "Suppliers" },
     ],
   },
   {
     label: "Network",
     items: [
-      { title: "Branches", url: "/branches", icon: Building2 },
-      { title: "Terminals", url: "/terminals", icon: Terminal },
-      { title: "Devices", url: "/devices", icon: HardDrive },
+      { title: "Branches",  url: "/branches",  icon: Building2, module: "Branches" },
+      { title: "Terminals", url: "/terminals", icon: Terminal,  module: "Terminals" },
+      { title: "Devices",   url: "/devices",   icon: HardDrive, module: "Devices" },
     ],
   },
   {
     label: "Insights",
     items: [
-      { title: "Sales", url: "/sales", icon: TrendingUp },
-      { title: "Reports", url: "/reports", icon: FileBarChart },
-      { title: "KPI Evaluation", url: "/kpi", icon: Gauge },
-      { title: "Business Intelligence", url: "/bi", icon: BarChart3 },
+      { title: "Sales",                 url: "/sales",    icon: TrendingUp,   module: "Reports" },
+      { title: "Reports",               url: "/reports",  icon: FileBarChart, module: "Reports" },
+      { title: "KPI Evaluation",        url: "/kpi",      icon: Gauge,        module: "Reports" },
+      { title: "Business Intelligence", url: "/bi",       icon: BarChart3,    module: "Reports" },
     ],
   },
   {
     label: "Admin",
     items: [
-      { title: "Rules Engine", url: "/rules", icon: Workflow },
-      { title: "Registered Users", url: "/users", icon: UserCog },
-      { title: "Staff & Roles", url: "/staff", icon: Users },
-      { title: "Roles & Permissions", url: "/roles", icon: Lock },
-      { title: "Maintenance", url: "/maintenance", icon: Wrench },
-      { title: "ZATCA Invoices", url: "/zatca", icon: ReceiptText },
-      { title: "Compliance", url: "/compliance", icon: ShieldCheck },
-      { title: "POS Settings", url: "/pos-settings", icon: Sliders },
-      { title: "Audit Logs", url: "/audit-logs", icon: History },
-      { title: "Plans & Pricing", url: "/plans", icon: Crown },
-      { title: "Settings", url: "/settings", icon: Settings },
+      { title: "Rules Engine",           url: "/rules",          icon: Workflow,    module: "Rules Engine" },
+      { title: "Registered Users",       url: "/users",          icon: UserCog,     module: "Users" },
+      { title: "Roles & Permissions",    url: "/roles",          icon: Lock,        module: "Roles" },
+      { title: "Staff & Roles",          url: "/staff",          icon: Users,       module: "Users" },
+      { title: "Maintenance",            url: "/maintenance",    icon: Wrench,      roles: ["tenant_admin"] },
+      { title: "ZATCA Invoices",         url: "/zatca",          icon: ReceiptText, module: "Compliance" },
+      { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2,  roles: ["tenant_admin"] },
+      { title: "Compliance",             url: "/compliance",     icon: ShieldCheck, module: "Compliance" },
+      { title: "POS Settings",           url: "/pos-settings",   icon: Sliders,     module: "Settings" },
+      { title: "Audit Logs",             url: "/audit-logs",     icon: History,     module: "Audit Logs" },
+      { title: "Plans & Pricing",        url: "/plans",          icon: Crown,       roles: ["tenant_admin"] },
+      { title: "Settings",               url: "/settings",       icon: Settings,    module: "Settings" },
     ],
   },
 ];
@@ -145,6 +165,13 @@ export function AppSidebar() {
     Object.fromEntries(navGroups.map((g) => [g.label, true])),
   );
 
+  const canSee = (item: NavItem) => {
+    if (user?.role === "tenant_admin") return true;
+    if (item.module) return user?.permissions?.[item.module]?.canView === true;
+    if (!item.roles) return true;
+    return !!user?.role && item.roles.includes(user.role as AppRole);
+  };
+
   const handleLogout = () => {
     logout();
     navigate({ to: "/login", search: { redirect: "/" } });
@@ -157,13 +184,15 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent className="px-2 py-3">
         {navGroups.map((group) => {
+          const visibleItems = group.items.filter(canSee);
+          if (visibleItems.length === 0) return null;
           const open = openGroups[group.label] ?? true;
-          const groupHasActive = group.items.some(
+          const groupHasActive = visibleItems.some(
             (it) => path === it.url || path.startsWith(it.url + "/"),
           );
           const renderItems = (
             <SidebarMenu>
-              {group.items.map((item) => {
+              {visibleItems.map((item) => {
                 const active = path === item.url || path.startsWith(item.url + "/");
                 return (
                   <SidebarMenuItem key={item.url}>
@@ -222,7 +251,7 @@ export function AppSidebar() {
           {!collapsed && (
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold truncate">{user?.name ?? "User"}</p>
-              <p className="text-[10px] text-sidebar-foreground/60 truncate">{user?.role === "owner" ? t("Owner") : user?.role === "manager" ? t("Manager") : t("Cashier")} · {user?.branch?.split(" — ")[1] ?? "HQ"}</p>
+              <p className="text-[10px] text-sidebar-foreground/60 truncate">{user?.role ? t(ROLE_LABELS[user.role]) : "User"} · {user?.branch?.split(" — ")[1] ?? "HQ"}</p>
             </div>
           )}
           {!collapsed && <LogOut className="h-4 w-4 text-sidebar-foreground/60" />}

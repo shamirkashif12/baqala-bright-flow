@@ -1,8 +1,13 @@
 export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5008";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("baqala_token") : null;
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
     ...init,
   });
   if (!res.ok) {
@@ -44,10 +49,12 @@ export const api = {
 
   // Roles
   getRoles: () => request<Role[]>("/api/roles"),
-  createRole: (data: Partial<Role>) =>
-    request<Role>("/api/roles", { method: "POST", body: JSON.stringify(data) }),
-  updateRole: (id: string, data: Partial<Role>) =>
+  createRole: (data: { name: string; nameAr?: string; description?: string; permissions: Omit<RolePermission, "id" | "roleId">[] }) =>
+    request<Role>("/api/roles", { method: "POST", body: JSON.stringify({ ...data, isSystem: false }) }),
+  updateRole: (id: string, data: { name?: string; nameAr?: string; description?: string; isSystem?: boolean; permissions: Omit<RolePermission, "id" | "roleId">[] }) =>
     request<Role>(`/api/roles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteRole: (id: string) =>
+    request<{ deleted: boolean }>(`/api/roles/${id}`, { method: "DELETE" }),
 
   // Products
   getProducts: (params?: { categoryId?: string; status?: string; search?: string }) => {
@@ -316,6 +323,7 @@ export interface Branch {
 export interface Role {
   id: string; name: string; nameAr?: string; description?: string;
   isSystem: boolean; createdAt: string;
+  userCount?: number;
   permissions?: RolePermission[];
 }
 
