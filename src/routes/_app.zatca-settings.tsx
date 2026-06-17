@@ -22,7 +22,7 @@ import {
 
 export const Route = createFileRoute("/_app/zatca-settings")({
   component: () => (
-    <RoleGate allow={["owner"]}>
+    <RoleGate allow={["tenant_admin"]}>
       <ZatcaSettings />
     </RoleGate>
   ),

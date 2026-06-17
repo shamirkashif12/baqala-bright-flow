@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { BaqalaLogo } from "@/components/baqala-logo";
 import { useAuth } from "@/lib/auth";
-import { supabase } from "@/integrations/supabase/client";
 import { ShieldCheck, ScanBarcode, Smartphone, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
 export const Route = createFileRoute("/login")({
   validateSearch: (search) => ({
@@ -34,12 +33,7 @@ function Login() {
 
     if (isAuthenticated) {
       window.location.replace(safeRedirect);
-      return;
     }
-
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) window.location.replace(safeRedirect);
-    });
   }, [authLoading, isAuthenticated, safeRedirect]);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -162,24 +156,8 @@ function Login() {
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 {loading ? "Signing in…" : "Sign in"}
               </Button>
-              <div className="relative my-2">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-                <div className="relative flex justify-center text-xs"><span className="bg-card px-2 text-muted-foreground">or</span></div>
-              </div>
-              <Button type="button" variant="outline" className="w-full h-11" disabled={loading}>
-                Use NAFATH ID
-              </Button>
-              <Link to="/signup" className="block">
-                <Button type="button" variant="outline" className="w-full h-11 border-primary/30 text-primary hover:bg-primary/5" disabled={loading}>
-                  Create a new account
-                </Button>
-              </Link>
             </Card>
           </form>
-
-          <p className="text-center text-sm text-muted-foreground mt-6">
-            New to MI Money? <Link to="/signup" className="text-primary font-semibold hover:underline">Register your business</Link>
-          </p>
         </div>
       </div>
     </div>

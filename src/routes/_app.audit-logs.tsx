@@ -15,7 +15,7 @@ import { api, type AuditLog } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/audit-logs")({
   component: () => (
-    <RoleGate allow={["owner", "manager"]}>
+    <RoleGate allow={["tenant_admin", "branch_manager"]}>
       <AuditLogs />
     </RoleGate>
   ),

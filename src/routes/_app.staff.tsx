@@ -10,20 +10,21 @@ import { api, type User } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/staff")({
   component: () => (
-    <RoleGate allow={["owner", "manager"]}>
+    <RoleGate allow={["tenant_admin", "branch_manager"]}>
       <Staff />
     </RoleGate>
   ),
 });
 
 const roleColors: Record<string, string> = {
-  owner: "bg-primary text-primary-foreground",
-  admin: "bg-primary text-primary-foreground",
-  manager: "bg-primary/15 text-primary",
-  cashier: "bg-success/15 text-success",
-  "inventory staff": "bg-warning/20 text-warning-foreground",
-  accountant: "bg-accent text-accent-foreground",
-  maintenance: "bg-muted text-foreground",
+  tenant_admin:   "bg-primary text-primary-foreground",
+  branch_manager: "bg-primary/15 text-primary",
+  cashier:        "bg-success/15 text-success",
+  storekeeper:    "bg-warning/20 text-warning-foreground",
+  supervisor:     "bg-accent text-accent-foreground",
+  finance_user:   "bg-blue-100 text-blue-700",
+  marketing_user: "bg-purple-100 text-purple-700",
+  picker:         "bg-muted text-foreground",
 };
 
 function roleColor(roleName?: string): string {

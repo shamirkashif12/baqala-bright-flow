@@ -1,50 +1,161 @@
 import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import type { Session, User as SupabaseUser } from "@supabase/supabase-js";
 
-export type AppRole = "owner" | "manager" | "cashier";
+export type AppRole =
+  | "tenant_admin"
+  | "branch_manager"
+  | "cashier"
+  | "storekeeper"
+  | "supervisor"
+  | "finance_user"
+  | "marketing_user"
+  | "picker";
+
+export const ROLE_LABELS: Record<AppRole, string> = {
+  tenant_admin:   "Tenant Admin",
+  branch_manager: "Branch Manager",
+  cashier:        "Cashier",
+  storekeeper:    "Storekeeper",
+  supervisor:     "Supervisor",
+  finance_user:   "Finance User",
+  marketing_user: "Marketing User",
+  picker:         "Picker",
+};
+
+export interface RolePermFlags {
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canApprove: boolean;
+  canExport: boolean;
+}
 
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
   role: AppRole;
+  roleId: string;
   branch: string;
   initials: string;
+  permissions: Record<string, RolePermFlags>;
 }
 
 export interface AuthState {
   isAuthenticated: boolean;
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<void>;
-  signup: (params: { email: string; password: string; name?: string }) => Promise<{ needsVerification: boolean }>;
   logout: () => void;
   loading: boolean;
   hasRole: (role: AppRole | AppRole[]) => boolean;
+  canViewModule: (module: string) => boolean;
 }
 
-function mapUser(u: SupabaseUser | null | undefined, role: AppRole): AuthUser | null {
-  if (!u) return null;
-  const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
-  const name = (meta.name as string) || (meta.full_name as string) || (u.email?.split("@")[0] ?? "User");
+// ── Storage keys ──────────────────────────────────────────────────────────────
+const TOKEN_KEY          = "baqala_token";
+const SESSION_EXPIRY_KEY = "baqala_session_expires";
+const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:5008";
+
+// ── Session helpers ───────────────────────────────────────────────────────────
+function stampSession() {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SESSION_EXPIRY_KEY, String(Date.now() + SESSION_DURATION_MS));
+}
+
+function clearSession() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(SESSION_EXPIRY_KEY);
+}
+
+function isSessionExpired(): boolean {
+  if (typeof window === "undefined") return false;
+  const raw = localStorage.getItem(SESSION_EXPIRY_KEY);
+  if (!raw) return false;
+  return Date.now() > parseInt(raw, 10);
+}
+
+// ── JWT helpers ───────────────────────────────────────────────────────────────
+interface JwtClaims {
+  sub: string;
+  email: string;
+  name: string;
+  role: string;
+  roleId?: string;
+  branchId?: string;
+  branchName?: string;
+}
+
+function parseJwt(token: string): JwtClaims | null {
+  try {
+    const payload = token.split(".")[1];
+    const padded  = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json    = decodeURIComponent(
+      atob(padded)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join(""),
+    );
+    return JSON.parse(json) as JwtClaims;
+  } catch {
+    return null;
+  }
+}
+
+function buildUser(claims: JwtClaims): AuthUser {
+  const name     = claims.name || claims.email.split("@")[0];
   const initials = name
     .split(/\s+/)
     .map((p) => p[0])
     .filter(Boolean)
     .slice(0, 2)
     .join("")
-    .toUpperCase();
+    .toUpperCase() || "U";
   return {
-    id: u.id,
+    id:          claims.sub,
     name,
-    email: u.email ?? "",
-    // Role is sourced from the server-controlled `user_roles` table,
-    // NOT from user_metadata (which any user can modify).
-    role,
-    branch: (meta.branch as string) ?? "Riyadh — Olaya Branch",
-    initials: initials || "U",
+    email:       claims.email,
+    role:        claims.role as AppRole,
+    roleId:      claims.roleId ?? "",
+    branch:      claims.branchName || "Riyadh — Olaya Branch",
+    initials,
+    permissions: {},
   };
 }
+
+// Fetches the live permission map for the user's role from the API.
+// Keyed by module name, e.g. permissions["Warehouses"].canView
+async function fetchPermissions(roleId: string): Promise<Record<string, RolePermFlags>> {
+  if (!roleId) return {};
+  try {
+    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+    const res = await fetch(`${API_BASE}/api/roles/${roleId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) return {};
+    const role = await res.json() as {
+      permissions?: Array<{ module: string } & RolePermFlags>;
+    };
+    const map: Record<string, RolePermFlags> = {};
+    for (const p of role.permissions ?? []) {
+      map[p.module] = {
+        canView:   p.canView   ?? false,
+        canCreate: p.canCreate ?? false,
+        canEdit:   p.canEdit   ?? false,
+        canDelete: p.canDelete ?? false,
+        canApprove:p.canApprove ?? false,
+        canExport: p.canExport  ?? false,
+      };
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthState | null>(null);
 
@@ -52,68 +163,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setAuthUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Hydrate from localStorage on mount, then fetch live permissions
   useEffect(() => {
-    let active = true;
-
-    async function resolveRole(): Promise<AppRole> {
-      try {
-        const { data, error } = await supabase.rpc("current_user_role");
-        if (error || !data) return "cashier";
-        return (data as AppRole) ?? "cashier";
-      } catch {
-        return "cashier";
+    let cancelled = false;
+    const hydrate = async () => {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (token && !isSessionExpired()) {
+        const claims = parseJwt(token);
+        if (claims) {
+          const baseUser = buildUser(claims);
+          if (!cancelled) setAuthUser(baseUser);
+          const perms = await fetchPermissions(baseUser.roleId);
+          if (!cancelled) setAuthUser(u => u ? { ...u, permissions: perms } : null);
+        } else {
+          clearSession();
+        }
+      } else if (token) {
+        clearSession();
       }
-    }
-
-    async function hydrate(session: Session | null) {
-      if (!session?.user) {
-        if (active) setAuthUser(null);
-        return;
-      }
-      const role = await resolveRole();
-      if (!active) return;
-      setAuthUser(mapUser(session.user, role));
-    }
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
-      void hydrate(session);
-    });
-    supabase.auth.getSession().then(async ({ data }) => {
-      await hydrate(data.session);
-      if (active) setLoading(false);
-    });
-    return () => {
-      active = false;
-      sub.subscription.unsubscribe();
+      if (!cancelled) setLoading(false);
     };
+    hydrate();
+    return () => { cancelled = true; };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    if (error) {
-      if (error.message.toLowerCase().includes("email not confirmed")) {
-        throw new Error("Please verify your email first. Check your inbox for the confirmation link.");
-      }
-      throw new Error(error.message);
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ email: email.trim(), password }),
+    });
+
+    if (!res.ok) {
+      let message = "Invalid email or password.";
+      try {
+        const body = (await res.json()) as { message?: string };
+        if (body.message) message = body.message;
+      } catch { /* ignore */ }
+      throw new Error(message);
+    }
+
+    const { token } = (await res.json()) as { token: string };
+    localStorage.setItem(TOKEN_KEY, token);
+    stampSession();
+
+    const claims = parseJwt(token);
+    if (claims) {
+      const baseUser = buildUser(claims);
+      const perms = await fetchPermissions(baseUser.roleId);
+      setAuthUser({ ...baseUser, permissions: perms });
     }
   }, []);
 
-  const signup = useCallback(async ({ email, password, name }: { email: string; password: string; name?: string }) => {
-    const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/login` : undefined;
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo: redirectTo,
-        data: name ? { name } : undefined,
-      },
-    });
-    if (error) throw new Error(error.message);
-    return { needsVerification: !data.session };
-  }, []);
-
   const logout = useCallback(() => {
-    void supabase.auth.signOut();
+    clearSession();
+    setAuthUser(null);
   }, []);
 
   const hasRole = useCallback(
@@ -125,8 +229,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
+  const canViewModule = useCallback(
+    (module: string) => {
+      if (!user) return false;
+      if (user.role === "tenant_admin") return true;
+      return user.permissions[module]?.canView === true;
+    },
+    [user],
+  );
+
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, signup, logout, loading, hasRole }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout, loading, hasRole, canViewModule }}>
       {children}
     </AuthContext.Provider>
   );

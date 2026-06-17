@@ -28,6 +28,10 @@ public class Role
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    // Set by controller queries — not persisted
+    [NotMapped]
+    public int UserCount { get; set; }
+
     // Navigation
     public ICollection<RolePermission> Permissions { get; set; } = [];
     [JsonIgnore] public ICollection<User> Users { get; set; } = [];
@@ -52,6 +56,6 @@ public class RolePermission
     [Column("can_approve")]public bool CanApprove{ get; set; } = false;
     [Column("can_export")] public bool CanExport { get; set; } = false;
 
-    // Navigation
-    [JsonIgnore] public Role Role { get; set; } = default!;
+    // Navigation — nullable so ASP.NET model binder doesn't require it in PUT/POST bodies
+    [JsonIgnore] public Role? Role { get; set; }
 }

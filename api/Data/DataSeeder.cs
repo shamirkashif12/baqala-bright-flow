@@ -244,6 +244,8 @@ public static class DataSeeder
 
         if (!await db.RulesEngine.AnyAsync())
             await SeedRulesEngineAsync(db);
+
+        await SeedTestUsersAsync(db);
     }
 
     // ─── Backfill: Warehouse Requests ────────────────────────────────────────
@@ -659,6 +661,48 @@ public static class DataSeeder
                 CreatedAt = DateTime.UtcNow.AddDays(-180), UpdatedAt = DateTime.UtcNow
             }
         );
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: Test Users (one per role, Pakistan123@) ───────────────────
+    private static async Task SeedTestUsersAsync(BaqalaDbContext db)
+    {
+        var brOlaya = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-001");
+
+        var testUsers = new[]
+        {
+            ("ahmad.aziz@mytm.co",         "ahmad.aziz",        "Ahmad Aziz",          "أحمد عزيز",       "Tenant Administrator"),
+            ("sara.manager@baqala.sa",     "sara.manager",      "Sara Al Manager",     "سارة المديرة",    "Branch Manager"),
+            ("khalid.cashier@baqala.sa",   "khalid.cashier",    "Khalid Al Cashier",   "خالد الكاشير",    "Cashier"),
+            ("nora.cashier2@baqala.sa",    "nora.cashier2",     "Nora Al Cashier",     "نورة الكاشير",    "Cashier"),
+            ("yousef.store@baqala.sa",     "yousef.store",      "Yousef Al Store",     "يوسف أمين",       "Storekeeper"),
+            ("omar.supervisor@baqala.sa",  "omar.supervisor",   "Omar Al Supervisor",  "عمر المشرف",      "Supervisor"),
+            ("bilal.finance@baqala.sa",    "bilal.finance",     "Bilal Al Finance",    "بلال المالية",    "Finance User"),
+            ("layla.marketing@baqala.sa",  "layla.marketing",   "Layla Al Marketing",  "ليلى التسويق",    "Marketing User"),
+            ("tarek.picker@baqala.sa",     "tarek.picker",      "Tarek Al Picker",     "طارق الجامع",     "Picker"),
+        };
+
+        foreach (var (email, username, fullName, fullNameAr, roleName) in testUsers)
+        {
+            if (await db.Users.AnyAsync(u => u.Email == email)) continue;
+            var role = await db.Roles.FirstOrDefaultAsync(r => r.Name == roleName);
+            if (role is null) continue;
+            db.Users.Add(new User
+            {
+                Id = Guid.NewGuid(),
+                Email = email,
+                Username = username,
+                FullName = fullName,
+                FullNameAr = fullNameAr,
+                PasswordHash = Hash("Pakistan123@"),
+                PinHash = Hash("1234"),
+                RoleId = role.Id,
+                BranchId = brOlaya?.Id,
+                Status = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
         await db.SaveChangesAsync();
     }
 

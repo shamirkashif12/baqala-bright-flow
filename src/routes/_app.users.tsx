@@ -15,7 +15,7 @@ import { api, type User } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/users")({
   component: () => (
-    <RoleGate allow={["owner", "manager"]}>
+    <RoleGate allow={["tenant_admin", "branch_manager"]}>
       <RegisteredUsers />
     </RoleGate>
   ),

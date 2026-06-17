@@ -21,7 +21,7 @@ import { api, type AuditLog, type DashboardMetrics } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/admin")({
   component: () => (
-    <RoleGate allow={["owner"]}>
+    <RoleGate allow={["tenant_admin"]}>
       <AdminHome />
     </RoleGate>
   ),

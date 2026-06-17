@@ -10,7 +10,7 @@ import { Building2, Languages, Bell, ShieldCheck, Receipt, CreditCard, Database,
 
 export const Route = createFileRoute("/_app/settings")({
   component: () => (
-    <RoleGate allow={["owner", "manager"]}>
+    <RoleGate allow={["tenant_admin", "branch_manager"]}>
       <Settings />
     </RoleGate>
   ),

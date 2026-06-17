@@ -12,14 +12,27 @@ public class RolesController(BaqalaDbContext db) : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        return Ok(await db.Roles.Include(r => r.Permissions).OrderBy(r => r.Name).ToListAsync());
+        var roles = await db.Roles.Include(r => r.Permissions).OrderBy(r => r.Name).ToListAsync();
+
+        var counts = await db.Users
+            .GroupBy(u => u.RoleId)
+            .Select(g => new { RoleId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.RoleId, x => x.Count);
+
+        foreach (var r in roles)
+            r.UserCount = counts.GetValueOrDefault(r.Id, 0);
+
+        return Ok(roles);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
         var role = await db.Roles.Include(r => r.Permissions).FirstOrDefaultAsync(r => r.Id == id);
-        return role is null ? NotFound() : Ok(role);
+        if (role is null) return NotFound();
+
+        role.UserCount = await db.Users.CountAsync(u => u.RoleId == id);
+        return Ok(role);
     }
 
     [HttpPost]
@@ -27,6 +40,7 @@ public class RolesController(BaqalaDbContext db) : ControllerBase
     {
         role.Id = Guid.NewGuid();
         role.CreatedAt = role.UpdatedAt = DateTime.UtcNow;
+        role.IsSystem = false;
         foreach (var p in role.Permissions) { p.Id = Guid.NewGuid(); p.RoleId = role.Id; }
         db.Roles.Add(role);
         await db.SaveChangesAsync();
@@ -38,17 +52,25 @@ public class RolesController(BaqalaDbContext db) : ControllerBase
     {
         var role = await db.Roles.Include(r => r.Permissions).FirstOrDefaultAsync(r => r.Id == id);
         if (role is null) return NotFound();
-        if (role.IsSystem) return BadRequest("Cannot modify system roles.");
-        role.Name = updated.Name;
-        role.NameAr = updated.NameAr;
-        role.Description = updated.Description;
+
+        // For system roles: protect name/description but allow permission updates
+        if (!role.IsSystem)
+        {
+            role.Name = updated.Name;
+            role.NameAr = updated.NameAr;
+            role.Description = updated.Description;
+        }
         role.UpdatedAt = DateTime.UtcNow;
 
         db.RolePermissions.RemoveRange(role.Permissions);
         foreach (var p in updated.Permissions) { p.Id = Guid.NewGuid(); p.RoleId = id; }
         db.RolePermissions.AddRange(updated.Permissions);
         await db.SaveChangesAsync();
-        return Ok(role);
+
+        // Reload with fresh permissions
+        var refreshed = await db.Roles.Include(r => r.Permissions).FirstAsync(r => r.Id == id);
+        refreshed.UserCount = await db.Users.CountAsync(u => u.RoleId == id);
+        return Ok(refreshed);
     }
 
     [HttpDelete("{id:guid}")]
@@ -56,9 +78,9 @@ public class RolesController(BaqalaDbContext db) : ControllerBase
     {
         var role = await db.Roles.FindAsync(id);
         if (role is null) return NotFound();
-        if (role.IsSystem) return BadRequest("Cannot delete system roles.");
+        if (role.IsSystem) return BadRequest(new { message = "System roles cannot be deleted." });
         db.Roles.Remove(role);
         await db.SaveChangesAsync();
-        return NoContent();
+        return Ok(new { deleted = true });
     }
 }
