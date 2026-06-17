@@ -31,6 +31,7 @@ import { Route as AppRolesRouteImport } from './routes/_app.roles'
 import { Route as AppReturnsRouteImport } from './routes/_app.returns'
 import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppRefundsRouteImport } from './routes/_app.refunds'
+import { Route as AppPurchaseOrdersRouteImport } from './routes/_app.purchase-orders'
 import { Route as AppPosSettingsRouteImport } from './routes/_app.pos-settings'
 import { Route as AppPosRouteImport } from './routes/_app.pos'
 import { Route as AppPlansRouteImport } from './routes/_app.plans'
@@ -166,6 +167,11 @@ const AppReportsRoute = AppReportsRouteImport.update({
 const AppRefundsRoute = AppRefundsRouteImport.update({
   id: '/refunds',
   path: '/refunds',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPurchaseOrdersRoute = AppPurchaseOrdersRouteImport.update({
+  id: '/purchase-orders',
+  path: '/purchase-orders',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPosSettingsRoute = AppPosSettingsRouteImport.update({
@@ -334,6 +340,7 @@ export interface FileRoutesByFullPath {
   '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
   '/pos-settings': typeof AppPosSettingsRoute
+  '/purchase-orders': typeof AppPurchaseOrdersRoute
   '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
   '/returns': typeof AppReturnsRoute
@@ -384,6 +391,7 @@ export interface FileRoutesByTo {
   '/plans': typeof AppPlansRoute
   '/pos': typeof AppPosRoute
   '/pos-settings': typeof AppPosSettingsRoute
+  '/purchase-orders': typeof AppPurchaseOrdersRoute
   '/refunds': typeof AppRefundsRoute
   '/reports': typeof AppReportsRoute
   '/returns': typeof AppReturnsRoute
@@ -436,6 +444,7 @@ export interface FileRoutesById {
   '/_app/plans': typeof AppPlansRoute
   '/_app/pos': typeof AppPosRoute
   '/_app/pos-settings': typeof AppPosSettingsRoute
+  '/_app/purchase-orders': typeof AppPurchaseOrdersRoute
   '/_app/refunds': typeof AppRefundsRoute
   '/_app/reports': typeof AppReportsRoute
   '/_app/returns': typeof AppReturnsRoute
@@ -488,6 +497,7 @@ export interface FileRouteTypes {
     | '/plans'
     | '/pos'
     | '/pos-settings'
+    | '/purchase-orders'
     | '/refunds'
     | '/reports'
     | '/returns'
@@ -538,6 +548,7 @@ export interface FileRouteTypes {
     | '/plans'
     | '/pos'
     | '/pos-settings'
+    | '/purchase-orders'
     | '/refunds'
     | '/reports'
     | '/returns'
@@ -589,6 +600,7 @@ export interface FileRouteTypes {
     | '/_app/plans'
     | '/_app/pos'
     | '/_app/pos-settings'
+    | '/_app/purchase-orders'
     | '/_app/refunds'
     | '/_app/reports'
     | '/_app/returns'
@@ -771,6 +783,13 @@ declare module '@tanstack/react-router' {
       path: '/refunds'
       fullPath: '/refunds'
       preLoaderRoute: typeof AppRefundsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/purchase-orders': {
+      id: '/_app/purchase-orders'
+      path: '/purchase-orders'
+      fullPath: '/purchase-orders'
+      preLoaderRoute: typeof AppPurchaseOrdersRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/pos-settings': {
@@ -1004,6 +1023,7 @@ interface AppRouteChildren {
   AppPlansRoute: typeof AppPlansRoute
   AppPosRoute: typeof AppPosRoute
   AppPosSettingsRoute: typeof AppPosSettingsRoute
+  AppPurchaseOrdersRoute: typeof AppPurchaseOrdersRoute
   AppRefundsRoute: typeof AppRefundsRoute
   AppReportsRoute: typeof AppReportsRoute
   AppReturnsRoute: typeof AppReturnsRoute
@@ -1051,6 +1071,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPlansRoute: AppPlansRoute,
   AppPosRoute: AppPosRoute,
   AppPosSettingsRoute: AppPosSettingsRoute,
+  AppPurchaseOrdersRoute: AppPurchaseOrdersRoute,
   AppRefundsRoute: AppRefundsRoute,
   AppReportsRoute: AppReportsRoute,
   AppReturnsRoute: AppReturnsRoute,
