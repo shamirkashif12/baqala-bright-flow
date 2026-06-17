@@ -19,14 +19,14 @@ const invoices = [
 
 function Zatca() {
   return (
-    <PageShell title="ZATCA Invoices" subtitle="Phase 2 e-invoicing · live sync · Arabic + English">
+    <PageShell title="ZATCA Invoices" subtitle="VAT invoices · live sync · Arabic + English">
       <Card className="p-6 border-success/30 bg-success/5 shadow-card">
         <div className="flex items-center gap-4">
           <div className="h-12 w-12 rounded-xl bg-success/15 text-success flex items-center justify-center">
             <ShieldCheck className="h-6 w-6" />
           </div>
           <div className="flex-1">
-            <div className="flex items-center gap-2"><h3 className="font-semibold">ZATCA Phase 2 — Connected</h3><Badge className="bg-success text-success-foreground border-0">Live</Badge></div>
+            <div className="flex items-center gap-2"><h3 className="font-semibold">ZATCA — Connected</h3><Badge className="bg-success text-success-foreground border-0">Live</Badge></div>
             <p className="text-sm text-muted-foreground mt-0.5">Last successful clearance: 2 minutes ago · Certificate valid until Sep 2027</p>
           </div>
           <Button variant="outline" className="gap-2"><RefreshCw className="h-4 w-4" /> Force sync</Button>
