@@ -96,11 +96,10 @@ function TaxFees() {
           </Card>
           <div className="grid gap-3 md:grid-cols-2">
             <Card className="p-5 space-y-3">
-              <h4 className="font-semibold text-sm">Phase 2 (Integration)</h4>
-              <p className="text-xs text-muted-foreground">Real-time clearance with ZATCA Fatoora portal.</p>
-              <div className="flex items-center justify-between rounded-xl border border-border/60 p-3"><span className="text-sm">Enable Phase 2 clearance</span><Switch checked={phase2} onCheckedChange={setPhase2} /></div>
-              <div className="flex items-center justify-between rounded-xl border border-border/60 p-3"><span className="text-sm">Auto-attach QR to every invoice</span><Switch defaultChecked /></div>
-              <div className="flex items-center justify-between rounded-xl border border-border/60 p-3"><span className="text-sm">Block sale if clearance fails</span><Switch /></div>
+              <h4 className="font-semibold text-sm">Invoice Settings</h4>
+              <p className="text-xs text-muted-foreground">Basic VAT invoice & receipt generation for POS, returns and supplier ops.</p>
+              <div className="flex items-center justify-between rounded-xl border border-border/60 p-3"><span className="text-sm">Auto-attach QR to every invoice</span><Switch defaultChecked checked={phase2} onCheckedChange={setPhase2} /></div>
+              <div className="flex items-center justify-between rounded-xl border border-border/60 p-3"><span className="text-sm">Print bilingual (AR/EN) receipts</span><Switch defaultChecked /></div>
             </Card>
             <Card className="p-5 space-y-3">
               <h4 className="font-semibold text-sm">Credentials</h4>
