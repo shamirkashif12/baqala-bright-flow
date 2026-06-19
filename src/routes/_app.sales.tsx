@@ -6,6 +6,7 @@ import { MetricCard } from "@/components/metric-card";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
 import { Wallet, Receipt, Percent, RotateCcw } from "lucide-react";
 import { api, type Order } from "@/lib/api";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/sales")({ component: Sales });
 
@@ -26,17 +27,17 @@ function Sales() {
   const refundedAmount = orders.filter(o => o.paymentStatus === "refunded").reduce((s, o) => s + o.totalAmount, 0);
   const totalDiscount = orders.reduce((s, o) => s + o.discountAmount, 0);
   const avgDiscountPct = totalRevenue > 0 ? ((totalDiscount / totalRevenue) * 100).toFixed(1) + "%" : "0%";
-  const fmt = (n: number) => `ر.س ${n.toLocaleString("en-SA", { minimumFractionDigits: 2 })}`;
+  const fmt = (n: number) => fmtSAR(n);
 
   const max = Math.max(...bars);
 
   return (
     <PageShell title="Sales" subtitle="Live transactions across all terminals">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Revenue" value={fmt(totalRevenue)} icon={Wallet} accent="primary" />
+        <MetricCard label="Total Revenue" value={<><SARIcon />{" "}{fmt(totalRevenue)}</>} icon={Wallet} accent="primary" />
         <MetricCard label="Invoices" value={String(orders.length)} icon={Receipt} />
         <MetricCard label="Avg Discount" value={avgDiscountPct} icon={Percent} accent="warning" />
-        <MetricCard label="Refunds" value={fmt(refundedAmount)} icon={RotateCcw} accent="destructive" />
+        <MetricCard label="Refunds" value={<><SARIcon />{" "}{fmt(refundedAmount)}</>} icon={RotateCcw} accent="destructive" />
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">
@@ -63,7 +64,7 @@ function Sales() {
             { key: "cashier", label: "Cashier", render: (r: Order) => (r as Order & { cashier?: { fullName: string } }).cashier?.fullName ?? "—" },
             { key: "method", label: "Method", render: (r: Order) => r.payments?.[0]?.paymentMethod ?? "—" },
             { key: "items", label: "Items", render: (r: Order) => r.items?.length ?? "—" },
-            { key: "totalAmount", label: "Total", render: (r: Order) => <span className="font-semibold">{fmt(r.totalAmount)}</span> },
+            { key: "totalAmount", label: "Total", render: (r: Order) => <span className="tabular-nums font-semibold"><SARIcon />{fmt(r.totalAmount)}</span> },
             { key: "paymentStatus", label: "Status", render: (r: Order) => <StatusBadge status={r.paymentStatus} /> },
           ]}
           rows={orders}

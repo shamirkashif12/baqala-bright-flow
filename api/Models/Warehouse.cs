@@ -10,8 +10,8 @@ public class WarehouseRequest
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("request_number")]
-    public string RequestNumber { get; set; } = default!;
+    [MaxLength(50), Column("request_number")]
+    public string? RequestNumber { get; set; }
 
     [Column("source_branch_id")]
     public Guid? SourceBranchId { get; set; }
@@ -47,9 +47,9 @@ public class WarehouseRequest
 
     // Navigation
     public Branch? SourceBranch { get; set; }
-    public Branch DestinationBranch { get; set; } = default!;
+    public Branch? DestinationBranch { get; set; }
     public Supplier? Supplier { get; set; }
-    public User RequestedByUser { get; set; } = default!;
+    public User? RequestedByUser { get; set; }
     public User? ApprovedByUser { get; set; }
     public ICollection<WarehouseRequestItem> Items { get; set; } = [];
 }
@@ -88,8 +88,8 @@ public class WarehouseRequestItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public WarehouseRequest Request { get; set; } = default!;
-    public Product Product { get; set; } = default!;
+    public WarehouseRequest? Request { get; set; }
+    public Product? Product { get; set; }
     public InventoryBatch? Batch { get; set; }
 }
 
@@ -162,8 +162,8 @@ public class WarehouseSupplier
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // [JsonIgnore] on back-reference to break circular serialization cycle
-    [JsonIgnore] public Warehouse Warehouse { get; set; } = default!;
-    public Supplier Supplier { get; set; } = default!;
+    [JsonIgnore] public Warehouse? Warehouse { get; set; }
+    public Supplier? Supplier { get; set; }
 }
 
 [Table("branch_warehouses")]
@@ -185,8 +185,8 @@ public class BranchWarehouse
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Branch Branch { get; set; } = default!;
-    [JsonIgnore] public Warehouse Warehouse { get; set; } = default!;
+    public Branch? Branch { get; set; }
+    [JsonIgnore] public Warehouse? Warehouse { get; set; }
 }
 
 [Table("warehouse_stock")]
@@ -220,6 +220,6 @@ public class WarehouseStock
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    [JsonIgnore] public Warehouse Warehouse { get; set; } = default!;
-    public Product Product { get; set; } = default!;
+    [JsonIgnore] public Warehouse? Warehouse { get; set; }
+    public Product? Product { get; set; }
 }

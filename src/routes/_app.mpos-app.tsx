@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import {
   Sparkles, Zap, Apple, Coffee, Milk, Pizza, ShoppingBag,
 } from "lucide-react";
 import mimonyLogoSrc from "@/assets/mimony-logo.png";
+import { SARIcon } from "@/lib/currency";
 const mimonyLogo = { url: mimonyLogoSrc };
 
 export const Route = createFileRoute("/_app/mpos-app")({ component: MposApp });
@@ -74,7 +75,7 @@ const auditLogs = [
   { id: "L5", action: "Stock Updated (Lays Classic)", user: "Yousef I.", role: "Inventory", terminal: "—", date: "Today · 09:32", status: "warning" },
 ];
 
-const sar = (n: number) => `ر.س ${n.toFixed(2)}`;
+const sar = (n: number): ReactNode => <><SARIcon />{n.toFixed(2)}</>;
 
 // -------- Phone frame (desktop preview) / full-bleed (mobile) --------
 function Phone({ children, framed }: { children: React.ReactNode; framed: boolean }) {
@@ -96,7 +97,7 @@ function Phone({ children, framed }: { children: React.ReactNode; framed: boolea
 }
 
 // -------- Header inside phone --------
-function PHeader({ title, subtitle, onBack, right }: { title: string; subtitle?: string; onBack?: () => void; right?: React.ReactNode }) {
+function PHeader({ title, subtitle, onBack, right }: { title: string; subtitle?: ReactNode; onBack?: () => void; right?: ReactNode }) {
   return (
     <div className="relative mpos-gradient-anim text-primary-foreground px-4 pt-9 pb-5 rounded-b-3xl overflow-hidden shadow-elegant">
       <div className="absolute -top-10 -right-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
@@ -465,7 +466,7 @@ function TerminalSelectScreen({ terminal, setTerminal, onDone, onBack }: { termi
   );
 }
 
-function StatTile({ label, value, icon: I, accent = "primary", sub }: { label: string; value: string | number; icon: React.ComponentType<any>; accent?: "primary" | "success" | "warning" | "destructive"; sub?: string }) {
+function StatTile({ label, value, icon: I, accent = "primary", sub }: { label: string; value: ReactNode; icon: React.ComponentType<any>; accent?: "primary" | "success" | "warning" | "destructive"; sub?: string }) {
   const m: Record<string, string> = { primary: "text-primary bg-primary/10", success: "text-success bg-success/10", warning: "text-warning bg-warning/10", destructive: "text-destructive bg-destructive/10" };
   return (
     <Card className="relative p-3 border-border/60 flex-1 min-w-0 overflow-hidden hover:shadow-card transition-all active:scale-[0.98] animate-fade-in group">
@@ -1192,7 +1193,7 @@ function ProfileScreen({ user, branch, terminal, opening, onLogout, onNav }: any
 }
 
 // -------- Tiny atoms --------
-function Row({ k, v, highlight }: { k: string; v: string; highlight?: boolean }) {
+function Row({ k, v, highlight }: { k: string; v: ReactNode; highlight?: boolean }) {
   return (
     <div className="flex justify-between text-xs py-0.5">
       <span className="text-muted-foreground capitalize">{k}</span>

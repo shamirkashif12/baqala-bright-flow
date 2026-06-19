@@ -16,6 +16,7 @@ import { MetricCard } from "@/components/metric-card";
 import { FilterBar } from "@/components/filter-bar";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { Progress } from "@/components/ui/progress";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/mobile-pos")({ component: Unified });
 
@@ -72,7 +73,7 @@ function Unified() {
                 </div>
                 <div className="mt-4 rounded-2xl bg-white/15 backdrop-blur p-4 border border-white/20">
                   <p className="text-xs opacity-80">Sales today</p>
-                  <p className="text-3xl font-bold mt-1">ر.س 4,820</p>
+                  <p className="text-3xl font-bold mt-1"><SARIcon />4,820</p>
                   <div className="flex justify-between text-xs mt-3 opacity-90"><span>87 orders</span><span>↑ 14% vs yesterday</span></div>
                 </div>
               </div>
@@ -113,15 +114,15 @@ function Unified() {
                 ].map((i) => (
                   <Card key={i.n} className="p-2.5 border-border/60 flex items-center gap-2.5">
                     <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center text-xl">{i.e}</div>
-                    <div className="flex-1 min-w-0"><p className="text-xs font-semibold truncate">{i.n}</p><p className="text-[10px] text-muted-foreground">×{i.q} · ر.س {i.p}</p></div>
+                    <div className="flex-1 min-w-0"><p className="text-xs font-semibold truncate">{i.n}</p><p className="text-[10px] text-muted-foreground">×{i.q} · <SARIcon />{i.p}</p></div>
                     <Plus className="h-4 w-4 text-primary" />
                   </Card>
                 ))}
               </div>
               <div className="px-4 py-3 bg-muted/50 mt-2 space-y-1.5 text-xs">
-                <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>ر.س 53.00</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">VAT 15%</span><span>ر.س 7.95</span></div>
-                <div className="flex justify-between font-bold text-base pt-1 border-t border-dashed"><span>Total</span><span className="text-primary">ر.س 60.95</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span><SARIcon />53.00</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">VAT 15%</span><span><SARIcon />7.95</span></div>
+                <div className="flex justify-between font-bold text-base pt-1 border-t border-dashed"><span>Total</span><span className="text-primary"><SARIcon />60.95</span></div>
               </div>
               <div className="p-3 grid grid-cols-3 gap-2">
                 <Button variant="outline" size="sm" className="flex-col h-14 gap-1 text-[10px]"><Banknote className="h-4 w-4" />Cash</Button>
@@ -129,7 +130,7 @@ function Unified() {
                 <Button variant="outline" size="sm" className="flex-col h-14 gap-1 text-[10px]"><Wallet className="h-4 w-4" />Wallet</Button>
               </div>
               <div className="px-3 pb-3">
-                <Button className="w-full h-12 gradient-primary text-primary-foreground border-0 shadow-glow">Charge ر.س 60.95</Button>
+                <Button className="w-full h-12 gradient-primary text-primary-foreground border-0 shadow-glow">Charge <SARIcon />60.95</Button>
               </div>
             </Phone>
 
@@ -199,15 +200,15 @@ function Unified() {
                   <Card key={i.n} className="p-2.5 border-border/60 flex items-center gap-2.5">
                     <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center text-xl">{i.e}</div>
                     <div className="flex-1 min-w-0"><p className="text-xs font-semibold truncate">{i.n}</p><p className="text-[10px] text-muted-foreground">×{i.q}</p></div>
-                    <span className="text-sm font-bold">ر.س {i.p}</span>
+                    <span className="text-sm font-bold"><SARIcon />{i.p}</span>
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Card>
                 ))}
               </div>
               <div className="p-3 bg-muted/40 border-t space-y-2">
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span>ر.س 38.00</span></div>
-                <div className="flex justify-between text-sm"><span className="text-success">Coupon WELCOME10</span><span className="text-success">-ر.س 3.80</span></div>
-                <div className="flex justify-between font-bold text-lg border-t border-dashed pt-2"><span>Total</span><span className="text-primary">ر.س 39.36</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span><SARIcon />38.00</span></div>
+                <div className="flex justify-between text-sm"><span className="text-success">Coupon WELCOME10</span><span className="text-success">-<SARIcon />3.80</span></div>
+                <div className="flex justify-between font-bold text-lg border-t border-dashed pt-2"><span>Total</span><span className="text-primary"><SARIcon />39.36</span></div>
                 <Button className="w-full h-12 gradient-primary text-primary-foreground border-0 shadow-glow">Pay now</Button>
               </div>
             </Screen>
@@ -224,7 +225,7 @@ function Unified() {
                     <QrCode className="h-20 w-20 text-background" />
                   </div>
                   <p className="text-xs text-center text-muted-foreground mt-2 font-mono">INV-20260602-0142</p>
-                  <p className="text-center text-xs font-semibold mt-1">ر.س 39.36 · ZATCA verified</p>
+                  <p className="text-center text-xs font-semibold mt-1"><SARIcon />39.36 · ZATCA verified</p>
                 </div>
                 <div className="flex gap-2 w-full">
                   <Button variant="outline" className="flex-1">Email</Button>
@@ -255,11 +256,11 @@ function Unified() {
               { key: "status", label: "Status", render: r => <StatusBadge status={r.status} /> },
             ]}
             rows={[
-              { sku: "MLK-001", name: "Almarai Laban 1L", cat: "Dairy", qty: 142, price: "ر.س 6.50", expiry: "12d", status: "in stock" },
-              { sku: "MLK-002", name: "Nadec Milk 2L", cat: "Dairy", qty: 18, price: "ر.س 12.00", expiry: "5d", status: "low" },
-              { sku: "CHK-001", name: "Sadia Chicken 1kg", cat: "Meat", qty: 24, price: "ر.س 28.00", expiry: "3d", status: "near expiry" },
-              { sku: "SNK-001", name: "Lay's Classic 75g", cat: "Snacks", qty: 6, price: "ر.س 7.00", expiry: "60d", status: "low" },
-              { sku: "BVG-001", name: "Pepsi 330ml ×6", cat: "Beverages", qty: 0, price: "ر.س 15.00", expiry: "90d", status: "out of stock" },
+              { sku: "MLK-001", name: "Almarai Laban 1L", cat: "Dairy", qty: 142, price: "SAR 6.50", expiry: "12d", status: "in stock" },
+              { sku: "MLK-002", name: "Nadec Milk 2L", cat: "Dairy", qty: 18, price: "SAR 12.00", expiry: "5d", status: "low" },
+              { sku: "CHK-001", name: "Sadia Chicken 1kg", cat: "Meat", qty: 24, price: "SAR 28.00", expiry: "3d", status: "near expiry" },
+              { sku: "SNK-001", name: "Lay's Classic 75g", cat: "Snacks", qty: 6, price: "SAR 7.00", expiry: "60d", status: "low" },
+              { sku: "BVG-001", name: "Pepsi 330ml ×6", cat: "Beverages", qty: 0, price: "SAR 15.00", expiry: "90d", status: "out of stock" },
             ]}
           />
         </TabsContent>
@@ -267,9 +268,9 @@ function Unified() {
         <TabsContent value="reports" className="mt-0 space-y-4">
           <FilterBar placeholder="Search reports by name…" />
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <MetricCard label="Sales (Today)" value="ر.س 4,820" icon={TrendingUp} accent="primary" delta="+14%" trend="up" />
+            <MetricCard label="Sales (Today)" value={<><SARIcon />4,820</>} icon={TrendingUp} accent="primary" delta="+14%" trend="up" />
             <MetricCard label="Orders" value="87" icon={ShoppingBag} />
-            <MetricCard label="Avg Basket" value="ر.س 55.40" icon={Wallet} accent="success" />
+            <MetricCard label="Avg Basket" value={<><SARIcon />55.40</>} icon={Wallet} accent="success" />
             <MetricCard label="Returns" value="3" icon={Undo2} accent="warning" />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
@@ -319,20 +320,20 @@ function Unified() {
             </div>
           </Card>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <MetricCard label="Opening Cash" value="ر.س 500" icon={Wallet} />
-            <MetricCard label="Expected Cash" value="ر.س 3,488" icon={Banknote} accent="primary" />
-            <MetricCard label="Counted Cash" value="ر.س 3,480" icon={Banknote} accent="success" />
-            <MetricCard label="Difference" value="-ر.س 8.00" icon={AlertTriangle} accent="warning" />
+            <MetricCard label="Opening Cash" value={<><SARIcon />500</>} icon={Wallet} />
+            <MetricCard label="Expected Cash" value={<><SARIcon />3,488</>} icon={Banknote} accent="primary" />
+            <MetricCard label="Counted Cash" value={<><SARIcon />3,480</>} icon={Banknote} accent="success" />
+            <MetricCard label="Difference" value={<>-<SARIcon />8.00</>} icon={AlertTriangle} accent="warning" />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="p-5 border-border/60 shadow-card">
               <h3 className="text-sm font-semibold mb-3">Sales by tender</h3>
               <div className="space-y-2 text-sm">
                 {[
-                  { k: "Cash", v: "ر.س 2,988" },
-                  { k: "Card (Mada)", v: "ر.س 1,212" },
-                  { k: "Wallet (STC/Apple)", v: "ر.س 558" },
-                  { k: "Bank Transfer", v: "ر.س 62" },
+                  { k: "Cash", v: "SAR 2,988" },
+                  { k: "Card (Mada)", v: "SAR 1,212" },
+                  { k: "Wallet (STC/Apple)", v: "SAR 558" },
+                  { k: "Bank Transfer", v: "SAR 62" },
                 ].map(r => (
                   <div key={r.k} className="flex justify-between py-2 border-b border-border/40 last:border-0">
                     <span className="text-muted-foreground">{r.k}</span>
@@ -347,9 +348,9 @@ function Unified() {
                 {[
                   { k: "Orders completed", v: "87" },
                   { k: "Items scanned", v: "342" },
-                  { k: "Refunds issued", v: "3 · ر.س 64.00" },
-                  { k: "Discounts given", v: "ر.س 142" },
-                  { k: "Cash withdrawal", v: "ر.س 200" },
+                  { k: "Refunds issued", v: "3 · SAR 64.00" },
+                  { k: "Discounts given", v: "SAR 142" },
+                  { k: "Cash withdrawal", v: "SAR 200" },
                   { k: "Held orders", v: "1" },
                 ].map(r => (
                   <div key={r.k} className="flex justify-between py-2 border-b border-border/40 last:border-0">
@@ -367,10 +368,10 @@ function Unified() {
           <Card className="p-0 border-border/60 shadow-card overflow-hidden">
             <ul className="divide-y divide-border/40">
               {[
-                { t: "14:42", a: "Refund issued", d: "Sadia Chicken 1kg · ر.س 28.00", c: "warning" },
-                { t: "14:32", a: "Sale completed", d: "INV-20260602-0142 · ر.س 60.95", c: "info" },
+                { t: "14:42", a: "Refund issued", d: "Sadia Chicken 1kg · SAR 28.00", c: "warning" },
+                { t: "14:32", a: "Sale completed", d: "INV-20260602-0142 · SAR 60.95", c: "info" },
                 { t: "14:18", a: "Discount applied", d: "10% manager override · INV-...0140", c: "warning" },
-                { t: "13:42", a: "Shift opened", d: "Opening cash ر.س 500", c: "info" },
+                { t: "13:42", a: "Shift opened", d: "Opening cash SAR 500", c: "info" },
                 { t: "13:38", a: "Item voided", d: "Lay's Classic 75g ×2", c: "warning" },
                 { t: "12:50", a: "Card timeout", d: "Retry succeeded after 8s", c: "warning" },
               ].map((l, i) => (

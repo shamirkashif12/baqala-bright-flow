@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { BaqalaLogo } from "@/components/baqala-logo";
 import { useAuth } from "@/lib/auth";
+import { SARIcon } from "@/lib/currency";
 import { ShieldCheck, ScanBarcode, Smartphone, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
 export const Route = createFileRoute("/login")({
   validateSearch: (search) => ({
@@ -71,7 +72,7 @@ function Login() {
         {/* Floating KPI chips */}
         <div className="absolute top-32 right-10 rounded-2xl bg-white/15 backdrop-blur border border-white/20 p-3 z-10 animate-pulse" style={{ animationDuration: "3s" }}>
           <p className="text-[10px] uppercase tracking-wider opacity-80">Today's Sales</p>
-          <p className="text-lg font-bold">ر.س 48,920</p>
+          <p className="text-lg font-bold"><SARIcon />48,920</p>
           <p className="text-[10px] text-success-foreground bg-success/40 inline-block px-1.5 rounded mt-1">+18%</p>
         </div>
         <div className="absolute bottom-44 right-20 rounded-2xl bg-white/15 backdrop-blur border border-white/20 p-3 z-10 animate-pulse" style={{ animationDuration: "4s", animationDelay: "0.5s" }}>

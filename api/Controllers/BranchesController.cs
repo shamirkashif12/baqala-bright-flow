@@ -29,6 +29,17 @@ public class BranchesController(BaqalaDbContext db) : ControllerBase
     {
         branch.Id = Guid.NewGuid();
         branch.CreatedAt = branch.UpdatedAt = DateTime.UtcNow;
+
+        // Auto-generate branch code: BR-001, BR-002, …
+        var lastCode = await db.Branches
+            .Where(b => b.BranchCode != null && b.BranchCode.StartsWith("BR-"))
+            .OrderByDescending(b => b.BranchCode)
+            .Select(b => b.BranchCode)
+            .FirstOrDefaultAsync();
+        int next = 1;
+        if (lastCode is not null && int.TryParse(lastCode[3..], out int n)) next = n + 1;
+        branch.BranchCode = $"BR-{next:D3}";
+
         db.Branches.Add(branch);
         await db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = branch.Id }, branch);

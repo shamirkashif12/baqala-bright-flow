@@ -22,6 +22,8 @@ builder.Services.AddCors(options =>
                 if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
                 // Allow any localhost port in development
                 if (uri.Host == "localhost" || uri.Host == "127.0.0.1") return true;
+                // Allow local network IP
+                if (uri.Host == "192.168.6.185") return true;
                 // Allow Vercel preview deployments
                 return uri.Host.EndsWith(".vercel.app");
             })
@@ -55,7 +57,49 @@ if (app.Environment.IsDevelopment())
     var db = scope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
     try { db.Database.Migrate(); } catch { /* tables already exist */ }
     await DataSeeder.SeedAsync(db);
+    await RenameRoles(db);
+    await RenamePermissionModules(db);
+    await DataSeeder.EnsurePermissionsAsync(db);
     app.MapOpenApi();
+}
+
+// ─── One-time role rename (old seeded names → product names) ─────────────────
+static async Task RenameRoles(BaqalaDbContext db)
+{
+    var renames = new Dictionary<string, string>
+    {
+        ["Tenant Administrator"] = "Admin",
+        ["Branch Manager"]       = "Manager",
+        ["Storekeeper"]          = "Inventory Staff",
+        ["Supervisor"]           = "Supervisor",   // keep
+        ["Finance User"]         = "Accountant",
+        ["Marketing User"]       = "Auditor",
+        ["Picker"]               = "Warehouse Staff",
+    };
+    bool changed = false;
+    foreach (var (oldName, newName) in renames)
+    {
+        if (oldName == newName) continue;
+        var role = await db.Roles.FirstOrDefaultAsync(r => r.Name == oldName);
+        if (role is not null && role.Name != newName) { role.Name = newName; changed = true; }
+    }
+    if (changed) await db.SaveChangesAsync();
+}
+
+// ─── One-time permission module rename (old names → product names) ────────────
+static async Task RenamePermissionModules(BaqalaDbContext db)
+{
+    var renames = new Dictionary<string, string>
+    {
+        ["Finance"] = "Accounting & Finance",
+    };
+    bool changed = false;
+    foreach (var (oldName, newName) in renames)
+    {
+        var rows = db.RolePermissions.Where(p => p.Module == oldName).ToList();
+        foreach (var row in rows) { row.Module = newName; changed = true; }
+    }
+    if (changed) await db.SaveChangesAsync();
 }
 
 app.UseCors("FrontendPolicy");

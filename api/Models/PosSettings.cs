@@ -43,5 +43,5 @@ public class PosSettings
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-    public Branch Branch { get; set; } = default!;
+    public Branch? Branch { get; set; }
 }

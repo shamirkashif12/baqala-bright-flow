@@ -10,12 +10,59 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Eye, Pencil, X, Monitor, Activity, Plus } from "lucide-react";
-import { api, type Terminal, type Branch } from "@/lib/api";
+import { api, type Terminal, type Branch, type User } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/terminals")({ component: Terminals });
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>;
+}
+
+function TerminalFormFields({ form, set, setS, branches, users, saving, onSave }: {
+  form: TerminalForm;
+  set: (k: keyof TerminalForm) => (e: React.ChangeEvent<HTMLInputElement>) => void;
+  setS: (k: keyof TerminalForm) => (v: string) => void;
+  branches: Branch[];
+  users: User[];
+  saving: boolean;
+  onSave: () => void;
+}) {
+  return (
+    <div className="mt-4 space-y-4">
+      <FieldRow label="Terminal Code"><Input value={form.terminalCode} onChange={set("terminalCode")} className="h-9 font-mono" placeholder="TML-RYD-001" /></FieldRow>
+      <FieldRow label="Name"><Input value={form.name} onChange={set("name")} className="h-9" placeholder="Olaya Cashier 1" /></FieldRow>
+      <FieldRow label="Branch">
+        <Select value={form.branchId} onValueChange={setS("branchId")}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+          <SelectContent>
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </FieldRow>
+      <FieldRow label="Assigned Cashier">
+        <Select value={form.assignedCashierId ?? "none"} onValueChange={v => setS("assignedCashierId")(v === "none" ? "" : v)}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">— Unassigned —</SelectItem>
+            {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </FieldRow>
+      <FieldRow label="Status">
+        <Select value={form.status} onValueChange={setS("status")}>
+          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Inactive</SelectItem>
+            <SelectItem value="maintenance">Maintenance</SelectItem>
+          </SelectContent>
+        </Select>
+      </FieldRow>
+      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving}>
+        {saving ? "Saving…" : "Save"}
+      </Button>
+    </div>
+  );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -27,12 +74,13 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-type TerminalForm = { name: string; terminalCode: string; branchId: string; status: string; };
-const emptyForm: TerminalForm = { name: "", terminalCode: "", branchId: "", status: "active" };
+type TerminalForm = { name: string; terminalCode: string; branchId: string; status: string; assignedCashierId: string; };
+const emptyForm: TerminalForm = { name: "", terminalCode: "", branchId: "", status: "active", assignedCashierId: "" };
 
 function Terminals() {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [br, setBr] = useState("all");
@@ -45,13 +93,14 @@ function Terminals() {
 
   const load = () => {
     setLoading(true);
-    Promise.all([api.getTerminals(), api.getBranches()])
-      .then(([t, b]) => { setTerminals(t); setBranches(b); })
+    Promise.all([api.getTerminals(), api.getBranches(), api.getUsers()])
+      .then(([t, b, u]) => { setTerminals(t); setBranches(b); setUsers(u); })
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
   const branchNames = [...new Set(terminals.map(t => t.branch?.name).filter(Boolean))];
+  const cashiers = users.filter(u => u.roleName?.toLowerCase().includes("cashier"));
 
   const filtered = terminals.filter(t => {
     const matchQ = !q || t.terminalCode?.toLowerCase().includes(q.toLowerCase()) || t.name?.toLowerCase().includes(q.toLowerCase());
@@ -62,7 +111,7 @@ function Terminals() {
 
   const openEdit = (t: Terminal) => {
     setEditTerm(t);
-    setForm({ name: t.name, terminalCode: t.terminalCode, branchId: t.branchId, status: t.status });
+    setForm({ name: t.name, terminalCode: t.terminalCode, branchId: t.branchId, status: t.status, assignedCashierId: t.assignedCashierId ?? "" });
   };
 
   const handleSave = async () => {
@@ -88,34 +137,6 @@ function Terminals() {
     setForm(p => ({ ...p, [k]: e.target.value }));
   const setS = (k: keyof TerminalForm) => (v: string) =>
     setForm(p => ({ ...p, [k]: v }));
-
-  const FormFields = () => (
-    <div className="mt-4 space-y-4">
-      <FieldRow label="Terminal Code"><Input value={form.terminalCode} onChange={set("terminalCode")} className="h-9 font-mono" placeholder="TML-RYD-001" /></FieldRow>
-      <FieldRow label="Name"><Input value={form.name} onChange={set("name")} className="h-9" placeholder="Olaya Cashier 1" /></FieldRow>
-      <FieldRow label="Branch">
-        <Select value={form.branchId} onValueChange={setS("branchId")}>
-          <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
-          <SelectContent>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </FieldRow>
-      <FieldRow label="Status">
-        <Select value={form.status} onValueChange={setS("status")}>
-          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-            <SelectItem value="maintenance">Maintenance</SelectItem>
-          </SelectContent>
-        </Select>
-      </FieldRow>
-      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
-        {saving ? "Saving…" : "Save"}
-      </Button>
-    </div>
-  );
 
   return (
     <PageShell title="Terminals" subtitle="POS terminal registry, sessions and sync status">
@@ -230,7 +251,7 @@ function Terminals() {
       <Sheet open={!!editTerm} onOpenChange={v => !v && setEditTerm(null)}>
         <SheetContent>
           <SheetHeader><SheetTitle>Edit Terminal</SheetTitle></SheetHeader>
-          <FormFields />
+          <TerminalFormFields form={form} set={set} setS={setS} branches={branches} users={cashiers} saving={saving} onSave={handleSave} />
         </SheetContent>
       </Sheet>
 
@@ -238,7 +259,7 @@ function Terminals() {
       <Sheet open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
         <SheetContent>
           <SheetHeader><SheetTitle>Add Terminal</SheetTitle></SheetHeader>
-          <FormFields />
+          <TerminalFormFields form={form} set={set} setS={setS} branches={branches} users={cashiers} saving={saving} onSave={handleSave} />
         </SheetContent>
       </Sheet>
     </PageShell>

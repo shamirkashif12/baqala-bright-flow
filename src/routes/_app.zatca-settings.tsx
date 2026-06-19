@@ -186,9 +186,9 @@ function ZatcaSettings() {
                 { key: "_a", label: "", render: () => <Button size="sm" variant="outline" className="h-7 gap-1"><RefreshCw className="h-3 w-3" />Retry</Button> },
               ]}
               rows={[
-                { id: "ORD-9912", branch: "Khobar", amt: "ر.س 142.50", queued: "12 min", status: "pending" },
-                { id: "ORD-9908", branch: "Jeddah", amt: "ر.س 92.00", queued: "44 min", status: "pending" },
-                { id: "ORD-9904", branch: "Madinah", amt: "ر.س 318.40", queued: "1h 8m", status: "retry required" },
+                { id: "ORD-9912", branch: "Khobar", amt: "SAR 142.50", queued: "12 min", status: "pending" },
+                { id: "ORD-9908", branch: "Jeddah", amt: "SAR 92.00", queued: "44 min", status: "pending" },
+                { id: "ORD-9904", branch: "Madinah", amt: "SAR 318.40", queued: "1h 8m", status: "retry required" },
               ]}
             />
           </Card>

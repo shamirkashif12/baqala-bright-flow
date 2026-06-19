@@ -60,6 +60,10 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<Coupon> Coupons { get; set; }
     public DbSet<TaxFeeRule> TaxFeeRules { get; set; }
 
+    // Promotions
+    public DbSet<Discount> Discounts { get; set; }
+    public DbSet<Offer> Offers { get; set; }
+
     // Compliance (ZATCA)
     public DbSet<ZatcaInvoice> ZatcaInvoices { get; set; }
     public DbSet<ZatcaSettings> ZatcaSettings { get; set; }
@@ -286,6 +290,38 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .WithMany()
             .HasForeignKey(st => st.DestSupplierId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── Discount: optional Product/Branch FKs ───────────────────────────
+        modelBuilder.Entity<Discount>()
+            .HasOne(d => d.Product)
+            .WithMany()
+            .HasForeignKey(d => d.ProductId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Discount>()
+            .HasOne(d => d.Branch)
+            .WithMany()
+            .HasForeignKey(d => d.BranchId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // ─── Offer: two Product FKs (must be configured explicitly) ──────────
+        modelBuilder.Entity<Offer>()
+            .HasOne(o => o.TriggerProduct)
+            .WithMany()
+            .HasForeignKey(o => o.TriggerProductId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Offer>()
+            .HasOne(o => o.GetProduct)
+            .WithMany()
+            .HasForeignKey(o => o.GetProductId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Offer>()
+            .HasOne(o => o.Branch)
+            .WithMany()
+            .HasForeignKey(o => o.BranchId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         // ─── StockTransfer: multiple Warehouse FKs ───────────────────────────
         modelBuilder.Entity<StockTransfer>()

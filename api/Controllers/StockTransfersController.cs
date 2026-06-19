@@ -34,13 +34,42 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] StockTransfer transfer)
+    public async Task<IActionResult> Create([FromBody] CreateTransferRequest req)
     {
-        transfer.Id = Guid.NewGuid();
-        transfer.TransferNumber = $"TRF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
-        transfer.Status = "draft";
-        transfer.CreatedAt = transfer.UpdatedAt = DateTime.UtcNow;
-        foreach (var item in transfer.Items) { item.Id = Guid.NewGuid(); item.TransferId = transfer.Id; item.CreatedAt = DateTime.UtcNow; }
+        var transferId = Guid.NewGuid();
+        var items = (req.Items ?? []).Select(i => new StockTransferItem
+        {
+            Id = Guid.NewGuid(),
+            TransferId = transferId,
+            ProductId = i.ProductId,
+            RequestedQuantity = i.RequestedQuantity,
+            UnitCost = i.UnitCost,
+            ReturnReason = i.ReturnReason,
+            Notes = i.Notes,
+            CreatedAt = DateTime.UtcNow,
+        }).ToList();
+
+        var transfer = new StockTransfer
+        {
+            Id = transferId,
+            TransferNumber = $"TRF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+            TransferType = req.TransferType,
+            SourceBranchId = req.SourceBranchId,
+            SourceWarehouseId = req.SourceWarehouseId,
+            SourceSupplierId = req.SourceSupplierId,
+            DestBranchId = req.DestBranchId,
+            DestWarehouseId = req.DestWarehouseId,
+            DestSupplierId = req.DestSupplierId,
+            PurchaseOrderId = req.PurchaseOrderId,
+            CreatedBy = req.CreatedBy ?? Guid.Empty,
+            Status = "draft",
+            ReturnReason = req.ReturnReason,
+            Notes = req.Notes,
+            ExpectedDate = req.ExpectedDate,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Items = items,
+        };
         db.StockTransfers.Add(transfer);
         await db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = transfer.Id }, transfer);
@@ -100,3 +129,27 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
 }
 
 public record UpdateTransferStatusRequest(string Status, Guid? ApprovedBy);
+
+public record CreateTransferItemRequest(
+    Guid ProductId,
+    decimal RequestedQuantity,
+    decimal? UnitCost,
+    string? ReturnReason,
+    string? Notes
+);
+
+public record CreateTransferRequest(
+    string TransferType,
+    Guid? SourceBranchId,
+    Guid? SourceWarehouseId,
+    Guid? SourceSupplierId,
+    Guid? DestBranchId,
+    Guid? DestWarehouseId,
+    Guid? DestSupplierId,
+    Guid? PurchaseOrderId,
+    Guid? CreatedBy,
+    string? ReturnReason,
+    string? Notes,
+    DateTime? ExpectedDate,
+    List<CreateTransferItemRequest>? Items
+);

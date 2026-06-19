@@ -10,8 +10,8 @@ public class Terminal
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("terminal_code")]
-    public string TerminalCode { get; set; } = default!;
+    [MaxLength(50), Column("terminal_code")]
+    public string? TerminalCode { get; set; }
 
     [Required, MaxLength(255), Column("name")]
     public string Name { get; set; } = default!;
@@ -39,7 +39,7 @@ public class Terminal
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Branch Branch { get; set; } = default!;
+    public Branch? Branch { get; set; }
     public User? AssignedCashier { get; set; }
     [JsonIgnore] public ICollection<Device> Devices { get; set; } = [];
     [JsonIgnore] public ICollection<CashierShift> Shifts { get; set; } = [];
@@ -86,6 +86,6 @@ public class Device
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Branch Branch { get; set; } = default!;
+    public Branch? Branch { get; set; }
     public Terminal? Terminal { get; set; }
 }

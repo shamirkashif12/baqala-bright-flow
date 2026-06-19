@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, type ReactNode } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { QRCodeSVG } from "qrcode.react";
-import { api, type Product, type Branch, type Coupon, type Customer, type CashierShift, type Order } from "@/lib/api";
+import { api, type Product, type Branch, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 // ─── ZATCA Phase 2 TLV QR encoder ────────────────────────────────────────────
 // Encodes seller name, VAT number, timestamp, total, VAT amount per ZATCA spec.
@@ -119,6 +120,11 @@ function POS() {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
 
+  // ─── Active Offers & Discounts ────────────────────────────────────────────────
+  const [activeOffers, setActiveOffers] = useState<Offer[]>([]);
+  const [activeDiscounts, setActiveDiscounts] = useState<Discount[]>([]);
+  const [customFees, setCustomFees] = useState<TaxFeeRule[]>([]);
+
   // ─── Holds ────────────────────────────────────────────────────────────────────
   const [holds, setHolds] = useState<{ id: string; items: CartItem[]; total: number; at: string }[]>([]);
 
@@ -175,6 +181,12 @@ function POS() {
         setLoading(false);
         searchRef.current?.focus();
       });
+
+    api.getActiveOffers().then(setActiveOffers).catch(() => {});
+    api.getDiscounts({ isActive: true }).then(setActiveDiscounts).catch(() => {});
+    api.getTaxRules().then(rules =>
+      setCustomFees(rules.filter(r => r.ruleType === "custom_fee" && r.status === "active"))
+    ).catch(() => {});
   }, []);
 
   // Keep refs fresh so the scanner listener never has stale closures
@@ -274,14 +286,126 @@ function POS() {
 
   // ─── Calculations ─────────────────────────────────────────────────────────────
   const subtotal = cart.reduce((s, i) => s + i.qty * i.price, 0);
+
+  // KSA tobacco excise: min 25 SAR OR 100% of base price, whichever is higher
+  function calcTobaccoFee(base: number): number {
+    return base <= 25 ? 25 : base;
+  }
+  const tobaccoExcise = cart.reduce((sum, ci) => {
+    const prod = products.find(p => p.id === ci.productId);
+    if (!prod?.isTobacco) return sum;
+    return sum + ci.qty * calcTobaccoFee(ci.price);
+  }, 0);
   const couponDiscount = appliedCoupon
     ? appliedCoupon.type === "percentage"
       ? Math.min(subtotal * (appliedCoupon.value / 100), subtotal)
       : Math.min(appliedCoupon.value, subtotal)
     : 0;
-  const taxable = subtotal - couponDiscount;
-  const vatAmount = taxable * taxRate;
-  const total = taxable + vatAmount;
+
+  // Parse combo product IDs stored as JSON in itemsDescription
+  function parseComboIds(desc?: string | null): string[] {
+    if (!desc) return [];
+    try { const d = JSON.parse(desc); return Array.isArray(d.products) ? d.products : []; } catch { return []; }
+  }
+
+  // Active discounts: "all" applies to everything; "product" applies per matching product in cart
+  const discountSavings = activeDiscounts.reduce((sum, d) => {
+    const now = new Date();
+    if (d.startDate && new Date(d.startDate) > now) return sum;
+    if (d.endDate && new Date(d.endDate) < now) return sum;
+    if (d.appliesTo === "all") {
+      return sum + (d.discountType === "percentage"
+        ? subtotal * (d.value / 100)
+        : Math.min(d.value, subtotal));
+    }
+    if (d.appliesTo === "product" && d.productId) {
+      const item = cart.find(i => i.productId === d.productId);
+      if (!item) return sum;
+      return sum + (d.discountType === "percentage"
+        ? item.qty * item.price * (d.value / 100)
+        : Math.min(d.value * item.qty, item.qty * item.price));
+    }
+    return sum;
+  }, 0);
+
+  // Triggered offers — split into "discountable" (we can compute SAR savings) vs "notify only"
+  const triggeredOffers = activeOffers.filter(o => {
+    if (o.offerType === "bogo") {
+      // With product: only triggers if that product is in cart
+      if (o.triggerProductId) return cart.some(i => i.productId === o.triggerProductId);
+      // Without product: blanket BOGO on any purchase
+      return cart.length > 0;
+    }
+    if (o.offerType === "product_offer") {
+      return o.triggerProductId ? cart.some(i => i.productId === o.triggerProductId) : false;
+    }
+    if (o.offerType === "buy_a_get_b") {
+      if (!o.triggerProductId) return false;
+      const trig = cart.find(i => i.productId === o.triggerProductId);
+      return trig !== undefined && trig.qty >= (o.triggerQuantity ?? 1);
+    }
+    if (o.offerType === "combo") {
+      const ids = parseComboIds(o.itemsDescription);
+      // Only JSON-format combos (min 2 product IDs) can be verified — plain text = skip
+      if (ids.length >= 2) return ids.every(id => cart.some(i => i.productId === id));
+      return false;
+    }
+    if (o.offerType === "lucky_draw") return o.minBasketAmount != null && subtotal >= o.minBasketAmount;
+    return false;
+  });
+
+  const offerDiscount = triggeredOffers.reduce((sum, o) => {
+    const item = o.triggerProductId ? cart.find(i => i.productId === o.triggerProductId) : null;
+    if (o.offerType === "bogo") {
+      if (item) {
+        // Product-specific BOGO
+        const sets = Math.floor(item.qty / ((o.triggerQuantity ?? 1) + (o.getQuantity ?? 1)));
+        return sum + sets * (o.getQuantity ?? 1) * item.price;
+      } else {
+        // Blanket BOGO: apply to every item in cart
+        return sum + cart.reduce((s, ci) => {
+          const sets = Math.floor(ci.qty / ((o.triggerQuantity ?? 1) + (o.getQuantity ?? 1)));
+          return s + sets * (o.getQuantity ?? 1) * ci.price;
+        }, 0);
+      }
+    }
+    if (o.offerType === "product_offer" && item) {
+      if (o.discountPercentage) return sum + item.qty * item.price * (o.discountPercentage / 100);
+      if (o.offerPrice != null) return sum + item.qty * Math.max(0, item.price - o.offerPrice);
+    }
+    if (o.offerType === "buy_a_get_b") {
+      const getItem = cart.find(i => i.productId === o.getProductId);
+      if (getItem) {
+        return sum + (o.getQuantity ?? 1) * Math.max(0, getItem.price - (o.offerPrice ?? 0));
+      }
+    }
+    if (o.offerType === "combo" && o.offerPrice != null) {
+      const ids = parseComboIds(o.itemsDescription);
+      if (ids.length >= 2) {
+        const retailTotal = ids.reduce((s, id) => s + (cart.find(i => i.productId === id)?.price ?? 0), 0);
+        return sum + Math.max(0, retailTotal - o.offerPrice);
+      }
+      // Plain text combo: no automatic SAR discount (operator must apply manually)
+    }
+    return sum;
+  }, 0);
+
+  const totalAutoDiscount = discountSavings + offerDiscount;
+
+  // Active custom fees that apply to every order
+  const allOrderFees = customFees.filter(f =>
+    f.applicableTo === "all_products" || f.applicableTo === "all_orders"
+  );
+  const customFeeTotal = cart.length > 0 ? allOrderFees.reduce((sum, f) => {
+    if (f.customFeeAmount > 0) return sum + f.customFeeAmount;
+    if (f.excisePercentage > 0) return sum + (subtotal * f.excisePercentage / 100);
+    if (f.vatPercentage > 0) return sum + (subtotal * f.vatPercentage / 100);
+    return sum;
+  }, 0) : 0;
+
+  const taxable = subtotal - couponDiscount - totalAutoDiscount + tobaccoExcise;
+  const vatAmount = Math.max(0, taxable) * taxRate;
+  const total = Math.max(0, taxable) + vatAmount + customFeeTotal;
 
   // ─── Cart ops ─────────────────────────────────────────────────────────────────
   const updateQty = (sku: string, d: number) =>
@@ -422,8 +546,8 @@ function POS() {
       customerId: customer?.id,
       cashierId: activeShift?.cashierId,
       subtotal,
-      discountAmount: couponDiscount,
-      taxAmount: vatAmount,
+      discountAmount: couponDiscount + totalAutoDiscount,
+      taxAmount: vatAmount + customFeeTotal,
       totalAmount: total,
       paymentStatus: "paid",
       orderStatus: "completed",
@@ -442,7 +566,7 @@ function POS() {
       createdAt: order.createdAt ?? new Date().toISOString(),
       items: [...cart],
       subtotal,
-      discount: couponDiscount,
+      discount: couponDiscount + totalAutoDiscount,
       vat: vatAmount,
       total,
       taxLabel,
@@ -560,7 +684,7 @@ function POS() {
                         </span>
                       )}
                       <span className="font-bold text-primary tabular-nums w-20 text-right">
-                        ر.س {p.basePrice.toFixed(2)}
+                        <SARIcon />{p.basePrice.toFixed(2)}
                       </span>
                     </button>
                   );
@@ -608,7 +732,7 @@ function POS() {
                     <span className="text-xs text-muted-foreground tabular-nums w-6 text-right">{idx + 1}.</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
-                      <p className="text-[11px] text-muted-foreground">SKU {item.sku} · ر.س {item.price.toFixed(2)}</p>
+                      <p className="text-[11px] text-muted-foreground">SKU {item.sku} · <SARIcon />{item.price.toFixed(2)}</p>
                     </div>
                     <div className="flex items-center gap-1 bg-muted rounded-lg">
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateQty(item.sku, -1)}>
@@ -627,7 +751,7 @@ function POS() {
                       </Button>
                     </div>
                     <span className="text-sm font-semibold tabular-nums w-20 text-right">
-                      ر.س {(item.qty * item.price).toFixed(2)}
+                      <SARIcon />{(item.qty * item.price).toFixed(2)}
                     </span>
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => remove(item.sku)}>
                       <Trash2 className="h-3.5 w-3.5" />
@@ -665,7 +789,7 @@ function POS() {
                 {cart.map((i) => (
                   <li key={i.sku} className="flex justify-between">
                     <span className="truncate pr-2">{i.qty} × {i.name}</span>
-                    <span className="tabular-nums text-foreground">ر.س {(i.qty * i.price).toFixed(2)}</span>
+                    <span className="tabular-nums text-foreground"><SARIcon />{(i.qty * i.price).toFixed(2)}</span>
                   </li>
                 ))}
               </ul>
@@ -713,7 +837,7 @@ function POS() {
                   <p className="text-xs font-semibold">{appliedCoupon.code}</p>
                   <p className="text-[10px] text-muted-foreground">
                     {appliedCoupon.type === "percentage" ? `${appliedCoupon.value}% off` : `SAR ${appliedCoupon.value} off`}
-                    {" — "}saves ر.س {couponDiscount.toFixed(2)}
+                    {" — "}saves <SARIcon />{couponDiscount.toFixed(2)}
                   </p>
                 </div>
                 <button onClick={removeCoupon} className="text-muted-foreground hover:text-destructive">
@@ -744,21 +868,123 @@ function POS() {
           <div className="p-4 border-t border-border/60 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Subtotal</span>
-              <span className="tabular-nums">ر.س {subtotal.toFixed(2)}</span>
+              <span className="tabular-nums"><SARIcon />{subtotal.toFixed(2)}</span>
             </div>
             {couponDiscount > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Coupon ({appliedCoupon?.code})</span>
-                <span className="tabular-nums text-success">− ر.س {couponDiscount.toFixed(2)}</span>
+                <span className="tabular-nums text-success">− <SARIcon />{couponDiscount.toFixed(2)}</span>
+              </div>
+            )}
+            {activeDiscounts.filter(d => {
+              const now = new Date();
+              if (d.startDate && new Date(d.startDate) > now) return false;
+              if (d.endDate && new Date(d.endDate) < now) return false;
+              if (d.appliesTo === "all") return cart.length > 0;
+              if (d.appliesTo === "product" && d.productId) return cart.some(i => i.productId === d.productId);
+              return false;
+            }).map(d => {
+              const saving = d.appliesTo === "all"
+                ? (d.discountType === "percentage" ? subtotal * (d.value / 100) : Math.min(d.value, subtotal))
+                : (() => {
+                    const item = cart.find(i => i.productId === d.productId);
+                    if (!item) return 0;
+                    return d.discountType === "percentage"
+                      ? item.qty * item.price * (d.value / 100)
+                      : Math.min(d.value * item.qty, item.qty * item.price);
+                  })();
+              return saving > 0 ? (
+                <div key={d.id} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground truncate max-w-[150px]">{d.name}</span>
+                  <span className="tabular-nums text-success">− <SARIcon />{saving.toFixed(2)}</span>
+                </div>
+              ) : null;
+            })}
+            {triggeredOffers.map(o => {
+              const item = o.triggerProductId ? cart.find(i => i.productId === o.triggerProductId) : null;
+              let saving = 0;
+
+              if (o.offerType === "bogo") {
+                if (item) {
+                  const sets = Math.floor(item.qty / ((o.triggerQuantity ?? 1) + (o.getQuantity ?? 1)));
+                  saving = sets * (o.getQuantity ?? 1) * item.price;
+                } else {
+                  saving = cart.reduce((s, ci) => {
+                    const sets = Math.floor(ci.qty / ((o.triggerQuantity ?? 1) + (o.getQuantity ?? 1)));
+                    return s + sets * (o.getQuantity ?? 1) * ci.price;
+                  }, 0);
+                }
+              } else if (o.offerType === "product_offer" && item) {
+                saving = o.discountPercentage
+                  ? item.qty * item.price * (o.discountPercentage / 100)
+                  : item.qty * Math.max(0, item.price - (o.offerPrice ?? 0));
+              } else if (o.offerType === "buy_a_get_b") {
+                const getItem = cart.find(i => i.productId === o.getProductId);
+                if (getItem) {
+                  saving = (o.getQuantity ?? 1) * Math.max(0, getItem.price - (o.offerPrice ?? 0));
+                } else {
+                  // Trigger met but get-product not in cart yet — show nudge
+                  const getPrice = o.offerPrice != null ? o.offerPrice : null;
+                  const freeLabel: ReactNode = getPrice === 0 || getPrice == null ? "FREE" : <><SARIcon />{getPrice.toFixed(2)}</>;
+                  return (
+                    <div key={o.id} className="flex items-start gap-1.5 text-xs text-blue-600 bg-blue-50 dark:bg-blue-950/30 rounded px-2 py-1.5">
+                      <span className="shrink-0">🎁</span>
+                      <span>
+                        <span className="font-semibold">{o.name}:</span>{" "}
+                        add <span className="font-semibold">{o.getProduct?.name ?? "the free item"}</span> to cart and pay only {freeLabel}
+                      </span>
+                    </div>
+                  );
+                }
+              } else if (o.offerType === "combo" && o.offerPrice != null) {
+                const ids = parseComboIds(o.itemsDescription);
+                const retailTotal = ids.reduce((s, id) => s + (cart.find(i => i.productId === id)?.price ?? 0), 0);
+                saving = Math.max(0, retailTotal - o.offerPrice);
+              }
+
+              if (o.offerType === "lucky_draw") {
+                return (
+                  <div key={o.id} className="flex items-center gap-1.5 text-xs text-amber-600 bg-amber-50 dark:bg-amber-950/30 rounded px-2 py-1">
+                    <span>🎁</span>
+                    <span className="truncate">{o.name} — eligible for draw!</span>
+                  </div>
+                );
+              }
+              if (saving <= 0) return null;
+              return (
+                <div key={o.id} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground truncate max-w-[150px]">{o.name}</span>
+                  <span className="tabular-nums text-success">− <SARIcon />{saving.toFixed(2)}</span>
+                </div>
+              );
+            })}
+            {cart.length > 0 && allOrderFees.map(f => {
+              const amount = f.customFeeAmount > 0
+                ? f.customFeeAmount
+                : (f.excisePercentage > 0 ? subtotal * f.excisePercentage / 100 : subtotal * f.vatPercentage / 100);
+              if (amount <= 0) return null;
+              return (
+                <div key={f.id} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground truncate max-w-[150px]">{f.ruleName}</span>
+                  <span className="tabular-nums">
+                    {f.customFeeAmount > 0 ? <><SARIcon />{amount.toFixed(2)}</> : `${amount.toFixed(2)} (${f.excisePercentage || f.vatPercentage}%)`}
+                  </span>
+                </div>
+              );
+            })}
+            {tobaccoExcise > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Tobacco Excise</span>
+                <span className="tabular-nums text-amber-600">+ <SARIcon />{tobaccoExcise.toFixed(2)}</span>
               </div>
             )}
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{taxLabel}</span>
-              <span className="tabular-nums">ر.س {vatAmount.toFixed(2)}</span>
+              <span className="tabular-nums"><SARIcon />{vatAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between items-baseline pt-2 border-t border-dashed border-border">
               <span className="font-semibold">Total</span>
-              <span className="text-2xl font-bold text-primary tabular-nums">ر.س {total.toFixed(2)}</span>
+              <span className="text-2xl font-bold text-primary tabular-nums"><SARIcon />{total.toFixed(2)}</span>
             </div>
 
             <Button
@@ -766,7 +992,7 @@ function POS() {
               disabled={cart.length === 0}
               onClick={() => setPayOpen(true)}
             >
-              Charge ر.س {total.toFixed(2)}
+              Charge <SARIcon />{total.toFixed(2)}
             </Button>
 
             <div className="grid grid-cols-4 gap-1.5 pt-1">
@@ -805,12 +1031,12 @@ function POS() {
             <Row k="Cashier" v={activeShift?.cashier?.fullName ?? "—"} />
             <Row k="Customer" v={customer?.fullName ?? "Walk-in"} />
             <Row k="Status" v="In progress" />
-            {appliedCoupon && <Row k="Coupon" v={`${appliedCoupon.code} (−ر.س ${couponDiscount.toFixed(2)})`} />}
+            {appliedCoupon && <Row k="Coupon" v={<>{appliedCoupon.code} (−<SARIcon />{couponDiscount.toFixed(2)})</>} />}
             <div className="pt-2 border-t">
               {cart.map((i) => (
                 <div key={i.sku} className="flex justify-between text-xs py-1">
                   <span>{i.qty} × {i.name}</span>
-                  <span className="tabular-nums">ر.س {(i.qty * i.price).toFixed(2)}</span>
+                  <span className="tabular-nums"><SARIcon />{(i.qty * i.price).toFixed(2)}</span>
                 </div>
               ))}
             </div>
@@ -845,7 +1071,7 @@ function POS() {
                   <p className="font-semibold text-sm">{h.id}</p>
                   <p className="text-xs text-muted-foreground truncate">{h.items.length} items · held at {h.at}</p>
                 </div>
-                <p className="text-sm font-bold tabular-nums">ر.س {h.total.toFixed(2)}</p>
+                <p className="text-sm font-bold tabular-nums"><SARIcon />{h.total.toFixed(2)}</p>
                 <div className="flex gap-1">
                   <Button size="sm" className="gradient-primary text-primary-foreground border-0" onClick={() => reopen(h.id)}>Reopen</Button>
                   <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setHolds((hs) => hs.filter((x) => x.id !== h.id))}>Cancel</Button>
@@ -930,7 +1156,7 @@ function POS() {
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
+function Row({ k, v }: { k: string; v: ReactNode }) {
   return (
     <div className="flex justify-between">
       <span className="text-muted-foreground">{k}</span>
@@ -1005,7 +1231,7 @@ function PaymentDialog({
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setStatus("idle"); }}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Take Payment — ر.س {total.toFixed(2)}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Take Payment — <SARIcon />{total.toFixed(2)}</DialogTitle></DialogHeader>
 
         <Tabs value={tab} onValueChange={(v) => { setTab(v); setStatus("idle"); }}>
           <TabsList className="grid grid-cols-4 w-full">
@@ -1022,12 +1248,12 @@ function PaymentDialog({
             </div>
             <div className="grid grid-cols-2 gap-2">
               {[50, 100, 200, 500].map((d) => (
-                <Button key={d} variant="outline" onClick={() => setReceived(String(d))}>ر.س {d}</Button>
+                <Button key={d} variant="outline" onClick={() => setReceived(String(d))}><SARIcon />{d}</Button>
               ))}
             </div>
             <div className="rounded-lg bg-muted/40 p-3 flex justify-between">
               <span className="text-sm text-muted-foreground">Change</span>
-              <span className="font-bold text-lg text-success tabular-nums">ر.س {change.toFixed(2)}</span>
+              <span className="font-bold text-lg text-success tabular-nums"><SARIcon />{change.toFixed(2)}</span>
             </div>
           </TabsContent>
 
@@ -1065,7 +1291,7 @@ function PaymentDialog({
             <div className={`flex justify-between text-sm p-2 rounded-lg ${splitOk ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
               <span>Sum</span>
               <span className="tabular-nums font-semibold">
-                ر.س {splitTotal.toFixed(2)} {splitOk ? "✓" : `(need ${total.toFixed(2)})`}
+                <SARIcon />{splitTotal.toFixed(2)} {splitOk ? "✓" : `(need ${total.toFixed(2)})`}
               </span>
             </div>
           </TabsContent>

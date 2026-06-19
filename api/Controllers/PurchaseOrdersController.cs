@@ -44,22 +44,39 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] PurchaseOrder po)
+    public async Task<IActionResult> Create([FromBody] CreatePoRequest req)
     {
-        po.Id = Guid.NewGuid();
-        po.PoNumber = $"PO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
-        po.Status = "draft";
-        po.PaymentStatus = "unpaid";
-        po.CreatedAt = po.UpdatedAt = DateTime.UtcNow;
-        po.TotalAmount = po.Items.Sum(i => i.OrderedQuantity * i.UnitCost);
-        foreach (var item in po.Items)
+        var poId = Guid.NewGuid();
+        var items = (req.Items ?? []).Select(i => new PurchaseOrderItem
         {
-            item.Id = Guid.NewGuid();
-            item.PoId = po.Id;
-            item.Subtotal = item.OrderedQuantity * item.UnitCost;
-            item.Status = "pending";
-            item.CreatedAt = DateTime.UtcNow;
-        }
+            Id = Guid.NewGuid(),
+            PoId = poId,
+            ProductId = i.ProductId,
+            OrderedQuantity = i.OrderedQuantity,
+            UnitCost = i.UnitCost,
+            Subtotal = i.OrderedQuantity * i.UnitCost,
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow,
+        }).ToList();
+
+        var po = new PurchaseOrder
+        {
+            Id = poId,
+            PoNumber = $"PO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+            SupplierId = req.SupplierId,
+            WarehouseId = req.WarehouseId,
+            BranchId = req.BranchId,
+            OrderedBy = req.OrderedBy ?? Guid.Empty,
+            PaymentTerms = req.PaymentTerms,
+            ExpectedDeliveryDate = req.ExpectedDeliveryDate,
+            Notes = req.Notes,
+            Status = "draft",
+            PaymentStatus = "unpaid",
+            TotalAmount = items.Sum(i => i.Subtotal),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Items = items,
+        };
         db.PurchaseOrders.Add(po);
         await db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = po.Id }, po);
@@ -160,14 +177,24 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
     }
 
     [HttpPost("{id:guid}/payments")]
-    public async Task<IActionResult> AddPayment(Guid id, [FromBody] SupplierPayment payment)
+    public async Task<IActionResult> AddPayment(Guid id, [FromBody] AddPaymentRequest req)
     {
         var po = await db.PurchaseOrders.FindAsync(id);
         if (po is null) return NotFound();
-        payment.Id = Guid.NewGuid();
-        payment.PoId = id;
-        payment.SupplierId = po.SupplierId;
-        payment.CreatedAt = DateTime.UtcNow;
+        var payment = new SupplierPayment
+        {
+            Id = Guid.NewGuid(),
+            PoId = id,
+            SupplierId = po.SupplierId,
+            Amount = req.Amount,
+            PaymentMethod = req.PaymentMethod ?? "cash",
+            PaymentDate = req.PaymentDate ?? DateTime.UtcNow,
+            ReferenceNumber = req.ReferenceNumber,
+            Notes = req.Notes,
+            RecordedBy = req.RecordedBy ?? Guid.Empty,
+            Status = "completed",
+            CreatedAt = DateTime.UtcNow,
+        };
         db.SupplierPayments.Add(payment);
         po.PaidAmount += payment.Amount;
         po.PaymentStatus = po.PaidAmount >= po.TotalAmount ? "paid" : (po.PaidAmount > 0 ? "partial" : "unpaid");
@@ -179,3 +206,22 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
 
 public record UpdatePoStatusRequest(string Status, Guid? ApprovedBy);
 public record ReceiveItemRequest(Guid ProductId, decimal Quantity, DateTime? ExpiryDate);
+public record CreatePoItemRequest(Guid ProductId, decimal OrderedQuantity, decimal UnitCost);
+public record CreatePoRequest(
+    Guid SupplierId,
+    Guid? WarehouseId,
+    Guid? BranchId,
+    Guid? OrderedBy,
+    string? PaymentTerms,
+    DateTime? ExpectedDeliveryDate,
+    string? Notes,
+    List<CreatePoItemRequest>? Items
+);
+public record AddPaymentRequest(
+    decimal Amount,
+    string? PaymentMethod,
+    DateTime? PaymentDate,
+    string? ReferenceNumber,
+    string? Notes,
+    Guid? RecordedBy
+);

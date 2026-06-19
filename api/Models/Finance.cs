@@ -70,9 +70,9 @@ public class Expense
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public ExpenseType ExpenseType { get; set; } = default!;
-    public Branch Branch { get; set; } = default!;
-    public User RecordedByUser { get; set; } = default!;
+    public ExpenseType? ExpenseType { get; set; }
+    public Branch? Branch { get; set; }
+    public User? RecordedByUser { get; set; }
     public User? ApprovedByUser { get; set; }
 }
 
@@ -134,7 +134,7 @@ public class Coupon
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-    public User CreatedByUser { get; set; } = default!;
+    public User? CreatedByUser { get; set; }
     public ICollection<Order> Orders { get; set; } = [];
 }
 
@@ -194,5 +194,5 @@ public class TaxFeeRule
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public Branch? Branch { get; set; }
-    public User CreatedByUser { get; set; } = default!;
+    public User? CreatedByUser { get; set; }
 }

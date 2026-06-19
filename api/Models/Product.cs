@@ -88,6 +88,9 @@ public class Product
     [Column("custom_fee")]
     public decimal CustomFee { get; set; } = 0;
 
+    [Column("is_tobacco")]
+    public bool IsTobacco { get; set; } = false;
+
     [MaxLength(500), Column("image_url")]
     public string? ImageUrl { get; set; }
 
@@ -143,7 +146,7 @@ public class ProductPriceList
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Product Product { get; set; } = default!;
+    public Product? Product { get; set; }
     public Branch? Branch { get; set; }
 }
 
@@ -182,5 +185,5 @@ public class ProductVariant
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-    [JsonIgnore] public Product Product { get; set; } = default!;
+    [JsonIgnore] public Product? Product { get; set; }
 }

@@ -39,7 +39,7 @@ public class LoyaltyTransaction
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Customer Customer { get; set; } = default!;
+    public Customer? Customer { get; set; }
     public Order? Order { get; set; }
     public Branch? Branch { get; set; }
 }

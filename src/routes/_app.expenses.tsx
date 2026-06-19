@@ -10,8 +10,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Plus, Receipt, ListTree, CheckCircle, XCircle } from "lucide-react";
+import { Plus, Receipt, ListTree, CheckCircle, XCircle, X } from "lucide-react";
 import { api, type Expense, type ExpenseType, type Branch } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/expenses")({ component: Expenses });
 
@@ -29,6 +30,8 @@ function EntriesTab() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<ExpenseForm>(emptyForm);
   const [saving, setSaving] = useState(false);
@@ -44,7 +47,9 @@ function EntriesTab() {
   const filtered = expenses.filter((e) => {
     const matchQ = !q || e.referenceNumber?.toLowerCase().includes(q.toLowerCase()) || e.description?.toLowerCase().includes(q.toLowerCase());
     const matchType = typeFilter === "all" || e.expenseType?.name === typeFilter;
-    return matchQ && matchType;
+    const mdf = !dateFrom || (!!e.expenseDate && e.expenseDate >= dateFrom);
+    const mdt = !dateTo || (!!e.expenseDate && e.expenseDate <= dateTo);
+    return matchQ && matchType && mdf && mdt;
   });
 
   const handleCreate = async () => {
@@ -85,6 +90,17 @@ function EntriesTab() {
             {expenseTypes.map(t => <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Expense Date:</span>
+          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          <span className="text-xs text-muted-foreground">–</span>
+          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          {(dateFrom || dateTo) && (
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
         <div className="flex-1" />
         <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setSheetOpen(true); }}>
           <Plus className="h-4 w-4" /> Add Expense
@@ -114,7 +130,7 @@ function EntriesTab() {
                     <td className="px-3 py-3 font-mono text-xs">{e.referenceNumber ?? "—"}</td>
                     <td className="px-3 py-3">{e.description ?? "—"}</td>
                     <td className="px-3 py-3"><Badge variant="outline" className="text-xs">{e.expenseType?.name ?? "—"}</Badge></td>
-                    <td className="px-3 py-3 tabular-nums font-semibold">SAR {e.amount.toFixed(2)}</td>
+                    <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{e.amount.toFixed(2)}</td>
                     <td className="px-3 py-3 text-xs">{e.expenseDate ? new Date(e.expenseDate).toLocaleDateString("en-SA") : "—"}</td>
                     <td className="px-3 py-3"><StatusBadge status={e.status} /></td>
                     <td className="px-3 py-3">

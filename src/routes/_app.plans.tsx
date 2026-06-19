@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Check, Crown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/plans")({ component: Plans });
 
@@ -48,7 +49,7 @@ function Plans() {
             <p className={cn("text-sm mt-1", p.featured ? "opacity-90" : "text-muted-foreground")}>{p.tag}</p>
             <div className="mt-4">
               {p.price > 0 ? (
-                <p className="text-4xl font-bold tracking-tight">ر.س {p.price}<span className={cn("text-sm font-normal", p.featured ? "opacity-80" : "text-muted-foreground")}>/mo</span></p>
+                <p className="text-4xl font-bold tracking-tight"><SARIcon />{p.price}<span className={cn("text-sm font-normal", p.featured ? "opacity-80" : "text-muted-foreground")}>/mo</span></p>
               ) : (
                 <p className="text-3xl font-bold tracking-tight">Custom</p>
               )}

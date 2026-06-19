@@ -62,6 +62,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         product.ReorderLevel = updated.ReorderLevel;
         product.Status = updated.Status;
         product.WeightBased = updated.WeightBased;
+        product.IsTobacco = updated.IsTobacco;
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(product);

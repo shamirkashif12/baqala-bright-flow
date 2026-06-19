@@ -34,8 +34,8 @@ public class InventoryStock
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Product Product { get; set; } = default!;
-    public Branch Branch { get; set; } = default!;
+    public Product? Product { get; set; }
+    public Branch? Branch { get; set; }
 }
 
 [Table("inventory_batches")]
@@ -44,8 +44,8 @@ public class InventoryBatch
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(100), Column("batch_number")]
-    public string BatchNumber { get; set; } = default!;
+    [MaxLength(100), Column("batch_number")]
+    public string? BatchNumber { get; set; }
 
     [Required, Column("product_id")]
     public Guid ProductId { get; set; }
@@ -87,8 +87,8 @@ public class InventoryBatch
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Product Product { get; set; } = default!;
-    public Branch Branch { get; set; } = default!;
+    public Product? Product { get; set; }
+    public Branch? Branch { get; set; }
     public Supplier? Supplier { get; set; }
 }
 
@@ -127,8 +127,8 @@ public class InventoryAdjustment
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Product Product { get; set; } = default!;
-    public Branch Branch { get; set; } = default!;
+    public Product? Product { get; set; }
+    public Branch? Branch { get; set; }
     public InventoryBatch? Batch { get; set; }
-    public User AdjustedByUser { get; set; } = default!;
+    public User? AdjustedByUser { get; set; }
 }

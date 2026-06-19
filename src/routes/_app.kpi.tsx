@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
 import { Gauge, ScanBarcode, Timer, ShoppingBag, TrendingUp } from "lucide-react";
 import { api, type CashierShift, type Terminal, type Branch } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/kpi")({ component: KPI });
 
@@ -85,7 +86,7 @@ function KPI() {
                           <td className="px-3 py-3 font-medium">{shift.cashier?.fullName ?? "Unknown"}</td>
                           <td className="px-3 py-3 text-xs">{shift.terminal?.terminalCode ?? "—"}</td>
                           <td className="px-3 py-3 tabular-nums">—</td>
-                          <td className="px-3 py-3 font-semibold">{"ر.س " + shift.totalSales.toLocaleString("en-SA", { minimumFractionDigits: 2 })}</td>
+                          <td className="px-3 py-3 font-semibold"><SARIcon />{shift.totalSales.toLocaleString("en-SA", { minimumFractionDigits: 2 })}</td>
                           <td className="px-3 py-3">
                             <Badge variant="outline" className={shift.status === "open" ? "bg-success/10 text-success border-success/30" : "bg-muted/40 text-muted-foreground border-border/60"}>
                               {shift.status}

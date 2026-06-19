@@ -48,5 +48,5 @@ public class RulesEngine
 
     public Branch? Branch { get; set; }
     [ForeignKey(nameof(CreatedBy))]
-    public User CreatedByUser { get; set; } = default!;
+    public User? CreatedByUser { get; set; }
 }

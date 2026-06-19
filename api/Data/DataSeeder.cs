@@ -248,6 +248,12 @@ public static class DataSeeder
         if (!await db.AuditLogs.AnyAsync())
             await SeedAuditLogsAsync(db);
 
+        if (!await db.Discounts.AnyAsync())
+            await SeedDiscountsAsync(db);
+
+        if (!await db.Offers.AnyAsync())
+            await SeedOffersAsync(db);
+
         await SeedTestUsersAsync(db);
     }
 
@@ -667,22 +673,6 @@ public static class DataSeeder
         await db.SaveChangesAsync();
     }
 
-    // ─── Backfill: Rules Engine ──────────────────────────────────────────────
-    private static async Task SeedRulesEngineAsync(BaqalaDbContext db)
-    {
-        var uAbdullah = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
-        if (uAbdullah is null) return;
-
-        db.RulesEngine.AddRange(
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Auto-block expired items", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"blockSale\": true, \"reason\": \"expired\"}", Priority = 100, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Warn 7 days before expiry", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"warnDays\": 7}", Priority = 90, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Require manager approval for refund > 100 SAR", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"threshold\": 100, \"requireManagerPin\": true}", Priority = 80, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Max return period 7 days", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"maxDays\": 7}", Priority = 70, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Loyalty points on paid orders", RuleType = "discount", AppliesTo = "all", RuleConfig = "{\"pointsPerSar\": 1}", Priority = 60, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
-        );
-        await db.SaveChangesAsync();
-    }
-
     // ─── Backfill: Audit Logs ────────────────────────────────────────────────
     private static async Task SeedAuditLogsAsync(BaqalaDbContext db)
     {
@@ -839,6 +829,40 @@ public static class DataSeeder
         Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(plain + "baqala_salt")));
 
+    // ─── Upsert: ensure every role has rows for all known modules ────────────
+    public static async Task EnsurePermissionsAsync(BaqalaDbContext db)
+    {
+        // Map from renamed role names back to the build-permissions seed names
+        static string SeedName(string name) => name switch
+        {
+            "Admin"           => "Tenant Administrator",
+            "Manager"         => "Branch Manager",
+            "Inventory Staff" => "Storekeeper",
+            "Accountant"      => "Finance User",
+            "Auditor"         => "Marketing User",
+            "Warehouse Staff" => "Picker",
+            _                 => name,
+        };
+
+        var roles = await db.Roles.Include(r => r.Permissions).ToListAsync();
+        var toAdd = new List<RolePermission>();
+
+        foreach (var role in roles)
+        {
+            var expected = BuildPermissions(role.Id, SeedName(role.Name)).ToList();
+            var existing = role.Permissions.Select(p => p.Module).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var perm in expected)
+                if (!existing.Contains(perm.Module))
+                    toAdd.Add(perm);
+        }
+
+        if (toAdd.Count > 0)
+        {
+            db.RolePermissions.AddRange(toAdd);
+            await db.SaveChangesAsync();
+        }
+    }
+
     // ─── Backfill: Role Permissions ──────────────────────────────────────────
     private static async Task SeedRolePermissionsAsync(BaqalaDbContext db)
     {
@@ -868,195 +892,267 @@ public static class DataSeeder
         {
             "Tenant Administrator" => new[]
             {
-                P(r, "Dashboard",      true,  true,  true,  true,  true,  true),
-                P(r, "Orders",         true,  true,  true,  true,  true,  true),
-                P(r, "Inventory",      true,  true,  true,  true,  true,  true),
-                P(r, "Batches",        true,  true,  true,  true,  true,  true),
-                P(r, "Warehouses",     true,  true,  true,  true,  true,  true),
-                P(r, "Branches",       true,  true,  true,  true,  true,  true),
-                P(r, "Users",          true,  true,  true,  true,  true,  true),
-                P(r, "Cashier Shifts", true,  true,  true,  true,  true,  true),
-                P(r, "Terminals",      true,  true,  true,  true,  true,  true),
-                P(r, "Suppliers",      true,  true,  true,  true,  true,  true),
-                P(r, "Customers",      true,  true,  true,  true,  true,  true),
-                P(r, "Finance",        true,  true,  true,  true,  true,  true),
-                P(r, "Tax & Fees",     true,  true,  true,  true,  true,  true),
-                P(r, "Returns",        true,  true,  true,  true,  true,  true),
-                P(r, "Reports",        true,  true,  true,  true,  true,  true),
-                P(r, "Compliance",     true,  true,  true,  true,  true,  true),
-                P(r, "Audit Logs",     true,  true,  true,  true,  true,  true),
-                P(r, "Devices",        true,  true,  true,  true,  true,  true),
-                P(r, "Rules Engine",   true,  true,  true,  true,  true,  true),
-                P(r, "Settings",       true,  true,  true,  true,  true,  true),
-                P(r, "Roles",          true,  true,  true,  true,  true,  true),
+                P(r, "Dashboard",           true,  true,  true,  true,  true,  true),
+                P(r, "POS",                 true,  true,  true,  true,  true,  true),
+                P(r, "Cashier Workspace",   true,  true,  true,  true,  true,  true),
+                P(r, "Cashier Shifts",      true,  true,  true,  true,  true,  true),
+                P(r, "Orders",              true,  true,  true,  true,  true,  true),
+                P(r, "Coupons",             true,  true,  true,  true,  true,  true),
+                P(r, "Customers",           true,  true,  true,  true,  true,  true),
+                P(r, "Returns",             true,  true,  true,  true,  true,  true),
+                P(r, "Inventory",           true,  true,  true,  true,  true,  true),
+                P(r, "Stocks",              true,  true,  true,  true,  true,  true),
+                P(r, "Batches",             true,  true,  true,  true,  true,  true),
+                P(r, "Warehouses",          true,  true,  true,  true,  true,  true),
+                P(r, "Stock Transfers",     true,  true,  true,  true,  true,  true),
+                P(r, "Suppliers",           true,  true,  true,  true,  true,  true),
+                P(r, "Purchase Orders",     true,  true,  true,  true,  true,  true),
+                P(r, "Supplier Returns",    true,  true,  true,  true,  true,  true),
+                P(r, "Accounting & Finance",true,  true,  true,  true,  true,  true),
+                P(r, "Tax & Fees",          true,  true,  true,  true,  true,  true),
+                P(r, "Sales",               true,  true,  true,  true,  true,  true),
+                P(r, "Control Tower",       true,  true,  true,  true,  true,  true),
+                P(r, "Reports",             true,  true,  true,  true,  true,  true),
+                P(r, "Branches",            true,  true,  true,  true,  true,  true),
+                P(r, "Terminals",           true,  true,  true,  true,  true,  true),
+                P(r, "Devices",             true,  true,  true,  true,  true,  true),
+                P(r, "Users",               true,  true,  true,  true,  true,  true),
+                P(r, "Roles",               true,  true,  true,  true,  true,  true),
+                P(r, "Compliance",          true,  true,  true,  true,  true,  true),
+                P(r, "Audit Logs",          true,  true,  true,  true,  true,  true),
+                P(r, "Rules Engine",        true,  true,  true,  true,  true,  true),
+                P(r, "Settings",            true,  true,  true,  true,  true,  true),
             },
             "Branch Manager" => new[]
             {
-                P(r, "Dashboard",      true,  false, false, false, false, true),
-                P(r, "Orders",         true,  true,  true,  false, true,  true),
-                P(r, "Inventory",      true,  true,  true,  false, true,  true),
-                P(r, "Batches",        true,  true,  true,  false, false, true),
-                P(r, "Warehouses",     true,  true,  true,  false, true,  false),
-                P(r, "Branches",       true,  false, true,  false, false, false),
-                P(r, "Users",          true,  true,  true,  false, false, false),
-                P(r, "Cashier Shifts", true,  false, false, false, true,  true),
-                P(r, "Terminals",      true,  false, true,  false, false, false),
-                P(r, "Suppliers",      true,  false, false, false, false, true),
-                P(r, "Customers",      true,  true,  true,  false, false, true),
-                P(r, "Finance",        true,  true,  true,  false, true,  true),
-                P(r, "Tax & Fees",     true,  false, false, false, false, false),
-                P(r, "Returns",        true,  true,  true,  false, true,  true),
-                P(r, "Reports",        true,  false, false, false, false, true),
-                P(r, "Compliance",     true,  false, false, false, false, false),
-                P(r, "Audit Logs",     true,  false, false, false, false, true),
-                P(r, "Devices",        true,  false, true,  false, false, false),
-                P(r, "Rules Engine",   true,  false, false, false, false, false),
-                P(r, "Settings",       true,  false, true,  false, false, false),
-                P(r, "Roles",          false, false, false, false, false, false),
+                P(r, "Dashboard",           true,  false, false, false, false, true),
+                P(r, "POS",                 true,  true,  true,  false, true,  false),
+                P(r, "Cashier Workspace",   true,  true,  true,  false, true,  false),
+                P(r, "Cashier Shifts",      true,  false, false, false, true,  true),
+                P(r, "Orders",              true,  true,  true,  false, true,  true),
+                P(r, "Coupons",             true,  true,  true,  true,  true,  false),
+                P(r, "Customers",           true,  true,  true,  false, false, true),
+                P(r, "Returns",             true,  true,  true,  false, true,  true),
+                P(r, "Inventory",           true,  true,  true,  false, true,  true),
+                P(r, "Stocks",              true,  false, false, false, false, true),
+                P(r, "Batches",             true,  true,  true,  false, false, true),
+                P(r, "Warehouses",          true,  true,  true,  false, true,  false),
+                P(r, "Stock Transfers",     true,  true,  true,  false, true,  false),
+                P(r, "Suppliers",           true,  false, false, false, false, true),
+                P(r, "Purchase Orders",     true,  true,  true,  false, true,  true),
+                P(r, "Supplier Returns",    true,  true,  false, false, true,  false),
+                P(r, "Accounting & Finance",true,  true,  true,  false, true,  true),
+                P(r, "Tax & Fees",          true,  false, false, false, false, false),
+                P(r, "Sales",               true,  false, false, false, false, true),
+                P(r, "Control Tower",       true,  false, false, false, false, false),
+                P(r, "Reports",             true,  false, false, false, false, true),
+                P(r, "Branches",            true,  false, true,  false, false, false),
+                P(r, "Terminals",           true,  false, true,  false, false, false),
+                P(r, "Devices",             true,  false, true,  false, false, false),
+                P(r, "Users",               true,  true,  true,  false, false, false),
+                P(r, "Roles",               false, false, false, false, false, false),
+                P(r, "Compliance",          true,  false, false, false, false, false),
+                P(r, "Audit Logs",          true,  false, false, false, false, true),
+                P(r, "Rules Engine",        true,  false, false, false, false, false),
+                P(r, "Settings",            true,  false, true,  false, false, false),
             },
             "Cashier" => new[]
             {
-                P(r, "Dashboard",      true,  false, false, false, false, false),
-                P(r, "Orders",         true,  true,  false, false, false, false),
-                P(r, "Inventory",      true,  false, false, false, false, false),
-                P(r, "Batches",        false, false, false, false, false, false),
-                P(r, "Warehouses",     false, false, false, false, false, false),
-                P(r, "Branches",       false, false, false, false, false, false),
-                P(r, "Users",          false, false, false, false, false, false),
-                P(r, "Cashier Shifts", true,  true,  false, false, false, false),
-                P(r, "Terminals",      true,  false, false, false, false, false),
-                P(r, "Suppliers",      false, false, false, false, false, false),
-                P(r, "Customers",      true,  true,  false, false, false, false),
-                P(r, "Finance",        false, false, false, false, false, false),
-                P(r, "Tax & Fees",     true,  false, false, false, false, false),
-                P(r, "Returns",        true,  true,  false, false, true,  false),
-                P(r, "Reports",        true,  false, false, false, false, false),
-                P(r, "Compliance",     false, false, false, false, false, false),
-                P(r, "Audit Logs",     false, false, false, false, false, false),
-                P(r, "Devices",        false, false, false, false, false, false),
-                P(r, "Rules Engine",   false, false, false, false, false, false),
-                P(r, "Settings",       false, false, false, false, false, false),
-                P(r, "Roles",          false, false, false, false, false, false),
+                P(r, "Dashboard",           true,  false, false, false, false, false),
+                P(r, "POS",                 true,  true,  true,  false, false, false),
+                P(r, "Cashier Workspace",   true,  true,  true,  false, false, false),
+                P(r, "Cashier Shifts",      true,  true,  false, false, false, false),
+                P(r, "Orders",              true,  true,  false, false, false, false),
+                P(r, "Coupons",             true,  false, false, false, false, false),
+                P(r, "Customers",           true,  true,  false, false, false, false),
+                P(r, "Returns",             true,  true,  false, false, true,  false),
+                P(r, "Inventory",           true,  false, false, false, false, false),
+                P(r, "Stocks",              true,  false, false, false, false, false),
+                P(r, "Batches",             false, false, false, false, false, false),
+                P(r, "Warehouses",          false, false, false, false, false, false),
+                P(r, "Stock Transfers",     false, false, false, false, false, false),
+                P(r, "Suppliers",           false, false, false, false, false, false),
+                P(r, "Purchase Orders",     false, false, false, false, false, false),
+                P(r, "Supplier Returns",    false, false, false, false, false, false),
+                P(r, "Accounting & Finance",false, false, false, false, false, false),
+                P(r, "Tax & Fees",          true,  false, false, false, false, false),
+                P(r, "Sales",               false, false, false, false, false, false),
+                P(r, "Control Tower",       false, false, false, false, false, false),
+                P(r, "Reports",             true,  false, false, false, false, false),
+                P(r, "Branches",            false, false, false, false, false, false),
+                P(r, "Terminals",           true,  false, false, false, false, false),
+                P(r, "Devices",             false, false, false, false, false, false),
+                P(r, "Users",               false, false, false, false, false, false),
+                P(r, "Roles",               false, false, false, false, false, false),
+                P(r, "Compliance",          false, false, false, false, false, false),
+                P(r, "Audit Logs",          false, false, false, false, false, false),
+                P(r, "Rules Engine",        false, false, false, false, false, false),
+                P(r, "Settings",            false, false, false, false, false, false),
             },
             "Storekeeper" => new[]
             {
-                P(r, "Dashboard",      true,  false, false, false, false, false),
-                P(r, "Orders",         true,  false, false, false, false, false),
-                P(r, "Inventory",      true,  true,  true,  false, true,  true),
-                P(r, "Batches",        true,  true,  true,  false, false, true),
-                P(r, "Warehouses",     true,  true,  true,  false, true,  false),
-                P(r, "Branches",       false, false, false, false, false, false),
-                P(r, "Users",          false, false, false, false, false, false),
-                P(r, "Cashier Shifts", false, false, false, false, false, false),
-                P(r, "Terminals",      false, false, false, false, false, false),
-                P(r, "Suppliers",      true,  false, false, false, false, false),
-                P(r, "Customers",      false, false, false, false, false, false),
-                P(r, "Finance",        false, false, false, false, false, false),
-                P(r, "Tax & Fees",     false, false, false, false, false, false),
-                P(r, "Returns",        false, false, false, false, false, false),
-                P(r, "Reports",        true,  false, false, false, false, true),
-                P(r, "Compliance",     false, false, false, false, false, false),
-                P(r, "Audit Logs",     false, false, false, false, false, false),
-                P(r, "Devices",        true,  false, true,  false, false, false),
-                P(r, "Rules Engine",   false, false, false, false, false, false),
-                P(r, "Settings",       false, false, false, false, false, false),
-                P(r, "Roles",          false, false, false, false, false, false),
+                P(r, "Dashboard",           true,  false, false, false, false, false),
+                P(r, "POS",                 false, false, false, false, false, false),
+                P(r, "Cashier Workspace",   false, false, false, false, false, false),
+                P(r, "Cashier Shifts",      false, false, false, false, false, false),
+                P(r, "Orders",              true,  false, false, false, false, false),
+                P(r, "Coupons",             false, false, false, false, false, false),
+                P(r, "Customers",           false, false, false, false, false, false),
+                P(r, "Returns",             false, false, false, false, false, false),
+                P(r, "Inventory",           true,  true,  true,  false, true,  true),
+                P(r, "Stocks",              true,  true,  true,  false, true,  true),
+                P(r, "Batches",             true,  true,  true,  false, false, true),
+                P(r, "Warehouses",          true,  true,  true,  false, true,  false),
+                P(r, "Stock Transfers",     true,  true,  true,  false, true,  false),
+                P(r, "Suppliers",           true,  false, false, false, false, false),
+                P(r, "Purchase Orders",     false, false, false, false, false, false),
+                P(r, "Supplier Returns",    false, false, false, false, false, false),
+                P(r, "Accounting & Finance",false, false, false, false, false, false),
+                P(r, "Tax & Fees",          false, false, false, false, false, false),
+                P(r, "Sales",               false, false, false, false, false, false),
+                P(r, "Control Tower",       false, false, false, false, false, false),
+                P(r, "Reports",             true,  false, false, false, false, true),
+                P(r, "Branches",            false, false, false, false, false, false),
+                P(r, "Terminals",           false, false, false, false, false, false),
+                P(r, "Devices",             true,  false, true,  false, false, false),
+                P(r, "Users",               false, false, false, false, false, false),
+                P(r, "Roles",               false, false, false, false, false, false),
+                P(r, "Compliance",          false, false, false, false, false, false),
+                P(r, "Audit Logs",          false, false, false, false, false, false),
+                P(r, "Rules Engine",        false, false, false, false, false, false),
+                P(r, "Settings",            false, false, false, false, false, false),
             },
             "Supervisor" => new[]
             {
-                P(r, "Dashboard",      true,  false, false, false, false, true),
-                P(r, "Orders",         true,  true,  true,  false, true,  true),
-                P(r, "Inventory",      true,  true,  true,  false, true,  true),
-                P(r, "Batches",        true,  false, false, false, false, true),
-                P(r, "Warehouses",     true,  true,  true,  false, true,  false),
-                P(r, "Branches",       true,  false, false, false, false, false),
-                P(r, "Users",          true,  false, false, false, false, false),
-                P(r, "Cashier Shifts", true,  true,  true,  false, true,  true),
-                P(r, "Terminals",      true,  false, false, false, false, false),
-                P(r, "Suppliers",      true,  false, false, false, false, false),
-                P(r, "Customers",      true,  true,  true,  false, false, false),
-                P(r, "Finance",        true,  false, false, false, true,  true),
-                P(r, "Tax & Fees",     true,  false, false, false, false, false),
-                P(r, "Returns",        true,  true,  true,  false, true,  true),
-                P(r, "Reports",        true,  false, false, false, false, true),
-                P(r, "Compliance",     true,  false, false, false, false, false),
-                P(r, "Audit Logs",     true,  false, false, false, false, false),
-                P(r, "Devices",        true,  false, true,  false, false, false),
-                P(r, "Rules Engine",   false, false, false, false, false, false),
-                P(r, "Settings",       true,  false, false, false, false, false),
-                P(r, "Roles",          false, false, false, false, false, false),
+                P(r, "Dashboard",           true,  false, false, false, false, true),
+                P(r, "POS",                 true,  true,  true,  false, true,  false),
+                P(r, "Cashier Workspace",   true,  true,  true,  false, true,  false),
+                P(r, "Cashier Shifts",      true,  true,  true,  false, true,  true),
+                P(r, "Orders",              true,  true,  true,  false, true,  true),
+                P(r, "Coupons",             true,  false, false, false, true,  false),
+                P(r, "Customers",           true,  true,  true,  false, false, false),
+                P(r, "Returns",             true,  true,  true,  false, true,  true),
+                P(r, "Inventory",           true,  true,  true,  false, true,  true),
+                P(r, "Stocks",              true,  false, false, false, false, true),
+                P(r, "Batches",             true,  false, false, false, false, true),
+                P(r, "Warehouses",          true,  true,  true,  false, true,  false),
+                P(r, "Stock Transfers",     true,  false, false, false, true,  false),
+                P(r, "Suppliers",           true,  false, false, false, false, false),
+                P(r, "Purchase Orders",     false, false, false, false, false, false),
+                P(r, "Supplier Returns",    false, false, false, false, false, false),
+                P(r, "Accounting & Finance",true,  false, false, false, true,  true),
+                P(r, "Tax & Fees",          true,  false, false, false, false, false),
+                P(r, "Sales",               true,  false, false, false, false, true),
+                P(r, "Control Tower",       true,  false, false, false, false, false),
+                P(r, "Reports",             true,  false, false, false, false, true),
+                P(r, "Branches",            true,  false, false, false, false, false),
+                P(r, "Terminals",           true,  false, false, false, false, false),
+                P(r, "Devices",             true,  false, true,  false, false, false),
+                P(r, "Users",               true,  false, false, false, false, false),
+                P(r, "Roles",               false, false, false, false, false, false),
+                P(r, "Compliance",          true,  false, false, false, false, false),
+                P(r, "Audit Logs",          true,  false, false, false, false, false),
+                P(r, "Rules Engine",        false, false, false, false, false, false),
+                P(r, "Settings",            true,  false, false, false, false, false),
             },
             "Finance User" => new[]
             {
-                P(r, "Dashboard",      true,  false, false, false, false, true),
-                P(r, "Orders",         true,  false, false, false, false, true),
-                P(r, "Inventory",      true,  false, false, false, false, true),
-                P(r, "Batches",        false, false, false, false, false, false),
-                P(r, "Warehouses",     true,  false, false, false, false, false),
-                P(r, "Branches",       true,  false, false, false, false, false),
-                P(r, "Users",          true,  false, false, false, false, false),
-                P(r, "Cashier Shifts", true,  false, false, false, false, true),
-                P(r, "Terminals",      false, false, false, false, false, false),
-                P(r, "Suppliers",      true,  false, false, false, false, true),
-                P(r, "Customers",      true,  false, false, false, false, true),
-                P(r, "Finance",        true,  true,  true,  true,  true,  true),
-                P(r, "Tax & Fees",     true,  true,  true,  true,  true,  true),
-                P(r, "Returns",        true,  false, false, false, true,  true),
-                P(r, "Reports",        true,  false, false, false, false, true),
-                P(r, "Compliance",     true,  false, false, false, false, true),
-                P(r, "Audit Logs",     true,  false, false, false, false, true),
-                P(r, "Devices",        false, false, false, false, false, false),
-                P(r, "Rules Engine",   true,  false, false, false, false, false),
-                P(r, "Settings",       false, false, false, false, false, false),
-                P(r, "Roles",          false, false, false, false, false, false),
+                P(r, "Dashboard",           true,  false, false, false, false, true),
+                P(r, "POS",                 false, false, false, false, false, false),
+                P(r, "Cashier Workspace",   false, false, false, false, false, false),
+                P(r, "Cashier Shifts",      true,  false, false, false, false, true),
+                P(r, "Orders",              true,  false, false, false, false, true),
+                P(r, "Coupons",             true,  false, false, false, false, true),
+                P(r, "Customers",           true,  false, false, false, false, true),
+                P(r, "Returns",             true,  false, false, false, true,  true),
+                P(r, "Inventory",           true,  false, false, false, false, true),
+                P(r, "Stocks",              true,  false, false, false, false, false),
+                P(r, "Batches",             false, false, false, false, false, false),
+                P(r, "Warehouses",          true,  false, false, false, false, false),
+                P(r, "Stock Transfers",     true,  false, false, false, false, true),
+                P(r, "Suppliers",           true,  false, false, false, false, true),
+                P(r, "Purchase Orders",     true,  true,  true,  false, true,  true),
+                P(r, "Supplier Returns",    true,  true,  false, false, true,  false),
+                P(r, "Accounting & Finance",true,  true,  true,  true,  true,  true),
+                P(r, "Tax & Fees",          true,  true,  true,  true,  true,  true),
+                P(r, "Sales",               true,  false, false, false, false, true),
+                P(r, "Control Tower",       true,  false, false, false, false, false),
+                P(r, "Reports",             true,  false, false, false, false, true),
+                P(r, "Branches",            true,  false, false, false, false, false),
+                P(r, "Terminals",           false, false, false, false, false, false),
+                P(r, "Devices",             false, false, false, false, false, false),
+                P(r, "Users",               true,  false, false, false, false, false),
+                P(r, "Roles",               false, false, false, false, false, false),
+                P(r, "Compliance",          true,  false, false, false, false, true),
+                P(r, "Audit Logs",          true,  false, false, false, false, true),
+                P(r, "Rules Engine",        true,  false, false, false, false, false),
+                P(r, "Settings",            false, false, false, false, false, false),
             },
             "Marketing User" => new[]
             {
-                P(r, "Dashboard",      true,  false, false, false, false, true),
-                P(r, "Orders",         true,  false, false, false, false, true),
-                P(r, "Inventory",      true,  false, false, false, false, true),
-                P(r, "Batches",        false, false, false, false, false, false),
-                P(r, "Warehouses",     false, false, false, false, false, false),
-                P(r, "Branches",       true,  false, false, false, false, false),
-                P(r, "Users",          false, false, false, false, false, false),
-                P(r, "Cashier Shifts", false, false, false, false, false, false),
-                P(r, "Terminals",      false, false, false, false, false, false),
-                P(r, "Suppliers",      false, false, false, false, false, false),
-                P(r, "Customers",      true,  true,  true,  false, false, true),
-                P(r, "Finance",        true,  false, false, false, false, true),
-                P(r, "Tax & Fees",     false, false, false, false, false, false),
-                P(r, "Returns",        true,  false, false, false, false, true),
-                P(r, "Reports",        true,  false, false, false, false, true),
-                P(r, "Compliance",     false, false, false, false, false, false),
-                P(r, "Audit Logs",     false, false, false, false, false, false),
-                P(r, "Devices",        false, false, false, false, false, false),
-                P(r, "Rules Engine",   true,  false, false, false, false, false),
-                P(r, "Settings",       false, false, false, false, false, false),
-                P(r, "Roles",          false, false, false, false, false, false),
+                P(r, "Dashboard",           true,  false, false, false, false, true),
+                P(r, "POS",                 false, false, false, false, false, false),
+                P(r, "Cashier Workspace",   false, false, false, false, false, false),
+                P(r, "Cashier Shifts",      false, false, false, false, false, false),
+                P(r, "Orders",              true,  false, false, false, false, true),
+                P(r, "Coupons",             true,  true,  true,  false, false, true),
+                P(r, "Customers",           true,  true,  true,  false, false, true),
+                P(r, "Returns",             true,  false, false, false, false, true),
+                P(r, "Inventory",           true,  false, false, false, false, true),
+                P(r, "Stocks",              true,  false, false, false, false, true),
+                P(r, "Batches",             false, false, false, false, false, false),
+                P(r, "Warehouses",          false, false, false, false, false, false),
+                P(r, "Stock Transfers",     false, false, false, false, false, false),
+                P(r, "Suppliers",           false, false, false, false, false, false),
+                P(r, "Purchase Orders",     false, false, false, false, false, false),
+                P(r, "Supplier Returns",    false, false, false, false, false, false),
+                P(r, "Accounting & Finance",true,  false, false, false, false, true),
+                P(r, "Tax & Fees",          false, false, false, false, false, false),
+                P(r, "Sales",               true,  false, false, false, false, true),
+                P(r, "Control Tower",       false, false, false, false, false, false),
+                P(r, "Reports",             true,  false, false, false, false, true),
+                P(r, "Branches",            true,  false, false, false, false, false),
+                P(r, "Terminals",           false, false, false, false, false, false),
+                P(r, "Devices",             false, false, false, false, false, false),
+                P(r, "Users",               false, false, false, false, false, false),
+                P(r, "Roles",               false, false, false, false, false, false),
+                P(r, "Compliance",          false, false, false, false, false, false),
+                P(r, "Audit Logs",          false, false, false, false, false, false),
+                P(r, "Rules Engine",        true,  false, false, false, false, false),
+                P(r, "Settings",            false, false, false, false, false, false),
             },
             "Picker" => new[]
             {
-                P(r, "Dashboard",      false, false, false, false, false, false),
-                P(r, "Orders",         true,  false, false, false, false, false),
-                P(r, "Inventory",      true,  false, false, false, false, false),
-                P(r, "Batches",        false, false, false, false, false, false),
-                P(r, "Warehouses",     true,  false, false, false, false, false),
-                P(r, "Branches",       false, false, false, false, false, false),
-                P(r, "Users",          false, false, false, false, false, false),
-                P(r, "Cashier Shifts", false, false, false, false, false, false),
-                P(r, "Terminals",      false, false, false, false, false, false),
-                P(r, "Suppliers",      false, false, false, false, false, false),
-                P(r, "Customers",      false, false, false, false, false, false),
-                P(r, "Finance",        false, false, false, false, false, false),
-                P(r, "Tax & Fees",     false, false, false, false, false, false),
-                P(r, "Returns",        false, false, false, false, false, false),
-                P(r, "Reports",        false, false, false, false, false, false),
-                P(r, "Compliance",     false, false, false, false, false, false),
-                P(r, "Audit Logs",     false, false, false, false, false, false),
-                P(r, "Devices",        false, false, false, false, false, false),
-                P(r, "Rules Engine",   false, false, false, false, false, false),
-                P(r, "Settings",       false, false, false, false, false, false),
-                P(r, "Roles",          false, false, false, false, false, false),
+                P(r, "Dashboard",           true,  false, false, false, false, false),
+                P(r, "POS",                 false, false, false, false, false, false),
+                P(r, "Cashier Workspace",   false, false, false, false, false, false),
+                P(r, "Cashier Shifts",      false, false, false, false, false, false),
+                P(r, "Orders",              true,  false, false, false, false, false),
+                P(r, "Coupons",             false, false, false, false, false, false),
+                P(r, "Customers",           false, false, false, false, false, false),
+                P(r, "Returns",             false, false, false, false, false, false),
+                P(r, "Inventory",           true,  false, false, false, false, false),
+                P(r, "Stocks",              true,  false, false, false, false, false),
+                P(r, "Batches",             true,  false, false, false, false, false),
+                P(r, "Warehouses",          true,  true,  false, false, false, false),
+                P(r, "Stock Transfers",     true,  true,  true,  false, false, false),
+                P(r, "Suppliers",           false, false, false, false, false, false),
+                P(r, "Purchase Orders",     false, false, false, false, false, false),
+                P(r, "Supplier Returns",    false, false, false, false, false, false),
+                P(r, "Accounting & Finance",false, false, false, false, false, false),
+                P(r, "Tax & Fees",          false, false, false, false, false, false),
+                P(r, "Sales",               false, false, false, false, false, false),
+                P(r, "Control Tower",       false, false, false, false, false, false),
+                P(r, "Reports",             false, false, false, false, false, false),
+                P(r, "Branches",            false, false, false, false, false, false),
+                P(r, "Terminals",           false, false, false, false, false, false),
+                P(r, "Devices",             false, false, false, false, false, false),
+                P(r, "Users",               false, false, false, false, false, false),
+                P(r, "Roles",               false, false, false, false, false, false),
+                P(r, "Compliance",          false, false, false, false, false, false),
+                P(r, "Audit Logs",          false, false, false, false, false, false),
+                P(r, "Rules Engine",        false, false, false, false, false, false),
+                P(r, "Settings",            false, false, false, false, false, false),
             },
             _ => Array.Empty<RolePermission>()
         };
@@ -1091,6 +1187,31 @@ public static class DataSeeder
             // FR-FEE: Custom Fee Rules
             new RulesEngine { Id = Guid.NewGuid(), RuleName = "Delivery service fee — SAR 10", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order channel = Delivery\",\"action\":\"Add SAR 10 delivery service fee to order total\"}", Priority = 40, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
             new RulesEngine { Id = Guid.NewGuid(), RuleName = "Eid week — 5% holiday surcharge", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Date falls within Eid holiday week\",\"action\":\"Add 5% surcharge to all orders\"}", Priority = 35, IsActive = false, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+        );
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: Discounts ─────────────────────────────────────────────────
+    private static async Task SeedDiscountsAsync(BaqalaDbContext db)
+    {
+        db.Discounts.AddRange(
+            new Discount { Id = Guid.NewGuid(), Name = "Senior Citizen 5%",     AppliesTo = "all",    DiscountType = "percentage", Value = 5,  IsActive = true,  CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new Discount { Id = Guid.NewGuid(), Name = "Loyalty Tier Gold 10%", AppliesTo = "all",    DiscountType = "percentage", Value = 10, IsActive = true,  CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new Discount { Id = Guid.NewGuid(), Name = "Eid Week-end 15%",      AppliesTo = "all",    DiscountType = "percentage", Value = 15, IsActive = false, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+        );
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: Offers ────────────────────────────────────────────────────
+    private static async Task SeedOffersAsync(BaqalaDbContext db)
+    {
+        var now = DateTime.UtcNow;
+        db.Offers.AddRange(
+            new Offer { Id = Guid.NewGuid(), Name = "Buy 1 Get 1 Free",          OfferType = "bogo",          ItemsDescription = "Select beverages",    TriggerQuantity = 1, GetQuantity = 1, StartDate = now, EndDate = now.AddMonths(1), IsActive = true,  UsedCount = 2841, UsageLimit = 5000, CreatedAt = now, UpdatedAt = now },
+            new Offer { Id = Guid.NewGuid(), Name = "Dairy Combo Deal",           OfferType = "combo",         ItemsDescription = "Milk + Laban + Bread", OfferPrice = 15.99m,                StartDate = now, EndDate = now.AddMonths(1), IsActive = true,  UsedCount = 980,  UsageLimit = 2000, CreatedAt = now, UpdatedAt = now },
+            new Offer { Id = Guid.NewGuid(), Name = "Buy Tea Get Sugar 50% Off",  OfferType = "buy_a_get_b",   ItemsDescription = "Tea → Sugar 50% off",  TriggerQuantity = 1, GetQuantity = 1, DiscountPercentage = 50, StartDate = now, EndDate = now.AddMonths(1), IsActive = true,  UsedCount = 1000, UsageLimit = 1000, CreatedAt = now, UpdatedAt = now },
+            new Offer { Id = Guid.NewGuid(), Name = "Lucky Draw — Spend 200 SAR", OfferType = "lucky_draw",    ItemsDescription = "Min basket ر.س 200",  MinBasketAmount = 200, Winners = 10,    StartDate = now, EndDate = now.AddMonths(1), IsActive = true,  UsedCount = 0,    UsageLimit = null, CreatedAt = now, UpdatedAt = now },
+            new Offer { Id = Guid.NewGuid(), Name = "KitKat Chunky 25% Off",      OfferType = "product_offer", ItemsDescription = "KitKat Chunky",        DiscountPercentage = 25,               StartDate = now, EndDate = now.AddMonths(1), IsActive = false, UsedCount = 0,    UsageLimit = null, CreatedAt = now, UpdatedAt = now }
         );
         await db.SaveChangesAsync();
     }

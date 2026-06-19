@@ -9,8 +9,8 @@ public class Customer
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("customer_code")]
-    public string CustomerCode { get; set; } = default!;
+    [MaxLength(50), Column("customer_code")]
+    public string? CustomerCode { get; set; }
 
     [Required, MaxLength(255), Column("full_name")]
     public string FullName { get; set; } = default!;

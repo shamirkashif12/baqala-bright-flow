@@ -47,7 +47,7 @@ public class User
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Role Role { get; set; } = default!;
+    public Role? Role { get; set; }
     public Branch? Branch { get; set; }
     [JsonIgnore] public ICollection<CashierShift> Shifts { get; set; } = [];
 }

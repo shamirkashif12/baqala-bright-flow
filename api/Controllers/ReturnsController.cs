@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -47,11 +48,50 @@ public class ReturnsController(BaqalaDbContext db) : ControllerBase
         var ret = await db.CustomerReturns.FindAsync(id);
         if (ret is null) return NotFound();
         ret.Status = req.Approved ? "approved" : "rejected";
-        ret.ApprovedBy = req.ApprovedBy;
+        var sub = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value;
+        if (Guid.TryParse(sub, out var approver)) ret.ApprovedBy = approver;
+        ret.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(ret);
+    }
+
+    [HttpPatch("{id:guid}/complete")]
+    public async Task<IActionResult> Complete(Guid id)
+    {
+        var ret = await db.CustomerReturns.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id);
+        if (ret is null) return NotFound();
+        if (ret.Status != "approved") return BadRequest("Only approved returns can be completed.");
+
+        // Restock items that are in good condition and flagged for restock
+        foreach (var item in ret.Items.Where(i => i.Restock && i.Condition == "good"))
+        {
+            var stock = await db.InventoryStocks
+                .FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == ret.BranchId);
+            if (stock is not null)
+            {
+                stock.Quantity += item.Quantity;
+                stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                db.InventoryStocks.Add(new InventoryStock
+                {
+                    Id = Guid.NewGuid(),
+                    ProductId = item.ProductId,
+                    BranchId = ret.BranchId,
+                    Quantity = item.Quantity,
+                    LastUpdated = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+        }
+
+        ret.Status = "completed";
         ret.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(ret);
     }
 }
 
-public record ApproveReturnRequest(bool Approved, Guid ApprovedBy);
+public record ApproveReturnRequest(bool Approved, Guid? ApprovedBy = null);

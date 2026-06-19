@@ -9,43 +9,16 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  FileText,
-  Package,
-  DollarSign,
-  CheckCircle,
-  Clock,
-  Truck,
-  Plus,
-  Trash2,
-  Eye,
-  CreditCard,
-  Loader2,
-} from "lucide-react";
-import {
-  api,
-  type PurchaseOrder,
-  type PurchaseOrderItem,
-  type SupplierPayment,
-  type Supplier,
-  type Warehouse,
-  type Branch,
-  type Product,
-} from "@/lib/api";
+import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X } from "lucide-react";
+import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
-export const Route = createFileRoute("/_app/purchase-orders")({
-  component: PurchaseOrders,
-});
+export const Route = createFileRoute("/_app/purchase-orders")({ component: PurchaseOrders });
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
   return n.toLocaleString("en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -56,334 +29,345 @@ function formatDate(d?: string) {
   return new Date(d).toLocaleDateString("en-SA", { year: "numeric", month: "short", day: "numeric" });
 }
 
-// ─── Badges ─────────────────────────────────────────────────────────────────
+// ─── Badge maps ──────────────────────────────────────────────────────────────
+
+const STATUS_MAP: Record<string, { label: string; cls: string }> = {
+  draft:            { label: "Draft",              cls: "bg-muted text-muted-foreground border-border" },
+  pending_approval: { label: "Pending Approval",   cls: "bg-warning/20 text-warning-foreground border-warning/40" },
+  approved:         { label: "Approved",           cls: "bg-success/15 text-success border-success/30" },
+  sent:             { label: "Sent to Supplier",   cls: "bg-primary/15 text-primary border-primary/30" },
+  partial_received: { label: "Partially Received", cls: "bg-warning/20 text-warning-foreground border-warning/40" },
+  fully_received:   { label: "Fully Received",     cls: "bg-success/15 text-success border-success/30" },
+  cancelled:        { label: "Cancelled",          cls: "bg-destructive/15 text-destructive border-destructive/30" },
+};
+
+const PAY_MAP: Record<string, { label: string; cls: string }> = {
+  unpaid:          { label: "Unpaid",          cls: "bg-destructive/15 text-destructive border-destructive/30" },
+  partial:         { label: "Partially Paid",  cls: "bg-warning/20 text-warning-foreground border-warning/40" },
+  partially_paid:  { label: "Partially Paid",  cls: "bg-warning/20 text-warning-foreground border-warning/40" },
+  paid:            { label: "Paid",            cls: "bg-success/15 text-success border-success/30" },
+  supplier_credit: { label: "Supplier Credit", cls: "bg-primary/15 text-primary border-primary/30" },
+};
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    draft: "bg-muted text-muted-foreground",
-    sent: "bg-primary/15 text-primary",
-    partial_received: "bg-warning/20 text-warning-foreground",
-    fully_received: "bg-success/15 text-success",
-    cancelled: "bg-destructive/15 text-destructive",
-  };
-  const labels: Record<string, string> = {
-    draft: "Draft",
-    sent: "Sent",
-    partial_received: "Partial",
-    fully_received: "Received",
-    cancelled: "Cancelled",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${map[status] ?? "bg-muted text-muted-foreground"}`}>
-      {labels[status] ?? status}
-    </span>
-  );
+  const s = STATUS_MAP[status] ?? { label: status, cls: "bg-muted text-muted-foreground border-border" };
+  return <Badge variant="outline" className={`text-xs ${s.cls}`}>{s.label}</Badge>;
 }
 
-function PaymentBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    unpaid: "bg-destructive/15 text-destructive",
-    partial: "bg-warning/20 text-warning-foreground",
-    paid: "bg-success/15 text-success",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${map[status] ?? "bg-muted text-muted-foreground"}`}>
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
-  );
+function PayBadge({ status }: { status: string }) {
+  const s = PAY_MAP[status] ?? { label: status, cls: "bg-muted text-muted-foreground border-border" };
+  return <Badge variant="outline" className={`text-xs ${s.cls}`}>{s.label}</Badge>;
 }
-
-// ─── FieldRow ────────────────────────────────────────────────────────────────
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="space-y-1.5"><Label className="text-xs font-medium">{label}</Label>{children}</div>;
+}
+
+// ─── 5-Step Create PO Wizard ─────────────────────────────────────────────────
+
+interface POItemDraft { productId: string; productName: string; quantity: number; unitCost: number; }
+const emptyItem = (): POItemDraft => ({ productId: "", productName: "", quantity: 1, unitCost: 0 });
+
+const TOTAL_STEPS = 5;
+
+function StepBar({ step }: { step: number }) {
   return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
+    <div className="flex gap-1 mt-1">
+      {Array.from({ length: TOTAL_STEPS }, (_, i) => (
+        <div
+          key={i}
+          className={`h-1 flex-1 rounded-full transition-colors ${i < step ? "bg-primary" : "bg-muted"}`}
+        />
+      ))}
     </div>
   );
 }
 
-// ─── Create PO Sheet ─────────────────────────────────────────────────────────
-
-interface POItemDraft {
-  productId: string;
-  quantity: number;
-  unitCost: number;
-  expiryDate: string;
-}
-
-const emptyItem = (): POItemDraft => ({ productId: "", quantity: 1, unitCost: 0, expiryDate: "" });
-
-function CreatePOSheet({
-  open,
-  onClose,
-  suppliers,
-  warehouses,
-  branches,
-  products,
-  onCreated,
+function CreatePOWizard({
+  open, onClose, suppliers, warehouses, products, onCreated,
 }: {
-  open: boolean;
-  onClose: () => void;
-  suppliers: Supplier[];
-  warehouses: Warehouse[];
-  branches: Branch[];
-  products: Product[];
+  open: boolean; onClose: () => void;
+  suppliers: Supplier[]; warehouses: Warehouse[]; products: Product[];
   onCreated: () => void;
 }) {
+  const { user } = useAuth();
+  const [step, setStep] = useState(1);
+  // Step 1
   const [supplierId, setSupplierId] = useState("");
-  const [destType, setDestType] = useState<"warehouse" | "branch">("warehouse");
+  const [supplierType, setSupplierType] = useState("Direct Supplier");
+  const [paymentTerms, setPaymentTerms] = useState("Net 30");
+  // Step 2
   const [warehouseId, setWarehouseId] = useState("");
-  const [branchId, setBranchId] = useState("");
-  const [paymentTerms, setPaymentTerms] = useState("on_delivery");
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
-  const [notes, setNotes] = useState("");
+  // Step 3
   const [items, setItems] = useState<POItemDraft[]>([emptyItem()]);
+  // Step 4 notes
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const reset = () => {
-    setSupplierId("");
-    setDestType("warehouse");
-    setWarehouseId("");
-    setBranchId("");
-    setPaymentTerms("on_delivery");
-    setExpectedDeliveryDate("");
-    setNotes("");
-    setItems([emptyItem()]);
-    setError("");
+    setStep(1); setSupplierId(""); setSupplierType("Direct Supplier"); setPaymentTerms("Net 30");
+    setWarehouseId(""); setExpectedDeliveryDate(""); setItems([emptyItem()]); setNotes(""); setError("");
   };
 
-  const handleClose = () => {
-    reset();
-    onClose();
-  };
+  const handleClose = () => { reset(); onClose(); };
 
-  const addItem = () => setItems((p) => [...p, emptyItem()]);
-  const removeItem = (i: number) => setItems((p) => p.filter((_, idx) => idx !== i));
-  const setItem = (i: number, key: keyof POItemDraft, val: string | number) =>
-    setItems((p) => p.map((row, idx) => (idx === i ? { ...row, [key]: val } : row)));
+  const addItem = () => setItems(p => [...p, emptyItem()]);
+  const removeItem = (i: number) => setItems(p => p.filter((_, idx) => idx !== i));
+  const setItemField = (i: number, key: keyof POItemDraft, val: string | number) =>
+    setItems(p => p.map((row, idx) => idx === i ? { ...row, [key]: val } : row));
 
+  const selectedSupplier = suppliers.find(s => s.id === supplierId);
+  const selectedWarehouse = warehouses.find(w => w.id === warehouseId);
   const total = items.reduce((s, it) => s + it.quantity * it.unitCost, 0);
 
-  const handleCreate = async () => {
-    if (!supplierId) return setError("Please select a supplier.");
-    if (destType === "warehouse" && !warehouseId) return setError("Please select a warehouse.");
-    if (destType === "branch" && !branchId) return setError("Please select a branch.");
-    const validItems = items.filter((it) => it.productId && it.quantity > 0 && it.unitCost >= 0);
-    if (!validItems.length) return setError("Add at least one valid item.");
+  const validateStep = () => {
+    if (step === 1 && !supplierId) { setError("Please select a supplier."); return false; }
+    if (step === 2 && !warehouseId) { setError("Please select a delivery location."); return false; }
+    if (step === 3) {
+      const valid = items.filter(it => it.productId && it.quantity > 0);
+      if (!valid.length) { setError("Add at least one item with a product selected."); return false; }
+    }
+    setError("");
+    return true;
+  };
 
+  const next = () => { if (validateStep()) setStep(s => s + 1); };
+  const back = () => { setError(""); setStep(s => s - 1); };
+
+  const handleSubmit = async () => {
     setSaving(true);
     setError("");
     try {
+      const validItems = items.filter(it => it.productId && it.quantity > 0);
       await api.createPurchaseOrder({
         supplierId,
-        warehouseId: destType === "warehouse" ? warehouseId : undefined,
-        branchId: destType === "branch" ? branchId : undefined,
-        paymentTerms,
+        warehouseId,
+        paymentTerms: paymentTerms.toLowerCase().replace(/ /g, "_"),
         expectedDeliveryDate: expectedDeliveryDate || undefined,
         notes: notes || undefined,
-        orderedBy: "system",
-        items: validItems.map((it) => ({
+        orderedBy: user?.id,
+        items: validItems.map(it => ({
           productId: it.productId,
           orderedQuantity: it.quantity,
           unitCost: it.unitCost,
-          expiryDate: it.expiryDate || undefined,
         })) as unknown as PurchaseOrderItem[],
       });
       onCreated();
       handleClose();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to create PO.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create purchase order.");
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Sheet open={open} onOpenChange={(v) => !v && handleClose()}>
+    <Sheet open={open} onOpenChange={v => !v && handleClose()}>
       <SheetContent style={{ width: 480, maxWidth: "100vw" }} className="overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>New Purchase Order</SheetTitle>
+        <SheetHeader className="pb-3">
+          <SheetTitle className="text-base">
+            Create Purchase Order — Step {step} / {TOTAL_STEPS}
+          </SheetTitle>
+          <StepBar step={step} />
         </SheetHeader>
 
-        <div className="mt-4 space-y-4">
-          <FieldRow label="Supplier *">
-            <Select value={supplierId} onValueChange={setSupplierId}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select supplier" /></SelectTrigger>
-              <SelectContent>
-                {suppliers.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FieldRow>
-
-          <FieldRow label="Destination Type">
-            <Select value={destType} onValueChange={(v) => setDestType(v as "warehouse" | "branch")}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="warehouse">Warehouse</SelectItem>
-                <SelectItem value="branch">Branch</SelectItem>
-              </SelectContent>
-            </Select>
-          </FieldRow>
-
-          {destType === "warehouse" && (
-            <FieldRow label="Warehouse *">
-              <Select value={warehouseId} onValueChange={setWarehouseId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
-                <SelectContent>
-                  {warehouses.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FieldRow>
+        <div className="mt-5 space-y-4 min-h-[300px]">
+          {/* ── Step 1: Supplier ── */}
+          {step === 1 && (
+            <>
+              <FieldRow label="Supplier Name *">
+                <Select value={supplierId} onValueChange={setSupplierId}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select supplier…" /></SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FieldRow>
+              <FieldRow label="Supplier Type">
+                <Select value={supplierType} onValueChange={setSupplierType}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Direct Supplier">Direct Supplier</SelectItem>
+                    <SelectItem value="Distributor">Distributor</SelectItem>
+                    <SelectItem value="Local Supplier">Local Supplier</SelectItem>
+                    <SelectItem value="Manufacturer">Manufacturer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FieldRow>
+              {selectedSupplier && (
+                <FieldRow label="Supplier Phone">
+                  <Input className="h-9" value={selectedSupplier.contactNumber ?? ""} readOnly />
+                </FieldRow>
+              )}
+              <FieldRow label="VAT / CR (optional)">
+                <Input className="h-9" placeholder="e.g. 310122393500003" />
+              </FieldRow>
+              <FieldRow label="Payment Terms">
+                <Select value={paymentTerms} onValueChange={setPaymentTerms}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Net 30">Net 30</SelectItem>
+                    <SelectItem value="Net 60">Net 60</SelectItem>
+                    <SelectItem value="On Delivery">On Delivery</SelectItem>
+                    <SelectItem value="Immediate">Immediate</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FieldRow>
+            </>
           )}
 
-          {destType === "branch" && (
-            <FieldRow label="Branch *">
-              <Select value={branchId} onValueChange={setBranchId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FieldRow>
+          {/* ── Step 2: Delivery ── */}
+          {step === 2 && (
+            <>
+              <FieldRow label="Delivery Location *">
+                <Select value={warehouseId} onValueChange={setWarehouseId}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select warehouse…" /></SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FieldRow>
+              <FieldRow label="Expected Delivery Date (optional)">
+                <Input
+                  type="date"
+                  className="h-9"
+                  value={expectedDeliveryDate}
+                  onChange={e => setExpectedDeliveryDate(e.target.value)}
+                />
+              </FieldRow>
+            </>
           )}
 
-          <FieldRow label="Payment Terms">
-            <Select value={paymentTerms} onValueChange={setPaymentTerms}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="on_delivery">On Delivery</SelectItem>
-                <SelectItem value="immediate">Immediate</SelectItem>
-                <SelectItem value="net_30">Net 30</SelectItem>
-                <SelectItem value="net_60">Net 60</SelectItem>
-              </SelectContent>
-            </Select>
-          </FieldRow>
-
-          <FieldRow label="Expected Delivery Date">
-            <Input
-              type="date"
-              className="h-9"
-              value={expectedDeliveryDate}
-              onChange={(e) => setExpectedDeliveryDate(e.target.value)}
-            />
-          </FieldRow>
-
-          <FieldRow label="Notes">
-            <Textarea
-              rows={2}
-              className="resize-none text-sm"
-              placeholder="Optional notes…"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </FieldRow>
-
-          {/* Items */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">Items</Label>
-              <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={addItem}>
-                <Plus className="h-3.5 w-3.5" /> Add Item
+          {/* ── Step 3: Items ── */}
+          {step === 3 && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-[1fr_64px_80px_28px] gap-1.5 text-xs font-semibold text-muted-foreground uppercase px-1">
+                <span>Item</span><span className="text-right">Qty</span><span className="text-right">Unit Cost (SAR)</span><span />
+              </div>
+              {items.map((it, i) => (
+                <div key={i} className="grid grid-cols-[1fr_64px_80px_28px] gap-1.5 items-center">
+                  <Select
+                    value={it.productId}
+                    onValueChange={v => {
+                      const prod = products.find(p => p.id === v);
+                      setItemField(i, "productId", v);
+                      setItemField(i, "productName", prod?.name ?? "");
+                      if (prod?.costPrice) setItemField(i, "unitCost", prod.costPrice);
+                    }}
+                  >
+                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select product…" /></SelectTrigger>
+                    <SelectContent>
+                      {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number" min={1}
+                    className="h-9 text-xs text-right"
+                    value={it.quantity}
+                    onChange={e => setItemField(i, "quantity", Number(e.target.value))}
+                  />
+                  <Input
+                    type="number" min={0} step="0.01"
+                    className="h-9 text-xs text-right"
+                    value={it.unitCost}
+                    onChange={e => setItemField(i, "unitCost", Number(e.target.value))}
+                  />
+                  <Button
+                    variant="ghost" size="icon" className="h-9 w-7 text-destructive hover:text-destructive"
+                    onClick={() => removeItem(i)} disabled={items.length === 1}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={addItem}>
+                <Plus className="h-3.5 w-3.5" /> Add Row
               </Button>
+              <div className="text-right text-sm font-semibold pt-1 border-t border-border/40">
+                Total: <SARIcon />{fmt(total)}
+              </div>
+              <FieldRow label="Notes (optional)">
+                <Textarea rows={2} className="resize-none text-sm" placeholder="Reason, handling notes…" value={notes} onChange={e => setNotes(e.target.value)} />
+              </FieldRow>
             </div>
+          )}
 
-            <div className="rounded-lg border border-border/60 overflow-hidden">
-              <table className="w-full text-xs">
-                <thead className="bg-muted/40">
-                  <tr>
-                    <th className="text-left px-2 py-1.5 font-medium">Product</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Qty</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Cost</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Expiry</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Sub</th>
-                    <th className="w-8" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((it, i) => (
-                    <tr key={i} className="border-t border-border/40">
-                      <td className="px-1 py-1">
-                        <Select value={it.productId} onValueChange={(v) => setItem(i, "productId", v)}>
-                          <SelectTrigger className="h-7 text-xs border-0 shadow-none bg-transparent px-1">
-                            <SelectValue placeholder="Select" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {products.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-1 py-1">
-                        <Input
-                          type="number"
-                          min={1}
-                          className="h-7 w-14 text-xs text-right"
-                          value={it.quantity}
-                          onChange={(e) => setItem(i, "quantity", Number(e.target.value))}
-                        />
-                      </td>
-                      <td className="px-1 py-1">
-                        <Input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          className="h-7 w-16 text-xs text-right"
-                          value={it.unitCost}
-                          onChange={(e) => setItem(i, "unitCost", Number(e.target.value))}
-                        />
-                      </td>
-                      <td className="px-1 py-1">
-                        <Input
-                          type="date"
-                          className="h-7 w-28 text-xs"
-                          value={it.expiryDate}
-                          onChange={(e) => setItem(i, "expiryDate", e.target.value)}
-                        />
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
-                        {fmt(it.quantity * it.unitCost)}
-                      </td>
-                      <td className="px-1 py-1 text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-destructive hover:text-destructive"
-                          onClick={() => removeItem(i)}
-                          disabled={items.length === 1}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="flex justify-end px-3 py-2 border-t border-border/40 bg-muted/20">
-                <span className="text-xs font-semibold">Total: SAR {fmt(total)}</span>
+          {/* ── Step 4: Review ── */}
+          {step === 4 && (
+            <div className="space-y-2 text-sm">
+              {[
+                ["Supplier",       selectedSupplier?.name ?? "—"],
+                ["Type",           supplierType],
+                ["Delivery to",    selectedWarehouse?.name ?? "—"],
+                ["ETA",            expectedDeliveryDate ? formatDate(expectedDeliveryDate) : "—"],
+                ["Payment terms",  paymentTerms],
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between border-b border-border/40 pb-2">
+                  <span className="text-muted-foreground">{k}</span>
+                  <span className="font-medium">{v}</span>
+                </div>
+              ))}
+              <div className="pt-1 space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Items</p>
+                {items.filter(it => it.productId).map((it, i) => {
+                  const name = products.find(p => p.id === it.productId)?.name ?? it.productName;
+                  return (
+                    <div key={i} className="flex justify-between text-sm border-b border-border/30 pb-1.5">
+                      <span>{name} × {it.quantity}</span>
+                      <span className="font-medium"><SARIcon />{fmt(it.quantity * it.unitCost)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between font-bold text-base pt-2">
+                <span>Total</span>
+                <span><SARIcon />{fmt(total)}</span>
               </div>
             </div>
-          </div>
+          )}
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {/* ── Step 5: Submit ── */}
+          {step === 5 && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-success/30 bg-success/10 p-4 flex gap-3">
+                <CheckCircle className="h-5 w-5 text-success shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-sm text-success">Ready to submit</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    On approval, a Finance payable entry is created. Inventory updates only after Goods Receiving.
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Supplier</span><span className="font-medium">{selectedSupplier?.name ?? "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Items</span><span className="font-medium">{items.filter(it => it.productId).length} product(s)</span></div>
+                <div className="flex justify-between border-t border-border/40 pt-2"><span className="text-muted-foreground">Order Total</span><span className="font-bold text-base"><SARIcon />{fmt(total)}</span></div>
+              </div>
+            </div>
+          )}
 
-          <Button
-            className="w-full gradient-primary text-primary-foreground border-0 shadow-glow"
-            onClick={handleCreate}
-            disabled={saving}
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Create PO
+          {error && <p className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{error}</p>}
+        </div>
+
+        <div className="flex gap-2 pt-5 mt-4 border-t border-border/60">
+          <Button variant="outline" className="w-24" onClick={step === 1 ? handleClose : back}>
+            {step === 1 ? "Cancel" : "Back"}
           </Button>
+          <div className="flex-1" />
+          {step < 5 ? (
+            <Button className="gradient-primary text-primary-foreground border-0 w-24" onClick={next}>Next</Button>
+          ) : (
+            <Button
+              className="gradient-primary text-primary-foreground border-0 flex-1"
+              onClick={handleSubmit}
+              disabled={saving}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Submit for Approval
+            </Button>
+          )}
         </div>
       </SheetContent>
     </Sheet>
@@ -392,114 +376,70 @@ function CreatePOSheet({
 
 // ─── Receive Goods Sheet ──────────────────────────────────────────────────────
 
-function ReceiveSheet({
-  open,
-  onClose,
-  po,
-  onReceived,
-}: {
-  open: boolean;
-  onClose: () => void;
-  po: PurchaseOrder | null;
-  onReceived: () => void;
+function ReceiveSheet({ open, onClose, po, onReceived }: {
+  open: boolean; onClose: () => void; po: PurchaseOrder | null; onReceived: () => void;
 }) {
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const [expiries, setExpiries] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const items = useMemo(
-    () => (po?.items ?? []).filter((it) => it.receivedQuantity < it.orderedQuantity),
-    [po],
-  );
+  const items = useMemo(() => (po?.items ?? []).filter(it => it.receivedQuantity < it.orderedQuantity), [po]);
 
   useEffect(() => {
     if (open && po) {
       const q: Record<string, number> = {};
       const e: Record<string, string> = {};
-      (po.items ?? []).forEach((it) => {
-        q[it.productId] = it.orderedQuantity - it.receivedQuantity;
-        e[it.productId] = it.expiryDate ?? "";
-      });
-      setQtys(q);
-      setExpiries(e);
-      setError("");
+      (po.items ?? []).forEach(it => { q[it.productId] = it.orderedQuantity - it.receivedQuantity; e[it.productId] = it.expiryDate ?? ""; });
+      setQtys(q); setExpiries(e); setError("");
     }
   }, [open, po]);
 
   const handleConfirm = async () => {
     if (!po) return;
-    const payload = items
-      .filter((it) => qtys[it.productId] > 0)
-      .map((it) => ({
-        productId: it.productId,
-        quantity: qtys[it.productId],
-        expiryDate: expiries[it.productId] || undefined,
-      }));
+    const payload = items.filter(it => qtys[it.productId] > 0).map(it => ({
+      productId: it.productId, quantity: qtys[it.productId], expiryDate: expiries[it.productId] || undefined,
+    }));
     if (!payload.length) return setError("Enter at least one quantity.");
-    setSaving(true);
-    setError("");
-    try {
-      await api.receivePurchaseOrder(po.id, payload);
-      onReceived();
-      onClose();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to receive goods.");
-    } finally {
-      setSaving(false);
-    }
+    setSaving(true); setError("");
+    try { await api.receivePurchaseOrder(po.id, payload); onReceived(); onClose(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Failed to receive goods."); }
+    finally { setSaving(false); }
   };
 
   if (!po) return null;
-
   return (
-    <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
+    <Sheet open={open} onOpenChange={v => !v && onClose()}>
       <SheetContent style={{ width: 480, maxWidth: "100vw" }} className="overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>Receive Goods — {po.poNumber}</SheetTitle>
-        </SheetHeader>
+        <SheetHeader><SheetTitle>Receive Goods — {po.poNumber}</SheetTitle></SheetHeader>
         <div className="mt-4 space-y-4">
           {items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">All items have been fully received.</p>
+            <p className="text-sm text-muted-foreground">All items fully received.</p>
           ) : (
             <div className="rounded-lg border border-border/60 overflow-hidden">
               <table className="w-full text-xs">
                 <thead className="bg-muted/40">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium">Product</th>
-                    <th className="text-right px-2 py-2 font-medium">Ordered</th>
-                    <th className="text-right px-2 py-2 font-medium">Received</th>
-                    <th className="text-right px-2 py-2 font-medium">Now</th>
-                    <th className="text-right px-2 py-2 font-medium">Expiry</th>
+                    <th className="text-left px-3 py-2">Product</th>
+                    <th className="text-right px-2 py-2">Ordered</th>
+                    <th className="text-right px-2 py-2">Received</th>
+                    <th className="text-right px-2 py-2">Now</th>
+                    <th className="text-right px-2 py-2">Expiry</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((it) => (
+                  {items.map(it => (
                     <tr key={it.id} className="border-t border-border/40">
                       <td className="px-3 py-2">{it.product?.name ?? it.productId}</td>
                       <td className="px-2 py-2 text-right">{it.orderedQuantity}</td>
                       <td className="px-2 py-2 text-right text-muted-foreground">{it.receivedQuantity}</td>
                       <td className="px-2 py-2 text-right">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={it.orderedQuantity - it.receivedQuantity}
-                          className="h-7 w-14 text-xs text-right"
-                          value={qtys[it.productId] ?? 0}
-                          onChange={(e) =>
-                            setQtys((p) => ({ ...p, [it.productId]: Number(e.target.value) }))
-                          }
-                        />
+                        <Input type="number" min={0} max={it.orderedQuantity - it.receivedQuantity} className="h-7 w-14 text-xs text-right"
+                          value={qtys[it.productId] ?? 0} onChange={e => setQtys(p => ({ ...p, [it.productId]: Number(e.target.value) }))} />
                       </td>
                       <td className="px-2 py-2 text-right">
-                        <Input
-                          type="date"
-                          className="h-7 w-28 text-xs"
-                          value={expiries[it.productId] ?? ""}
-                          onChange={(e) =>
-                            setExpiries((p) => ({ ...p, [it.productId]: e.target.value }))
-                          }
-                        />
+                        <Input type="date" className="h-7 w-28 text-xs"
+                          value={expiries[it.productId] ?? ""} onChange={e => setExpiries(p => ({ ...p, [it.productId]: e.target.value }))} />
                       </td>
                     </tr>
                   ))}
@@ -507,16 +447,9 @@ function ReceiveSheet({
               </table>
             </div>
           )}
-
           {error && <p className="text-xs text-destructive">{error}</p>}
-
-          <Button
-            className="w-full gradient-primary text-primary-foreground border-0 shadow-glow"
-            onClick={handleConfirm}
-            disabled={saving || items.length === 0}
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Confirm Receipt
+          <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleConfirm} disabled={saving || items.length === 0}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Confirm Receipt
           </Button>
         </div>
       </SheetContent>
@@ -526,20 +459,11 @@ function ReceiveSheet({
 
 // ─── View PO Sheet ────────────────────────────────────────────────────────────
 
-function ViewPOSheet({
-  open,
-  onClose,
-  po,
-  onRefresh,
-}: {
-  open: boolean;
-  onClose: () => void;
-  po: PurchaseOrder | null;
-  onRefresh: () => void;
+function ViewPOSheet({ open, onClose, po, onRefresh }: {
+  open: boolean; onClose: () => void; po: PurchaseOrder | null; onRefresh: () => void;
 }) {
+  const { user } = useAuth();
   const [receiveOpen, setReceiveOpen] = useState(false);
-
-  // Add Payment form state
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("bank_transfer");
   const [payRef, setPayRef] = useState("");
@@ -550,46 +474,30 @@ function ViewPOSheet({
 
   if (!po) return null;
 
-  const statusOrder = ["draft", "sent", "partial_received", "fully_received"];
-  const currentStep = statusOrder.indexOf(po.status);
-
   const handleAddPayment = async () => {
     const amount = parseFloat(payAmount);
     if (!amount || amount <= 0) return setPayError("Enter a valid amount.");
-    setPayLoading(true);
-    setPayError("");
+    setPayLoading(true); setPayError("");
     try {
-      await api.addSupplierPayment(po.id, {
-        amount,
-        paymentMethod: payMethod,
-        referenceNumber: payRef || undefined,
-        paymentDate: payDate,
-        notes: payNotes || undefined,
-        recordedBy: "system",
-        supplierId: po.supplierId,
-      });
-      setPayAmount("");
-      setPayRef("");
-      setPayNotes("");
-      onRefresh();
-    } catch (e: unknown) {
-      setPayError(e instanceof Error ? e.message : "Failed to record payment.");
-    } finally {
-      setPayLoading(false);
-    }
+      await api.addSupplierPayment(po.id, { amount, paymentMethod: payMethod, referenceNumber: payRef || undefined, paymentDate: payDate, notes: payNotes || undefined, recordedBy: user?.id });
+      setPayAmount(""); setPayRef(""); setPayNotes(""); onRefresh();
+    } catch (e) { setPayError(e instanceof Error ? e.message : "Failed."); }
+    finally { setPayLoading(false); }
   };
 
-  const destName =
-    po.warehouse?.name ?? po.branch?.name ?? "—";
+  const destName = po.warehouse?.name ?? po.branch?.name ?? "—";
+  const statusOrder = ["draft", "sent", "partial_received", "fully_received"];
+  const currentStep = statusOrder.indexOf(po.status);
 
   return (
     <>
-      <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
+      <Sheet open={open} onOpenChange={v => !v && onClose()}>
         <SheetContent style={{ width: 560, maxWidth: "100vw" }} className="overflow-y-auto">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               {po.poNumber}
               <StatusBadge status={po.status} />
+              <PayBadge status={po.paymentStatus} />
             </SheetTitle>
           </SheetHeader>
 
@@ -601,271 +509,131 @@ function ViewPOSheet({
               <TabsTrigger value="timeline" className="text-xs">Timeline</TabsTrigger>
             </TabsList>
 
-            {/* Overview */}
             <TabsContent value="overview" className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <p className="text-xs text-muted-foreground">PO Number</p>
-                  <p className="font-medium">{po.poNumber}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Created</p>
-                  <p className="font-medium">{formatDate(po.createdAt)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Supplier</p>
-                  <p className="font-medium">{po.supplier?.name ?? "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Supplier Code</p>
-                  <p className="font-medium">{po.supplier?.supplierCode ?? "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Destination</p>
-                  <p className="font-medium">{destName}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Payment Terms</p>
-                  <p className="font-medium capitalize">{po.paymentTerms?.replace("_", " ") ?? "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Payment Status</p>
-                  <PaymentBadge status={po.paymentStatus} />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Expected Delivery</p>
-                  <p className="font-medium">{formatDate(po.expectedDeliveryDate)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Received Date</p>
-                  <p className="font-medium">{formatDate(po.receivedDate)}</p>
-                </div>
+                {[
+                  ["PO Number", po.poNumber], ["Created", formatDate(po.createdAt)],
+                  ["Supplier", po.supplier?.name ?? "—"], ["Supplier Code", po.supplier?.supplierCode ?? "—"],
+                  ["Destination", destName], ["Payment Terms", po.paymentTerms?.replace(/_/g, " ") ?? "—"],
+                  ["Expected Delivery", formatDate(po.expectedDeliveryDate)], ["Received Date", formatDate(po.receivedDate)],
+                ].map(([k, v]) => (
+                  <div key={k}><p className="text-xs text-muted-foreground">{k}</p><p className="font-medium">{v}</p></div>
+                ))}
               </div>
-
               <div className="rounded-lg border border-border/60 p-3 space-y-1.5">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Total Amount</span>
-                  <span className="font-semibold">SAR {fmt(po.totalAmount)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Paid Amount</span>
-                  <span className="font-semibold text-success">SAR {fmt(po.paidAmount)}</span>
-                </div>
-                <div className="flex justify-between text-sm border-t border-border/40 pt-1.5">
-                  <span className="text-muted-foreground">Balance Due</span>
-                  <span className="font-bold text-destructive">SAR {fmt(po.totalAmount - po.paidAmount)}</span>
-                </div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Amount</span><span className="font-semibold"><SARIcon />{fmt(po.totalAmount)}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Paid Amount</span><span className="font-semibold text-success"><SARIcon />{fmt(po.paidAmount)}</span></div>
+                <div className="flex justify-between text-sm border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Balance Due</span><span className="font-bold text-destructive"><SARIcon />{fmt(po.totalAmount - po.paidAmount)}</span></div>
               </div>
-
-              {po.notes && (
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Notes</p>
-                  <p className="text-sm bg-muted/30 rounded-lg px-3 py-2">{po.notes}</p>
-                </div>
-              )}
+              {po.notes && <div><p className="text-xs text-muted-foreground mb-1">Notes</p><p className="text-sm bg-muted/30 rounded-lg px-3 py-2">{po.notes}</p></div>}
             </TabsContent>
 
-            {/* Items */}
             <TabsContent value="items" className="mt-4 space-y-3">
               <div className="rounded-lg border border-border/60 overflow-hidden">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/40">
                     <tr>
-                      <th className="text-left px-3 py-2 font-medium">Product</th>
-                      <th className="text-right px-2 py-2 font-medium">Ordered</th>
-                      <th className="text-right px-2 py-2 font-medium">Received</th>
-                      <th className="text-right px-2 py-2 font-medium">Cost</th>
-                      <th className="text-right px-2 py-2 font-medium">Subtotal</th>
-                      <th className="text-right px-2 py-2 font-medium">Status</th>
+                      <th className="text-left px-3 py-2">Product</th>
+                      <th className="text-right px-2 py-2">Ordered</th>
+                      <th className="text-right px-2 py-2">Received</th>
+                      <th className="text-right px-2 py-2">Cost</th>
+                      <th className="text-right px-2 py-2">Subtotal</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(po.items ?? []).map((it) => (
+                    {(po.items ?? []).map(it => (
                       <tr key={it.id} className="border-t border-border/40">
                         <td className="px-3 py-2">{it.product?.name ?? it.productId}</td>
                         <td className="px-2 py-2 text-right">{it.orderedQuantity}</td>
                         <td className="px-2 py-2 text-right text-muted-foreground">{it.receivedQuantity}</td>
                         <td className="px-2 py-2 text-right tabular-nums">{fmt(it.unitCost)}</td>
                         <td className="px-2 py-2 text-right tabular-nums font-medium">{fmt(it.subtotal)}</td>
-                        <td className="px-2 py-2 text-right">
-                          <StatusBadge status={it.status} />
-                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-
               {(po.status === "sent" || po.status === "partial_received") && (
-                <Button
-                  className="w-full gradient-primary text-primary-foreground border-0 shadow-glow"
-                  onClick={() => setReceiveOpen(true)}
-                >
-                  <Truck className="h-4 w-4 mr-2" />
-                  {po.status === "partial_received" ? "Receive More" : "Receive Goods"}
+                <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setReceiveOpen(true)}>
+                  <Truck className="h-4 w-4 mr-2" />{po.status === "partial_received" ? "Receive More" : "Receive Goods"}
                 </Button>
               )}
             </TabsContent>
 
-            {/* Payments */}
             <TabsContent value="payments" className="mt-4 space-y-4">
               <div className="space-y-2">
                 {(po.payments ?? []).length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">No payments recorded.</p>
                 ) : (
-                  (po.payments ?? []).map((pay) => (
+                  (po.payments ?? []).map(pay => (
                     <div key={pay.id} className="rounded-lg border border-border/60 px-3 py-2.5">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium">SAR {fmt(pay.amount)}</p>
-                          <p className="text-xs text-muted-foreground capitalize">
-                            {pay.paymentMethod.replace("_", " ")} · {formatDate(pay.paymentDate)}
-                          </p>
-                          {pay.referenceNumber && (
-                            <p className="text-xs text-muted-foreground">Ref: {pay.referenceNumber}</p>
-                          )}
+                          <p className="text-sm font-medium"><SARIcon />{fmt(pay.amount)}</p>
+                          <p className="text-xs text-muted-foreground capitalize">{pay.paymentMethod.replace("_", " ")} · {formatDate(pay.paymentDate)}</p>
+                          {pay.referenceNumber && <p className="text-xs text-muted-foreground">Ref: {pay.referenceNumber}</p>}
                         </div>
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${pay.status === "confirmed" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
-                          {pay.status}
-                        </span>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${pay.status === "confirmed" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{pay.status}</span>
                       </div>
                       {pay.notes && <p className="text-xs text-muted-foreground mt-1">{pay.notes}</p>}
                     </div>
                   ))
                 )}
               </div>
-
               {po.status !== "cancelled" && (
                 <div className="rounded-lg border border-border/60 p-3 space-y-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Add Payment</p>
                   <div className="grid grid-cols-2 gap-2">
-                    <FieldRow label="Amount (SAR) *">
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        className="h-9"
-                        placeholder="0.00"
-                        value={payAmount}
-                        onChange={(e) => setPayAmount(e.target.value)}
-                      />
-                    </FieldRow>
-                    <FieldRow label="Payment Method">
+                    <FieldRow label="Amount (SAR) *"><Input type="number" min={0} step="0.01" className="h-9" placeholder="0.00" value={payAmount} onChange={e => setPayAmount(e.target.value)} /></FieldRow>
+                    <FieldRow label="Method">
                       <Select value={payMethod} onValueChange={setPayMethod}>
                         <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
                           <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
                           <SelectItem value="cheque">Cheque</SelectItem>
-                          <SelectItem value="card">Card</SelectItem>
                         </SelectContent>
                       </Select>
                     </FieldRow>
-                    <FieldRow label="Reference">
-                      <Input
-                        className="h-9"
-                        placeholder="Reference #"
-                        value={payRef}
-                        onChange={(e) => setPayRef(e.target.value)}
-                      />
-                    </FieldRow>
-                    <FieldRow label="Payment Date">
-                      <Input
-                        type="date"
-                        className="h-9"
-                        value={payDate}
-                        onChange={(e) => setPayDate(e.target.value)}
-                      />
-                    </FieldRow>
+                    <FieldRow label="Reference"><Input className="h-9" placeholder="Ref #" value={payRef} onChange={e => setPayRef(e.target.value)} /></FieldRow>
+                    <FieldRow label="Date"><Input type="date" className="h-9" value={payDate} onChange={e => setPayDate(e.target.value)} /></FieldRow>
                   </div>
-                  <FieldRow label="Notes">
-                    <Textarea
-                      rows={2}
-                      className="resize-none text-sm"
-                      value={payNotes}
-                      onChange={(e) => setPayNotes(e.target.value)}
-                    />
-                  </FieldRow>
+                  <FieldRow label="Notes"><Textarea rows={2} className="resize-none text-sm" value={payNotes} onChange={e => setPayNotes(e.target.value)} /></FieldRow>
                   {payError && <p className="text-xs text-destructive">{payError}</p>}
-                  <Button
-                    className="w-full gradient-primary text-primary-foreground border-0 shadow-glow"
-                    onClick={handleAddPayment}
-                    disabled={payLoading}
-                  >
-                    {payLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CreditCard className="h-4 w-4 mr-2" />}
-                    Record Payment
+                  <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleAddPayment} disabled={payLoading}>
+                    {payLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CreditCard className="h-4 w-4 mr-2" />}Record Payment
                   </Button>
                 </div>
               )}
             </TabsContent>
 
-            {/* Timeline */}
             <TabsContent value="timeline" className="mt-6">
               <div className="relative pl-4">
                 {statusOrder.map((step, idx) => {
                   const reached = currentStep >= idx;
                   const isCurrent = currentStep === idx && po.status !== "cancelled";
-                  const label: Record<string, string> = {
-                    draft: "Draft Created",
-                    sent: "Sent to Supplier",
-                    partial_received: "Partial Receipt",
-                    fully_received: "Fully Received",
-                  };
+                  const label: Record<string, string> = { draft: "Draft Created", sent: "Sent to Supplier", partial_received: "Partial Receipt", fully_received: "Fully Received" };
                   return (
                     <div key={step} className="relative flex gap-3 pb-6 last:pb-0">
-                      {idx < statusOrder.length - 1 && (
-                        <div
-                          className={`absolute left-0 top-5 w-0.5 h-full -translate-x-1/2 ${reached ? "bg-primary" : "bg-border/60"}`}
-                        />
-                      )}
-                      <div
-                        className={`relative z-10 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 ${reached ? "bg-primary border-primary" : "bg-background border-border"} ${isCurrent ? "ring-2 ring-primary/30 ring-offset-2 ring-offset-background" : ""}`}
-                      >
+                      {idx < statusOrder.length - 1 && <div className={`absolute left-0 top-5 w-0.5 h-full -translate-x-1/2 ${reached ? "bg-primary" : "bg-border/60"}`} />}
+                      <div className={`relative z-10 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 ${reached ? "bg-primary border-primary" : "bg-background border-border"} ${isCurrent ? "ring-2 ring-primary/30 ring-offset-2" : ""}`}>
                         {reached && <CheckCircle className="h-3 w-3 text-primary-foreground" />}
                       </div>
                       <div className="pt-0.5">
-                        <p className={`text-sm font-medium ${reached ? "text-foreground" : "text-muted-foreground"}`}>
-                          {label[step]}
-                        </p>
-                        {step === "draft" && reached && (
-                          <p className="text-xs text-muted-foreground">{formatDate(po.createdAt)}</p>
-                        )}
-                        {step === "fully_received" && po.receivedDate && (
-                          <p className="text-xs text-muted-foreground">{formatDate(po.receivedDate)}</p>
-                        )}
-                        {step === "sent" && po.status !== "draft" && (
-                          <p className="text-xs text-muted-foreground">{formatDate(po.updatedAt)}</p>
-                        )}
+                        <p className={`text-sm font-medium ${reached ? "text-foreground" : "text-muted-foreground"}`}>{label[step]}</p>
+                        {step === "draft" && reached && <p className="text-xs text-muted-foreground">{formatDate(po.createdAt)}</p>}
+                        {step === "fully_received" && po.receivedDate && <p className="text-xs text-muted-foreground">{formatDate(po.receivedDate)}</p>}
                       </div>
                     </div>
                   );
                 })}
-
-                {po.status === "cancelled" && (
-                  <div className="mt-4 flex gap-3">
-                    <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-destructive/15 border-2 border-destructive">
-                      <span className="h-2 w-2 rounded-full bg-destructive" />
-                    </div>
-                    <div className="pt-0.5">
-                      <p className="text-sm font-medium text-destructive">Cancelled</p>
-                    </div>
-                  </div>
-                )}
               </div>
             </TabsContent>
           </Tabs>
         </SheetContent>
       </Sheet>
 
-      <ReceiveSheet
-        open={receiveOpen}
-        onClose={() => setReceiveOpen(false)}
-        po={po}
-        onReceived={() => {
-          setReceiveOpen(false);
-          onRefresh();
-        }}
-      />
+      <ReceiveSheet open={receiveOpen} onClose={() => setReceiveOpen(false)} po={po} onReceived={() => { setReceiveOpen(false); onRefresh(); }} />
     </>
   );
 }
@@ -877,28 +645,19 @@ function PurchaseOrders() {
   const [loading, setLoading] = useState(true);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [, setBranches] = useState<unknown[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [payFilter, setPayFilter] = useState("all");
-
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
   const [receiveTarget, setReceiveTarget] = useState<PurchaseOrder | null>(null);
-
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
-    const params: Record<string, string> = {};
-    if (statusFilter !== "all") params.status = statusFilter;
-    if (payFilter !== "all") params.paymentStatus = payFilter;
-    api
-      .getPurchaseOrders(params)
-      .then(setPos)
-      .finally(() => setLoading(false));
+    api.getPurchaseOrders().then(setPos).finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -909,263 +668,242 @@ function PurchaseOrders() {
     api.getProducts().then(setProducts);
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [statusFilter, payFilter]);
-
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    if (!q) return pos;
-    return pos.filter(
-      (p) =>
-        p.poNumber.toLowerCase().includes(q) ||
-        (p.supplier?.name ?? "").toLowerCase().includes(q),
-    );
-  }, [pos, search]);
+    return pos.filter(p => {
+      const matchQ = !q || p.poNumber.toLowerCase().includes(q) || (p.supplier?.name ?? "").toLowerCase().includes(q);
+      const mdf = !dateFrom || (!!p.createdAt && p.createdAt >= dateFrom);
+      const mdt = !dateTo || (!!p.createdAt && p.createdAt <= dateTo + "T23:59:59");
+      return matchQ && mdf && mdt;
+    });
+  }, [pos, search, dateFrom, dateTo]);
 
   // Metrics
   const totalPOs = pos.length;
-  const pending = pos.filter((p) => p.status === "draft" || p.status === "sent").length;
-  const totalValue = pos.reduce((s, p) => s + p.totalAmount, 0);
-  const unpaidAmount = pos
-    .filter((p) => p.paymentStatus !== "paid" && p.status !== "cancelled")
-    .reduce((s, p) => s + (p.totalAmount - p.paidAmount), 0);
+  const outstandingPayables = pos.filter(p => p.paymentStatus !== "paid" && p.status !== "cancelled").reduce((s, p) => s + (p.totalAmount - p.paidAmount), 0);
+  const supplierCredits = pos.filter(p => p.paymentStatus === "supplier_credit").reduce((s, p) => s + p.totalAmount, 0);
+  const paidThisMonth = (() => {
+    const now = new Date();
+    return pos.filter(p => {
+      const d = new Date(p.updatedAt);
+      return p.paymentStatus === "paid" && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }).reduce((s, p) => s + p.paidAmount, 0);
+  })();
 
-  const handleSendToSupplier = async (po: PurchaseOrder) => {
+  const handleSend = async (po: PurchaseOrder) => {
     setActionLoading(po.id + "_send");
-    try {
-      await api.updatePoStatus(po.id, "sent");
-      load();
-    } finally {
-      setActionLoading(null);
-    }
+    try { await api.updatePoStatus(po.id, "sent"); load(); }
+    finally { setActionLoading(null); }
   };
 
   const handleCancel = async (po: PurchaseOrder) => {
     if (!confirm(`Cancel PO ${po.poNumber}?`)) return;
     setActionLoading(po.id + "_cancel");
-    try {
-      await api.updatePoStatus(po.id, "cancelled");
-      load();
-    } finally {
-      setActionLoading(null);
-    }
+    try { await api.updatePoStatus(po.id, "cancelled"); load(); }
+    finally { setActionLoading(null); }
   };
 
   const refreshView = () => {
     load();
-    if (viewPO) {
-      api.getPurchaseOrder(viewPO.id).then(setViewPO).catch(() => {});
-    }
+    if (viewPO) api.getPurchaseOrder(viewPO.id).then(setViewPO).catch(() => {});
   };
 
   return (
     <PageShell
       title="Purchase Orders"
-      subtitle="Manage supplier purchase orders and goods receipt"
+      subtitle="Accounting & Finance · PO does not increase inventory until Goods Receiving"
+      actions={
+        <Button className="gradient-primary text-primary-foreground border-0 shadow-glow h-9 gap-1.5" onClick={() => setCreateOpen(true)}>
+          <Plus className="h-4 w-4" />New Purchase Order
+        </Button>
+      }
     >
       {/* Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard
-          label="Total POs"
-          value={String(totalPOs)}
-          icon={FileText}
-          accent="primary"
-        />
-        <MetricCard
-          label="Pending"
-          value={String(pending)}
-          icon={Clock}
-          accent="warning"
-        />
-        <MetricCard
-          label="Total Ordered Value"
-          value={`SAR ${fmt(totalValue)}`}
-          icon={Package}
-          accent="default"
-        />
-        <MetricCard
-          label="Unpaid Amount"
-          value={`SAR ${fmt(unpaidAmount)}`}
-          icon={DollarSign}
-          accent="destructive"
-        />
+        <MetricCard label="Total POs"            value={String(totalPOs)}                          icon={ShoppingCart} accent="primary" />
+        <MetricCard label="Outstanding Payables" value={<><SARIcon />{" "}{fmt(outstandingPayables)}</>}         icon={DollarSign}   accent="warning" />
+        <MetricCard label="Supplier Credits"     value={<><SARIcon />{" "}{fmt(supplierCredits)}</>}             icon={FileText}     accent="primary" />
+        <MetricCard label="Paid This Month"      value={<><SARIcon />{" "}{fmt(paidThisMonth)}</>}               icon={CheckCircle}  accent="success" />
       </div>
 
-      {/* Filters + Actions */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          className="h-9 w-56 bg-muted/50"
-          placeholder="Search PO # or supplier…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-44">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="sent">Sent</SelectItem>
-            <SelectItem value="partial_received">Partial Received</SelectItem>
-            <SelectItem value="fully_received">Fully Received</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={payFilter} onValueChange={setPayFilter}>
-          <SelectTrigger className="h-9 w-36">
-            <SelectValue placeholder="All payments" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Payments</SelectItem>
-            <SelectItem value="unpaid">Unpaid</SelectItem>
-            <SelectItem value="partial">Partial</SelectItem>
-            <SelectItem value="paid">Paid</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="flex-1" />
-        <Button
-          className="gradient-primary text-primary-foreground border-0 shadow-glow h-9"
-          onClick={() => setCreateOpen(true)}
-        >
-          <Plus className="h-4 w-4 mr-1.5" />
-          New PO
-        </Button>
-      </div>
+      {/* Tabs */}
+      <Tabs defaultValue="pos">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <TabsList>
+            <TabsTrigger value="pos" className="gap-1.5"><FileText className="h-3.5 w-3.5" />Purchase Orders</TabsTrigger>
+            <TabsTrigger value="payables" className="gap-1.5"><DollarSign className="h-3.5 w-3.5" />Supplier Payables</TabsTrigger>
+            <TabsTrigger value="returns" className="gap-1.5"><Package className="h-3.5 w-3.5" />Return / Credit Entries</TabsTrigger>
+          </TabsList>
+          <div className="flex items-center gap-1">
+            <Input className="h-9 w-48 bg-muted/50" placeholder="Search PO # or supplier…" value={search} onChange={e => setSearch(e.target.value)} />
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
+            <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            <span className="text-xs text-muted-foreground">–</span>
+            <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            {(dateFrom || dateTo) && (
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
 
-      {/* Table */}
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b border-border/60">
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">PO #</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Supplier</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Destination</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Payment</th>
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Total</th>
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Paid</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Exp. Delivery</th>
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={9} className="text-center py-12">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                  </td>
-                </tr>
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="text-center py-12 text-muted-foreground text-sm">
-                    No purchase orders found.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((po) => {
-                  const dest = po.warehouse?.name ?? po.branch?.name ?? "—";
-                  const isSending = actionLoading === po.id + "_send";
-                  const isCancelling = actionLoading === po.id + "_cancel";
-                  return (
-                    <tr key={po.id} className="border-t border-border/40 hover:bg-muted/20 transition-colors">
-                      <td className="px-4 py-3 font-mono font-medium text-xs">{po.poNumber}</td>
-                      <td className="px-4 py-3">{po.supplier?.name ?? "—"}</td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">{dest}</td>
-                      <td className="px-4 py-3"><StatusBadge status={po.status} /></td>
-                      <td className="px-4 py-3"><PaymentBadge status={po.paymentStatus} /></td>
-                      <td className="px-4 py-3 text-right tabular-nums font-medium">SAR {fmt(po.totalAmount)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">SAR {fmt(po.paidAmount)}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(po.expectedDeliveryDate)}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => setViewPO(po)}
-                            title="View"
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                          </Button>
+        {/* ── Purchase Orders tab ── */}
+        <TabsContent value="pos" className="mt-3">
+          <Card className="overflow-hidden border-border/60 shadow-card">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="px-3 py-3 font-semibold">PO ID</th>
+                    <th className="px-3 py-3 font-semibold">Supplier</th>
+                    <th className="px-3 py-3 font-semibold">Type</th>
+                    <th className="px-3 py-3 font-semibold">Delivery</th>
+                    <th className="px-3 py-3 font-semibold">PO Date</th>
+                    <th className="px-3 py-3 font-semibold">ETA</th>
+                    <th className="px-3 py-3 font-semibold">Items</th>
+                    <th className="px-3 py-3 font-semibold">Total</th>
+                    <th className="px-3 py-3 font-semibold">Payment</th>
+                    <th className="px-3 py-3 font-semibold">Status</th>
+                    <th className="px-3 py-3 font-semibold">Approver</th>
+                    <th className="px-3 py-3 font-semibold"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={12} className="text-center py-12"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
+                  ) : filtered.length === 0 ? (
+                    <tr><td colSpan={12} className="text-center py-12 text-muted-foreground text-sm">No purchase orders found.</td></tr>
+                  ) : filtered.map(po => {
+                    const dest = po.warehouse?.name ?? po.branch?.name ?? "—";
+                    const supplierType = suppliers.find(s => s.id === po.supplierId)?.supplyType ?? "—";
+                    const isSending = actionLoading === po.id + "_send";
+                    const isCancelling = actionLoading === po.id + "_cancel";
+                    return (
+                      <tr key={po.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
+                        <td className="px-3 py-3 font-mono font-bold text-xs">{po.poNumber}</td>
+                        <td className="px-3 py-3 font-medium">{po.supplier?.name ?? "—"}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground capitalize">{supplierType.replace(/_/g, " ")}</td>
+                        <td className="px-3 py-3 text-xs">{dest}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{formatDate(po.createdAt)}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{formatDate(po.expectedDeliveryDate)}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{(po.items ?? []).length}</td>
+                        <td className="px-3 py-3 font-semibold tabular-nums"><SARIcon />{fmt(po.totalAmount)}</td>
+                        <td className="px-3 py-3"><PayBadge status={po.paymentStatus} /></td>
+                        <td className="px-3 py-3"><StatusBadge status={po.status} /></td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">—</td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setViewPO(po)} title="View"><Eye className="h-3.5 w-3.5" /></Button>
+                            {po.status === "draft" && (
+                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleSend(po)} disabled={isSending}>
+                                {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}Send
+                              </Button>
+                            )}
+                            {(po.status === "sent" || po.status === "partial_received") && (
+                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setReceiveTarget(po)}>
+                                <Package className="h-3 w-3" />{po.status === "partial_received" ? "More" : "Receive"}
+                              </Button>
+                            )}
+                            {po.status !== "cancelled" && po.status !== "fully_received" && (
+                              <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleCancel(po)} disabled={isCancelling}>
+                                {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : null}Cancel
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </TabsContent>
 
-                          {po.status === "draft" && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs gap-1"
-                              onClick={() => handleSendToSupplier(po)}
-                              disabled={isSending}
-                            >
-                              {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}
-                              Send
-                            </Button>
-                          )}
-
-                          {(po.status === "sent" || po.status === "partial_received") && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs gap-1"
-                              onClick={() => setReceiveTarget(po)}
-                            >
-                              <Package className="h-3 w-3" />
-                              {po.status === "partial_received" ? "More" : "Receive"}
-                            </Button>
-                          )}
-
-                          {po.status !== "cancelled" && po.status !== "fully_received" && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 text-xs gap-1 text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={() => handleCancel(po)}
-                              disabled={isCancelling}
-                            >
-                              {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                              Cancel
-                            </Button>
-                          )}
-                        </div>
+        {/* ── Supplier Payables tab ── */}
+        <TabsContent value="payables" className="mt-3">
+          <Card className="overflow-hidden border-border/60 shadow-card">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="px-3 py-3 font-semibold">Supplier</th>
+                    <th className="px-3 py-3 font-semibold">PO</th>
+                    <th className="px-3 py-3 font-semibold">PO Amount</th>
+                    <th className="px-3 py-3 font-semibold">Paid</th>
+                    <th className="px-3 py-3 font-semibold">Due</th>
+                    <th className="px-3 py-3 font-semibold">Status</th>
+                    <th className="px-3 py-3 font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pos.filter(p => p.paymentStatus !== "paid" && p.status !== "cancelled").map(po => (
+                    <tr key={po.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
+                      <td className="px-3 py-3 font-medium">{po.supplier?.name ?? "—"}</td>
+                      <td className="px-3 py-3 font-mono text-xs font-bold">{po.poNumber}</td>
+                      <td className="px-3 py-3 tabular-nums"><SARIcon />{fmt(po.totalAmount)}</td>
+                      <td className="px-3 py-3 tabular-nums text-success"><SARIcon />{fmt(po.paidAmount)}</td>
+                      <td className="px-3 py-3 tabular-nums text-destructive font-semibold"><SARIcon />{fmt(po.totalAmount - po.paidAmount)}</td>
+                      <td className="px-3 py-3"><PayBadge status={po.paymentStatus} /></td>
+                      <td className="px-3 py-3">
+                        <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setViewPO(po)}>
+                          <CreditCard className="h-3 w-3" />Pay
+                        </Button>
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+                  ))}
+                  {pos.filter(p => p.paymentStatus !== "paid" && p.status !== "cancelled").length === 0 && (
+                    <tr><td colSpan={7} className="text-center py-10 text-muted-foreground text-sm">No outstanding payables.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </TabsContent>
 
-      {/* Sheets */}
-      <CreatePOSheet
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        suppliers={suppliers}
-        warehouses={warehouses}
-        branches={branches}
-        products={products}
+        {/* ── Return / Credit Entries tab ── */}
+        <TabsContent value="returns" className="mt-3">
+          <Card className="overflow-hidden border-border/60 shadow-card">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="px-3 py-3 font-semibold">Supplier</th>
+                    <th className="px-3 py-3 font-semibold">PO</th>
+                    <th className="px-3 py-3 font-semibold">Credit Amount</th>
+                    <th className="px-3 py-3 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pos.filter(p => p.paymentStatus === "supplier_credit").map(po => (
+                    <tr key={po.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
+                      <td className="px-3 py-3 font-medium">{po.supplier?.name ?? "—"}</td>
+                      <td className="px-3 py-3 font-mono text-xs font-bold">{po.poNumber}</td>
+                      <td className="px-3 py-3 tabular-nums font-semibold text-primary"><SARIcon />{fmt(po.totalAmount)}</td>
+                      <td className="px-3 py-3"><PayBadge status={po.paymentStatus} /></td>
+                    </tr>
+                  ))}
+                  {pos.filter(p => p.paymentStatus === "supplier_credit").length === 0 && (
+                    <tr><td colSpan={4} className="text-center py-10 text-muted-foreground text-sm">No credit entries.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <CreatePOWizard
+        open={createOpen} onClose={() => setCreateOpen(false)}
+        suppliers={suppliers} warehouses={warehouses} products={products}
         onCreated={load}
       />
 
-      <ViewPOSheet
-        open={!!viewPO}
-        onClose={() => setViewPO(null)}
-        po={viewPO}
-        onRefresh={refreshView}
-      />
+      <ViewPOSheet open={!!viewPO} onClose={() => setViewPO(null)} po={viewPO} onRefresh={refreshView} />
 
-      <ReceiveSheet
-        open={!!receiveTarget}
-        onClose={() => setReceiveTarget(null)}
-        po={receiveTarget}
-        onReceived={() => {
-          setReceiveTarget(null);
-          load();
-        }}
-      />
+      <ReceiveSheet open={!!receiveTarget} onClose={() => setReceiveTarget(null)} po={receiveTarget}
+        onReceived={() => { setReceiveTarget(null); load(); }} />
     </PageShell>
   );
 }

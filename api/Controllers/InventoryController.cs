@@ -13,7 +13,7 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
     public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock)
     {
         var query = db.InventoryStocks
-            .Include(i => i.Product)
+            .Include(i => i.Product).ThenInclude(p => p!.Category)
             .Include(i => i.Branch)
             .AsQueryable();
         if (branchId.HasValue) query = query.Where(i => i.BranchId == branchId);
@@ -50,47 +50,83 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
     }
 
     [HttpPost("batches")]
-    public async Task<IActionResult> ReceiveBatch([FromBody] InventoryBatch batch)
+    public async Task<IActionResult> ReceiveBatch([FromBody] ReceiveBatchRequest req)
     {
-        batch.Id = Guid.NewGuid();
-        batch.RemainingQuantity = batch.Quantity;
-        batch.Status = "active";
-        batch.CreatedAt = batch.UpdatedAt = DateTime.UtcNow;
+        var batchId = Guid.NewGuid();
+        var batch = new InventoryBatch
+        {
+            Id = batchId,
+            BatchNumber = !string.IsNullOrEmpty(req.BatchNumber) ? req.BatchNumber : $"BATCH-{DateTime.UtcNow:yyyyMMddHHmm}-{batchId.ToString()[..4].ToUpper()}",
+            ProductId = req.ProductId,
+            BranchId = req.BranchId,
+            SupplierId = req.SupplierId,
+            Quantity = req.Quantity,
+            RemainingQuantity = req.Quantity,
+            PurchaseCost = req.PurchaseCost,
+            ExpiryDate = req.ExpiryDate,
+            ReceivedDate = DateTime.UtcNow,
+            Notes = req.Notes,
+            Status = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
         db.InventoryBatches.Add(batch);
 
         var stock = await db.InventoryStocks
-            .FirstOrDefaultAsync(s => s.ProductId == batch.ProductId && s.BranchId == batch.BranchId);
+            .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
         if (stock is null)
         {
             db.InventoryStocks.Add(new InventoryStock
             {
-                Id = Guid.NewGuid(), ProductId = batch.ProductId, BranchId = batch.BranchId,
-                Quantity = batch.Quantity, LastUpdated = DateTime.UtcNow
+                Id = Guid.NewGuid(), ProductId = req.ProductId, BranchId = req.BranchId,
+                Quantity = req.Quantity, ReorderLevel = req.ReorderLevel ?? 10,
+                LastUpdated = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
             });
         }
         else
         {
-            stock.Quantity += batch.Quantity;
-            stock.LastUpdated = DateTime.UtcNow;
+            stock.Quantity += req.Quantity;
+            stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
         }
         await db.SaveChangesAsync();
         return Created($"/api/inventory/batches/{batch.Id}", batch);
     }
 
-    [HttpPost("adjustments")]
-    public async Task<IActionResult> Adjust([FromBody] InventoryAdjustment adjustment)
+    [HttpGet("adjustments")]
+    public async Task<IActionResult> GetAdjustments([FromQuery] Guid? branchId, [FromQuery] string? adjustmentType)
     {
-        adjustment.Id = Guid.NewGuid();
-        adjustment.CreatedAt = DateTime.UtcNow;
+        var query = db.InventoryAdjustments
+            .Include(a => a.Product)
+            .Include(a => a.Branch)
+            .AsQueryable();
+        if (branchId.HasValue) query = query.Where(a => a.BranchId == branchId);
+        if (!string.IsNullOrEmpty(adjustmentType)) query = query.Where(a => a.AdjustmentType == adjustmentType);
+        return Ok(await query.OrderByDescending(a => a.CreatedAt).ToListAsync());
+    }
 
+    [HttpPost("adjustments")]
+    public async Task<IActionResult> Adjust([FromBody] AdjustRequest req)
+    {
         var stock = await db.InventoryStocks
-            .FirstOrDefaultAsync(s => s.ProductId == adjustment.ProductId && s.BranchId == adjustment.BranchId);
+            .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
         if (stock is null) return NotFound("Stock record not found.");
 
-        if (adjustment.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in")
-            stock.Quantity += adjustment.Quantity;
+        var adjustment = new InventoryAdjustment
+        {
+            Id = Guid.NewGuid(),
+            ProductId = req.ProductId,
+            BranchId = req.BranchId,
+            Quantity = req.Quantity,
+            AdjustmentType = req.AdjustmentType,
+            Reason = req.Reason ?? "",
+            AdjustedBy = req.AdjustedBy ?? Guid.Empty,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        if (req.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in")
+            stock.Quantity += req.Quantity;
         else
-            stock.Quantity -= adjustment.Quantity;
+            stock.Quantity -= req.Quantity;
         stock.LastUpdated = DateTime.UtcNow;
 
         db.InventoryAdjustments.Add(adjustment);
@@ -98,3 +134,24 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
         return Created($"/api/inventory/adjustments/{adjustment.Id}", adjustment);
     }
 }
+
+public record AdjustRequest(
+    Guid ProductId,
+    Guid BranchId,
+    decimal Quantity,
+    string AdjustmentType,
+    string? Reason,
+    Guid? AdjustedBy
+);
+
+public record ReceiveBatchRequest(
+    Guid ProductId,
+    Guid BranchId,
+    Guid? SupplierId,
+    decimal Quantity,
+    decimal? PurchaseCost,
+    DateTime? ExpiryDate,
+    string? BatchNumber,
+    string? Notes,
+    int? ReorderLevel
+);

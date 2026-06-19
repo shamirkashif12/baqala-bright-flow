@@ -1,3 +1,4 @@
+import React from "react";
 import { cn } from "@/lib/utils";
 import { ArrowUpRight, ArrowDownRight, X, type LucideIcon } from "lucide-react";
 
@@ -13,7 +14,7 @@ export function MetricCard({
   onRemove,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   delta?: string;
   trend?: "up" | "down" | "flat";
   icon: LucideIcon;

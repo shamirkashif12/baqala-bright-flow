@@ -7,6 +7,7 @@ import { ShieldCheck, Ban, AlertTriangle, Lock } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { useEffect, useState } from "react";
 import { api, type TaxFeeRule } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/compliance")({ component: Compliance });
 
@@ -35,7 +36,7 @@ function Compliance() {
           {[
             { title: "Auto-block expired items", desc: "Cashier cannot complete sale" },
             { title: "Warn 7 days before expiry", desc: "Soft warning to cashier" },
-            { title: "Require manager PIN for refunds > ر.س 100", desc: "Approval workflow" },
+            { title: "Require manager PIN for refunds > SAR 100", desc: "Approval workflow" },
             { title: "Restrict alcohol-like SKUs", desc: "Always blocked in KSA" },
           ].map((t) => (
             <div key={t.title} className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
@@ -52,7 +53,7 @@ function Compliance() {
           { key: "ruleName", label: "Rule Name" },
           { key: "ruleType", label: "Rule Type" },
           { key: "vatPercentage", label: "VAT %", render: (r: TaxFeeRule) => <span>{r.vatPercentage}%</span> },
-          { key: "customFeeAmount", label: "Custom Fee", render: (r: TaxFeeRule) => <span>{r.customFeeAmount} ر.س</span> },
+          { key: "customFeeAmount", label: "Custom Fee", render: (r: TaxFeeRule) => <span><SARIcon />{r.customFeeAmount}</span> },
           { key: "applicableTo", label: "Applicable To" },
           { key: "status", label: "Status", render: (r: TaxFeeRule) => <StatusBadge status={r.status} /> },
         ]}

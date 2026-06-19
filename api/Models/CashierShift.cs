@@ -53,9 +53,9 @@ public class CashierShift
     public string? Notes { get; set; }
 
     // Navigation
-    public User Cashier { get; set; } = default!;
+    public User? Cashier { get; set; }
     public Terminal? Terminal { get; set; }
-    public Branch Branch { get; set; } = default!;
+    public Branch? Branch { get; set; }
     [JsonIgnore] public ICollection<ShiftCashMovement> CashMovements { get; set; } = [];
     [JsonIgnore] public ICollection<Order> Orders { get; set; } = [];
 }
@@ -85,6 +85,6 @@ public class ShiftCashMovement
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    [JsonIgnore] public CashierShift Shift { get; set; } = default!;
-    public User RecordedByUser { get; set; } = default!;
+    [JsonIgnore] public CashierShift? Shift { get; set; }
+    public User? RecordedByUser { get; set; }
 }

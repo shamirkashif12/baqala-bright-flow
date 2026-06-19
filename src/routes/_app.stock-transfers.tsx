@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { MetricCard } from "@/components/metric-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import {
   ArrowRight, Warehouse, Building2, Truck, Package, RefreshCcw,
-  CheckCircle2, Clock, Plus, Trash2, Eye, ArrowLeftRight, Loader2,
+  CheckCircle2, Clock, Plus, Trash2, Eye, ArrowLeftRight, Loader2, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -21,6 +21,8 @@ import {
   type StockTransfer, type StockTransferItem,
   type Branch, type Warehouse as WarehouseType, type Supplier, type Product,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/stock-transfers")({ component: StockTransfers });
 
@@ -44,7 +46,7 @@ const TRANSFER_TYPES: { value: TransferType; label: string; description: string;
 ];
 
 const STATUS_OPTIONS = [
-  { value: "", label: "All Statuses" },
+  { value: "all", label: "All Statuses" },
   { value: "draft", label: "Draft" },
   { value: "pending_approval", label: "Pending Approval" },
   { value: "approved", label: "Approved" },
@@ -426,6 +428,7 @@ function CreateTransferSheet({
   products: Product[];
   onCreated: () => void;
 }) {
+  const { user } = useAuth();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [transferType, setTransferType] = useState<TransferType | null>(null);
   const [form, setForm] = useState<CreateForm>(emptyForm);
@@ -461,7 +464,7 @@ function CreateTransferSheet({
         returnReason: form.returnReason || undefined,
         expectedDate: form.expectedDate || undefined,
         notes: form.notes || undefined,
-        createdBy: "current-user",
+        createdBy: user?.id,
         items: items
           .filter(item => item.productId)
           .map(item => ({
@@ -655,6 +658,7 @@ function ViewTransferSheet({
   onClose: () => void;
   onStatusUpdate: () => void;
 }) {
+  const { user } = useAuth();
   const [updating, setUpdating] = useState(false);
 
   if (!transfer) return null;
@@ -662,7 +666,7 @@ function ViewTransferSheet({
   const updateStatus = async (newStatus: string) => {
     setUpdating(true);
     try {
-      await api.updateTransferStatus(transfer.id, newStatus, newStatus === "approved" ? "admin" : undefined);
+      await api.updateTransferStatus(transfer.id, newStatus, newStatus === "approved" ? user?.id : undefined);
       onStatusUpdate();
     } catch (e) {
       console.error(e);
@@ -771,7 +775,7 @@ function ViewTransferSheet({
                         <td className="py-2 px-2 text-right">{item.requestedQuantity}</td>
                         <td className="py-2 px-2 text-right">{item.approvedQuantity ?? "—"}</td>
                         <td className="py-2 px-2 text-right">{item.receivedQuantity ?? "—"}</td>
-                        <td className="py-2 px-2 text-right">{item.unitCost != null ? `SAR ${item.unitCost.toFixed(2)}` : "—"}</td>
+                        <td className="py-2 px-2 text-right">{item.unitCost != null ? <><SARIcon />{item.unitCost.toFixed(2)}</> : "—"}</td>
                         <td className="py-2 px-2">
                           {item.returnReason ? (
                             <Badge variant="outline" className="text-[10px] capitalize">{item.returnReason.replace(/_/g, " ")}</Badge>
@@ -897,6 +901,7 @@ function RowStatusAction({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 function StockTransfers() {
+  const { user } = useAuth();
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -905,8 +910,10 @@ function StockTransfers() {
   const [products, setProducts] = useState<Product[]>([]);
 
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [viewTransfer, setViewTransfer] = useState<StockTransfer | null>(null);
@@ -926,7 +933,7 @@ function StockTransfers() {
 
   const handleStatusAction = async (id: string, status: string) => {
     try {
-      await api.updateTransferStatus(id, status, status === "approved" ? "admin" : undefined);
+      await api.updateTransferStatus(id, status, status === "approved" ? user?.id : undefined);
       load();
     } catch (e) {
       console.error(e);
@@ -937,11 +944,13 @@ function StockTransfers() {
     const s = search.toLowerCase();
     return transfers.filter(t => {
       if (s && !t.transferNumber.toLowerCase().includes(s) && !getSourceLabel(t).toLowerCase().includes(s) && !getDestLabel(t).toLowerCase().includes(s)) return false;
-      if (typeFilter && t.transferType !== typeFilter) return false;
-      if (statusFilter && t.status !== statusFilter) return false;
+      if (typeFilter !== "all" && t.transferType !== typeFilter) return false;
+      if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      if (dateFrom && t.createdAt < dateFrom) return false;
+      if (dateTo && t.createdAt > dateTo + "T23:59:59") return false;
       return true;
     });
-  }, [transfers, search, typeFilter, statusFilter]);
+  }, [transfers, search, typeFilter, statusFilter, dateFrom, dateTo]);
 
   const today = todayStr();
   const totalTransfers = transfers.length;
@@ -986,7 +995,7 @@ function StockTransfers() {
             <SelectValue placeholder="All Transfer Types" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All Types</SelectItem>
+            <SelectItem value="all">All Types</SelectItem>
             {TRANSFER_TYPES.map(t => (
               <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
             ))}
@@ -1002,6 +1011,17 @@ function StockTransfers() {
             ))}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
+          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          <span className="text-xs text-muted-foreground">–</span>
+          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          {(dateFrom || dateTo) && (
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Table */}

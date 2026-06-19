@@ -1,4 +1,4 @@
-export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5008";
+export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("baqala_token") : null;
@@ -94,6 +94,10 @@ export const api = {
     request<InventoryBatch>("/api/inventory/batches", { method: "POST", body: JSON.stringify(data) }),
   adjustInventory: (data: AdjustInventoryPayload) =>
     request<{ id: string }>("/api/inventory/adjustments", { method: "POST", body: JSON.stringify(data) }),
+  getAdjustments: (params?: { branchId?: string; adjustmentType?: string }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v))).toString();
+    return request<InventoryAdjustment[]>(`/api/inventory/adjustments${q ? `?${q}` : ""}`);
+  },
 
   // Orders
   getOrders: (params?: { branchId?: string; status?: string; paymentStatus?: string; from?: string; to?: string }) => {
@@ -255,6 +259,10 @@ export const api = {
   },
   createReturn: (data: Partial<CustomerReturn>) =>
     request<CustomerReturn>("/api/returns", { method: "POST", body: JSON.stringify(data) }),
+  approveReturn: (id: string, approved: boolean) =>
+    request<CustomerReturn>(`/api/returns/${id}/approve`, { method: "PATCH", body: JSON.stringify({ approved }) }),
+  completeReturn: (id: string) =>
+    request<CustomerReturn>(`/api/returns/${id}/complete`, { method: "PATCH", body: JSON.stringify({}) }),
 
   // Compliance / ZATCA
   getZatcaInvoices: (params?: { branchId?: string; status?: string }) => {
@@ -310,6 +318,36 @@ export const api = {
     request<DeviceRecord>(`/api/devices/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   updateDeviceStatus: (id: string, status: string, syncStatus?: string) =>
     request<DeviceRecord>(`/api/devices/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, syncStatus }) }),
+
+  // Discounts
+  getDiscounts: (params?: { isActive?: boolean }) => {
+    const q = params?.isActive !== undefined ? `?isActive=${params.isActive}` : "";
+    return request<Discount[]>(`/api/discounts${q}`);
+  },
+  createDiscount: (data: Partial<Discount>) =>
+    request<Discount>("/api/discounts", { method: "POST", body: JSON.stringify(data) }),
+  updateDiscount: (id: string, data: Partial<Discount>) =>
+    request<Discount>(`/api/discounts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  toggleDiscount: (id: string) =>
+    request<Discount>(`/api/discounts/${id}/toggle`, { method: "PATCH" }),
+  deleteDiscount: (id: string) =>
+    request<void>(`/api/discounts/${id}`, { method: "DELETE" }),
+
+  // Offers
+  getOffers: (params?: { isActive?: boolean; offerType?: string }) => {
+    const entries = Object.entries(params ?? {}).filter(([, v]) => v !== undefined) as [string, string][];
+    const q = new URLSearchParams(Object.fromEntries(entries)).toString();
+    return request<Offer[]>(`/api/offers${q ? `?${q}` : ""}`);
+  },
+  getActiveOffers: () => request<Offer[]>("/api/offers/active"),
+  createOffer: (data: Partial<Offer>) =>
+    request<Offer>("/api/offers", { method: "POST", body: JSON.stringify(data) }),
+  updateOffer: (id: string, data: Partial<Offer>) =>
+    request<Offer>(`/api/offers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  toggleOffer: (id: string) =>
+    request<Offer>(`/api/offers/${id}/toggle`, { method: "PATCH" }),
+  deleteOffer: (id: string) =>
+    request<void>(`/api/offers/${id}`, { method: "DELETE" }),
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -353,13 +391,15 @@ export interface Product {
   id: string; sku: string; barcode?: string; name: string; nameAr?: string;
   categoryId?: string; brand?: string; basePrice: number; costPrice?: number;
   taxPercentage: number; customFee: number; reorderLevel: number;
-  status: string; weightBased: boolean;
+  status: string; weightBased: boolean; isTobacco: boolean;
+  category?: { id: string; name: string; nameAr?: string };
 }
 
 export interface InventoryStock {
   id: string; productId: string; branchId: string; quantity: number;
   reservedQuantity: number; reorderLevel: number; lastUpdated: string;
   product?: Product;
+  branch?: { id: string; name: string; branchCode?: string };
 }
 
 export interface InventoryBatch {
@@ -422,7 +462,7 @@ export interface Supplier {
 export interface Customer {
   id: string; customerCode: string; fullName: string; phone: string;
   email?: string; loyaltyBalance: number; totalSpend: number;
-  visitCount?: number; tier: string; status: string;
+  visitCount?: number; tier: string; status: string; createdAt?: string;
 }
 
 export interface LoyaltyTransaction {
@@ -446,6 +486,32 @@ export interface Coupon {
   id: string; code: string; name: string; type: string; value: number;
   usageLimit?: number; usedCount: number; startDate: string; endDate: string;
   status: string;
+}
+
+export interface Discount {
+  id: string; name: string; nameAr?: string;
+  appliesTo: string; // all | product | category | branch
+  productId?: string; categoryId?: string; branchId?: string;
+  discountType: string; // percentage | fixed
+  value: number; isActive: boolean;
+  startDate?: string; endDate?: string; createdAt: string;
+  product?: { id: string; name: string; sku: string };
+  branch?: { id: string; name: string };
+}
+
+export interface Offer {
+  id: string; name: string;
+  offerType: string; // bogo | combo | buy_a_get_b | product_offer | lucky_draw
+  branchId?: string;
+  triggerProductId?: string; getProductId?: string;
+  triggerQuantity: number; getQuantity: number;
+  offerPrice?: number; discountPercentage?: number;
+  itemsDescription?: string; minBasketAmount?: number; winners?: number;
+  usageLimit?: number; usedCount: number;
+  startDate: string; endDate: string; isActive: boolean; createdAt: string;
+  branch?: { id: string; name: string };
+  triggerProduct?: { id: string; name: string; sku: string };
+  getProduct?: { id: string; name: string; sku: string };
 }
 
 export interface TaxFeeRule {
@@ -482,9 +548,11 @@ export interface CustomerReturn {
 }
 
 export interface CustomerReturnItem {
-  id: string; returnId: string; productId: string;
-  quantity: number; unitPrice: number; refundAmount: number; restock: boolean;
-  product?: Product;
+  id?: string; returnId?: string; productId: string;
+  orderItemId?: string;
+  quantity: number; unitPrice: number; refundAmount: number;
+  condition: string; restock: boolean;
+  product?: { id: string; name: string; sku: string };
 }
 
 export interface ZatcaSettings {
@@ -526,7 +594,16 @@ export interface DeviceRecord {
 
 export interface AdjustInventoryPayload {
   productId: string; branchId: string; quantity: number;
-  adjustmentType: string; reason?: string;
+  adjustmentType: string; reason?: string; adjustedBy?: string;
+}
+
+export interface InventoryAdjustment {
+  id: string; productId: string; branchId: string;
+  quantity: number; adjustmentType: string; reason?: string;
+  adjustedBy?: string; createdAt: string;
+  product?: Product;
+  branch?: { id: string; name: string };
+  adjustedByUser?: { id: string; fullName: string };
 }
 
 export interface Warehouse {

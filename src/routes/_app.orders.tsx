@@ -11,9 +11,10 @@ import { Separator } from "@/components/ui/separator";
 import {
   Printer, Download, Globe, Pencil, Package, CreditCard,
   User, Store, ChevronRight, Loader2, RefreshCw,
-  CheckCircle2, XCircle, Clock, Truck, AlertCircle,
+  CheckCircle2, XCircle, Clock, Truck, AlertCircle, X,
 } from "lucide-react";
 import { api, type Order } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/orders")({ component: Orders });
 
@@ -219,9 +220,9 @@ function OrderDetail({ orderId, onStatusChanged }: {
             <div key={i} className="flex items-center justify-between text-sm bg-muted/30 rounded-lg px-3 py-2">
               <div>
                 <p className="font-medium">{(item as any).product?.name ?? "Product"}</p>
-                <p className="text-xs text-muted-foreground">SAR {item.unitPrice.toFixed(2)} × {item.quantity}</p>
+                <p className="text-xs text-muted-foreground"><SARIcon />{item.unitPrice.toFixed(2)} × {item.quantity}</p>
               </div>
-              <p className="font-semibold tabular-nums">SAR {item.totalPrice.toFixed(2)}</p>
+              <p className="font-semibold tabular-nums"><SARIcon />{item.totalPrice.toFixed(2)}</p>
             </div>
           ))}
           {(order.items ?? []).length === 0 && (
@@ -235,18 +236,18 @@ function OrderDetail({ orderId, onStatusChanged }: {
       {/* Totals */}
       <div className="space-y-1.5 text-sm">
         <div className="flex justify-between text-muted-foreground">
-          <span>Subtotal</span><span>SAR {order.subtotal.toFixed(2)}</span>
+          <span>Subtotal</span><span><SARIcon />{order.subtotal.toFixed(2)}</span>
         </div>
         {order.discountAmount > 0 && (
           <div className="flex justify-between text-red-600">
-            <span>Discount</span><span>-SAR {order.discountAmount.toFixed(2)}</span>
+            <span>Discount</span><span>-<SARIcon />{order.discountAmount.toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between text-muted-foreground">
-          <span>VAT</span><span>SAR {order.taxAmount.toFixed(2)}</span>
+          <span>VAT</span><span><SARIcon />{order.taxAmount.toFixed(2)}</span>
         </div>
         <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
-          <span>Total</span><span className="text-primary">SAR {order.totalAmount.toFixed(2)}</span>
+          <span>Total</span><span className="text-primary"><SARIcon />{order.totalAmount.toFixed(2)}</span>
         </div>
       </div>
 
@@ -297,6 +298,8 @@ function POSTab() {
   const [brFilter, setBrFilter] = useState("all");
   const [stFilter, setStFilter] = useState("all");
   const [payFilter, setPayFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const load = () => {
@@ -314,6 +317,8 @@ function POSTab() {
     if (brFilter !== "all" && o.branch?.name !== brFilter) return false;
     if (stFilter !== "all" && o.orderStatus !== stFilter) return false;
     if (payFilter !== "all" && o.paymentStatus !== payFilter) return false;
+    if (dateFrom && o.createdAt < dateFrom) return false;
+    if (dateTo && o.createdAt > dateTo + "T23:59:59") return false;
     return true;
   }), [orders, q, brFilter, stFilter, payFilter]);
 
@@ -327,7 +332,7 @@ function POSTab() {
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Total Orders", value: filtered.length, color: "text-foreground" },
-          { label: "Revenue", value: `SAR ${totalRevenue.toFixed(2)}`, color: "text-primary" },
+          { label: "Revenue", value: <><SARIcon />{totalRevenue.toFixed(2)}</>, color: "text-primary" },
           { label: "Pending", value: pendingCount, color: "text-yellow-600" },
         ].map(c => (
           <Card key={c.label} className="px-4 py-3 border-border/60 shadow-card">
@@ -361,6 +366,17 @@ function POSTab() {
             {PAYMENT_STATUSES.map(s => <SelectItem key={s} value={s} className="capitalize">{s.replace(/_/g, " ")}</SelectItem>)}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Order Date:</span>
+          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          <span className="text-xs text-muted-foreground">–</span>
+          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          {(dateFrom || dateTo) && (
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={load}>
           <RefreshCw className="h-4 w-4" /> Refresh
@@ -404,7 +420,7 @@ function POSTab() {
                     <td className="px-3 py-3 font-mono text-xs font-bold text-primary">{o.orderNumber}</td>
                     <td className="px-3 py-3 text-xs">{o.branch?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{o.cashier?.fullName ?? "—"}</td>
-                    <td className="px-3 py-3 tabular-nums font-semibold">SAR {o.totalAmount.toFixed(2)}</td>
+                    <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{o.totalAmount.toFixed(2)}</td>
                     <td className="px-3 py-3"><SBadge status={o.orderStatus} /></td>
                     <td className="px-3 py-3"><SBadge status={o.paymentStatus} /></td>
                     <td className="px-3 py-3 text-xs text-muted-foreground">

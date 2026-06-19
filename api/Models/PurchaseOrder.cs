@@ -10,8 +10,8 @@ public class PurchaseOrder
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("po_number")]
-    public string PoNumber { get; set; } = default!;
+    [MaxLength(50), Column("po_number")]
+    public string? PoNumber { get; set; }
 
     [Required, Column("supplier_id")]
     public Guid SupplierId { get; set; }
@@ -69,10 +69,10 @@ public class PurchaseOrder
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Supplier Supplier { get; set; } = default!;
+    public Supplier? Supplier { get; set; }
     public Warehouse? Warehouse { get; set; }
     public Branch? Branch { get; set; }
-    public User OrderedByUser { get; set; } = default!;
+    public User? OrderedByUser { get; set; }
     public User? ApprovedByUser { get; set; }
     public ICollection<PurchaseOrderItem> Items { get; set; } = [];
     public ICollection<SupplierPayment> Payments { get; set; } = [];
@@ -116,8 +116,8 @@ public class PurchaseOrderItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    [JsonIgnore] public PurchaseOrder PurchaseOrder { get; set; } = default!;
-    public Product Product { get; set; } = default!;
+    [JsonIgnore] public PurchaseOrder? PurchaseOrder { get; set; }
+    public Product? Product { get; set; }
 }
 
 [Table("supplier_payments")]
@@ -159,7 +159,7 @@ public class SupplierPayment
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    [JsonIgnore] public PurchaseOrder PurchaseOrder { get; set; } = default!;
-    public Supplier Supplier { get; set; } = default!;
-    public User RecordedByUser { get; set; } = default!;
+    [JsonIgnore] public PurchaseOrder? PurchaseOrder { get; set; }
+    public Supplier? Supplier { get; set; }
+    public User? RecordedByUser { get; set; }
 }

@@ -85,15 +85,15 @@ public class AuthController(BaqalaDbContext db, IConfiguration config) : Control
 
     private static string ToAppRole(string roleName) => roleName switch
     {
-        "Tenant Administrator" => "tenant_admin",
-        "Branch Manager"      => "branch_manager",
-        "Cashier"             => "cashier",
-        "Storekeeper"         => "storekeeper",
-        "Supervisor"          => "supervisor",
-        "Finance User"        => "finance_user",
-        "Marketing User"      => "marketing_user",
-        "Picker"              => "picker",
-        _                     => roleName.ToLower().Replace(' ', '_')
+        "Tenant Administrator" or "Admin"            => "tenant_admin",
+        "Branch Manager"       or "Manager"          => "branch_manager",
+        "Cashier"                                    => "cashier",
+        "Storekeeper"          or "Inventory Staff"  => "storekeeper",
+        "Supervisor"                                 => "supervisor",
+        "Finance User"         or "Accountant"       => "finance_user",
+        "Marketing User"       or "Auditor"          => "marketing_user",
+        "Picker"               or "Warehouse Staff"  => "picker",
+        _                                            => roleName.ToLower().Replace(' ', '_')
     };
 
     private static string HashPassword(string plain) =>

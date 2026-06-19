@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, type CashierShift, type Order } from "@/lib/api";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/cashier")({ component: CashierWorkspace });
 
@@ -23,7 +24,7 @@ function elapsed(openedAt: string) {
 }
 
 function fmtMoney(n: number) {
-  return `ر.س ${n.toLocaleString("en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return fmtSAR(n);
 }
 
 // ─── Tile definitions (dynamic, built from runtime data) ─────────────────────
@@ -173,8 +174,8 @@ function CashierWorkspace() {
           <div className="flex gap-2 flex-wrap">
             {[
               { label: "Today's Orders", value: todayOrders.length },
-              { label: "Today's Revenue", value: fmtMoney(todayRevenue) },
-              { label: "Cash in Drawer", value: shift ? fmtMoney(cashInDrawer) : "—" },
+              { label: "Today's Revenue", value: <><SARIcon />{fmtMoney(todayRevenue)}</> },
+              { label: "Cash in Drawer", value: shift ? <><SARIcon />{fmtMoney(cashInDrawer)}</> : "—" },
             ].map(stat => (
               <div key={stat.label} className="rounded-xl bg-white/15 backdrop-blur border border-white/20 px-4 py-2 min-w-[100px]">
                 <p className="text-[10px] uppercase opacity-80">{stat.label}</p>
@@ -196,10 +197,10 @@ function CashierWorkspace() {
       {shift && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Opening Amount", value: fmtMoney(shift.openingAmount) },
-            { label: "Cash Sales", value: fmtMoney(shift.cashSales) },
-            { label: "Card Sales", value: fmtMoney(shift.cardSales) },
-            { label: "Wallet Sales", value: fmtMoney(shift.digitalSales) },
+            { label: "Opening Amount", value: <><SARIcon />{fmtMoney(shift.openingAmount)}</> },
+            { label: "Cash Sales", value: <><SARIcon />{fmtMoney(shift.cashSales)}</> },
+            { label: "Card Sales", value: <><SARIcon />{fmtMoney(shift.cardSales)}</> },
+            { label: "Wallet Sales", value: <><SARIcon />{fmtMoney(shift.digitalSales)}</> },
           ].map(m => (
             <Card key={m.label} className="px-4 py-3 border-border/60 shadow-card">
               <p className="text-xs text-muted-foreground">{m.label}</p>
@@ -271,7 +272,7 @@ function CashierWorkspace() {
                   <tr key={o.id} className="border-t border-border/30 hover:bg-muted/20">
                     <td className="px-4 py-2 font-mono text-xs font-bold text-primary">{o.orderNumber}</td>
                     <td className="px-4 py-2 text-xs text-muted-foreground">{o.customer?.fullName ?? "Walk-in"}</td>
-                    <td className="px-4 py-2 font-semibold tabular-nums">SAR {o.totalAmount.toFixed(2)}</td>
+                    <td className="px-4 py-2 font-semibold tabular-nums"><SARIcon />{o.totalAmount.toFixed(2)}</td>
                     <td className="px-4 py-2">
                       <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
                         o.paymentStatus === "paid" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"

@@ -39,7 +39,7 @@ public class StaffAttendance
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public User User { get; set; } = default!;
-    public Branch Branch { get; set; } = default!;
+    public User? User { get; set; }
+    public Branch? Branch { get; set; }
     public User? RecordedByUser { get; set; }
 }

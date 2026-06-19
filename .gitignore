@@ -22,6 +22,8 @@ dist-ssr
 # Local env files — contain secrets
 *.local
 .dev.vars
+.env
+.env.*
 
 # Wrangler / Cloudflare
 .wrangler/

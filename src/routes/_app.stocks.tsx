@@ -1,363 +1,992 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { MetricCard } from "@/components/metric-card";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter, SheetTrigger } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
   Boxes, ArrowDownToLine, ArrowUpFromLine, ClipboardCheck, Truck, Undo2,
-  Trash2, ScanLine, Plus, CheckCircle2, AlertTriangle, History, FileBarChart,
+  Trash2, Plus, History, FileBarChart, ScanLine, Package, AlertTriangle,
+  TrendingUp, BarChart3, Download, CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  api, Branch, Product, Supplier, Warehouse,
+  InventoryStock, InventoryBatch, InventoryAdjustment,
+  PurchaseOrder, StockTransfer,
+} from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app/stocks")({ component: Stocks });
 
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function fmt(n: number) { return n.toLocaleString("en-SA", { minimumFractionDigits: 0 }); }
+function fmtDate(d?: string) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" }); }
+function fmtTime(d?: string) { if (!d) return "—"; return new Date(d).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" }); }
+
+function StBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    active: "bg-green-100 text-green-700",
+    pending: "bg-yellow-100 text-yellow-700",
+    completed: "bg-blue-100 text-blue-700",
+    cancelled: "bg-red-100 text-red-700",
+    partial: "bg-orange-100 text-orange-700",
+    partial_received: "bg-orange-100 text-orange-700",
+    fully_received: "bg-green-100 text-green-700",
+    approved: "bg-emerald-100 text-emerald-700",
+    draft: "bg-gray-100 text-gray-600",
+    expired: "bg-red-100 text-red-700",
+    damage: "bg-red-100 text-red-700",
+    reduction: "bg-orange-100 text-orange-700",
+    addition: "bg-green-100 text-green-700",
+    transfer_in: "bg-blue-100 text-blue-700",
+    return_to_supplier: "bg-purple-100 text-purple-700",
+    warehouse_to_branch: "bg-indigo-100 text-indigo-700",
+    branch_to_branch: "bg-cyan-100 text-cyan-700",
+    confirmed: "bg-teal-100 text-teal-700",
+  };
+  const cls = map[status] ?? "bg-gray-100 text-gray-600";
+  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{status.replace(/_/g, " ")}</span>;
+}
+
+// ─── Stock-In dialog ─────────────────────────────────────────────────────────
+
+function StockInDialog({ branches, products, suppliers, onDone }: { branches: Branch[]; products: Product[]; suppliers: Supplier[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ productId: "", branchId: "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "" });
+
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSave() {
+    if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
+    setSaving(true);
+    try {
+      await api.receiveBatch({
+        productId: form.productId, branchId: form.branchId,
+        supplierId: form.supplierId || undefined,
+        quantity: Number(form.quantity),
+        purchaseCost: form.purchaseCost ? Number(form.purchaseCost) : undefined,
+        expiryDate: form.expiryDate || undefined,
+        batchNumber: form.batchNumber || undefined,
+        notes: form.notes || undefined,
+      } as Parameters<typeof api.receiveBatch>[0]);
+      toast.success("Stock-In recorded");
+      setOpen(false);
+      setForm({ productId: "", branchId: "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "" });
+      onDone();
+    } catch { toast.error("Failed to record stock-in"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" /> Add Stock-In
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Add Stock-In</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="col-span-2">
+              <Label>Product *</Label>
+              <Select value={form.productId} onValueChange={v => set("productId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Branch *</Label>
+              <Select value={form.branchId} onValueChange={v => set("branchId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Supplier</Label>
+              <Select value={form.supplierId} onValueChange={v => set("supplierId", v)}>
+                <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Quantity *</Label>
+              <Input type="number" min="1" value={form.quantity} onChange={e => set("quantity", e.target.value)} placeholder="0" />
+            </div>
+            <div>
+              <Label>Purchase Cost (SAR)</Label>
+              <Input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={e => set("purchaseCost", e.target.value)} placeholder="0.00" />
+            </div>
+            <div>
+              <Label>Expiry Date</Label>
+              <Input type="date" value={form.expiryDate} onChange={e => set("expiryDate", e.target.value)} />
+            </div>
+            <div>
+              <Label>Batch Number</Label>
+              <Input value={form.batchNumber} onChange={e => set("batchNumber", e.target.value)} placeholder="Auto-generated if blank" />
+            </div>
+            <div className="col-span-2">
+              <Label>Notes</Label>
+              <Textarea rows={2} value={form.notes} onChange={e => set("notes", e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Stock-Out dialog ────────────────────────────────────────────────────────
+
+function StockOutDialog({ branches, products, onDone }: { branches: Branch[]; products: Product[]; onDone: () => void }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ productId: "", branchId: "", quantity: "", reason: "" });
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSave() {
+    if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
+    setSaving(true);
+    try {
+      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "reduction", reason: form.reason || undefined, adjustedBy: user?.id });
+      toast.success("Stock-Out recorded");
+      setOpen(false);
+      setForm({ productId: "", branchId: "", quantity: "", reason: "" });
+      onDone();
+    } catch { toast.error("Failed to record stock-out"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" /> Add Stock-Out
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Add Stock-Out</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="col-span-2">
+              <Label>Product *</Label>
+              <Select value={form.productId} onValueChange={v => set("productId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Branch *</Label>
+              <Select value={form.branchId} onValueChange={v => set("branchId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Quantity *</Label>
+              <Input type="number" min="1" value={form.quantity} onChange={e => set("quantity", e.target.value)} placeholder="0" />
+            </div>
+            <div className="col-span-2">
+              <Label>Reason</Label>
+              <Textarea rows={2} value={form.reason} onChange={e => set("reason", e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── GRN Receive dialog ──────────────────────────────────────────────────────
+
+function GrnReceiveDialog({ po, onDone }: { po: PurchaseOrder; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [quantities, setQuantities] = useState<Record<string, string>>({});
+
+  function initQty() {
+    const init: Record<string, string> = {};
+    (po.items ?? []).forEach(it => { init[it.productId] = String(it.orderedQuantity - it.receivedQuantity); });
+    setQuantities(init);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const items = Object.entries(quantities)
+        .filter(([, q]) => Number(q) > 0)
+        .map(([productId, q]) => ({ productId, quantity: Number(q) }));
+      if (!items.length) { toast.error("No quantities entered"); setSaving(false); return; }
+      await api.receivePurchaseOrder(po.id, items);
+      toast.success(`GRN recorded for ${po.poNumber}`);
+      setOpen(false);
+      onDone();
+    } catch { toast.error("Failed to record GRN"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <>
+      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => { initQty(); setOpen(true); }}>Receive</Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Receive PO — {po.poNumber}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground mb-2">Enter quantities received for each item.</p>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {(po.items ?? []).map(it => (
+              <div key={it.productId} className="flex items-center gap-3">
+                <span className="flex-1 text-sm">{it.product?.name ?? it.productId}</span>
+                <span className="text-xs text-muted-foreground">Ordered: {it.orderedQuantity} / Rcvd: {it.receivedQuantity}</span>
+                <Input className="w-24" type="number" min="0" max={it.orderedQuantity - it.receivedQuantity}
+                  value={quantities[it.productId] ?? ""} onChange={e => setQuantities(q => ({ ...q, [it.productId]: e.target.value }))} />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Confirm Receive"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Store Delivery dialog ────────────────────────────────────────────────────
+
+function StoreDeliveryDialog({ branches, warehouses, products, onDone }: { branches: Branch[]; warehouses: Warehouse[]; products: Product[]; onDone: () => void }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ sourceWarehouseId: "", destBranchId: "", notes: "", expectedDate: "" });
+  const [items, setItems] = useState([{ productId: "", quantity: "" }]);
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSave() {
+    if (!form.sourceWarehouseId || !form.destBranchId) { toast.error("Source warehouse and destination branch are required"); return; }
+    const validItems = items.filter(it => it.productId && Number(it.quantity) > 0);
+    if (!validItems.length) { toast.error("Add at least one item"); return; }
+    setSaving(true);
+    try {
+      await api.createStockTransfer({
+        transferType: "warehouse_to_branch",
+        sourceWarehouseId: form.sourceWarehouseId,
+        destBranchId: form.destBranchId,
+        createdBy: user?.id ?? "",
+        status: "pending",
+        notes: form.notes || undefined,
+        expectedDate: form.expectedDate || undefined,
+        items: validItems.map(it => ({ productId: it.productId, requestedQuantity: Number(it.quantity) })) as StockTransfer["items"],
+      });
+      toast.success("Store delivery created");
+      setOpen(false);
+      setForm({ sourceWarehouseId: "", destBranchId: "", notes: "", expectedDate: "" });
+      setItems([{ productId: "", quantity: "" }]);
+      onDone();
+    } catch { toast.error("Failed to create delivery"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" /> New Delivery
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>New Store Delivery</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div>
+              <Label>From Warehouse *</Label>
+              <Select value={form.sourceWarehouseId} onValueChange={v => set("sourceWarehouseId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select warehouse" /></SelectTrigger>
+                <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>To Branch *</Label>
+              <Select value={form.destBranchId} onValueChange={v => set("destBranchId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Expected Date</Label>
+              <Input type="date" value={form.expectedDate} onChange={e => set("expectedDate", e.target.value)} />
+            </div>
+            <div>
+              <Label>Notes</Label>
+              <Input value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Optional" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Items</Label>
+            {items.map((it, i) => (
+              <div key={i} className="flex gap-2">
+                <Select value={it.productId} onValueChange={v => setItems(arr => arr.map((x, j) => j === i ? { ...x, productId: v } : x))}>
+                  <SelectTrigger className="flex-1"><SelectValue placeholder="Product" /></SelectTrigger>
+                  <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Input className="w-24" type="number" min="1" placeholder="Qty" value={it.quantity}
+                  onChange={e => setItems(arr => arr.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
+                {items.length > 1 && <Button size="sm" variant="ghost" onClick={() => setItems(arr => arr.filter((_, j) => j !== i))}>×</Button>}
+              </div>
+            ))}
+            <Button size="sm" variant="outline" onClick={() => setItems(arr => [...arr, { productId: "", quantity: "" }])}>+ Add Item</Button>
+          </div>
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Create Delivery"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Supplier Return dialog ───────────────────────────────────────────────────
+
+function SupplierReturnDialog({ branches, suppliers, products, onDone }: { branches: Branch[]; suppliers: Supplier[]; products: Product[]; onDone: () => void }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ sourceBranchId: "", destSupplierId: "", returnReason: "", notes: "" });
+  const [items, setItems] = useState([{ productId: "", quantity: "" }]);
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSave() {
+    if (!form.sourceBranchId || !form.destSupplierId) { toast.error("Branch and supplier are required"); return; }
+    const validItems = items.filter(it => it.productId && Number(it.quantity) > 0);
+    if (!validItems.length) { toast.error("Add at least one item"); return; }
+    setSaving(true);
+    try {
+      await api.createStockTransfer({
+        transferType: "return_to_supplier",
+        sourceBranchId: form.sourceBranchId,
+        destSupplierId: form.destSupplierId,
+        createdBy: user?.id ?? "",
+        status: "pending",
+        returnReason: form.returnReason || undefined,
+        notes: form.notes || undefined,
+        items: validItems.map(it => ({ productId: it.productId, requestedQuantity: Number(it.quantity), returnReason: form.returnReason || undefined })) as StockTransfer["items"],
+      });
+      toast.success("Supplier return created");
+      setOpen(false);
+      setForm({ sourceBranchId: "", destSupplierId: "", returnReason: "", notes: "" });
+      setItems([{ productId: "", quantity: "" }]);
+      onDone();
+    } catch { toast.error("Failed to create return"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" /> Create Return
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Return to Supplier</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div>
+              <Label>From Branch *</Label>
+              <Select value={form.sourceBranchId} onValueChange={v => set("sourceBranchId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Return to Supplier *</Label>
+              <Select value={form.destSupplierId} onValueChange={v => set("destSupplierId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="col-span-2">
+              <Label>Return Reason</Label>
+              <Input value={form.returnReason} onChange={e => set("returnReason", e.target.value)} placeholder="e.g. damaged, expired, wrong item" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Items</Label>
+            {items.map((it, i) => (
+              <div key={i} className="flex gap-2">
+                <Select value={it.productId} onValueChange={v => setItems(arr => arr.map((x, j) => j === i ? { ...x, productId: v } : x))}>
+                  <SelectTrigger className="flex-1"><SelectValue placeholder="Product" /></SelectTrigger>
+                  <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Input className="w-24" type="number" min="1" placeholder="Qty" value={it.quantity}
+                  onChange={e => setItems(arr => arr.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
+                {items.length > 1 && <Button size="sm" variant="ghost" onClick={() => setItems(arr => arr.filter((_, j) => j !== i))}>×</Button>}
+              </div>
+            ))}
+            <Button size="sm" variant="outline" onClick={() => setItems(arr => [...arr, { productId: "", quantity: "" }])}>+ Add Item</Button>
+          </div>
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Submit Return"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Wastage dialog ───────────────────────────────────────────────────────────
+
+function WastageDialog({ branches, products, onDone }: { branches: Branch[]; products: Product[]; onDone: () => void }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ productId: "", branchId: "", quantity: "", reason: "" });
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSave() {
+    if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
+    setSaving(true);
+    try {
+      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "damage", reason: form.reason || undefined, adjustedBy: user?.id });
+      toast.success("Wastage recorded");
+      setOpen(false);
+      setForm({ productId: "", branchId: "", quantity: "", reason: "" });
+      onDone();
+    } catch { toast.error("Failed to record wastage"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" /> Record Wastage
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Record Wastage / Damage</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="col-span-2">
+              <Label>Product *</Label>
+              <Select value={form.productId} onValueChange={v => set("productId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Branch *</Label>
+              <Select value={form.branchId} onValueChange={v => set("branchId", v)}>
+                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Quantity *</Label>
+              <Input type="number" min="1" value={form.quantity} onChange={e => set("quantity", e.target.value)} placeholder="0" />
+            </div>
+            <div className="col-span-2">
+              <Label>Reason / Notes</Label>
+              <Textarea rows={2} value={form.reason} onChange={e => set("reason", e.target.value)} placeholder="e.g. expired, damaged in transit…" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 function Stocks() {
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+
+  const [stock, setStock] = useState<InventoryStock[]>([]);
+  const [batches, setBatches] = useState<InventoryBatch[]>([]);
+  const [reductions, setReductions] = useState<InventoryAdjustment[]>([]);
+  const [damages, setDamages] = useState<InventoryAdjustment[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [deliveries, setDeliveries] = useState<StockTransfer[]>([]);
+  const [returns, setReturns] = useState<StockTransfer[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("overview");
+  const [search, setSearch] = useState("");
+
+  async function loadAll() {
+    setLoading(true);
+    try {
+      const [br, pr, su, wh, sk, bt, rd, dm, po, dl, rt] = await Promise.allSettled([
+        api.getBranches(),
+        api.getProducts(),
+        api.getSuppliers(),
+        api.getWarehouses(),
+        api.getStock(),
+        api.getBatches(),
+        api.getAdjustments({ adjustmentType: "reduction" }),
+        api.getAdjustments({ adjustmentType: "damage" }),
+        api.getPurchaseOrders(),
+        api.getStockTransfers({ transferType: "warehouse_to_branch" }),
+        api.getStockTransfers({ transferType: "return_to_supplier" }),
+      ]);
+      if (br.status === "fulfilled") setBranches(br.value ?? []);
+      if (pr.status === "fulfilled") setProducts(pr.value ?? []);
+      if (su.status === "fulfilled") setSuppliers(su.value ?? []);
+      if (wh.status === "fulfilled") setWarehouses(wh.value ?? []);
+      if (sk.status === "fulfilled") setStock(sk.value ?? []);
+      if (bt.status === "fulfilled") setBatches(bt.value ?? []);
+      if (rd.status === "fulfilled") setReductions(rd.value ?? []);
+      if (dm.status === "fulfilled") setDamages(dm.value ?? []);
+      if (po.status === "fulfilled") setPurchaseOrders(po.value ?? []);
+      if (dl.status === "fulfilled") setDeliveries(dl.value ?? []);
+      if (rt.status === "fulfilled") setReturns(rt.value ?? []);
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => { loadAll(); }, []);
+
+  async function refreshPartial() {
+    const [sk, bt, rd, dm, po, dl, rt] = await Promise.allSettled([
+      api.getStock(), api.getBatches(),
+      api.getAdjustments({ adjustmentType: "reduction" }),
+      api.getAdjustments({ adjustmentType: "damage" }),
+      api.getPurchaseOrders(),
+      api.getStockTransfers({ transferType: "warehouse_to_branch" }),
+      api.getStockTransfers({ transferType: "return_to_supplier" }),
+    ]);
+    if (sk.status === "fulfilled") setStock(sk.value ?? []);
+    if (bt.status === "fulfilled") setBatches(bt.value ?? []);
+    if (rd.status === "fulfilled") setReductions(rd.value ?? []);
+    if (dm.status === "fulfilled") setDamages(dm.value ?? []);
+    if (po.status === "fulfilled") setPurchaseOrders(po.value ?? []);
+    if (dl.status === "fulfilled") setDeliveries(dl.value ?? []);
+    if (rt.status === "fulfilled") setReturns(rt.value ?? []);
+  }
+
+  // Metrics
+  const totalSKUs = stock.length;
+  const totalUnits = stock.reduce((s, x) => s + x.quantity, 0);
+  const lowStockCount = stock.filter(x => x.quantity <= x.reorderLevel).length;
+  const expiringSoon = batches.filter(b => {
+    if (!b.expiryDate || b.remainingQuantity <= 0) return false;
+    const diff = (new Date(b.expiryDate).getTime() - Date.now()) / 86400000;
+    return diff >= 0 && diff <= 30;
+  }).length;
+
+  const q = search.toLowerCase();
+  const filteredStock = stock.filter(s => !q || s.product?.name?.toLowerCase().includes(q));
+
+  // Movement timeline
+  type Event = { date: string; type: string; label: string; qty: number; detail: string };
+  const events: Event[] = [
+    ...batches.map(b => ({ date: b.receivedDate ?? "", type: "in", label: b.product?.name ?? "—", qty: b.quantity, detail: `Batch ${b.batchNumber} — ${b.supplier?.name ?? ""}` })),
+    ...reductions.map(a => ({ date: a.createdAt, type: "out", label: a.product?.name ?? "—", qty: a.quantity, detail: a.reason ?? "Reduction" })),
+    ...damages.map(a => ({ date: a.createdAt, type: "damage", label: a.product?.name ?? "—", qty: a.quantity, detail: a.reason ?? "Damage" })),
+    ...deliveries.map(t => ({ date: t.createdAt, type: "delivery", label: t.destBranch?.name ?? "—", qty: t.items?.reduce((s, i) => s + i.requestedQuantity, 0) ?? 0, detail: t.transferNumber })),
+    ...returns.map(t => ({ date: t.createdAt, type: "return", label: t.destSupplier?.name ?? "—", qty: t.items?.reduce((s, i) => s + i.requestedQuantity, 0) ?? 0, detail: t.transferNumber })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const movColor: Record<string, string> = {
+    in: "bg-green-100 text-green-700",
+    out: "bg-orange-100 text-orange-700",
+    damage: "bg-red-100 text-red-700",
+    delivery: "bg-blue-100 text-blue-700",
+    return: "bg-purple-100 text-purple-700",
+  };
+
   return (
     <PageShell
       title="Stocks"
       subtitle="Stock-In · Stock-Out · GRN · Transfers · Wastage · Movement"
       actions={
-        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow animate-pulse-soft" onClick={() => toast.success("Scanner ready — point at barcode")}>
-          <ScanLine className="h-4 w-4" />Scan Item
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => toast.success("Scanner ready — point at barcode")}>
+          <ScanLine className="h-4 w-4" /> Scan Item
         </Button>
       }
     >
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total SKUs" value="1,284" icon={Boxes} accent="primary" />
-        <MetricCard label="Stock-In Today" value="312" icon={ArrowDownToLine} accent="success" />
-        <MetricCard label="Stock-Out Today" value="248" icon={ArrowUpFromLine} accent="warning" />
-        <MetricCard label="Pending Approvals" value="6" icon={ClipboardCheck} accent="destructive" />
+      {/* Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <MetricCard label="Total SKUs" value={String(totalSKUs)} icon={Boxes} />
+        <MetricCard label="Total Units" value={fmt(totalUnits)} icon={Package} />
+        <MetricCard label="Low Stock" value={String(lowStockCount)} icon={AlertTriangle} trend={lowStockCount > 0 ? "down" : undefined} />
+        <MetricCard label="Expiring (30d)" value={String(expiringSoon)} icon={TrendingUp} />
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="flex flex-wrap h-auto">
-          <TabsTrigger value="overview"><Boxes className="h-3.5 w-3.5 mr-1.5" />Overview</TabsTrigger>
-          <TabsTrigger value="in"><ArrowDownToLine className="h-3.5 w-3.5 mr-1.5" />Stock-In</TabsTrigger>
-          <TabsTrigger value="out"><ArrowUpFromLine className="h-3.5 w-3.5 mr-1.5" />Stock-Out</TabsTrigger>
-          <TabsTrigger value="grn"><ClipboardCheck className="h-3.5 w-3.5 mr-1.5" />GRN</TabsTrigger>
-          <TabsTrigger value="delivery"><Truck className="h-3.5 w-3.5 mr-1.5" />Store Delivery</TabsTrigger>
-          <TabsTrigger value="return"><Undo2 className="h-3.5 w-3.5 mr-1.5" />Supplier Return</TabsTrigger>
-          <TabsTrigger value="wastage"><Trash2 className="h-3.5 w-3.5 mr-1.5" />Wastage</TabsTrigger>
-          <TabsTrigger value="movement"><History className="h-3.5 w-3.5 mr-1.5" />Movement</TabsTrigger>
-          <TabsTrigger value="reports"><FileBarChart className="h-3.5 w-3.5 mr-1.5" />Reports</TabsTrigger>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="mb-4 flex-wrap h-auto gap-1">
+          <TabsTrigger value="overview" className="gap-1.5"><Boxes className="h-3.5 w-3.5" />Overview</TabsTrigger>
+          <TabsTrigger value="stock-in" className="gap-1.5"><ArrowDownToLine className="h-3.5 w-3.5" />Stock-In</TabsTrigger>
+          <TabsTrigger value="stock-out" className="gap-1.5"><ArrowUpFromLine className="h-3.5 w-3.5" />Stock-Out</TabsTrigger>
+          <TabsTrigger value="grn" className="gap-1.5"><ClipboardCheck className="h-3.5 w-3.5" />GRN</TabsTrigger>
+          <TabsTrigger value="delivery" className="gap-1.5"><Truck className="h-3.5 w-3.5" />Store Delivery</TabsTrigger>
+          <TabsTrigger value="supplier-return" className="gap-1.5"><Undo2 className="h-3.5 w-3.5" />Supplier Return</TabsTrigger>
+          <TabsTrigger value="wastage" className="gap-1.5"><Trash2 className="h-3.5 w-3.5" />Wastage</TabsTrigger>
+          <TabsTrigger value="movement" className="gap-1.5"><History className="h-3.5 w-3.5" />Movement</TabsTrigger>
+          <TabsTrigger value="reports" className="gap-1.5"><FileBarChart className="h-3.5 w-3.5" />Reports</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="mt-4"><Overview /></TabsContent>
-        <TabsContent value="in" className="mt-4"><StockIn /></TabsContent>
-        <TabsContent value="out" className="mt-4"><StockOut /></TabsContent>
-        <TabsContent value="grn" className="mt-4"><GRN /></TabsContent>
-        <TabsContent value="delivery" className="mt-4"><StoreDelivery /></TabsContent>
-        <TabsContent value="return" className="mt-4"><SupplierReturn /></TabsContent>
-        <TabsContent value="wastage" className="mt-4"><Wastage /></TabsContent>
-        <TabsContent value="movement" className="mt-4"><Movement /></TabsContent>
-        <TabsContent value="reports" className="mt-4"><Reports /></TabsContent>
+        {/* ── Overview ── */}
+        <TabsContent value="overview">
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-base">Stock Overview</CardTitle>
+              <Input className="w-52 h-8" placeholder="Search product…" value={search} onChange={e => setSearch(e.target.value)} />
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Product</th>
+                      <th className="px-4 py-2 text-left">Branch</th>
+                      <th className="px-4 py-2 text-right">Qty</th>
+                      <th className="px-4 py-2 text-right">Reserved</th>
+                      <th className="px-4 py-2 text-right">Reorder Lvl</th>
+                      <th className="px-4 py-2 text-left">Status</th>
+                      <th className="px-4 py-2 text-left">Last Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                    ) : filteredStock.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No stock records found</td></tr>
+                    ) : filteredStock.map(s => {
+                      const isLow = s.quantity <= s.reorderLevel;
+                      const branch = branches.find(b => b.id === s.branchId);
+                      return (
+                        <tr key={s.id} className="border-t hover:bg-muted/20">
+                          <td className="px-4 py-2.5 font-medium">{s.product?.name ?? "—"}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground">{branch?.name ?? s.branchId}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold">{fmt(s.quantity)}</td>
+                          <td className="px-4 py-2.5 text-right text-muted-foreground">{fmt(s.reservedQuantity ?? 0)}</td>
+                          <td className="px-4 py-2.5 text-right text-muted-foreground">{s.reorderLevel}</td>
+                          <td className="px-4 py-2.5">
+                            {isLow ? <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700"><AlertTriangle className="h-3 w-3" />Low</span>
+                              : <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700"><CheckCircle2 className="h-3 w-3 mr-0.5" />OK</span>}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs">{fmtDate(s.lastUpdated)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Stock-In ── */}
+        <TabsContent value="stock-in">
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-base">Stock-In Records</CardTitle>
+              <StockInDialog branches={branches} products={products} suppliers={suppliers} onDone={refreshPartial} />
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Batch #</th>
+                      <th className="px-4 py-2 text-left">Product</th>
+                      <th className="px-4 py-2 text-left">Supplier</th>
+                      <th className="px-4 py-2 text-right">Qty</th>
+                      <th className="px-4 py-2 text-right">Remaining</th>
+                      <th className="px-4 py-2 text-right">Cost</th>
+                      <th className="px-4 py-2 text-left">Expiry</th>
+                      <th className="px-4 py-2 text-left">Received</th>
+                      <th className="px-4 py-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                    ) : batches.length === 0 ? (
+                      <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No batches found</td></tr>
+                    ) : batches.map(b => (
+                      <tr key={b.id} className="border-t hover:bg-muted/20">
+                        <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{b.batchNumber}</td>
+                        <td className="px-4 py-2.5 font-medium">{b.product?.name ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{b.supplier?.name ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-right">{fmt(b.quantity)}</td>
+                        <td className="px-4 py-2.5 text-right">{fmt(b.remainingQuantity)}</td>
+                        <td className="px-4 py-2.5 text-right">{b.purchaseCost != null ? `${b.purchaseCost.toFixed(2)} SAR` : "—"}</td>
+                        <td className="px-4 py-2.5">{b.expiryDate ? <ExpiryCell date={b.expiryDate} /> : "—"}</td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground">{fmtDate(b.receivedDate)}</td>
+                        <td className="px-4 py-2.5"><StBadge status={b.status} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Stock-Out ── */}
+        <TabsContent value="stock-out">
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-base">Stock-Out Records</CardTitle>
+              <StockOutDialog branches={branches} products={products} onDone={refreshPartial} />
+            </CardHeader>
+            <CardContent className="p-0">
+              <AdjustmentTable rows={reductions} branches={branches} loading={loading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── GRN ── */}
+        <TabsContent value="grn">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Goods Received Notes</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
+                    <tr>
+                      <th className="px-4 py-2 text-left">PO #</th>
+                      <th className="px-4 py-2 text-left">Supplier</th>
+                      <th className="px-4 py-2 text-left">Warehouse / Branch</th>
+                      <th className="px-4 py-2 text-right">Total</th>
+                      <th className="px-4 py-2 text-left">ETA</th>
+                      <th className="px-4 py-2 text-left">Received</th>
+                      <th className="px-4 py-2 text-left">Status</th>
+                      <th className="px-4 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                    ) : purchaseOrders.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No purchase orders found</td></tr>
+                    ) : purchaseOrders.map(po => (
+                      <tr key={po.id} className="border-t hover:bg-muted/20">
+                        <td className="px-4 py-2.5 font-mono text-xs font-semibold">{po.poNumber}</td>
+                        <td className="px-4 py-2.5">{po.supplier?.name ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{po.warehouse?.name ?? po.branch?.name ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-right">{po.totalAmount.toFixed(2)} SAR</td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground">{fmtDate(po.expectedDeliveryDate)}</td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground">{fmtDate(po.receivedDate)}</td>
+                        <td className="px-4 py-2.5"><StBadge status={po.status} /></td>
+                        <td className="px-4 py-2.5">
+                          {!["fully_received", "cancelled"].includes(po.status) && po.items?.length ? (
+                            <GrnReceiveDialog po={po} onDone={refreshPartial} />
+                          ) : <span className="text-xs text-muted-foreground">—</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Store Delivery ── */}
+        <TabsContent value="delivery">
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-base">Store Deliveries</CardTitle>
+              <StoreDeliveryDialog branches={branches} warehouses={warehouses} products={products} onDone={refreshPartial} />
+            </CardHeader>
+            <CardContent className="p-0">
+              <TransferTable rows={deliveries} loading={loading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Supplier Return ── */}
+        <TabsContent value="supplier-return">
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-base">Supplier Returns</CardTitle>
+              <SupplierReturnDialog branches={branches} suppliers={suppliers} products={products} onDone={refreshPartial} />
+            </CardHeader>
+            <CardContent className="p-0">
+              <TransferTable rows={returns} loading={loading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Wastage ── */}
+        <TabsContent value="wastage">
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-base">Wastage & Damage</CardTitle>
+              <WastageDialog branches={branches} products={products} onDone={refreshPartial} />
+            </CardHeader>
+            <CardContent className="p-0">
+              <AdjustmentTable rows={damages} branches={branches} loading={loading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Movement ── */}
+        <TabsContent value="movement">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Stock Movement Timeline</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loading ? <p className="text-center text-muted-foreground py-8">Loading…</p>
+                : events.length === 0 ? <p className="text-center text-muted-foreground py-8">No movement records found</p>
+                : (
+                  <div className="space-y-1 max-h-[600px] overflow-y-auto">
+                    {events.map((ev, i) => (
+                      <div key={i} className="flex items-start gap-3 py-2 border-b last:border-0">
+                        <div className="w-1.5 h-1.5 mt-2 rounded-full bg-primary flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${movColor[ev.type] ?? "bg-gray-100 text-gray-600"}`}>{ev.type}</span>
+                            <span className="font-medium text-sm truncate">{ev.label}</span>
+                            <span className="text-xs text-muted-foreground">Qty: {fmt(ev.qty)}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5 truncate">{ev.detail}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-xs text-muted-foreground">{fmtDate(ev.date)}</p>
+                          <p className="text-xs text-muted-foreground">{fmtTime(ev.date)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Reports ── */}
+        <TabsContent value="reports">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[
+              { title: "Stock Valuation Report", desc: "Current stock value by product and branch", icon: <BarChart3 className="h-8 w-8 text-blue-500" /> },
+              { title: "Stock Movement Report", desc: "In/out movements over a date range", icon: <History className="h-8 w-8 text-green-500" /> },
+              { title: "Low Stock Report", desc: "Products below reorder level", icon: <AlertTriangle className="h-8 w-8 text-yellow-500" /> },
+              { title: "Expiry Report", desc: "Batches expiring within 30/60/90 days", icon: <TrendingUp className="h-8 w-8 text-red-500" /> },
+              { title: "GRN Summary", desc: "Goods received against purchase orders", icon: <ClipboardCheck className="h-8 w-8 text-purple-500" /> },
+              { title: "Wastage Report", desc: "Damage and wastage records by period", icon: <Trash2 className="h-8 w-8 text-red-400" /> },
+              { title: "Supplier Return Report", desc: "Returns sent back to suppliers", icon: <Undo2 className="h-8 w-8 text-orange-500" /> },
+              { title: "Store Delivery Report", desc: "Warehouse-to-branch transfers", icon: <Truck className="h-8 w-8 text-indigo-500" /> },
+              { title: "Stock Count Variance", desc: "Physical count vs system count differences", icon: <Boxes className="h-8 w-8 text-teal-500" /> },
+            ].map(r => (
+              <Card key={r.title} className="cursor-pointer hover:shadow-md transition-shadow">
+                <CardContent className="p-4 flex items-start gap-4">
+                  <div className="mt-0.5">{r.icon}</div>
+                  <div>
+                    <p className="font-semibold text-sm">{r.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{r.desc}</p>
+                    <Button size="sm" variant="outline" className="mt-3 gap-1.5 h-7 text-xs" onClick={() => toast.info("Report export coming soon")}>
+                      <Download className="h-3 w-3" /> Export
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
       </Tabs>
     </PageShell>
   );
 }
 
-function Overview() {
-  const items = [
-    { name: "Almarai Milk 1L", sku: "ALM-MK-1L", branch: 120, wh: 240, status: "Healthy" },
-    { name: "Pepsi 330ml", sku: "PEP-330", branch: 80, wh: 600, status: "Healthy" },
-    { name: "Bread Pack", sku: "BRD-001", branch: 12, wh: 8, status: "Low" },
-    { name: "Lipton Tea 100", sku: "LPT-TB-100", branch: 30, wh: 580, status: "Close to Expiry" },
-  ];
-  return (
-    <Card className="overflow-hidden border-border/60 shadow-card">
-      <table className="w-full text-sm">
-        <thead><tr className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
-          <th className="px-3 py-3">Item</th><th className="px-3 py-3">SKU</th><th className="px-3 py-3">Branch Stock</th><th className="px-3 py-3">Warehouse Stock</th><th className="px-3 py-3">Status</th>
-        </tr></thead>
-        <tbody>
-          {items.map((i) => (
-            <tr key={i.sku} className="border-b border-border/40 hover:bg-muted/30 animate-fade-in">
-              <td className="px-3 py-3 font-semibold">{i.name}</td>
-              <td className="px-3 py-3 font-mono text-xs">{i.sku}</td>
-              <td className="px-3 py-3">{i.branch}</td>
-              <td className="px-3 py-3">{i.wh}</td>
-              <td className="px-3 py-3">
-                <Badge variant="outline" className={
-                  i.status === "Healthy" ? "bg-success/15 text-success border-success/30" :
-                  i.status === "Low" ? "bg-destructive/15 text-destructive border-destructive/30" :
-                  "bg-warning/20 text-warning-foreground border-warning/40"
-                }>{i.status}</Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
-  );
+// ─── Shared sub-tables ────────────────────────────────────────────────────────
+
+function ExpiryCell({ date }: { date: string }) {
+  const diff = (new Date(date).getTime() - Date.now()) / 86400000;
+  if (diff < 0) return <span className="text-red-600 text-xs font-medium">Expired</span>;
+  if (diff <= 30) return <span className="text-orange-500 text-xs font-medium">{Math.ceil(diff)}d left</span>;
+  return <span className="text-xs text-muted-foreground">{new Date(date).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" })}</span>;
 }
 
-function StockIn() {
-  const rows = [
-    { id: "STIN-2026-001", src: "Supplier Purchase", supplier: "Almarai Supplier KSA", po: "PO-2026-001", grn: "GRN-2026-001", item: "Almarai Milk 1L", qty: 100, batch: "BAT-MILK-3301", exp: "2026-07-30", by: "Fahad Al Saud", loc: "Riyadh Main Warehouse" },
-    { id: "STIN-2026-002", src: "Warehouse Transfer", supplier: "—", po: "—", grn: "—", item: "Pepsi 330ml", qty: 240, batch: "BAT-PEP-2201", exp: "2026-12-15", by: "Ali Hassan", loc: "Riyadh Central Baqala" },
-    { id: "STIN-2026-003", src: "Supplier Replacement", supplier: "Riyadh Bakery", po: "PO-2026-004", grn: "GRN-2026-004", item: "Bread Pack", qty: 20, batch: "BAT-BRD-5010", exp: "2026-06-25", by: "Fahad Al Saud", loc: "Riyadh Main Warehouse" },
-  ];
-  return (
-    <FlowCard title="Stock-In" desc="Goods received from supplier, transfer, manual add, or replacement." cta="Add Stock-In" onCta={() => toast.success("Stock-In recorded — inventory updated")}>
-      <SimpleTable
-        cols={["Stock-In", "Source", "Supplier", "PO / GRN", "Item", "Qty", "Batch", "Expiry", "Location", "By"]}
-        rows={rows.map((r) => [r.id, r.src, r.supplier, `${r.po} / ${r.grn}`, r.item, r.qty, r.batch, r.exp, r.loc, r.by])}
-      />
-    </FlowCard>
-  );
-}
-
-function StockOut() {
-  const rows = [
-    { id: "STOUT-2026-001", item: "Pepsi 330ml", qty: 2, reason: "POS Sale", dest: "MPOS-RYD-001", link: "ORD-9981", by: "Sara Khan" },
-    { id: "STOUT-2026-002", item: "Almarai Milk 1L", qty: 40, reason: "Store Delivery", dest: "Riyadh Central Baqala", link: "DEL-2026-001", by: "Fahad Al Saud" },
-    { id: "STOUT-2026-003", item: "Bread Pack", qty: 20, reason: "Supplier Return", dest: "Riyadh Bakery", link: "SRET-2026-001", by: "Fahad Al Saud" },
-    { id: "STOUT-2026-004", item: "Yogurt 200g", qty: 6, reason: "Expired", dest: "Wastage Bin", link: "WST-2026-001", by: "Ali Hassan" },
-  ];
-  return (
-    <FlowCard title="Stock-Out" desc="Sale, delivery, transfer, return, damage, expired, manual correction." cta="Add Stock-Out" onCta={() => toast.warning("Stock-Out logged — movement timeline updated")}>
-      <SimpleTable
-        cols={["Stock-Out", "Item", "Qty", "Reason", "Destination", "Linked Doc", "By"]}
-        rows={rows.map((r) => [r.id, r.item, r.qty, <Badge key={r.id} variant="outline" className="bg-warning/15 text-warning-foreground border-warning/30">{r.reason}</Badge>, r.dest, r.link, r.by])}
-      />
-    </FlowCard>
-  );
-}
-
-function GRN() {
-  const rows = [
-    { id: "GRN-2026-001", po: "PO-2026-001", sup: "Almarai Supplier KSA", loc: "Riyadh Main Warehouse", date: "12 Jun 2026", items: 3, by: "Fahad Al Saud", status: "Received" },
-    { id: "GRN-2026-002", po: "PO-2026-002", sup: "PepsiCo KSA", loc: "Jeddah Stock Room", date: "13 Jun 2026", items: 2, by: "Omar Al Qahtani", status: "Partially Received" },
-    { id: "GRN-2026-003", po: "PO-2026-003", sup: "Nadec Supplier", loc: "Riyadh Main Warehouse", date: "14 Jun 2026", items: 4, by: "Fahad Al Saud", status: "Discrepancy Found" },
-  ];
-  const statusColor: Record<string, string> = {
-    "Received": "bg-success/15 text-success border-success/30",
-    "Partially Received": "bg-warning/20 text-warning-foreground border-warning/40",
-    "Discrepancy Found": "bg-destructive/15 text-destructive border-destructive/30",
-    "Draft": "bg-muted text-muted-foreground border-border",
-  };
-  return (
-    <FlowCard title="Goods Receiving Notes (GRN)" desc="Only accepted qty increases inventory. Rejected qty flows to Supplier Return." cta="New GRN" onCta={() => toast.success("GRN draft created")}>
-      <SimpleTable
-        cols={["GRN", "PO", "Supplier", "Location", "Date", "Items", "Received By", "Status"]}
-        rows={rows.map((r) => [r.id, r.po, r.sup, r.loc, r.date, r.items, r.by, <Badge key={r.id} variant="outline" className={statusColor[r.status]}>{r.status}</Badge>])}
-      />
-    </FlowCard>
-  );
-}
-
-function StoreDelivery() {
-  const rows = [
-    { id: "DEL-2026-001", src: "Riyadh Main Warehouse", dest: "Riyadh Central Baqala", items: "Almarai Milk 1L, Pepsi 330ml", qty: 80, by: "Fahad Al Saud", to: "Sara Khan", status: "Delivered" },
-    { id: "DEL-2026-002", src: "Jeddah Stock Room", dest: "Jeddah Mart 02", items: "Lipton Tea 100, Yogurt 200g", qty: 50, by: "Ali Hassan", to: "Omar Al Qahtani", status: "In Transit" },
-    { id: "DEL-2026-003", src: "Khobar DC", dest: "Khobar Corniche", items: "Bread Pack", qty: 30, by: "Ahmed Al Harbi", to: "—", status: "Draft" },
-  ];
-  return (
-    <FlowCard title="Store Delivery" desc="Warehouse → store. Dispatch reduces WH stock, receive increases branch stock." cta="New Delivery" onCta={() => toast.success("Delivery draft created")}>
-      <SimpleTable
-        cols={["Delivery", "Source", "Destination", "Items", "Qty", "Delivered By", "Received By", "Status"]}
-        rows={rows.map((r) => [r.id, r.src, r.dest, r.items, r.qty, r.by, r.to, <Badge key={r.id} variant="outline" className="bg-primary/10 text-primary border-primary/30">{r.status}</Badge>])}
-      />
-    </FlowCard>
-  );
-}
-
-function SupplierReturn() {
-  const rows = [
-    { id: "SRET-2026-001", sup: "Riyadh Bakery", po: "PO-2026-004", grn: "GRN-2026-004", item: "Bread Pack", batch: "BAT-BRD-5009", qty: 20, reason: "Expired item", repl: "Pending Replacement", fin: "Supplier Credit Created", inv: "Removed from Sellable Stock", by: "Fahad Al Saud", appr: "Ahmed Al Harbi" },
-    { id: "SRET-2026-002", sup: "PepsiCo KSA", po: "PO-2026-002", grn: "GRN-2026-002", item: "Pepsi 330ml", batch: "BAT-PEP-1190", qty: 12, reason: "Damaged on arrival", repl: "Replacement Received", fin: "Closed", inv: "Replacement Added", by: "Omar Al Qahtani", appr: "Ahmed Al Harbi" },
-  ];
-  return (
-    <FlowCard
-      title="Supplier Returns"
-      desc="Return reason note is mandatory. Approved return reduces inventory and posts a supplier credit in Finance."
-      cta="Create Supplier Return"
-      onCta={() => toast.success("Supplier return submitted for manager approval")}
-    >
-      <SimpleTable
-        cols={["Return ID", "Supplier", "PO / GRN", "Item · Batch", "Qty", "Reason", "Replacement", "Finance", "Inventory", "By"]}
-        rows={rows.map((r) => [r.id, r.sup, `${r.po} / ${r.grn}`, `${r.item} · ${r.batch}`, r.qty, r.reason, <Badge key={r.id} variant="outline" className="bg-warning/15 text-warning-foreground border-warning/30">{r.repl}</Badge>, r.fin, r.inv, r.by])}
-      />
-    </FlowCard>
-  );
-}
-
-function Wastage() {
-  const [openCreate, setOpenCreate] = useState(false);
-  const [form, setForm] = useState({ source: "Branch", item: "Bread Pack", qty: "20", reason: "Expired", note: "" });
-
-  const tabs: { key: string; label: string; rows: { id: string; item: string; qty: number; reason: string; value: string; by: string; status: string }[] }[] = [
-    { key: "pending", label: "Pending Approval", rows: [
-      { id: "WST-2026-003", item: "Yogurt 200g", qty: 6, reason: "Expired", value: "SAR 24.00", by: "Ali Hassan", status: "Pending" },
-      { id: "WST-2026-004", item: "Tomato Pack", qty: 8, reason: "Spoiled", value: "SAR 32.00", by: "Sara Khan", status: "Pending" },
-    ]},
-    { key: "approved", label: "Approved", rows: [
-      { id: "WST-2026-001", item: "Bread Pack", qty: 20, reason: "Expired", value: "SAR 30.00", by: "Fahad Al Saud", status: "Approved" },
-    ]},
-    { key: "rejected", label: "Rejected", rows: [
-      { id: "WST-2026-002", item: "Pepsi 330ml", qty: 2, reason: "Leakage", value: "SAR 8.00", by: "Omar Al Qahtani", status: "Rejected" },
-    ]},
-    { key: "finance", label: "Finance Posted", rows: [
-      { id: "WST-2026-001", item: "Bread Pack", qty: 20, reason: "Expired", value: "SAR 30.00", by: "Fahad Al Saud", status: "Posted as Wastage Loss" },
-    ]},
-  ];
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Wastage Today" value="18 items" icon={Trash2} accent="destructive" />
-        <MetricCard label="Wastage Value" value="SAR 245.50" icon={AlertTriangle} accent="warning" />
-        <MetricCard label="Pending Approvals" value="3" icon={ClipboardCheck} accent="warning" />
-        <MetricCard label="Finance Posted" value="SAR 180.00" icon={CheckCircle2} accent="success" />
-      </div>
-
-      <Card className="p-4 border-border/60 shadow-card flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold flex items-center gap-2"><Trash2 className="h-4 w-4 text-destructive" />Wastage Management</h3>
-          <p className="text-xs text-muted-foreground">Lives inside Stocks. Approved wastage creates Stock-Out and a Finance loss entry.</p>
-        </div>
-        <Sheet open={openCreate} onOpenChange={setOpenCreate}>
-          <SheetTrigger asChild>
-            <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow"><Plus className="h-4 w-4" />Create Wastage</Button>
-          </SheetTrigger>
-          <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-            <SheetHeader><SheetTitle>Create Wastage</SheetTitle></SheetHeader>
-            <div className="mt-4 space-y-3">
-              <div className="space-y-1"><Label className="text-xs">Source</Label>
-                <Select value={form.source} onValueChange={(v) => setForm({ ...form, source: v })}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>{["Branch", "Warehouse", "POS Return", "Stock Receiving", "Store Delivery", "Manual Stock Check"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Item</Label><Input value={form.item} onChange={(e) => setForm({ ...form, item: e.target.value })} className="h-9" /></div>
-                <div className="space-y-1"><Label className="text-xs">Quantity</Label><Input value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} className="h-9" /></div>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">Reason</Label>
-                <Select value={form.reason} onValueChange={(v) => setForm({ ...form, reason: v })}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>{["Expired", "Damaged", "Leakage", "Broken Packaging", "Spoiled", "Temperature Issue", "Poor Quality", "Lost Stock", "Customer Return Not Resellable", "Supplier Delivery Damage", "Operational Mistake", "Other"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">Note (mandatory)</Label><Textarea rows={3} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Why is this being wasted?" /></div>
-              <Card className="p-3 bg-muted/40 text-xs space-y-1">
-                <p className="font-semibold">Impact preview</p>
-                <p>Stock-Out · qty {form.qty} · reason: Wastage</p>
-                <p>Finance loss entry will be posted on approval.</p>
-              </Card>
-            </div>
-            <SheetFooter className="mt-4">
-              <Button onClick={() => { if (!form.note) { toast.error("Note is mandatory"); return; } toast.success("Wastage submitted for approval"); setOpenCreate(false); }} className="gradient-primary text-primary-foreground border-0">Submit for approval</Button>
-            </SheetFooter>
-          </SheetContent>
-        </Sheet>
-      </Card>
-
-      <Tabs defaultValue="pending">
-        <TabsList>{tabs.map((t) => <TabsTrigger key={t.key} value={t.key}>{t.label}</TabsTrigger>)}</TabsList>
-        {tabs.map((t) => (
-          <TabsContent key={t.key} value={t.key} className="mt-3">
-            <Card className="overflow-hidden border-border/60 shadow-card">
-              <SimpleTable
-                cols={["Wastage ID", "Item", "Qty", "Reason", "Value", "Reported By", "Status"]}
-                rows={t.rows.map((r) => [r.id, r.item, r.qty, r.reason, r.value, r.by, <Badge key={r.id} variant="outline" className={
-                  r.status === "Approved" || r.status.startsWith("Posted") ? "bg-success/15 text-success border-success/30" :
-                  r.status === "Rejected" ? "bg-destructive/15 text-destructive border-destructive/30" :
-                  "bg-warning/20 text-warning-foreground border-warning/40"
-                }>{r.status}</Badge>])}
-              />
-            </Card>
-          </TabsContent>
-        ))}
-      </Tabs>
-    </div>
-  );
-}
-
-function Movement() {
-  const events = [
-    { t: "Today · 10:15", k: "Stock-In", v: "+100 Almarai Milk 1L", who: "Fahad Al Saud", note: "GRN-2026-001 · PO-2026-001" },
-    { t: "Today · 11:02", k: "Store Delivery", v: "−40 to Riyadh Central", who: "Fahad Al Saud", note: "DEL-2026-001" },
-    { t: "Today · 13:44", k: "POS Sale", v: "−2 Pepsi 330ml", who: "Sara Khan", note: "ORD-9981" },
-    { t: "Today · 14:20", k: "Wastage", v: "−6 Yogurt 200g (Expired)", who: "Ali Hassan", note: "WST-2026-003" },
-    { t: "Today · 16:11", k: "Supplier Return", v: "−20 Bread Pack", who: "Fahad Al Saud", note: "SRET-2026-001" },
-  ];
-  return (
-    <Card className="p-4 border-border/60 shadow-card">
-      <div className="space-y-3">
-        {events.map((e, i) => (
-          <div key={i} className="flex gap-3 animate-fade-in">
-            <div className="flex flex-col items-center">
-              <div className="h-2 w-2 rounded-full bg-primary" />
-              {i < events.length - 1 && <div className="flex-1 w-px bg-border" />}
-            </div>
-            <div className="flex-1 pb-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold">{e.k} <span className="text-muted-foreground font-normal">· {e.v}</span></p>
-                <span className="text-xs text-muted-foreground">{e.t}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">{e.who} · {e.note}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function Reports() {
-  const reports = [
-    "Stock-In Report", "Stock-Out Report", "Stock Transfer Report", "Stock Adjustment Report",
-    "Supplier Return Report", "Wastage Report", "Stock Movement Report", "Low Stock Report", "Expiry Report",
-  ];
-  return (
-    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-      {reports.map((r) => (
-        <Card key={r} className="p-4 border-border/60 shadow-card hover:shadow-elegant transition-all cursor-pointer animate-fade-in" onClick={() => toast.success(`${r} exported`)}>
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl gradient-primary text-primary-foreground flex items-center justify-center"><FileBarChart className="h-5 w-5" /></div>
-            <div>
-              <p className="font-semibold text-sm">{r}</p>
-              <p className="text-xs text-muted-foreground">Daily · Weekly · Monthly · Custom</p>
-            </div>
-          </div>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-function FlowCard({ title, desc, cta, onCta, children }: { title: string; desc: string; cta: string; onCta: () => void; children: React.ReactNode }) {
-  return (
-    <div className="space-y-4">
-      <Card className="p-4 border-border/60 shadow-card flex items-center justify-between">
-        <div><h3 className="font-semibold">{title}</h3><p className="text-xs text-muted-foreground">{desc}</p></div>
-        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={onCta}><Plus className="h-4 w-4" />{cta}</Button>
-      </Card>
-      <Card className="overflow-hidden border-border/60 shadow-card">{children}</Card>
-    </div>
-  );
-}
-
-function SimpleTable({ cols, rows }: { cols: string[]; rows: (string | number | React.ReactNode)[][] }) {
+function AdjustmentTable({ rows, branches, loading }: { rows: InventoryAdjustment[]; branches: Branch[]; loading: boolean }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <thead><tr className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
-          {cols.map((c) => <th key={c} className="px-3 py-3">{c}</th>)}
-        </tr></thead>
+        <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
+          <tr>
+            <th className="px-4 py-2 text-left">Product</th>
+            <th className="px-4 py-2 text-left">Branch</th>
+            <th className="px-4 py-2 text-right">Qty</th>
+            <th className="px-4 py-2 text-left">Type</th>
+            <th className="px-4 py-2 text-left">Reason</th>
+            <th className="px-4 py-2 text-left">Date</th>
+          </tr>
+        </thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className="border-b border-border/40 hover:bg-muted/30 animate-fade-in">
-              {row.map((cell, j) => <td key={j} className="px-3 py-3 text-xs">{cell as React.ReactNode}</td>)}
+          {loading ? (
+            <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+          ) : rows.length === 0 ? (
+            <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No records found</td></tr>
+          ) : rows.map(a => {
+            const branch = branches.find(b => b.id === a.branchId);
+            return (
+              <tr key={a.id} className="border-t hover:bg-muted/20">
+                <td className="px-4 py-2.5 font-medium">{a.product?.name ?? "—"}</td>
+                <td className="px-4 py-2.5 text-muted-foreground">{a.branch?.name ?? branch?.name ?? "—"}</td>
+                <td className="px-4 py-2.5 text-right">{fmt(a.quantity)}</td>
+                <td className="px-4 py-2.5"><StBadge status={a.adjustmentType} /></td>
+                <td className="px-4 py-2.5 text-muted-foreground text-xs">{a.reason ?? "—"}</td>
+                <td className="px-4 py-2.5 text-xs text-muted-foreground">{new Date(a.createdAt).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" })}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TransferTable({ rows, loading }: { rows: StockTransfer[]; loading: boolean }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
+          <tr>
+            <th className="px-4 py-2 text-left">Transfer #</th>
+            <th className="px-4 py-2 text-left">From</th>
+            <th className="px-4 py-2 text-left">To</th>
+            <th className="px-4 py-2 text-right">Items</th>
+            <th className="px-4 py-2 text-left">Expected</th>
+            <th className="px-4 py-2 text-left">Completed</th>
+            <th className="px-4 py-2 text-left">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+          ) : rows.length === 0 ? (
+            <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No records found</td></tr>
+          ) : rows.map(t => (
+            <tr key={t.id} className="border-t hover:bg-muted/20">
+              <td className="px-4 py-2.5 font-mono text-xs font-semibold">{t.transferNumber}</td>
+              <td className="px-4 py-2.5">{t.sourceWarehouse?.name ?? t.sourceBranch?.name ?? t.sourceSupplier?.name ?? "—"}</td>
+              <td className="px-4 py-2.5">{t.destBranch?.name ?? t.destWarehouse?.name ?? t.destSupplier?.name ?? "—"}</td>
+              <td className="px-4 py-2.5 text-right">{t.items?.length ?? 0}</td>
+              <td className="px-4 py-2.5 text-xs text-muted-foreground">{t.expectedDate ? new Date(t.expectedDate).toLocaleDateString("en-SA", { day: "2-digit", month: "short" }) : "—"}</td>
+              <td className="px-4 py-2.5 text-xs text-muted-foreground">{t.completedDate ? new Date(t.completedDate).toLocaleDateString("en-SA", { day: "2-digit", month: "short" }) : "—"}</td>
+              <td className="px-4 py-2.5"><StBadge status={t.status} /></td>
             </tr>
           ))}
         </tbody>

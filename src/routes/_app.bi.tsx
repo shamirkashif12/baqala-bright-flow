@@ -8,6 +8,7 @@ import { MetricCard } from "@/components/metric-card";
 import { TrendingUp, Wallet, ShoppingBag, Undo2, BadgePercent, Building2, Truck, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, type DashboardMetrics } from "@/lib/api";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/bi")({ component: BI });
 
@@ -51,12 +52,12 @@ function BI() {
   const payBreakdown = dashboard?.sales.paymentBreakdown ?? [];
   const branchPerf = dashboard?.branchPerformance ?? [];
   const maxBranchSales = branchPerf.reduce((mx, b) => Math.max(mx, b.sales), 1);
-  const fmt = (n: number) => `ر.س ${n.toLocaleString("en-SA", { minimumFractionDigits: 0 })}`;
+  const fmt = (n: number) => fmtSAR(n, 0);
 
   return (
     <PageShell title="Business Intelligence" subtitle="Performance, trends and analytics across the chain">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Revenue (today)" value={fmt(totalRevenue)} icon={Wallet} accent="primary" />
+        <MetricCard label="Revenue (today)" value={<><SARIcon />{" "}{fmt(totalRevenue)}</>} icon={Wallet} accent="primary" />
         <MetricCard label="Orders (today)" value={String(totalOrders)} icon={ShoppingBag} />
         <MetricCard label="Refund Rate" value={refundRate} icon={Undo2} accent="success" />
         <MetricCard label="Returns Today" value={String(returnsCount)} icon={BadgePercent} accent="warning" />
@@ -141,7 +142,7 @@ function BI() {
             <div key={b.branch} className="mb-3">
               <div className="flex justify-between text-sm mb-1">
                 <span>{b.branch}</span>
-                <span className="font-semibold">{branchPerf.length > 0 ? fmt(b.sales) : `${b.sales}%`}</span>
+                <span className="font-semibold">{branchPerf.length > 0 ? <><SARIcon />{fmt(b.sales)}</> : `${b.sales}%`}</span>
               </div>
               <Progress value={Math.round(b.sales / maxBranchSales * 100)} className="h-1.5" />
             </div>
@@ -149,13 +150,13 @@ function BI() {
         </Card>
         <Card className="p-6 border-border/60 shadow-card">
           <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Package className="h-4 w-4 text-warning-foreground" />Expiry Loss (month)</h3>
-          <p className="text-3xl font-bold">ر.س 4,820</p>
+          <p className="text-3xl font-bold"><SARIcon />4,820</p>
           <p className="text-xs text-muted-foreground mt-1">From 142 expired SKU units</p>
           <div className="mt-4 space-y-2 text-sm">
-            <div className="flex justify-between"><span>Dairy</span><span className="font-semibold">ر.س 2,180</span></div>
-            <div className="flex justify-between"><span>Bakery</span><span className="font-semibold">ر.س 1,420</span></div>
-            <div className="flex justify-between"><span>Meat</span><span className="font-semibold">ر.س 920</span></div>
-            <div className="flex justify-between"><span>Other</span><span className="font-semibold">ر.س 300</span></div>
+            <div className="flex justify-between"><span>Dairy</span><span className="font-semibold"><SARIcon />2,180</span></div>
+            <div className="flex justify-between"><span>Bakery</span><span className="font-semibold"><SARIcon />1,420</span></div>
+            <div className="flex justify-between"><span>Meat</span><span className="font-semibold"><SARIcon />920</span></div>
+            <div className="flex justify-between"><span>Other</span><span className="font-semibold"><SARIcon />300</span></div>
           </div>
         </Card>
         <Card className="p-6 border-border/60 shadow-card">

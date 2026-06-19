@@ -10,8 +10,8 @@ public class Branch
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("branch_code")]
-    public string BranchCode { get; set; } = default!;
+    [MaxLength(50), Column("branch_code")]
+    public string? BranchCode { get; set; }
 
     [Required, MaxLength(255), Column("name")]
     public string Name { get; set; } = default!;

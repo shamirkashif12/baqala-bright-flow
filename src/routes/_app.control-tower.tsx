@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState, useEffect, useRef, useCallback, type ReactElement } from "react";
+import { useMemo, useState, useEffect, useRef, useCallback, type ReactElement, type ReactNode } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   Clock, CheckCircle2, XCircle, ToggleLeft, ToggleRight, UserCheck,
 } from "lucide-react";
 import { api, type Branch, type Terminal, type User, type CashierShift } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/control-tower")({ component: ControlTower });
 
@@ -469,7 +470,7 @@ function ControlTower() {
                                 <div className="text-[10px] text-muted-foreground">{shift.terminal.terminalCode}</div>
                               )}
                               <div className="text-[10px] text-muted-foreground tabular-nums">
-                                Cash: SAR {(shift.openingAmount + shift.cashSales).toFixed(2)}
+                                Cash: <SARIcon />{(shift.openingAmount + shift.cashSales).toFixed(2)}
                               </div>
                             </div>
                           ) : (
@@ -677,7 +678,7 @@ function BranchCard({ branch, terminals, users, activeShifts }: {
         <StatRow label="Active Terminals" value={`${active} / ${terminals.length}`} />
         <StatRow label="On Shift" value={String(activeShifts.length)} />
         <StatRow label="Offline" value={String(offline)} tone={offline > 0 ? "warn" : undefined} />
-        <StatRow label="Cash in Drawers" value={`SAR ${activeShifts.reduce((a, s) => a + s.openingAmount + s.cashSales, 0).toFixed(0)}`} />
+        <StatRow label="Cash in Drawers" value={<><SARIcon />{activeShifts.reduce((a, s) => a + s.openingAmount + s.cashSales, 0).toFixed(0)}</>} />
       </div>
       <div className="mt-4 flex flex-wrap gap-1.5">
         <Link to="/control-tower/$branchId" params={{ branchId: branch.id }}
@@ -697,7 +698,7 @@ function BranchCard({ branch, terminals, users, activeShifts }: {
   );
 }
 
-function StatRow({ label, value, tone }: { label: string; value: string; tone?: "warn" }) {
+function StatRow({ label, value, tone }: { label: string; value: ReactNode; tone?: "warn" }) {
   return (
     <div className="flex items-center justify-between rounded-lg bg-muted/30 px-2.5 py-1.5">
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
@@ -718,7 +719,7 @@ function MiniInsights({ branches, terminals, activeShifts }: { branches: Branch[
     { label: "Active Terminals",  value: String(terminals.filter(t => t.status === "active").length),   icon: Activity },
     { label: "Offline Terminals", value: String(terminals.filter(t => t.status === "offline").length),  icon: WifiOff },
     { label: "Shifts Open",       value: String(activeShifts.length),                                    icon: Clock },
-    { label: "Cash in Drawers",   value: `SAR ${activeShifts.reduce((a, s) => a + s.openingAmount + s.cashSales, 0).toFixed(0)}`, icon: Zap },
+    { label: "Cash in Drawers",   value: <><SARIcon />{activeShifts.reduce((a, s) => a + s.openingAmount + s.cashSales, 0).toFixed(0)}</>, icon: Zap },
     { label: "Fully Operational", value: `${fullyOp} / ${branches.length}`,                              icon: ShieldCheck },
   ];
   return (

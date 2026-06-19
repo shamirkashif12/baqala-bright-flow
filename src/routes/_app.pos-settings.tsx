@@ -93,7 +93,7 @@ function PosSettings() {
           <Row title="Cashier can refund" />
           <Row title="Cashier can hold orders" defaultChecked />
           <Row title="Cashier can edit completed orders" />
-          <Row title="Manager approval required for refund > ر.س 100" defaultChecked />
+          <Row title="Manager approval required for refund > SAR 100" defaultChecked />
         </TabsContent>
 
         <TabsContent value="scan" className="space-y-3 mt-4">

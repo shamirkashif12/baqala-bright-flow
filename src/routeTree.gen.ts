@@ -13,6 +13,7 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppZatcaSettingsRouteImport } from './routes/_app.zatca-settings'
 import { Route as AppZatcaRouteImport } from './routes/_app.zatca'
 import { Route as AppWarehousesRouteImport } from './routes/_app.warehouses'
 import { Route as AppWarehouseSuppliersRouteImport } from './routes/_app.warehouse-suppliers'
@@ -59,6 +60,7 @@ import { Route as AppBranchesRouteImport } from './routes/_app.branches'
 import { Route as AppBiRouteImport } from './routes/_app.bi'
 import { Route as AppBatchesRouteImport } from './routes/_app.batches'
 import { Route as AppAuditLogsRouteImport } from './routes/_app.audit-logs'
+import { Route as AppAdminOverviewRouteImport } from './routes/_app.admin-overview'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
 import { Route as AppControlTowerBranchIdRouteImport } from './routes/_app.control-tower.$branchId'
 
@@ -80,6 +82,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppZatcaSettingsRoute = AppZatcaSettingsRouteImport.update({
+  id: '/zatca-settings',
+  path: '/zatca-settings',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppZatcaRoute = AppZatcaRouteImport.update({
   id: '/zatca',
@@ -311,6 +318,11 @@ const AppAuditLogsRoute = AppAuditLogsRouteImport.update({
   path: '/audit-logs',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminOverviewRoute = AppAdminOverviewRouteImport.update({
+  id: '/admin-overview',
+  path: '/admin-overview',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -327,6 +339,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/admin': typeof AppAdminRoute
+  '/admin-overview': typeof AppAdminOverviewRoute
   '/audit-logs': typeof AppAuditLogsRoute
   '/batches': typeof AppBatchesRoute
   '/bi': typeof AppBiRoute
@@ -373,6 +386,7 @@ export interface FileRoutesByFullPath {
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
+  '/zatca-settings': typeof AppZatcaSettingsRoute
   '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRoutesByTo {
@@ -380,6 +394,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/admin': typeof AppAdminRoute
+  '/admin-overview': typeof AppAdminOverviewRoute
   '/audit-logs': typeof AppAuditLogsRoute
   '/batches': typeof AppBatchesRoute
   '/bi': typeof AppBiRoute
@@ -426,6 +441,7 @@ export interface FileRoutesByTo {
   '/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/warehouses': typeof AppWarehousesRoute
   '/zatca': typeof AppZatcaRoute
+  '/zatca-settings': typeof AppZatcaSettingsRoute
   '/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRoutesById {
@@ -435,6 +451,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/_app/admin': typeof AppAdminRoute
+  '/_app/admin-overview': typeof AppAdminOverviewRoute
   '/_app/audit-logs': typeof AppAuditLogsRoute
   '/_app/batches': typeof AppBatchesRoute
   '/_app/bi': typeof AppBiRoute
@@ -481,6 +498,7 @@ export interface FileRoutesById {
   '/_app/warehouse-suppliers': typeof AppWarehouseSuppliersRoute
   '/_app/warehouses': typeof AppWarehousesRoute
   '/_app/zatca': typeof AppZatcaRoute
+  '/_app/zatca-settings': typeof AppZatcaSettingsRoute
   '/_app/control-tower/$branchId': typeof AppControlTowerBranchIdRoute
 }
 export interface FileRouteTypes {
@@ -490,6 +508,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/admin'
+    | '/admin-overview'
     | '/audit-logs'
     | '/batches'
     | '/bi'
@@ -536,6 +555,7 @@ export interface FileRouteTypes {
     | '/warehouse-suppliers'
     | '/warehouses'
     | '/zatca'
+    | '/zatca-settings'
     | '/control-tower/$branchId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -543,6 +563,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/admin'
+    | '/admin-overview'
     | '/audit-logs'
     | '/batches'
     | '/bi'
@@ -589,6 +610,7 @@ export interface FileRouteTypes {
     | '/warehouse-suppliers'
     | '/warehouses'
     | '/zatca'
+    | '/zatca-settings'
     | '/control-tower/$branchId'
   id:
     | '__root__'
@@ -597,6 +619,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/_app/admin'
+    | '/_app/admin-overview'
     | '/_app/audit-logs'
     | '/_app/batches'
     | '/_app/bi'
@@ -643,6 +666,7 @@ export interface FileRouteTypes {
     | '/_app/warehouse-suppliers'
     | '/_app/warehouses'
     | '/_app/zatca'
+    | '/_app/zatca-settings'
     | '/_app/control-tower/$branchId'
   fileRoutesById: FileRoutesById
 }
@@ -682,6 +706,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/zatca-settings': {
+      id: '/_app/zatca-settings'
+      path: '/zatca-settings'
+      fullPath: '/zatca-settings'
+      preLoaderRoute: typeof AppZatcaSettingsRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/zatca': {
       id: '/_app/zatca'
@@ -1005,6 +1036,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAuditLogsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/admin-overview': {
+      id: '/_app/admin-overview'
+      path: '/admin-overview'
+      fullPath: '/admin-overview'
+      preLoaderRoute: typeof AppAdminOverviewRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/admin': {
       id: '/_app/admin'
       path: '/admin'
@@ -1036,6 +1074,7 @@ const AppControlTowerRouteWithChildren = AppControlTowerRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
+  AppAdminOverviewRoute: typeof AppAdminOverviewRoute
   AppAuditLogsRoute: typeof AppAuditLogsRoute
   AppBatchesRoute: typeof AppBatchesRoute
   AppBiRoute: typeof AppBiRoute
@@ -1082,10 +1121,12 @@ interface AppRouteChildren {
   AppWarehouseSuppliersRoute: typeof AppWarehouseSuppliersRoute
   AppWarehousesRoute: typeof AppWarehousesRoute
   AppZatcaRoute: typeof AppZatcaRoute
+  AppZatcaSettingsRoute: typeof AppZatcaSettingsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
+  AppAdminOverviewRoute: AppAdminOverviewRoute,
   AppAuditLogsRoute: AppAuditLogsRoute,
   AppBatchesRoute: AppBatchesRoute,
   AppBiRoute: AppBiRoute,
@@ -1132,6 +1173,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppWarehouseSuppliersRoute: AppWarehouseSuppliersRoute,
   AppWarehousesRoute: AppWarehousesRoute,
   AppZatcaRoute: AppZatcaRoute,
+  AppZatcaSettingsRoute: AppZatcaSettingsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

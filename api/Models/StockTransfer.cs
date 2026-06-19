@@ -13,8 +13,8 @@ public class StockTransfer
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("transfer_number")]
-    public string TransferNumber { get; set; } = default!;
+    [MaxLength(50), Column("transfer_number")]
+    public string? TransferNumber { get; set; }
 
     // supplier_to_warehouse | warehouse_to_branch | branch_to_warehouse
     // branch_to_branch | warehouse_to_warehouse | warehouse_to_supplier
@@ -82,7 +82,7 @@ public class StockTransfer
     public Warehouse? DestWarehouse { get; set; }
     public Supplier? DestSupplier { get; set; }
     public PurchaseOrder? PurchaseOrder { get; set; }
-    public User CreatedByUser { get; set; } = default!;
+    public User? CreatedByUser { get; set; }
     public User? ApprovedByUser { get; set; }
     public ICollection<StockTransferItem> Items { get; set; } = [];
 }
@@ -128,7 +128,7 @@ public class StockTransferItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    [JsonIgnore] public StockTransfer Transfer { get; set; } = default!;
-    public Product Product { get; set; } = default!;
+    [JsonIgnore] public StockTransfer? Transfer { get; set; }
+    public Product? Product { get; set; }
     public InventoryBatch? Batch { get; set; }
 }

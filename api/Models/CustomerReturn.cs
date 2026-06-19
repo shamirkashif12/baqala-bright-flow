@@ -10,8 +10,8 @@ public class CustomerReturn
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, MaxLength(50), Column("return_number")]
-    public string ReturnNumber { get; set; } = default!;
+    [MaxLength(50), Column("return_number")]
+    public string? ReturnNumber { get; set; }
 
     [Required, Column("order_id")]
     public Guid OrderId { get; set; }
@@ -56,9 +56,9 @@ public class CustomerReturn
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Order Order { get; set; } = default!;
-    public Customer Customer { get; set; } = default!;
-    public Branch Branch { get; set; } = default!;
+    public Order? Order { get; set; }
+    public Customer? Customer { get; set; }
+    public Branch? Branch { get; set; }
     public User? ProcessedByUser { get; set; }
     public User? ApprovedByUser { get; set; }
     public ICollection<CustomerReturnItem> Items { get; set; } = [];
@@ -97,6 +97,6 @@ public class CustomerReturnItem
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public CustomerReturn Return { get; set; } = default!;
-    public Product Product { get; set; } = default!;
+    public CustomerReturn? Return { get; set; }
+    public Product? Product { get; set; }
 }

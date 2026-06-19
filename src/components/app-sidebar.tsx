@@ -3,7 +3,6 @@ import { useState, type ElementType } from "react";
 import {
   LayoutDashboard,
   ScanBarcode,
-  Smartphone,
   Package,
   CalendarClock,
   Truck,
@@ -76,38 +75,34 @@ const navGroups: NavGroup[] = [
     label: "Operate",
     items: [
       { title: "Dashboard",           url: "/dashboard",     icon: LayoutDashboard, module: "Dashboard" },
-      { title: "POS Checkout",        url: "/pos",           icon: ScanBarcode,
-        roles: ["tenant_admin","branch_manager","cashier","supervisor"] },
-      { title: "Mobile POS & Kiosk",  url: "/mobile-pos",    icon: Smartphone,
-        roles: ["tenant_admin","branch_manager"] },
-      { title: "MPOS App Preview",    url: "/mpos-app",      icon: Smartphone,
-        roles: ["tenant_admin"] },
+      { title: "POS Checkout",        url: "/pos",           icon: ScanBarcode,     module: "POS" },
+      // { title: "Mobile POS & Kiosk",  url: "/mobile-pos",    icon: Smartphone,
+      //   roles: ["tenant_admin","branch_manager"] },
+      // { title: "MPOS App Preview",    url: "/mpos-app",      icon: Smartphone,
+      //   roles: ["tenant_admin"] },
       { title: "Orders",              url: "/orders",        icon: ShoppingBag,    module: "Orders" },
       { title: "Customers",           url: "/customers",     icon: Users,          module: "Customers" },
-      { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,
-        roles: ["tenant_admin","branch_manager","cashier","supervisor"] },
+      { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
       { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts" },
-      { title: "Control Tower",       url: "/control-tower", icon: Radar,
-        roles: ["tenant_admin","branch_manager","supervisor"] },
+      { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower" },
     ],
   },
   {
     label: "Stock",
     items: [
-      { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Inventory" },
+      { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Stocks" },
       { title: "Inventory",            url: "/inventory",       icon: Package,       module: "Inventory" },
-      { title: "Expiry & Permissible", url: "/batches",         icon: CalendarClock, module: "Batches" },
+      { title: "Expiry & Perishable",  url: "/batches",         icon: CalendarClock, module: "Batches" },
       { title: "Warehouses",           url: "/warehouses",      icon: Warehouse,     module: "Warehouses" },
-      { title: "Stock Transfers",      url: "/stock-transfers", icon: ArrowLeftRight, module: "Warehouses" },
+      { title: "Stock Transfers",      url: "/stock-transfers", icon: ArrowLeftRight, module: "Stock Transfers" },
     ],
   },
   {
     label: "Finance",
     items: [
-      { title: "Expenses",                    url: "/expenses",        icon: Wallet,       module: "Finance" },
-      { title: "Purchase Orders",             url: "/purchase-orders", icon: ClipboardList, module: "Suppliers" },
-      { title: "Coupons, Discounts & Offers", url: "/coupons",         icon: TicketPercent,
-        roles: ["tenant_admin","branch_manager","supervisor","marketing_user"] },
+      { title: "Expenses",                    url: "/expenses",        icon: Wallet,       module: "Accounting & Finance" },
+      { title: "Purchase Orders",             url: "/purchase-orders", icon: ClipboardList, module: "Purchase Orders" },
+      { title: "Coupons, Discounts & Offers", url: "/coupons",         icon: TicketPercent,  module: "Coupons" },
       { title: "Customer Returns",            url: "/returns",         icon: ReturnIcon,   module: "Returns" },
       { title: "Tax, Fees & Tobacco",         url: "/tax-fees",        icon: Cigarette,    module: "Tax & Fees" },
     ],
@@ -129,7 +124,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Insights",
     items: [
-      { title: "Sales",                 url: "/sales",    icon: TrendingUp,   module: "Reports" },
+      { title: "Sales",                 url: "/sales",    icon: TrendingUp,   module: "Sales" },
       { title: "Reports",               url: "/reports",  icon: FileBarChart, module: "Reports" },
       { title: "KPI Evaluation",        url: "/kpi",      icon: Gauge,        module: "Reports" },
       { title: "Business Intelligence", url: "/bi",       icon: BarChart3,    module: "Reports" },
@@ -138,10 +133,11 @@ const navGroups: NavGroup[] = [
   {
     label: "Admin",
     items: [
+      { title: "Admin Overview",         url: "/admin-overview", icon: LayoutDashboard, roles: ["tenant_admin"] },
       { title: "Rules Engine",           url: "/rules",          icon: Workflow,    module: "Rules Engine" },
       { title: "Registered Users",       url: "/users",          icon: UserCog,     module: "Users" },
       { title: "Roles & Permissions",    url: "/roles",          icon: Lock,        module: "Roles" },
-      { title: "Staff & Roles",          url: "/staff",          icon: Users,       module: "Users" },
+      // { title: "Staff & Roles",          url: "/staff",          icon: Users,       module: "Users" },
       { title: "Maintenance",            url: "/maintenance",    icon: Wrench,      roles: ["tenant_admin"] },
       { title: "ZATCA Invoices",         url: "/zatca",          icon: ReceiptText, module: "Compliance" },
       { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2,  roles: ["tenant_admin"] },
@@ -166,8 +162,11 @@ export function AppSidebar() {
   );
 
   const canSee = (item: NavItem) => {
+    // tenant_admin always sees everything regardless of permission map
     if (user?.role === "tenant_admin") return true;
+    // Module-based items: check the live permission map
     if (item.module) return user?.permissions?.[item.module]?.canView === true;
+    // Role-only items (no module)
     if (!item.roles) return true;
     return !!user?.role && item.roles.includes(user.role as AppRole);
   };

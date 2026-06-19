@@ -10,11 +10,11 @@ import { Button } from "@/components/ui/button";
 export const Route = createFileRoute("/_app/zatca")({ component: Zatca });
 
 const invoices = [
-  { inv: "INV-20260602-0142", time: "14:32", branch: "Olaya", total: "ر.س 56.00", vat: "ر.س 7.30", type: "Simplified", status: "synced" },
-  { inv: "INV-20260602-0141", time: "14:28", branch: "Olaya", total: "ر.س 18.50", vat: "ر.س 2.41", type: "Simplified", status: "synced" },
-  { inv: "INV-20260602-0140", time: "14:21", branch: "Khobar", total: "ر.س 142.30", vat: "ر.س 18.56", type: "Tax Invoice", status: "synced" },
-  { inv: "CN-20260602-0011", time: "13:50", branch: "Jeddah", total: "- ر.س 12.00", vat: "- ر.س 1.57", type: "Credit Note", status: "synced" },
-  { inv: "INV-20260602-0136", time: "14:02", branch: "Olaya", total: "ر.س 78.20", vat: "ر.س 10.20", type: "Simplified", status: "pending" },
+  { inv: "INV-20260602-0142", time: "14:32", branch: "Olaya", total: "SAR 56.00", vat: "SAR 7.30", type: "Simplified", status: "synced" },
+  { inv: "INV-20260602-0141", time: "14:28", branch: "Olaya", total: "SAR 18.50", vat: "SAR 2.41", type: "Simplified", status: "synced" },
+  { inv: "INV-20260602-0140", time: "14:21", branch: "Khobar", total: "SAR 142.30", vat: "SAR 18.56", type: "Tax Invoice", status: "synced" },
+  { inv: "CN-20260602-0011", time: "13:50", branch: "Jeddah", total: "- SAR 12.00", vat: "- SAR 1.57", type: "Credit Note", status: "synced" },
+  { inv: "INV-20260602-0136", time: "14:02", branch: "Olaya", total: "SAR 78.20", vat: "SAR 10.20", type: "Simplified", status: "pending" },
 ];
 
 function Zatca() {

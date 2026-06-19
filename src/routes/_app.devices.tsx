@@ -29,6 +29,60 @@ const emptyForm: DeviceForm = { deviceName: "", deviceType: "Receipt Printer", s
 
 const DEVICE_TYPES = ["Receipt Printer", "Barcode Scanner", "Cash Drawer", "Card Machine", "Kiosk Display", "Tablet (mPOS)"];
 
+function DeviceFormFields({ form, set, branches, terminals }: {
+  form: DeviceForm;
+  set: (k: keyof DeviceForm) => (v: string) => void;
+  branches: Branch[];
+  terminals: Terminal[];
+}) {
+  return (
+    <div className="space-y-3 mt-4">
+      <Field label="Device Name" value={form.deviceName} placeholder="Olaya Printer #4" onChange={set("deviceName")} />
+      <div className="space-y-1">
+        <Label className="text-xs">Device Type</Label>
+        <Select value={form.deviceType} onValueChange={set("deviceType")}>
+          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {DEVICE_TYPES.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <Field label="Serial Number" value={form.serialNumber} placeholder="SN-…" onChange={set("serialNumber")} />
+      <div className="space-y-1">
+        <Label className="text-xs">Branch</Label>
+        <Select value={form.branchId} onValueChange={set("branchId")}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+          <SelectContent>
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Terminal Mapping</Label>
+        <Select value={form.terminalId || "none"} onValueChange={v => set("terminalId")(v === "none" ? "" : v)}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="None" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">— None —</SelectItem>
+            {terminals.map(t => <SelectItem key={t.id} value={t.id}>{t.terminalCode} — {t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Status</Label>
+        <Select value={form.status} onValueChange={set("status")}>
+          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="maintenance">Maintenance</SelectItem>
+            <SelectItem value="offline">Offline</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <Field label="Behavior Profile" value={form.behaviourProfile} placeholder="Alert on idle > 10m" onChange={set("behaviourProfile")} />
+    </div>
+  );
+}
+
 function Devices() {
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -85,53 +139,6 @@ function Devices() {
   };
 
   const set = (k: keyof DeviceForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
-
-  const FormFields = () => (
-    <div className="space-y-3 mt-4">
-      <Field label="Device Name" value={form.deviceName} placeholder="Olaya Printer #4" onChange={set("deviceName")} />
-      <div className="space-y-1">
-        <Label className="text-xs">Device Type</Label>
-        <Select value={form.deviceType} onValueChange={set("deviceType")}>
-          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {DEVICE_TYPES.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <Field label="Serial Number" value={form.serialNumber} placeholder="SN-…" onChange={set("serialNumber")} />
-      <div className="space-y-1">
-        <Label className="text-xs">Branch</Label>
-        <Select value={form.branchId} onValueChange={set("branchId")}>
-          <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
-          <SelectContent>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Terminal Mapping</Label>
-        <Select value={form.terminalId} onValueChange={set("terminalId")}>
-          <SelectTrigger className="h-9"><SelectValue placeholder="None" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">None</SelectItem>
-            {terminals.map(t => <SelectItem key={t.id} value={t.id}>{t.terminalCode} — {t.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Status</Label>
-        <Select value={form.status} onValueChange={set("status")}>
-          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="maintenance">Maintenance</SelectItem>
-            <SelectItem value="offline">Offline</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <Field label="Behavior Profile" value={form.behaviourProfile} placeholder="Alert on idle > 10m" onChange={set("behaviourProfile")} />
-    </div>
-  );
 
   return (
     <PageShell title="Devices" subtitle="Hardware fleet + behavior in one place">
@@ -225,7 +232,7 @@ function Devices() {
       <Sheet open={!!edit} onOpenChange={v => !v && setEdit(null)}>
         <SheetContent className="w-full sm:max-w-md">
           <SheetHeader><SheetTitle>Edit {edit?.deviceName}</SheetTitle></SheetHeader>
-          <FormFields />
+          <DeviceFormFields form={form} set={set} branches={branches} terminals={terminals} />
           <SheetFooter className="mt-4">
             <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
               {saving ? "Saving…" : "Save"}
@@ -238,7 +245,7 @@ function Devices() {
       <Sheet open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
         <SheetContent className="w-full sm:max-w-md">
           <SheetHeader><SheetTitle>Register New Device</SheetTitle></SheetHeader>
-          <FormFields />
+          <DeviceFormFields form={form} set={set} branches={branches} terminals={terminals} />
           <SheetFooter className="mt-4">
             <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
               {saving ? "Registering…" : "Register"}

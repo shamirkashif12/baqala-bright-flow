@@ -16,8 +16,8 @@ public class ZatcaInvoice
     [Required, Column("branch_id")]
     public Guid BranchId { get; set; }
 
-    [Required, MaxLength(100), Column("invoice_number")]
-    public string InvoiceNumber { get; set; } = default!;
+    [MaxLength(100), Column("invoice_number")]
+    public string? InvoiceNumber { get; set; }
 
     [Required, MaxLength(20), Column("invoice_type")]
     public string InvoiceType { get; set; } = "standard"; // standard | simplified | credit | debit
@@ -63,8 +63,8 @@ public class ZatcaInvoice
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Order Order { get; set; } = default!;
-    public Branch Branch { get; set; } = default!;
+    public Order? Order { get; set; }
+    public Branch? Branch { get; set; }
 }
 
 [Table("zatca_settings")]
@@ -103,5 +103,5 @@ public class ZatcaSettings
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-    public Branch Branch { get; set; } = default!;
+    public Branch? Branch { get; set; }
 }

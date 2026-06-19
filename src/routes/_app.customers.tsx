@@ -11,9 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import {
   Plus, Search, Star, Phone, Mail, ShoppingBag, TrendingUp,
-  ChevronRight, Loader2, ArrowUpCircle, ArrowDownCircle, Gift,
+  ChevronRight, Loader2, ArrowUpCircle, ArrowDownCircle, Gift, X,
 } from "lucide-react";
 import { api, type Customer, type LoyaltyTransaction } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/customers")({ component: Customers });
 
@@ -47,13 +48,13 @@ function TierProgress({ spend }: { spend: number }) {
     <div className="space-y-1.5">
       <div className="flex justify-between text-xs text-muted-foreground">
         <span className="capitalize">{current.label}</span>
-        <span className="capitalize">{next.label} at SAR {next.min.toLocaleString()}</span>
+        <span className="capitalize">{next.label} at <SARIcon />{next.min.toLocaleString()}</span>
       </div>
       <div className="h-2 bg-muted rounded-full overflow-hidden">
         <div className={`h-full rounded-full transition-all ${current.bar}`} style={{ width: `${pct}%` }} />
       </div>
       <p className="text-xs text-muted-foreground">
-        SAR {(next.min - spend).toLocaleString("en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} more to reach {next.label}
+        <SARIcon />{(next.min - spend).toLocaleString("en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} more to reach {next.label}
       </p>
     </div>
   );
@@ -118,13 +119,13 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
               {customer.loyaltyBalance.toLocaleString()}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              ≈ SAR {(customer.loyaltyBalance / 100).toFixed(2)} discount value
+              ≈ <SARIcon />{(customer.loyaltyBalance / 100).toFixed(2)} discount value
             </p>
           </div>
           <div className="text-right">
             <p className="text-xs text-muted-foreground">Total Spend</p>
             <p className="text-lg font-bold tabular-nums">
-              SAR {customer.totalSpend.toLocaleString("en-SA", { minimumFractionDigits: 2 })}
+              <SARIcon />{customer.totalSpend.toLocaleString("en-SA", { minimumFractionDigits: 2 })}
             </p>
           </div>
         </div>
@@ -257,6 +258,8 @@ function Customers() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [tierFilter, setTierFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [selected, setSelected] = useState<Customer | null>(null);
   const [editTarget, setEditTarget] = useState<Customer | null | "new">(null);
 
@@ -268,7 +271,10 @@ function Customers() {
 
   const filtered = customers.filter(c => {
     const matchQ = !q || c.fullName.toLowerCase().includes(q.toLowerCase()) || c.phone.includes(q) || c.customerCode.toLowerCase().includes(q.toLowerCase()) || (c.email?.toLowerCase().includes(q.toLowerCase()));
-    return matchQ && (tierFilter === "all" || c.tier === tierFilter);
+    const matchTier = tierFilter === "all" || c.tier === tierFilter;
+    const mdf = !dateFrom || (!!c.createdAt && c.createdAt >= dateFrom);
+    const mdt = !dateTo || (!!c.createdAt && c.createdAt <= dateTo + "T23:59:59");
+    return matchQ && matchTier && mdf && mdt;
   });
 
   const totalSpend = customers.reduce((s, c) => s + c.totalSpend, 0);
@@ -287,7 +293,7 @@ function Customers() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: "Total Customers", value: customers.length, icon: <ShoppingBag className="h-4 w-4" /> },
-          { label: "Total Spend", value: `SAR ${totalSpend.toLocaleString("en-SA", { maximumFractionDigits: 0 })}`, icon: <TrendingUp className="h-4 w-4" /> },
+          { label: "Total Spend", value: <><SARIcon />{totalSpend.toLocaleString("en-SA", { maximumFractionDigits: 0 })}</>, icon: <TrendingUp className="h-4 w-4" /> },
           { label: "Loyalty Points", value: totalLoyalty.toLocaleString(), icon: <Star className="h-4 w-4" /> },
           { label: "Platinum Members", value: platinum, icon: <Star className="h-4 w-4 text-purple-500" /> },
         ].map(s => (
@@ -311,6 +317,17 @@ function Customers() {
             {TIERS.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Joined:</span>
+          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          <span className="text-xs text-muted-foreground">–</span>
+          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          {(dateFrom || dateTo) && (
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
         <div className="flex-1" />
         <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => setEditTarget("new")}>
           <Plus className="h-4 w-4" /> Add Customer
@@ -353,7 +370,7 @@ function Customers() {
                       <Star className="h-3 w-3 inline mr-1 text-yellow-500" />{c.loyaltyBalance.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 tabular-nums font-semibold">
-                      SAR {c.totalSpend.toLocaleString("en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <SARIcon />{c.totalSpend.toLocaleString("en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant="outline" className={c.status === "active" ? "text-green-600 border-green-400/40 text-xs" : "text-xs"}>{c.status}</Badge>

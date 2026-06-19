@@ -18,6 +18,7 @@ import heroBg from "@/assets/admin-hero.jpg";
 import storePhoto from "@/assets/store-photo.jpg";
 import ownerPhoto from "@/assets/owner-photo.jpg";
 import { api, type AuditLog, type DashboardMetrics } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/admin")({
   component: () => (
@@ -151,7 +152,7 @@ function AdminHome() {
                 <div className="flex items-center gap-2">
                   <PulseDot />
                   <span className="text-xs font-semibold">Olaya HQ · Live</span>
-                  <span className="text-xs text-muted-foreground ml-auto">ر.س {Math.round(salesValue).toLocaleString()}</span>
+                  <span className="text-xs text-muted-foreground ml-auto"><SARIcon />{Math.round(salesValue).toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -161,7 +162,7 @@ function AdminHome() {
 
       {/* Live metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Live Sales" value={`ر.س ${Math.round(salesValue).toLocaleString()}`} delta="+18%" trend="up" hint="today" icon={TrendingUp} accent="primary" />
+        <MetricCard label="Live Sales" value={<><SARIcon />{Math.round(salesValue).toLocaleString()}</>} delta="+18%" trend="up" hint="today" icon={TrendingUp} accent="primary" />
         <MetricCard label="Orders Today" value={ordersValue.toLocaleString()} delta="+12%" trend="up" hint="total" icon={ReceiptText} />
         <MetricCard label="API Throughput" value={`${Math.round(apiRps)} rps`} delta="healthy" trend="flat" icon={Activity} accent="success" />
         <MetricCard label="Platform Uptime" value={`${uptime.toFixed(2)}%`} delta="30d" trend="up" icon={ShieldCheck} accent="success" />

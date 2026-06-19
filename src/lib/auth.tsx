@@ -56,7 +56,7 @@ const TOKEN_KEY          = "baqala_token";
 const SESSION_EXPIRY_KEY = "baqala_session_expires";
 const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:5008";
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:5000";
 
 // ── Session helpers ───────────────────────────────────────────────────────────
 function stampSession() {
@@ -125,9 +125,9 @@ function buildUser(claims: JwtClaims): AuthUser {
   };
 }
 
-// Fetches the live permission map for the user's role from the API.
-// Keyed by module name, e.g. permissions["Warehouses"].canView
-async function fetchPermissions(roleId: string): Promise<Record<string, RolePermFlags>> {
+// Fetches role permissions then overlays any user-specific overrides from localStorage.
+// localStorage key: baqala_user_perms_{userId} → Record<module, RolePermFlags>
+async function fetchPermissions(roleId: string, userId?: string): Promise<Record<string, RolePermFlags>> {
   if (!roleId) return {};
   try {
     const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
@@ -139,15 +139,19 @@ async function fetchPermissions(roleId: string): Promise<Record<string, RolePerm
       permissions?: Array<{ module: string } & RolePermFlags>;
     };
     const map: Record<string, RolePermFlags> = {};
+    const empty: RolePermFlags = { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canExport: false };
     for (const p of role.permissions ?? []) {
-      map[p.module] = {
-        canView:   p.canView   ?? false,
-        canCreate: p.canCreate ?? false,
-        canEdit:   p.canEdit   ?? false,
-        canDelete: p.canDelete ?? false,
-        canApprove:p.canApprove ?? false,
-        canExport: p.canExport  ?? false,
-      };
+      map[p.module] = { canView: p.canView ?? false, canCreate: p.canCreate ?? false, canEdit: p.canEdit ?? false, canDelete: p.canDelete ?? false, canApprove: p.canApprove ?? false, canExport: p.canExport ?? false };
+    }
+    // Overlay user-specific permission overrides stored in localStorage
+    if (userId && typeof window !== "undefined") {
+      const raw = localStorage.getItem(`baqala_user_perms_${userId}`);
+      if (raw) {
+        const overrides = JSON.parse(raw) as Record<string, Partial<RolePermFlags>>;
+        for (const [mod, flags] of Object.entries(overrides)) {
+          map[mod] = { ...(map[mod] ?? empty), ...flags };
+        }
+      }
     }
     return map;
   } catch {
@@ -173,7 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (claims) {
           const baseUser = buildUser(claims);
           if (!cancelled) setAuthUser(baseUser);
-          const perms = await fetchPermissions(baseUser.roleId);
+          const perms = await fetchPermissions(baseUser.roleId, baseUser.id);
           if (!cancelled) setAuthUser(u => u ? { ...u, permissions: perms } : null);
         } else {
           clearSession();
@@ -210,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const claims = parseJwt(token);
     if (claims) {
       const baseUser = buildUser(claims);
-      const perms = await fetchPermissions(baseUser.roleId);
+      const perms = await fetchPermissions(baseUser.roleId, baseUser.id);
       setAuthUser({ ...baseUser, permissions: perms });
     }
   }, []);

@@ -15,11 +15,12 @@ import {
   RefreshCw, CheckCircle2, XCircle, Loader2, UserCheck,
 } from "lucide-react";
 import { api, type CashierShift, type User, type Branch, type Terminal } from "@/lib/api";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/cashier-shift")({ component: Shift });
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-const fmt = (n: number) => `ر.س ${n.toLocaleString("en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = (n: number) => fmtSAR(n);
 
 function elapsed(openedAt: string) {
   const diff = Math.floor((Date.now() - new Date(openedAt).getTime()) / 1000);
@@ -113,9 +114,9 @@ function Shift() {
       {/* Summary metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Active Shifts" value={String(activeShifts.length)} icon={Clock} accent="primary" />
-        <MetricCard label="Total Cash" value={fmt(totalCash)} icon={Banknote} accent="success" />
-        <MetricCard label="Total Card" value={fmt(totalCard)} icon={CreditCard} />
-        <MetricCard label="Total Wallet" value={fmt(totalDigital)} icon={Smartphone} />
+        <MetricCard label="Total Cash" value={<><SARIcon />{" "}{fmt(totalCash)}</>} icon={Banknote} accent="success" />
+        <MetricCard label="Total Card" value={<><SARIcon />{" "}{fmt(totalCard)}</>} icon={CreditCard} />
+        <MetricCard label="Total Wallet" value={<><SARIcon />{" "}{fmt(totalDigital)}</>} icon={Smartphone} />
       </div>
 
       {/* Shifts table */}
@@ -438,7 +439,7 @@ function CheckOutForm({
         {variance !== null && (
           <Info
             label="Cash Variance"
-            value={variance === 0 ? "ر.س 0.00 — Perfect" : `${variance > 0 ? "+" : ""}${fmt(variance)}`}
+            value={variance === 0 ? "0.00 — Perfect" : `${variance > 0 ? "+" : ""}${fmt(variance)}`}
             tone={variance < 0 ? "destructive" : variance > 0 ? "success" : "primary"}
           />
         )}
