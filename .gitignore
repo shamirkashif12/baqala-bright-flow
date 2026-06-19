@@ -19,6 +19,9 @@ dist-ssr
 .tanstack/**
 .nitro
 
+# TanStack Router — auto-generated, never commit
+src/routeTree.gen.ts
+
 # Local env files — contain secrets
 *.local
 .dev.vars
