@@ -186,6 +186,7 @@ function Batches() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
@@ -193,19 +194,27 @@ function Batches() {
   async function loadBatches() {
     setLoading(true);
     try {
-      const data = await api.getBatches();
+      const data = await api.getBatches({
+        branchId: branchFilter !== "all" ? branchFilter : undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+      });
       setBatches(data ?? []);
     } finally {
       setLoading(false);
     }
   }
 
+  // Load metadata once on mount
   useEffect(() => {
-    loadBatches();
     api.getBranches().then(setBranches).catch(() => {});
     api.getProducts().then(setProducts).catch(() => {});
     api.getSuppliers().then(setSuppliers).catch(() => {});
   }, []);
+
+  // Re-fetch batches from BE whenever a filter changes
+  useEffect(() => {
+    loadBatches();
+  }, [branchFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const nearExpiry = batches.filter(b => b.status === "near_expiry").length;
   const expired = batches.filter(b => b.status === "expired").length;
@@ -214,10 +223,11 @@ function Batches() {
   const q = search.toLowerCase();
   const filtered = batches.filter(b => {
     const mq = !q || b.product?.name?.toLowerCase().includes(q) || b.product?.sku?.toLowerCase().includes(q) || b.batchNumber.toLowerCase().includes(q);
+    const mbr = branchFilter === "all" || b.branchId === branchFilter;
     const ms = statusFilter === "all" || b.status === statusFilter;
     const mef = !expiryFrom || (!!b.expiryDate && b.expiryDate >= expiryFrom);
     const met = !expiryTo || (!!b.expiryDate && b.expiryDate <= expiryTo + "T23:59:59");
-    return mq && ms && mef && met;
+    return mq && mbr && ms && mef && met;
   });
 
   return (
@@ -235,6 +245,13 @@ function Batches() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Input placeholder="Search batch / lot / product…" className="h-9 bg-card" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+        <Select value={branchFilter} onValueChange={setBranchFilter}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Branches</SelectItem>
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Statuses" /></SelectTrigger>
           <SelectContent>
@@ -277,6 +294,7 @@ function Batches() {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Batch #</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Branch</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Supplier</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Received</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Expiry</th>
@@ -294,6 +312,7 @@ function Batches() {
                           <p className="text-xs text-muted-foreground">{b.product?.sku ?? "—"}</p>
                         </td>
                         <td className="px-4 py-3 font-mono text-xs">{b.batchNumber}</td>
+                        <td className="px-4 py-3 text-xs">{branches.find(br => br.id === b.branchId)?.name ?? "—"}</td>
                         <td className="px-4 py-3 text-muted-foreground">{b.supplier?.name ?? "—"}</td>
                         <td className="px-4 py-3 text-muted-foreground text-xs">
                           {new Date(b.receivedDate).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" })}

@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { api, type DashboardMetrics, type CashierShift, type Branch } from "@/lib/api";
+import { api, type DashboardMetrics, type CashierShift, type Branch, type InventoryStock, type Terminal } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, CalendarClock,
@@ -270,6 +270,15 @@ function Dashboard() {
   const [warehousePending, setWarehousePending] = useState(0);
   const [loading, setLoading] = useState(true);
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
+
+  const [inventoryItems, setInventoryItems] = useState<InventoryStock[]>([]);
+  const [inventoryTabLoading, setInventoryTabLoading] = useState(false);
+  const [inventoryTabLoaded, setInventoryTabLoaded] = useState(false);
+
+  const [terminalItems, setTerminalItems] = useState<Terminal[]>([]);
+  const [terminalTabLoading, setTerminalTabLoading] = useState(false);
+  const [terminalTabLoaded, setTerminalTabLoaded] = useState(false);
 
   const [visibleCards, setVisibleCards] = useState<Set<string>>(() => {
     try {
@@ -305,6 +314,32 @@ function Dashboard() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [period, branch]);
+
+  // Reset lazy-loaded tab data when branch/period filter changes
+  useEffect(() => {
+    setInventoryTabLoaded(false);
+    setTerminalTabLoaded(false);
+  }, [branch, period]);
+
+  // Lazy load low-stock items when inventory tab is first opened
+  useEffect(() => {
+    if (activeTab !== "inventory" || inventoryTabLoaded) return;
+    setInventoryTabLoading(true);
+    api.getStock({ branchId: branch !== "all" ? branch : undefined, lowStock: true })
+      .then(items => { setInventoryItems(items); setInventoryTabLoaded(true); })
+      .catch(() => {})
+      .finally(() => setInventoryTabLoading(false));
+  }, [activeTab, inventoryTabLoaded, branch]);
+
+  // Lazy load terminals when terminals tab is first opened
+  useEffect(() => {
+    if (activeTab !== "terminals" || terminalTabLoaded) return;
+    setTerminalTabLoading(true);
+    api.getTerminals(branch !== "all" ? branch : undefined)
+      .then(items => { setTerminalItems(items); setTerminalTabLoaded(true); })
+      .catch(() => {})
+      .finally(() => setTerminalTabLoading(false));
+  }, [activeTab, terminalTabLoaded, branch]);
 
   const allCards = dashData ? buildCards(dashData) : [];
   const statCards = allCards.filter(c => visibleCards.has(c.id));
@@ -396,7 +431,7 @@ function Dashboard() {
       )}
 
       {/* Tabs */}
-      <Tabs defaultValue="overview" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="overview" className="gap-1.5"><LayoutDashboard className="h-4 w-4" />Overview</TabsTrigger>
           <TabsTrigger value="orders" className="gap-1.5"><ShoppingBag className="h-4 w-4" />Orders</TabsTrigger>
@@ -489,7 +524,7 @@ function Dashboard() {
           </Widget>
         </TabsContent>
 
-        <TabsContent value="inventory" className="mt-4">
+        <TabsContent value="inventory" className="mt-4 space-y-4">
           <Widget title="Inventory Health" link={{ to: "/inventory", label: "Open Inventory" }}>
             {loading ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />) : (
               <div className="grid grid-cols-2 gap-3">
@@ -502,12 +537,92 @@ function Dashboard() {
               </div>
             )}
           </Widget>
+          {inventoryTabLoading ? (
+            <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-9 w-full rounded-xl" />)}</div>
+          ) : inventoryItems.length > 0 ? (
+            <Card className="overflow-hidden border-border/60 shadow-card">
+              <div className="px-4 py-3 border-b border-border/60 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Low Stock Items</h3>
+                <span className="text-xs text-muted-foreground">{inventoryItems.length} items need restocking</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-2 font-semibold">Product</th>
+                      <th className="px-3 py-2 font-semibold">Category</th>
+                      <th className="px-3 py-2 font-semibold">Branch</th>
+                      <th className="px-3 py-2 font-semibold text-right">Qty</th>
+                      <th className="px-3 py-2 font-semibold text-right">Reorder Level</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventoryItems.slice(0, 15).map(item => (
+                      <tr key={item.id} className="border-t border-border/40 hover:bg-muted/30">
+                        <td className="px-3 py-2 font-medium">{item.product?.name ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{item.product?.category?.name ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{item.branch?.name ?? "—"}</td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-destructive">{item.quantity}</td>
+                        <td className="px-3 py-2 text-right text-xs text-muted-foreground">{item.reorderLevel}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : inventoryTabLoaded ? (
+            <Card className="p-6 border-border/60 text-center text-muted-foreground text-sm">
+              No low-stock items — inventory looks healthy!
+            </Card>
+          ) : null}
         </TabsContent>
 
-        <TabsContent value="cashiers" className="mt-4">
-          <Widget title="Cashier Performance" link={{ to: "/cashier-shift", label: "View Shifts" }}>
-            {loading ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />) :
-              cashierPerf.length > 0 ? cashierPerf.map((c) => (
+        <TabsContent value="cashiers" className="mt-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Mini label="Active Cashiers" value={loading ? "…" : String(dashData?.shifts.active ?? 0)} tone="success" />
+            <Mini label="Total Cashiers" value={loading ? "…" : String(dashData?.shifts.totalCashiers ?? 0)} />
+            <Mini label="Open Shifts" value={loading ? "…" : String(activeShifts.length)} tone={activeShifts.length > 0 ? "success" : "default"} />
+          </div>
+          {loading ? (
+            <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-9 w-full rounded-xl" />)}</div>
+          ) : activeShifts.length > 0 ? (
+            <Card className="overflow-hidden border-border/60 shadow-card">
+              <div className="px-4 py-3 border-b border-border/60">
+                <h3 className="text-sm font-semibold">Active Shifts</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-2 font-semibold">Cashier</th>
+                      <th className="px-3 py-2 font-semibold">Terminal</th>
+                      <th className="px-3 py-2 font-semibold">Branch</th>
+                      <th className="px-3 py-2 font-semibold">Opened At</th>
+                      <th className="px-3 py-2 font-semibold">Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeShifts.map(s => (
+                      <tr key={s.id} className="border-t border-border/40 hover:bg-muted/30">
+                        <td className="px-3 py-2 font-medium">{s.cashier?.fullName ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs font-mono">{s.terminal?.terminalCode ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{branches.find(b => b.id === s.branchId)?.name ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{new Date(s.openedAt).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })}</td>
+                        <td className="px-3 py-2 text-xs font-mono">{shiftDuration(s.openedAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : (
+            <Card className="p-6 border-border/60 text-center text-muted-foreground text-sm">
+              No active shifts right now.
+            </Card>
+          )}
+          {!loading && cashierPerf.length > 0 && (
+            <Widget title="Cashier Performance (Today)" link={{ to: "/cashier-shift", label: "View All" }}>
+              {cashierPerf.map((c) => (
                 <div key={c.name} className="flex items-center justify-between text-sm py-0.5">
                   <span className="truncate max-w-[160px]">{c.name}</span>
                   <div className="flex items-center gap-2">
@@ -517,22 +632,69 @@ function Dashboard() {
                     <span className="font-semibold tabular-nums text-xs"><SARIcon />{c.sales.toLocaleString("en-SA", { maximumFractionDigits: 0 })}</span>
                   </div>
                 </div>
-              )) : <p className="text-xs text-muted-foreground">No cashier data available.</p>
-            }
-          </Widget>
+              ))}
+            </Widget>
+          )}
         </TabsContent>
 
-        <TabsContent value="terminals" className="mt-4">
-          <Widget title="Terminal Status" link={{ to: "/terminals", label: "Manage Terminals" }}>
-            {loading ? Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />) : (
-              <div className="grid grid-cols-3 gap-3">
-                <Mini label="Online" value={String(dashData?.terminals.active ?? 0)} tone="success" />
-                <Mini label="Offline" value={String((dashData?.terminals.total ?? 0) - (dashData?.terminals.active ?? 0))}
-                  tone={(dashData?.terminals.total ?? 0) - (dashData?.terminals.active ?? 0) > 0 ? "destructive" : "default"} />
-                <Mini label="Total" value={String(dashData?.terminals.total ?? 0)} />
+        <TabsContent value="terminals" className="mt-4 space-y-4">
+          {loading ? (
+            <div className="grid grid-cols-3 gap-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              <Mini label="Online" value={String(dashData?.terminals.active ?? 0)} tone="success" />
+              <Mini label="Offline" value={String((dashData?.terminals.total ?? 0) - (dashData?.terminals.active ?? 0))}
+                tone={(dashData?.terminals.total ?? 0) - (dashData?.terminals.active ?? 0) > 0 ? "destructive" : "default"} />
+              <Mini label="Total" value={String(dashData?.terminals.total ?? 0)} />
+            </div>
+          )}
+          {terminalTabLoading ? (
+            <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-9 w-full rounded-xl" />)}</div>
+          ) : terminalItems.length > 0 ? (
+            <Card className="overflow-hidden border-border/60 shadow-card">
+              <div className="px-4 py-3 border-b border-border/60 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Terminal Registry</h3>
+                <span className="text-xs text-muted-foreground">{terminalItems.length} terminals</span>
               </div>
-            )}
-          </Widget>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-2 font-semibold">Code</th>
+                      <th className="px-3 py-2 font-semibold">Name</th>
+                      <th className="px-3 py-2 font-semibold">Branch</th>
+                      <th className="px-3 py-2 font-semibold">Cashier</th>
+                      <th className="px-3 py-2 font-semibold">Last Sync</th>
+                      <th className="px-3 py-2 font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {terminalItems.map(t => (
+                      <tr key={t.id} className="border-t border-border/40 hover:bg-muted/30">
+                        <td className="px-3 py-2 font-mono font-bold text-xs">{t.terminalCode}</td>
+                        <td className="px-3 py-2 font-medium">{t.name}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{t.branch?.name ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs">{t.assignedCashier?.fullName ?? "Unassigned"}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{t.lastSync ? new Date(t.lastSync).toLocaleString("en-SA", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                        <td className="px-3 py-2">
+                          <span className={cn(
+                            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                            t.status === "active" ? "bg-success/15 text-success" :
+                            t.status === "maintenance" ? "bg-warning/20 text-warning-foreground" :
+                            "bg-muted text-muted-foreground"
+                          )}>{t.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : terminalTabLoaded ? (
+            <Card className="p-6 border-border/60 text-center text-muted-foreground text-sm">
+              No terminals found.
+            </Card>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="returns" className="mt-4">

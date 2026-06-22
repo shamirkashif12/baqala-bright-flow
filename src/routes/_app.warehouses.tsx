@@ -333,10 +333,14 @@ function Warehouses() {
   const [newOpen, setNewOpen] = useState(false);
 
   const load = () => {
-    api.getWarehouseRequests().then(setRequests).finally(() => setLoading(false));
+    setLoading(true);
+    api.getWarehouseRequests({
+      approvalStatus: approvalFilter !== "all" ? approvalFilter : undefined,
+      deliveryStatus: deliveryFilter !== "all" ? deliveryFilter : undefined,
+    }).then(setRequests).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [approvalFilter, deliveryFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = requests.filter(r => {
     const mq = !q

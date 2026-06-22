@@ -63,6 +63,12 @@ public class Expense
     [Column("approved_by")]
     public Guid? ApprovedBy { get; set; }
 
+    [MaxLength(50), Column("payment_method")]
+    public string? PaymentMethod { get; set; } // cash | card | bank_transfer | wallet
+
+    [Column("paid_amount")]
+    public decimal? PaidAmount { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

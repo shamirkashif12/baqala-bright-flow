@@ -11,11 +11,17 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
 {
     // ─── Expenses ─────────────────────────────────────────────────────────────
     [HttpGet("expenses")]
-    public async Task<IActionResult> GetExpenses([FromQuery] Guid? branchId, [FromQuery] string? status)
+    public async Task<IActionResult> GetExpenses(
+        [FromQuery] Guid? branchId,
+        [FromQuery] string? status,
+        [FromQuery] string? paymentMethod,
+        [FromQuery] Guid? expenseTypeId)
     {
         var query = db.Expenses.Include(e => e.ExpenseType).Include(e => e.Branch).AsQueryable();
         if (branchId.HasValue) query = query.Where(e => e.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(e => e.Status == status);
+        if (!string.IsNullOrEmpty(paymentMethod)) query = query.Where(e => e.PaymentMethod == paymentMethod);
+        if (expenseTypeId.HasValue) query = query.Where(e => e.ExpenseTypeId == expenseTypeId);
         return Ok(await query.OrderByDescending(e => e.ExpenseDate).ToListAsync());
     }
 
@@ -28,6 +34,34 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         db.Expenses.Add(expense);
         await db.SaveChangesAsync();
         return Created($"/api/finance/expenses/{expense.Id}", expense);
+    }
+
+    [HttpPut("expenses/{id:guid}")]
+    public async Task<IActionResult> UpdateExpense(Guid id, [FromBody] Expense updated)
+    {
+        var expense = await db.Expenses.FindAsync(id);
+        if (expense is null) return NotFound();
+        expense.ExpenseTypeId = updated.ExpenseTypeId;
+        expense.BranchId = updated.BranchId;
+        expense.Amount = updated.Amount;
+        expense.PaidAmount = updated.PaidAmount;
+        expense.Description = updated.Description;
+        expense.ReferenceNumber = updated.ReferenceNumber;
+        expense.ExpenseDate = updated.ExpenseDate;
+        expense.PaymentMethod = updated.PaymentMethod;
+        expense.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(expense);
+    }
+
+    [HttpDelete("expenses/{id:guid}")]
+    public async Task<IActionResult> DeleteExpense(Guid id)
+    {
+        var expense = await db.Expenses.FindAsync(id);
+        if (expense is null) return NotFound();
+        db.Expenses.Remove(expense);
+        await db.SaveChangesAsync();
+        return NoContent();
     }
 
     [HttpPatch("expenses/{id:guid}/approve")]
@@ -43,9 +77,11 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
     }
 
     [HttpGet("expense-types")]
-    public async Task<IActionResult> GetExpenseTypes()
+    public async Task<IActionResult> GetExpenseTypes([FromQuery] bool includeInactive = false)
     {
-        return Ok(await db.ExpenseTypes.Where(t => t.IsActive).OrderBy(t => t.Name).ToListAsync());
+        var query = db.ExpenseTypes.AsQueryable();
+        if (!includeInactive) query = query.Where(t => t.IsActive);
+        return Ok(await query.OrderBy(t => t.Name).ToListAsync());
     }
 
     [HttpPost("expense-types")]
@@ -56,6 +92,31 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         db.ExpenseTypes.Add(expenseType);
         await db.SaveChangesAsync();
         return Created($"/api/finance/expense-types/{expenseType.Id}", expenseType);
+    }
+
+    [HttpPut("expense-types/{id:guid}")]
+    public async Task<IActionResult> UpdateExpenseType(Guid id, [FromBody] ExpenseType updated)
+    {
+        var expenseType = await db.ExpenseTypes.FindAsync(id);
+        if (expenseType is null) return NotFound();
+        expenseType.Name = updated.Name;
+        expenseType.NameAr = updated.NameAr;
+        expenseType.Description = updated.Description;
+        expenseType.IsActive = updated.IsActive;
+        expenseType.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(expenseType);
+    }
+
+    [HttpDelete("expense-types/{id:guid}")]
+    public async Task<IActionResult> DeleteExpenseType(Guid id)
+    {
+        var expenseType = await db.ExpenseTypes.FindAsync(id);
+        if (expenseType is null) return NotFound();
+        expenseType.IsActive = false;
+        expenseType.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(expenseType);
     }
 
     // ─── Coupons ──────────────────────────────────────────────────────────────

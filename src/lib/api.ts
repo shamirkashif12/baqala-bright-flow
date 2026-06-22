@@ -37,7 +37,7 @@ export const api = {
 
   // Users
   getUsers: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<User[]>(`/api/users${q ? `?${q}` : ""}`);
   },
   createUser: (data: CreateUserPayload) =>
@@ -58,7 +58,7 @@ export const api = {
 
   // Products
   getProducts: (params?: { categoryId?: string; status?: string; search?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<Product[]>(`/api/products${q ? `?${q}` : ""}`);
   },
   getProductByBarcode: (barcode: string) =>
@@ -78,12 +78,12 @@ export const api = {
     request<Category>(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   // Inventory
-  getStock: (params?: { branchId?: string; lowStock?: boolean }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+  getStock: (params?: { branchId?: string; lowStock?: boolean; categoryId?: string }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<InventoryStock[]>(`/api/inventory/stock${q ? `?${q}` : ""}`);
   },
   getBatches: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<InventoryBatch[]>(`/api/inventory/batches${q ? `?${q}` : ""}`);
   },
   getExpiringBatches: (branchId?: string, daysAhead = 30) => {
@@ -113,7 +113,7 @@ export const api = {
 
   // Cashier Shifts
   getShifts: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<CashierShift[]>(`/api/shifts${q ? `?${q}` : ""}`);
   },
   getActiveShifts: (branchId?: string) =>
@@ -124,8 +124,10 @@ export const api = {
     request<CashierShift>(`/api/shifts/${id}/close`, { method: "POST", body: JSON.stringify(data) }),
 
   // Terminals
-  getTerminals: (branchId?: string) =>
-    request<Terminal[]>(`/api/terminals${branchId ? `?branchId=${branchId}` : ""}`),
+  getTerminals: (params?: { branchId?: string; status?: string }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
+    return request<Terminal[]>(`/api/terminals${q ? `?${q}` : ""}`);
+  },
   createTerminal: (data: Partial<Terminal>) =>
     request<Terminal>("/api/terminals", { method: "POST", body: JSON.stringify(data) }),
   updateTerminal: (id: string, data: Partial<Terminal>) =>
@@ -135,7 +137,7 @@ export const api = {
 
   // Suppliers
   getSuppliers: (params?: { status?: string; supplyType?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<Supplier[]>(`/api/suppliers${q ? `?${q}` : ""}`);
   },
   createSupplier: (data: Partial<Supplier>) =>
@@ -147,7 +149,8 @@ export const api = {
 
   // Customers
   getCustomers: (params?: { tier?: string; search?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>;
+    const q = new URLSearchParams(filtered).toString();
     return request<Customer[]>(`/api/customers${q ? `?${q}` : ""}`);
   },
   getCustomerByPhone: (phone: string) =>
@@ -160,15 +163,27 @@ export const api = {
     request<LoyaltyTransaction[]>(`/api/customers/${id}/loyalty`),
 
   // Finance
-  getExpenses: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+  getExpenses: (params?: { branchId?: string; status?: string; paymentMethod?: string; expenseTypeId?: string }) => {
+    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
+    const q = new URLSearchParams(filtered).toString();
     return request<Expense[]>(`/api/finance/expenses${q ? `?${q}` : ""}`);
   },
   createExpense: (data: Partial<Expense>) =>
     request<Expense>("/api/finance/expenses", { method: "POST", body: JSON.stringify(data) }),
+  updateExpense: (id: string, data: Partial<Expense>) =>
+    request<Expense>(`/api/finance/expenses/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteExpense: (id: string) =>
+    request<void>(`/api/finance/expenses/${id}`, { method: "DELETE" }),
   approveExpense: (id: string, approved: boolean, approvedBy: string) =>
     request<Expense>(`/api/finance/expenses/${id}/approve`, { method: "PATCH", body: JSON.stringify({ approved, approvedBy }) }),
-  getExpenseTypes: () => request<ExpenseType[]>("/api/finance/expense-types"),
+  getExpenseTypes: (includeInactive = false) =>
+    request<ExpenseType[]>(`/api/finance/expense-types${includeInactive ? "?includeInactive=true" : ""}`),
+  createExpenseType: (data: { name: string; nameAr?: string; description?: string }) =>
+    request<ExpenseType>("/api/finance/expense-types", { method: "POST", body: JSON.stringify({ ...data, isActive: true }) }),
+  updateExpenseType: (id: string, data: { name: string; nameAr?: string; description?: string; isActive: boolean }) =>
+    request<ExpenseType>(`/api/finance/expense-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteExpenseType: (id: string) =>
+    request<void>(`/api/finance/expense-types/${id}`, { method: "DELETE" }),
   getCoupons: (status?: string) =>
     request<Coupon[]>(`/api/finance/coupons${status ? `?status=${status}` : ""}`),
   createCoupon: (data: Partial<Coupon>) =>
@@ -188,7 +203,7 @@ export const api = {
 
   // Warehouse
   getWarehouseRequests: (params?: { branchId?: string; approvalStatus?: string; deliveryStatus?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<WarehouseRequest[]>(`/api/warehouse/requests${q ? `?${q}` : ""}`);
   },
   createWarehouseRequest: (data: Partial<WarehouseRequest>) =>
@@ -254,7 +269,7 @@ export const api = {
 
   // Returns
   getReturns: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<CustomerReturn[]>(`/api/returns${q ? `?${q}` : ""}`);
   },
   createReturn: (data: Partial<CustomerReturn>) =>
@@ -266,7 +281,7 @@ export const api = {
 
   // Compliance / ZATCA
   getZatcaInvoices: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<ZatcaInvoice[]>(`/api/compliance/zatca/invoices${q ? `?${q}` : ""}`);
   },
   getZatcaSettings: (branchId: string) =>
@@ -279,13 +294,13 @@ export const api = {
 
   // Audit Logs
   getAuditLogs: (params?: { entityType?: string; page?: number }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<{ total: number; items: AuditLog[] }>(`/api/auditlogs${q ? `?${q}` : ""}`);
   },
 
   // Attendance
   getAttendance: (params?: { branchId?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<StaffAttendance[]>(`/api/settings/attendance${q ? `?${q}` : ""}`);
   },
 
@@ -301,7 +316,7 @@ export const api = {
 
   // Compliance rules
   getComplianceRules: (params?: { ruleType?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<ComplianceRule[]>(`/api/compliance/rules${q ? `?${q}` : ""}`);
   },
   createComplianceRule: (data: Partial<ComplianceRule>) =>
@@ -309,7 +324,7 @@ export const api = {
 
   // Devices
   getDevices: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<DeviceRecord[]>(`/api/devices${q ? `?${q}` : ""}`);
   },
   createDevice: (data: Partial<DeviceRecord>) =>
@@ -478,8 +493,10 @@ export interface ExpenseType {
 
 export interface Expense {
   id: string; expenseTypeId: string; branchId: string; amount: number;
+  paidAmount?: number; paymentMethod?: string;
   description?: string; referenceNumber?: string; expenseDate: string; status: string;
   expenseType?: { id: string; name: string };
+  branch?: { id: string; name: string };
 }
 
 export interface Coupon {

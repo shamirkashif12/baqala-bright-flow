@@ -10,10 +10,11 @@ namespace BaqalaPOS.Api.Controllers;
 public class TerminalsController(BaqalaDbContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] Guid? branchId)
+    public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
         var query = db.Terminals.Include(t => t.Branch).Include(t => t.AssignedCashier).Include(t => t.Devices).AsQueryable();
         if (branchId.HasValue) query = query.Where(t => t.BranchId == branchId);
+        if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);
         return Ok(await query.ToListAsync());
     }
 

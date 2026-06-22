@@ -781,7 +781,7 @@ function POS() {
           </div>
 
           {/* Cart mini-list */}
-          <div className="flex-1 overflow-y-auto p-3 text-sm text-muted-foreground">
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 text-sm text-muted-foreground">
             {cart.length === 0 ? (
               <p className="text-center pt-6">Scan or search a product to start a sale.</p>
             ) : (
@@ -797,7 +797,7 @@ function POS() {
           </div>
 
           {/* Customer + Coupon section */}
-          <div className="px-4 py-3 border-t border-border/60 space-y-3">
+          <div className="px-4 py-3 border-t border-border/60 space-y-3 shrink-0">
             {/* Customer lookup */}
             {customer ? (
               <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2">
@@ -865,7 +865,7 @@ function POS() {
           </div>
 
           {/* Totals + actions */}
-          <div className="p-4 border-t border-border/60 space-y-2">
+          <div className="p-4 border-t border-border/60 space-y-2 shrink-0">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Subtotal</span>
               <span className="tabular-nums"><SARIcon />{subtotal.toFixed(2)}</span>

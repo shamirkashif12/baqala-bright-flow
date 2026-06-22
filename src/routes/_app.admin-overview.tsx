@@ -84,11 +84,20 @@ function AdminOverview() {
       api.getWarehouses(),
       api.getStock(),
       api.getCategories(),
+      api.getBatches(),
     ])
-      .then(([b, w, s, c]) => {
+      .then(([b, w, s, c, batches]) => {
         setBranches(b);
         setWarehouses(w);
-        setStock(s as StockItem[]);
+        const expiryMap = new Map<string, string>();
+        for (const batch of batches) {
+          if (!batch.expiryDate) continue;
+          const key = `${batch.productId}:${batch.branchId}`;
+          const existing = expiryMap.get(key);
+          if (!existing || new Date(batch.expiryDate) < new Date(existing))
+            expiryMap.set(key, batch.expiryDate);
+        }
+        setStock(s.map(item => ({ ...item, expiryDate: expiryMap.get(`${item.productId}:${item.branchId}`) })) as StockItem[]);
         setCategories(c);
       })
       .finally(() => setLoading(false));

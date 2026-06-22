@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import {
   User, Store, ChevronRight, Loader2, RefreshCw,
   CheckCircle2, XCircle, Clock, Truck, AlertCircle, X,
 } from "lucide-react";
-import { api, type Order } from "@/lib/api";
+import { api, type Order, type Branch } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/orders")({ component: Orders });
@@ -293,34 +293,40 @@ function OrderDetail({ orderId, onStatusChanged }: {
 // ─── POS Tab ──────────────────────────────────────────────────────────────────
 function POSTab() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [brFilter, setBrFilter] = useState("all");
+  const [branchId, setBranchId] = useState("all");
   const [stFilter, setStFilter] = useState("all");
   const [payFilter, setPayFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const load = () => {
+  useEffect(() => {
+    api.getBranches("active").then(setBranches).catch(() => {});
+  }, []);
+
+  const load = useCallback(() => {
     setLoading(true);
-    api.getOrders().then(setOrders).finally(() => setLoading(false));
-  };
-  useEffect(load, []);
+    api.getOrders({
+      branchId: branchId !== "all" ? branchId : undefined,
+      status: stFilter !== "all" ? stFilter : undefined,
+      paymentStatus: payFilter !== "all" ? payFilter : undefined,
+      from: dateFrom || undefined,
+      to: dateTo || undefined,
+    }).then(setOrders).finally(() => setLoading(false));
+  }, [branchId, stFilter, payFilter, dateFrom, dateTo]);
 
-  const branches = useMemo(() => [...new Set(orders.map(o => o.branch?.name).filter(Boolean))] as string[], [orders]);
+  useEffect(() => { load(); }, [load]);
 
+  // Client-side text search only
   const filtered = useMemo(() => orders.filter(o => {
-    if (q && !o.orderNumber?.toLowerCase().includes(q.toLowerCase()) &&
-        !o.branch?.name?.toLowerCase().includes(q.toLowerCase()) &&
-        !o.cashier?.fullName?.toLowerCase().includes(q.toLowerCase())) return false;
-    if (brFilter !== "all" && o.branch?.name !== brFilter) return false;
-    if (stFilter !== "all" && o.orderStatus !== stFilter) return false;
-    if (payFilter !== "all" && o.paymentStatus !== payFilter) return false;
-    if (dateFrom && o.createdAt < dateFrom) return false;
-    if (dateTo && o.createdAt > dateTo + "T23:59:59") return false;
-    return true;
-  }), [orders, q, brFilter, stFilter, payFilter]);
+    if (!q) return true;
+    return o.orderNumber?.toLowerCase().includes(q.toLowerCase()) ||
+      o.branch?.name?.toLowerCase().includes(q.toLowerCase()) ||
+      o.cashier?.fullName?.toLowerCase().includes(q.toLowerCase());
+  }), [orders, q]);
 
   // Summary cards
   const totalRevenue = filtered.reduce((s, o) => s + o.totalAmount, 0);
@@ -345,11 +351,11 @@ function POSTab() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search order number, branch, cashier…" className="h-9 w-64 flex-shrink-0" />
-        <Select value={brFilter} onValueChange={setBrFilter}>
+        <Select value={branchId} onValueChange={setBranchId}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={stFilter} onValueChange={setStFilter}>
@@ -378,7 +384,7 @@ function POSTab() {
           )}
         </div>
         <div className="flex-1" />
-        <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={load}>
+        <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => load()}>
           <RefreshCw className="h-4 w-4" /> Refresh
         </Button>
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => exportCSV(filtered)} disabled={filtered.length === 0}>

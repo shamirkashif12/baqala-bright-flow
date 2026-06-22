@@ -14,7 +14,7 @@ import {
   Plus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2,
 } from "lucide-react";
-import { api, type InventoryStock, type Category, type Branch, type Supplier, type Warehouse } from "@/lib/api";
+import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/inventory")({ component: Inventory });
@@ -605,17 +605,50 @@ function Inventory() {
 
   const load = () => {
     setLoading(true);
-    Promise.all([api.getStock(), api.getCategories(), api.getBranches(), api.getSuppliers(), api.getWarehouses()])
-      .then(([s, c, b, sup, w]) => {
-        setStock(s as StockItem[]);
+    Promise.all([api.getStock(), api.getCategories(), api.getBranches(), api.getWarehouses()])
+      .then(([s, c, b, w]) => {
+        // Build warehouse map: branchId -> warehouse name (primary or first)
+        const whMap = new Map<string, string>();
+        (w as Warehouse[]).forEach(wh => {
+          (wh.branchWarehouses ?? []).forEach(bw => {
+            if (!whMap.has(bw.branchId)) whMap.set(bw.branchId, wh.name);
+          });
+        });
+        const enriched = (s as StockItem[]).map(item => ({
+          ...item,
+          warehouseName: whMap.get(item.branchId) ?? undefined,
+        }));
+        setStock(enriched);
         setCategories(c);
         setBranches(b);
-        setSuppliers(sup);
         setWarehouses(w);
+        // Enrich expiry dates async (non-blocking — page shows immediately)
+        api.getBatches().then(batches => {
+          const expiryMap = new Map<string, string>();
+          (batches as InventoryBatch[]).forEach(batch => {
+            if (!batch.expiryDate || batch.remainingQuantity <= 0) return;
+            const key = `${batch.productId}:${batch.branchId}`;
+            const existing = expiryMap.get(key);
+            if (!existing || new Date(batch.expiryDate) < new Date(existing)) {
+              expiryMap.set(key, batch.expiryDate);
+            }
+          });
+          setStock(prev => prev.map(item => ({
+            ...item,
+            expiryDate: expiryMap.get(`${item.productId}:${item.branchId}`) ?? item.expiryDate,
+          })));
+        }).catch(() => {});
       })
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
+
+  // Lazy-load suppliers only when the Receive Batch dialog is first opened
+  useEffect(() => {
+    if (batchOpen && suppliers.length === 0) {
+      api.getSuppliers().then(setSuppliers).catch(() => {});
+    }
+  }, [batchOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => stock.filter(s => {
     const mq = !q || (s.product?.name?.toLowerCase().includes(q.toLowerCase()) || s.product?.sku?.toLowerCase().includes(q.toLowerCase()) || s.product?.barcode?.toLowerCase().includes(q.toLowerCase()));

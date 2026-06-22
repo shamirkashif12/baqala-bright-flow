@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -105,6 +105,12 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
             <Mail className="h-3.5 w-3.5" /><span>{customer.email}</span>
           </div>
         )}
+        {customer.createdAt && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Gift className="h-3.5 w-3.5" />
+            <span>Member since {new Date(customer.createdAt).toLocaleDateString("en-SA", { year: "numeric", month: "short", day: "numeric" })}</span>
+          </div>
+        )}
       </div>
 
       <Separator />
@@ -181,6 +187,10 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
 type CustomerForm = { fullName: string; phone: string; email: string; tier: string; status: string };
 const emptyForm: CustomerForm = { fullName: "", phone: "", email: "", tier: "standard", status: "active" };
 
+function CFormField({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>;
+}
+
 function CustomerForm({ editing, onSaved, onCancel }: {
   editing: Customer | null; onSaved: () => void; onCancel: () => void;
 }) {
@@ -193,13 +203,16 @@ function CustomerForm({ editing, onSaved, onCancel }: {
   const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
-    if (!form.fullName.trim() || !form.phone.trim()) { setError("Full name and phone are required."); return; }
+    if (!form.fullName.trim() || !form.phone.trim() || !form.email.trim()) {
+      setError("Full name, phone and email are required.");
+      return;
+    }
     setSaving(true); setError(null);
     try {
       if (editing) {
-        await api.updateCustomer(editing.id, { fullName: form.fullName.trim(), phone: form.phone.trim(), email: form.email.trim() || undefined, tier: form.tier, status: form.status });
+        await api.updateCustomer(editing.id, { fullName: form.fullName.trim(), phone: form.phone.trim(), email: form.email.trim(), tier: form.tier, status: form.status });
       } else {
-        await api.createCustomer({ fullName: form.fullName.trim(), phone: form.phone.trim(), email: form.email.trim() || undefined, tier: form.tier, status: form.status, customerCode: `CUST-${Date.now().toString().slice(-6)}` });
+        await api.createCustomer({ fullName: form.fullName.trim(), phone: form.phone.trim(), email: form.email.trim(), tier: form.tier, status: form.status, customerCode: `CUST-${Date.now().toString().slice(-6)}` });
       }
       onSaved();
     } catch (e: unknown) {
@@ -207,31 +220,27 @@ function CustomerForm({ editing, onSaved, onCancel }: {
     } finally { setSaving(false); }
   };
 
-  const F = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>
-  );
-
   return (
     <div className="space-y-4 mt-4">
-      <F label="Full Name *">
+      <CFormField label="Full Name *">
         <Input value={form.fullName} onChange={e => setForm(p => ({ ...p, fullName: e.target.value }))} placeholder="Ahmed Al Mansouri" className="h-9" />
-      </F>
-      <F label="Phone * (with country code)">
+      </CFormField>
+      <CFormField label="Phone * (with country code)">
         <Input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="+966501234567" className="h-9" />
-      </F>
-      <F label="Email (optional)">
+      </CFormField>
+      <CFormField label="Email *">
         <Input value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="ahmed@example.com" type="email" className="h-9" />
-      </F>
+      </CFormField>
       <div className="grid grid-cols-2 gap-3">
-        <F label="Tier">
+        <CFormField label="Tier">
           <Select value={form.tier} onValueChange={v => setForm(p => ({ ...p, tier: v }))}>
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>
               {TIERS.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
             </SelectContent>
           </Select>
-        </F>
-        <F label="Status">
+        </CFormField>
+        <CFormField label="Status">
           <Select value={form.status} onValueChange={v => setForm(p => ({ ...p, status: v }))}>
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -239,7 +248,7 @@ function CustomerForm({ editing, onSaved, onCancel }: {
               <SelectItem value="inactive">Inactive</SelectItem>
             </SelectContent>
           </Select>
-        </F>
+        </CFormField>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <div className="flex gap-2">
@@ -263,23 +272,26 @@ function Customers() {
   const [selected, setSelected] = useState<Customer | null>(null);
   const [editTarget, setEditTarget] = useState<Customer | null | "new">(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
-    api.getCustomers().then(setCustomers).finally(() => setLoading(false));
-  };
-  useEffect(load, []);
+    api.getCustomers({
+      tier: tierFilter !== "all" ? tierFilter : undefined,
+      search: q || undefined,
+    }).then(setCustomers).finally(() => setLoading(false));
+  }, [tierFilter, q]);
 
+  useEffect(() => { load(); }, [load]);
+
+  // Client-side date filtering only (BE doesn't support createdAt filter yet)
   const filtered = customers.filter(c => {
-    const matchQ = !q || c.fullName.toLowerCase().includes(q.toLowerCase()) || c.phone.includes(q) || c.customerCode.toLowerCase().includes(q.toLowerCase()) || (c.email?.toLowerCase().includes(q.toLowerCase()));
-    const matchTier = tierFilter === "all" || c.tier === tierFilter;
     const mdf = !dateFrom || (!!c.createdAt && c.createdAt >= dateFrom);
     const mdt = !dateTo || (!!c.createdAt && c.createdAt <= dateTo + "T23:59:59");
-    return matchQ && matchTier && mdf && mdt;
+    return mdf && mdt;
   });
 
-  const totalSpend = customers.reduce((s, c) => s + c.totalSpend, 0);
-  const totalLoyalty = customers.reduce((s, c) => s + c.loyaltyBalance, 0);
-  const platinum = customers.filter(c => c.tier === "platinum").length;
+  const totalSpend = filtered.reduce((s, c) => s + c.totalSpend, 0);
+  const totalLoyalty = filtered.reduce((s, c) => s + c.loyaltyBalance, 0);
+  const platinum = filtered.filter(c => c.tier === "platinum").length;
 
   const handleSaved = () => {
     setEditTarget(null);
@@ -292,7 +304,7 @@ function Customers() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "Total Customers", value: customers.length, icon: <ShoppingBag className="h-4 w-4" /> },
+          { label: "Total Customers", value: filtered.length, icon: <ShoppingBag className="h-4 w-4" /> },
           { label: "Total Spend", value: <><SARIcon />{totalSpend.toLocaleString("en-SA", { maximumFractionDigits: 0 })}</>, icon: <TrendingUp className="h-4 w-4" /> },
           { label: "Loyalty Points", value: totalLoyalty.toLocaleString(), icon: <Star className="h-4 w-4" /> },
           { label: "Platinum Members", value: platinum, icon: <Star className="h-4 w-4 text-purple-500" /> },

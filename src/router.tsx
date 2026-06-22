@@ -11,6 +11,7 @@ const authStore: AuthState = {
   login: async () => {},
   logout: () => {},
   hasRole: () => false,
+  canViewModule: () => true,
 };
 
 export const getRouter = () => {

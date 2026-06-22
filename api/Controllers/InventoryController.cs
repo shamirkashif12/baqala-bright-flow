@@ -10,7 +10,7 @@ namespace BaqalaPOS.Api.Controllers;
 public class InventoryController(BaqalaDbContext db) : ControllerBase
 {
     [HttpGet("stock")]
-    public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock)
+    public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock, [FromQuery] Guid? categoryId)
     {
         var query = db.InventoryStocks
             .Include(i => i.Product).ThenInclude(p => p!.Category)
@@ -18,6 +18,7 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
             .AsQueryable();
         if (branchId.HasValue) query = query.Where(i => i.BranchId == branchId);
         if (lowStock == true) query = query.Where(i => i.Quantity <= i.ReorderLevel);
+        if (categoryId.HasValue) query = query.Where(i => i.Product!.CategoryId == categoryId);
         return Ok(await query.ToListAsync());
     }
 
@@ -32,7 +33,10 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
     [HttpGet("batches")]
     public async Task<IActionResult> GetBatches([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
-        var query = db.InventoryBatches.Include(b => b.Product).AsQueryable();
+        var query = db.InventoryBatches
+            .Include(b => b.Product)
+            .Include(b => b.Supplier)
+            .AsQueryable();
         if (branchId.HasValue) query = query.Where(b => b.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(b => b.Status == status);
         return Ok(await query.OrderBy(b => b.ExpiryDate).ToListAsync());
@@ -44,6 +48,7 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
         var cutoff = DateTime.UtcNow.AddDays(daysAhead);
         var query = db.InventoryBatches
             .Include(b => b.Product)
+            .Include(b => b.Supplier)
             .Where(b => b.ExpiryDate != null && b.ExpiryDate <= cutoff && b.RemainingQuantity > 0);
         if (branchId.HasValue) query = query.Where(b => b.BranchId == branchId);
         return Ok(await query.OrderBy(b => b.ExpiryDate).ToListAsync());

@@ -528,71 +528,190 @@ function Stocks() {
   const [returns, setReturns] = useState<StockTransfer[]>([]);
 
   const [loading, setLoading] = useState(true);
+  const [tabLoading, setTabLoading] = useState(false);
+  const [expiringSoonCount, setExpiringSoonCount] = useState(0);
+
   const [tab, setTab] = useState("overview");
   const [search, setSearch] = useState("");
+  const [overviewBranch, setOverviewBranch] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all"); // stores category ID or "all"
+  const [allCategoryOptions, setAllCategoryOptions] = useState<{ id: string; name: string }[]>([]);
 
-  async function loadAll() {
+  // Sub-tab filters — passed to BE when tab is active
+  const [siBranch, setSiBranch] = useState("all");
+  const [siStatus, setSiStatus] = useState("all");
+  const [grnStatus, setGrnStatus] = useState("all");
+  const [dlStatus, setDlStatus] = useState("all");
+  const [rtStatus, setRtStatus] = useState("all");
+
+  // Per-tab date filters (FE-side since BE doesn't expose date range params)
+  const [grnDateFrom, setGrnDateFrom] = useState("");
+  const [grnDateTo, setGrnDateTo] = useState("");
+  const [dlDateFrom, setDlDateFrom] = useState("");
+  const [dlDateTo, setDlDateTo] = useState("");
+  const [rtDateFrom, setRtDateFrom] = useState("");
+  const [rtDateTo, setRtDateTo] = useState("");
+
+  // ── Per-section fetch functions ──────────────────────────────────────────────
+
+  async function fetchOverview() {
     setLoading(true);
-    try {
-      const [br, pr, su, wh, sk, bt, rd, dm, po, dl, rt] = await Promise.allSettled([
-        api.getBranches(),
-        api.getProducts(),
-        api.getSuppliers(),
-        api.getWarehouses(),
-        api.getStock(),
-        api.getBatches(),
-        api.getAdjustments({ adjustmentType: "reduction" }),
-        api.getAdjustments({ adjustmentType: "damage" }),
-        api.getPurchaseOrders(),
-        api.getStockTransfers({ transferType: "warehouse_to_branch" }),
-        api.getStockTransfers({ transferType: "return_to_supplier" }),
-      ]);
-      if (br.status === "fulfilled") setBranches(br.value ?? []);
-      if (pr.status === "fulfilled") setProducts(pr.value ?? []);
-      if (su.status === "fulfilled") setSuppliers(su.value ?? []);
-      if (wh.status === "fulfilled") setWarehouses(wh.value ?? []);
-      if (sk.status === "fulfilled") setStock(sk.value ?? []);
-      if (bt.status === "fulfilled") setBatches(bt.value ?? []);
-      if (rd.status === "fulfilled") setReductions(rd.value ?? []);
-      if (dm.status === "fulfilled") setDamages(dm.value ?? []);
-      if (po.status === "fulfilled") setPurchaseOrders(po.value ?? []);
-      if (dl.status === "fulfilled") setDeliveries(dl.value ?? []);
-      if (rt.status === "fulfilled") setReturns(rt.value ?? []);
-    } finally { setLoading(false); }
+    const sk = await api.getStock({
+      branchId: overviewBranch !== "all" ? overviewBranch : undefined,
+      categoryId: categoryFilter !== "all" ? categoryFilter : undefined,
+    }).catch(() => []);
+    setStock(sk ?? []);
+    // Rebuild category options from unfiltered load (when no category is active)
+    if (categoryFilter === "all") {
+      const seen = new Map<string, string>();
+      (sk ?? []).forEach(s => {
+        const c = s.product?.category;
+        if (c?.id && c.name && !seen.has(c.id)) seen.set(c.id, c.name);
+      });
+      setAllCategoryOptions(Array.from(seen.entries()).map(([id, name]) => ({ id, name })));
+    }
+    setLoading(false);
   }
 
-  useEffect(() => { loadAll(); }, []);
+  async function fetchBatches() {
+    setTabLoading(true);
+    const bt = await api.getBatches({
+      branchId: siBranch !== "all" ? siBranch : undefined,
+      status: siStatus !== "all" ? siStatus : undefined,
+    }).catch(() => []);
+    setBatches(bt ?? []);
+    setTabLoading(false);
+  }
 
-  async function refreshPartial() {
-    const [sk, bt, rd, dm, po, dl, rt] = await Promise.allSettled([
-      api.getStock(), api.getBatches(),
+  async function fetchReductions() {
+    setTabLoading(true);
+    const rd = await api.getAdjustments({ adjustmentType: "reduction" }).catch(() => []);
+    setReductions(rd ?? []);
+    setTabLoading(false);
+  }
+
+  async function fetchDamages() {
+    setTabLoading(true);
+    const dm = await api.getAdjustments({ adjustmentType: "damage" }).catch(() => []);
+    setDamages(dm ?? []);
+    setTabLoading(false);
+  }
+
+  async function fetchPOs() {
+    setTabLoading(true);
+    const po = await api.getPurchaseOrders({
+      status: grnStatus !== "all" ? grnStatus : undefined,
+    }).catch(() => []);
+    setPurchaseOrders(po ?? []);
+    setTabLoading(false);
+  }
+
+  async function fetchDeliveries() {
+    setTabLoading(true);
+    const dl = await api.getStockTransfers({
+      transferType: "warehouse_to_branch",
+      status: dlStatus !== "all" ? dlStatus : undefined,
+    }).catch(() => []);
+    setDeliveries(dl ?? []);
+    setTabLoading(false);
+  }
+
+  async function fetchReturns() {
+    setTabLoading(true);
+    const rt = await api.getStockTransfers({
+      transferType: "return_to_supplier",
+      status: rtStatus !== "all" ? rtStatus : undefined,
+    }).catch(() => []);
+    setReturns(rt ?? []);
+    setTabLoading(false);
+  }
+
+  async function fetchMovement() {
+    setTabLoading(true);
+    const [bt, rd, dm, dl, rt] = await Promise.allSettled([
+      api.getBatches(),
       api.getAdjustments({ adjustmentType: "reduction" }),
       api.getAdjustments({ adjustmentType: "damage" }),
-      api.getPurchaseOrders(),
       api.getStockTransfers({ transferType: "warehouse_to_branch" }),
       api.getStockTransfers({ transferType: "return_to_supplier" }),
     ]);
-    if (sk.status === "fulfilled") setStock(sk.value ?? []);
     if (bt.status === "fulfilled") setBatches(bt.value ?? []);
     if (rd.status === "fulfilled") setReductions(rd.value ?? []);
     if (dm.status === "fulfilled") setDamages(dm.value ?? []);
-    if (po.status === "fulfilled") setPurchaseOrders(po.value ?? []);
     if (dl.status === "fulfilled") setDeliveries(dl.value ?? []);
     if (rt.status === "fulfilled") setReturns(rt.value ?? []);
+    setTabLoading(false);
   }
 
-  // Metrics
+  function refreshCurrentTab() {
+    fetchOverview(); // always refresh overview metrics
+    if (tab === "stock-in") fetchBatches();
+    else if (tab === "stock-out") fetchReductions();
+    else if (tab === "grn") fetchPOs();
+    else if (tab === "delivery") fetchDeliveries();
+    else if (tab === "supplier-return") fetchReturns();
+    else if (tab === "wastage") fetchDamages();
+    else if (tab === "movement") fetchMovement();
+  }
+
+  // Mount: only fetch branches (for filter dropdowns) + expiring count metric
+  useEffect(() => {
+    api.getBranches().then(br => setBranches(br ?? [])).catch(() => {});
+    api.getExpiringBatches(undefined, 30).then(bt => setExpiringSoonCount(bt?.length ?? 0)).catch(() => {});
+  }, []);
+
+  // Lazy-load products/suppliers/warehouses only when a form dialog is first opened
+  const metadataLoaded = products.length > 0 || suppliers.length > 0 || warehouses.length > 0;
+  function ensureDialogMetadata() {
+    if (metadataLoaded) return;
+    Promise.allSettled([api.getProducts(), api.getSuppliers(), api.getWarehouses()])
+      .then(([pr, su, wh]) => {
+        if (pr.status === "fulfilled") setProducts(pr.value ?? []);
+        if (su.status === "fulfilled") setSuppliers(su.value ?? []);
+        if (wh.status === "fulfilled") setWarehouses(wh.value ?? []);
+      });
+  }
+
+  // Unified data-loading effect: re-runs on tab change OR relevant filter change.
+  // Each branch only fetches data for the active tab, so irrelevant filter
+  // changes never cause cross-tab API calls.
+  useEffect(() => {
+    if (tab === "overview") fetchOverview();
+    else if (tab === "stock-in") fetchBatches();
+    else if (tab === "stock-out") fetchReductions();
+    else if (tab === "grn") fetchPOs();
+    else if (tab === "delivery") fetchDeliveries();
+    else if (tab === "supplier-return") fetchReturns();
+    else if (tab === "wastage") fetchDamages();
+    else if (tab === "movement") fetchMovement();
+  }, [tab, overviewBranch, categoryFilter, siBranch, siStatus, grnStatus, dlStatus, rtStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Metrics (from overview stock + pre-fetched expiring count)
   const totalSKUs = stock.length;
   const totalUnits = stock.reduce((s, x) => s + x.quantity, 0);
   const lowStockCount = stock.filter(x => x.quantity <= x.reorderLevel).length;
-  const expiringSoon = batches.filter(b => {
-    if (!b.expiryDate || b.remainingQuantity <= 0) return false;
-    const diff = (new Date(b.expiryDate).getTime() - Date.now()) / 86400000;
-    return diff >= 0 && diff <= 30;
-  }).length;
 
   const q = search.toLowerCase();
+  // Category is already BE-filtered; only search filter applied here
   const filteredStock = stock.filter(s => !q || s.product?.name?.toLowerCase().includes(q));
+
+  // Sub-tabs: data already fetched from BE with status filter; apply date range FE-side only
+  const filteredBatches = batches; // branch+status already filtered by BE
+  const filteredPOs = purchaseOrders.filter(po => {
+    const mdf = !grnDateFrom || (!!po.createdAt && po.createdAt >= grnDateFrom);
+    const mdt = !grnDateTo || (!!po.createdAt && po.createdAt <= grnDateTo + "T23:59:59");
+    return mdf && mdt;
+  });
+  const filteredDeliveries = deliveries.filter(d => {
+    const mdf = !dlDateFrom || (!!d.createdAt && d.createdAt >= dlDateFrom);
+    const mdt = !dlDateTo || (!!d.createdAt && d.createdAt <= dlDateTo + "T23:59:59");
+    return mdf && mdt;
+  });
+  const filteredReturns = returns.filter(r => {
+    const mdf = !rtDateFrom || (!!r.createdAt && r.createdAt >= rtDateFrom);
+    const mdt = !rtDateTo || (!!r.createdAt && r.createdAt <= rtDateTo + "T23:59:59");
+    return mdf && mdt;
+  });
 
   // Movement timeline
   type Event = { date: string; type: string; label: string; qty: number; detail: string };
@@ -627,7 +746,7 @@ function Stocks() {
         <MetricCard label="Total SKUs" value={String(totalSKUs)} icon={Boxes} />
         <MetricCard label="Total Units" value={fmt(totalUnits)} icon={Package} />
         <MetricCard label="Low Stock" value={String(lowStockCount)} icon={AlertTriangle} trend={lowStockCount > 0 ? "down" : undefined} />
-        <MetricCard label="Expiring (30d)" value={String(expiringSoon)} icon={TrendingUp} />
+        <MetricCard label="Expiring (30d)" value={String(expiringSoonCount)} icon={TrendingUp} />
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -646,9 +765,25 @@ function Stocks() {
         {/* ── Overview ── */}
         <TabsContent value="overview">
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardHeader className="pb-2 flex flex-row items-center gap-2 justify-between flex-wrap">
               <CardTitle className="text-base">Stock Overview</CardTitle>
-              <Input className="w-52 h-8" placeholder="Search product…" value={search} onChange={e => setSearch(e.target.value)} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <Select value={overviewBranch} onValueChange={setOverviewBranch}>
+                  <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branches</SelectItem>
+                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Categories" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {allCategoryOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Input className="w-52 h-8" placeholder="Search product…" value={search} onChange={e => setSearch(e.target.value)} />
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -666,7 +801,7 @@ function Stocks() {
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading stock…</td></tr>
                     ) : filteredStock.length === 0 ? (
                       <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No stock records found</td></tr>
                     ) : filteredStock.map(s => {
@@ -697,9 +832,27 @@ function Stocks() {
         {/* ── Stock-In ── */}
         <TabsContent value="stock-in">
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Stock-In Records</CardTitle>
-              <StockInDialog branches={branches} products={products} suppliers={suppliers} onDone={refreshPartial} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <Select value={siBranch} onValueChange={setSiBranch}>
+                  <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Branch" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branches</SelectItem>
+                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={siStatus} onValueChange={setSiStatus}>
+                  <SelectTrigger className="h-8 w-32"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="depleted">Depleted</SelectItem>
+                    <SelectItem value="expired">Expired</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div onClick={ensureDialogMetadata}><StockInDialog branches={branches} products={products} suppliers={suppliers} onDone={refreshCurrentTab} /></div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -708,6 +861,7 @@ function Stocks() {
                     <tr>
                       <th className="px-4 py-2 text-left">Batch #</th>
                       <th className="px-4 py-2 text-left">Product</th>
+                      <th className="px-4 py-2 text-left">Branch</th>
                       <th className="px-4 py-2 text-left">Supplier</th>
                       <th className="px-4 py-2 text-right">Qty</th>
                       <th className="px-4 py-2 text-right">Remaining</th>
@@ -718,14 +872,15 @@ function Stocks() {
                     </tr>
                   </thead>
                   <tbody>
-                    {loading ? (
-                      <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
-                    ) : batches.length === 0 ? (
-                      <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No batches found</td></tr>
-                    ) : batches.map(b => (
+                    {tabLoading ? (
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                    ) : filteredBatches.length === 0 ? (
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">No batches found</td></tr>
+                    ) : filteredBatches.map(b => (
                       <tr key={b.id} className="border-t hover:bg-muted/20">
                         <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{b.batchNumber}</td>
                         <td className="px-4 py-2.5 font-medium">{b.product?.name ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground text-xs">{branches.find(br => br.id === b.branchId)?.name ?? "—"}</td>
                         <td className="px-4 py-2.5 text-muted-foreground">{b.supplier?.name ?? "—"}</td>
                         <td className="px-4 py-2.5 text-right">{fmt(b.quantity)}</td>
                         <td className="px-4 py-2.5 text-right">{fmt(b.remainingQuantity)}</td>
@@ -747,10 +902,10 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between">
               <CardTitle className="text-base">Stock-Out Records</CardTitle>
-              <StockOutDialog branches={branches} products={products} onDone={refreshPartial} />
+              <div onClick={ensureDialogMetadata}><StockOutDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
             </CardHeader>
             <CardContent className="p-0">
-              <AdjustmentTable rows={reductions} branches={branches} loading={loading} />
+              <AdjustmentTable rows={reductions} branches={branches} loading={tabLoading} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -758,8 +913,22 @@ function Stocks() {
         {/* ── GRN ── */}
         <TabsContent value="grn">
           <Card>
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Goods Received Notes</CardTitle>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Select value={grnStatus} onValueChange={setGrnStatus}>
+                  <SelectTrigger className="h-8 w-40"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="partial_received">Partial</SelectItem>
+                    <SelectItem value="fully_received">Fully Received</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input type="date" className="h-8 w-36 text-xs" value={grnDateFrom} onChange={e => setGrnDateFrom(e.target.value)} title="From" />
+                <Input type="date" className="h-8 w-36 text-xs" value={grnDateTo} onChange={e => setGrnDateTo(e.target.value)} title="To" />
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -777,11 +946,11 @@ function Stocks() {
                     </tr>
                   </thead>
                   <tbody>
-                    {loading ? (
+                    {tabLoading ? (
                       <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
-                    ) : purchaseOrders.length === 0 ? (
+                    ) : filteredPOs.length === 0 ? (
                       <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No purchase orders found</td></tr>
-                    ) : purchaseOrders.map(po => (
+                    ) : filteredPOs.map(po => (
                       <tr key={po.id} className="border-t hover:bg-muted/20">
                         <td className="px-4 py-2.5 font-mono text-xs font-semibold">{po.poNumber}</td>
                         <td className="px-4 py-2.5">{po.supplier?.name ?? "—"}</td>
@@ -792,7 +961,7 @@ function Stocks() {
                         <td className="px-4 py-2.5"><StBadge status={po.status} /></td>
                         <td className="px-4 py-2.5">
                           {!["fully_received", "cancelled"].includes(po.status) && po.items?.length ? (
-                            <GrnReceiveDialog po={po} onDone={refreshPartial} />
+                            <GrnReceiveDialog po={po} onDone={refreshCurrentTab} />
                           ) : <span className="text-xs text-muted-foreground">—</span>}
                         </td>
                       </tr>
@@ -807,12 +976,26 @@ function Stocks() {
         {/* ── Store Delivery ── */}
         <TabsContent value="delivery">
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Store Deliveries</CardTitle>
-              <StoreDeliveryDialog branches={branches} warehouses={warehouses} products={products} onDone={refreshPartial} />
+              <div className="flex items-center gap-2">
+                <Select value={dlStatus} onValueChange={setDlStatus}>
+                  <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input type="date" className="h-8 w-36 text-xs" value={dlDateFrom} onChange={e => setDlDateFrom(e.target.value)} title="From" />
+                <Input type="date" className="h-8 w-36 text-xs" value={dlDateTo} onChange={e => setDlDateTo(e.target.value)} title="To" />
+                <div onClick={ensureDialogMetadata}><StoreDeliveryDialog branches={branches} warehouses={warehouses} products={products} onDone={refreshCurrentTab} /></div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
-              <TransferTable rows={deliveries} loading={loading} />
+              <TransferTable rows={filteredDeliveries} loading={tabLoading} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -820,12 +1003,26 @@ function Stocks() {
         {/* ── Supplier Return ── */}
         <TabsContent value="supplier-return">
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Supplier Returns</CardTitle>
-              <SupplierReturnDialog branches={branches} suppliers={suppliers} products={products} onDone={refreshPartial} />
+              <div className="flex items-center gap-2">
+                <Select value={rtStatus} onValueChange={setRtStatus}>
+                  <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input type="date" className="h-8 w-36 text-xs" value={rtDateFrom} onChange={e => setRtDateFrom(e.target.value)} title="From" />
+                <Input type="date" className="h-8 w-36 text-xs" value={rtDateTo} onChange={e => setRtDateTo(e.target.value)} title="To" />
+                <div onClick={ensureDialogMetadata}><SupplierReturnDialog branches={branches} suppliers={suppliers} products={products} onDone={refreshCurrentTab} /></div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
-              <TransferTable rows={returns} loading={loading} />
+              <TransferTable rows={filteredReturns} loading={tabLoading} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -835,10 +1032,10 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between">
               <CardTitle className="text-base">Wastage & Damage</CardTitle>
-              <WastageDialog branches={branches} products={products} onDone={refreshPartial} />
+              <div onClick={ensureDialogMetadata}><WastageDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
             </CardHeader>
             <CardContent className="p-0">
-              <AdjustmentTable rows={damages} branches={branches} loading={loading} />
+              <AdjustmentTable rows={damages} branches={branches} loading={tabLoading} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -850,7 +1047,7 @@ function Stocks() {
               <CardTitle className="text-base">Stock Movement Timeline</CardTitle>
             </CardHeader>
             <CardContent>
-              {loading ? <p className="text-center text-muted-foreground py-8">Loading…</p>
+              {tabLoading ? <p className="text-center text-muted-foreground py-8">Loading…</p>
                 : events.length === 0 ? <p className="text-center text-muted-foreground py-8">No movement records found</p>
                 : (
                   <div className="space-y-1 max-h-[600px] overflow-y-auto">

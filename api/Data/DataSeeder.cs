@@ -218,6 +218,9 @@ public static class DataSeeder
         } // end fresh-database seed
 
         // Per-entity guards — run even on already-seeded DBs to backfill missing data
+        if (!await db.Warehouses.AnyAsync())
+            await SeedWarehousesAsync(db);
+
         if (!await db.WarehouseRequests.AnyAsync())
             await SeedWarehouseRequestsAsync(db);
 
@@ -254,7 +257,203 @@ public static class DataSeeder
         if (!await db.Offers.AnyAsync())
             await SeedOffersAsync(db);
 
+        if (!await db.PurchaseOrders.AnyAsync())
+            await SeedPurchaseOrdersAsync(db);
+
+        if (!await db.StockTransfers.AnyAsync())
+            await SeedStockTransfersAsync(db);
+
         await SeedTestUsersAsync(db);
+    }
+
+    // ─── Backfill: Purchase Orders (GRN) ────────────────────────────────────────
+    private static async Task SeedPurchaseOrdersAsync(BaqalaDbContext db)
+    {
+        var brOlaya  = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-001");
+        var brKhobar = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-002");
+        var wh       = await db.Warehouses.FirstOrDefaultAsync();
+        var sup1     = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-001");
+        var sup2     = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-002");
+        var user     = await db.Users.FirstOrDefaultAsync();
+        var products = await db.Products.Take(4).ToListAsync();
+
+        if (brOlaya is null || sup1 is null || user is null || products.Count < 2) return;
+
+        var po1 = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(), PoNumber = "PO-2026-001",
+            SupplierId = sup1.Id, WarehouseId = wh?.Id, BranchId = brOlaya.Id,
+            OrderedBy = user.Id, Status = "pending", PaymentStatus = "unpaid",
+            PaymentTerms = "net_30", TotalAmount = 4800m, TaxAmount = 720m,
+            ExpectedDeliveryDate = DateTime.UtcNow.AddDays(3),
+            CreatedAt = DateTime.UtcNow.AddDays(-5), UpdatedAt = DateTime.UtcNow,
+        };
+        po1.Items = [
+            new PurchaseOrderItem { Id = Guid.NewGuid(), PoId = po1.Id, ProductId = products[0].Id, OrderedQuantity = 200, UnitCost = 12m, Subtotal = 2400m },
+            new PurchaseOrderItem { Id = Guid.NewGuid(), PoId = po1.Id, ProductId = products[1].Id, OrderedQuantity = 200, UnitCost = 12m, Subtotal = 2400m },
+        ];
+
+        var po2 = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(), PoNumber = "PO-2026-002",
+            SupplierId = sup2?.Id ?? sup1.Id, BranchId = brKhobar?.Id ?? brOlaya.Id,
+            OrderedBy = user.Id, Status = "partial_received", PaymentStatus = "partial",
+            PaymentTerms = "on_delivery", TotalAmount = 2100m, TaxAmount = 315m, PaidAmount = 1050m,
+            ExpectedDeliveryDate = DateTime.UtcNow.AddDays(-2),
+            ReceivedDate = DateTime.UtcNow.AddDays(-1),
+            CreatedAt = DateTime.UtcNow.AddDays(-10), UpdatedAt = DateTime.UtcNow,
+        };
+        po2.Items = [
+            new PurchaseOrderItem { Id = Guid.NewGuid(), PoId = po2.Id, ProductId = products[2 % products.Count].Id, OrderedQuantity = 150, ReceivedQuantity = 75, UnitCost = 7m, Subtotal = 1050m },
+            new PurchaseOrderItem { Id = Guid.NewGuid(), PoId = po2.Id, ProductId = products[3 % products.Count].Id, OrderedQuantity = 150, ReceivedQuantity = 0, UnitCost = 7m, Subtotal = 1050m },
+        ];
+
+        var po3 = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(), PoNumber = "PO-2026-003",
+            SupplierId = sup1.Id, BranchId = brOlaya.Id,
+            OrderedBy = user.Id, Status = "fully_received", PaymentStatus = "paid",
+            PaymentTerms = "net_30", TotalAmount = 1380m, TaxAmount = 207m, PaidAmount = 1380m,
+            ExpectedDeliveryDate = DateTime.UtcNow.AddDays(-7),
+            ReceivedDate = DateTime.UtcNow.AddDays(-6),
+            CreatedAt = DateTime.UtcNow.AddDays(-15), UpdatedAt = DateTime.UtcNow,
+        };
+        po3.Items = [
+            new PurchaseOrderItem { Id = Guid.NewGuid(), PoId = po3.Id, ProductId = products[0].Id, OrderedQuantity = 100, ReceivedQuantity = 100, UnitCost = 4.20m, Subtotal = 420m },
+            new PurchaseOrderItem { Id = Guid.NewGuid(), PoId = po3.Id, ProductId = products[1].Id, OrderedQuantity = 120, ReceivedQuantity = 120, UnitCost = 8m, Subtotal = 960m },
+        ];
+
+        db.PurchaseOrders.AddRange(po1, po2, po3);
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: Stock Transfers (Store Delivery + Supplier Return) ────────────
+    private static async Task SeedStockTransfersAsync(BaqalaDbContext db)
+    {
+        var brOlaya  = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-001");
+        var brKhobar = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-002");
+        var wh       = await db.Warehouses.FirstOrDefaultAsync();
+        var sup      = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-001");
+        var user     = await db.Users.FirstOrDefaultAsync();
+        var products = await db.Products.Take(4).ToListAsync();
+
+        if (brOlaya is null || user is null || products.Count < 2) return;
+
+        // Store Delivery: warehouse → Olaya branch
+        var del1 = new StockTransfer
+        {
+            Id = Guid.NewGuid(), TransferNumber = "TRF-DL-001",
+            TransferType = "warehouse_to_branch",
+            SourceWarehouseId = wh?.Id, DestBranchId = brOlaya.Id,
+            CreatedBy = user.Id, Status = "completed",
+            ExpectedDate = DateTime.UtcNow.AddDays(-3),
+            CompletedDate = DateTime.UtcNow.AddDays(-2),
+            CreatedAt = DateTime.UtcNow.AddDays(-4), UpdatedAt = DateTime.UtcNow,
+        };
+        del1.Items = [
+            new StockTransferItem { Id = Guid.NewGuid(), TransferId = del1.Id, ProductId = products[0].Id, RequestedQuantity = 100, ReceivedQuantity = 100 },
+            new StockTransferItem { Id = Guid.NewGuid(), TransferId = del1.Id, ProductId = products[1].Id, RequestedQuantity = 50, ReceivedQuantity = 50 },
+        ];
+
+        // Store Delivery: warehouse → Khobar branch (pending)
+        var del2 = new StockTransfer
+        {
+            Id = Guid.NewGuid(), TransferNumber = "TRF-DL-002",
+            TransferType = "warehouse_to_branch",
+            SourceWarehouseId = wh?.Id, DestBranchId = brKhobar?.Id ?? brOlaya.Id,
+            CreatedBy = user.Id, Status = "pending",
+            ExpectedDate = DateTime.UtcNow.AddDays(2),
+            CreatedAt = DateTime.UtcNow.AddDays(-1), UpdatedAt = DateTime.UtcNow,
+        };
+        del2.Items = [
+            new StockTransferItem { Id = Guid.NewGuid(), TransferId = del2.Id, ProductId = products[2 % products.Count].Id, RequestedQuantity = 80 },
+        ];
+
+        // Supplier Return
+        var ret1 = new StockTransfer
+        {
+            Id = Guid.NewGuid(), TransferNumber = "TRF-RT-001",
+            TransferType = "return_to_supplier",
+            SourceBranchId = brOlaya.Id, DestSupplierId = sup?.Id,
+            CreatedBy = user.Id, Status = "completed", ReturnReason = "expired",
+            CompletedDate = DateTime.UtcNow.AddDays(-5),
+            CreatedAt = DateTime.UtcNow.AddDays(-6), UpdatedAt = DateTime.UtcNow,
+        };
+        ret1.Items = [
+            new StockTransferItem { Id = Guid.NewGuid(), TransferId = ret1.Id, ProductId = products[0].Id, RequestedQuantity = 12, ReturnReason = "expired" },
+        ];
+
+        db.StockTransfers.AddRange(del1, del2, ret1);
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: Warehouses ────────────────────────────────────────────────
+    private static async Task SeedWarehousesAsync(BaqalaDbContext db)
+    {
+        var brOlaya   = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-001");
+        var brKhobar  = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-002");
+        var brJeddah  = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-003");
+        var brMadinah = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-004");
+
+        var supAlmarai = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-001");
+        var supNadec   = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-002");
+        var supSadia   = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-004");
+
+        if (brOlaya is null) return;
+
+        // Central Riyadh Warehouse
+        var whRiyadh = new Warehouse
+        {
+            Id = Guid.NewGuid(), Code = "WH-RYD-001", Name = "Central Riyadh Warehouse",
+            NameAr = "مستودع الرياض المركزي",
+            Address = "Industrial Area, 2nd Ring Rd, Riyadh", City = "Riyadh",
+            Capacity = 5000, ContactPerson = "Yousef Al Ahmadi",
+            ContactNumber = "+966504004040", Status = "active",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+        };
+
+        // Jeddah Distribution Center
+        var whJeddah = new Warehouse
+        {
+            Id = Guid.NewGuid(), Code = "WH-JED-001", Name = "Jeddah Distribution Center",
+            NameAr = "مركز توزيع جدة",
+            Address = "Jeddah Industrial City, Jeddah", City = "Jeddah",
+            Capacity = 3000, ContactPerson = "Sara Al Qahtani",
+            ContactNumber = "+966563003030", Status = "active",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+        };
+
+        db.Warehouses.AddRange(whRiyadh, whJeddah);
+        await db.SaveChangesAsync();
+
+        // Link branches to warehouses
+        var links = new List<BranchWarehouse>();
+        if (brOlaya is not null)   links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brOlaya.Id,   WarehouseId = whRiyadh.Id, IsPrimary = true,  CreatedAt = DateTime.UtcNow });
+        if (brKhobar is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brKhobar.Id,  WarehouseId = whRiyadh.Id, IsPrimary = true,  CreatedAt = DateTime.UtcNow });
+        if (brMadinah is not null) links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brMadinah.Id, WarehouseId = whRiyadh.Id, IsPrimary = false, CreatedAt = DateTime.UtcNow });
+        if (brJeddah is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brJeddah.Id,  WarehouseId = whJeddah.Id, IsPrimary = true,  CreatedAt = DateTime.UtcNow });
+        db.BranchWarehouses.AddRange(links);
+
+        // Supplier links
+        var supplierLinks = new List<WarehouseSupplier>();
+        if (supAlmarai is not null) supplierLinks.Add(new WarehouseSupplier { Id = Guid.NewGuid(), WarehouseId = whRiyadh.Id, SupplierId = supAlmarai.Id, IsPrimary = true,  CreatedAt = DateTime.UtcNow });
+        if (supNadec is not null)   supplierLinks.Add(new WarehouseSupplier { Id = Guid.NewGuid(), WarehouseId = whRiyadh.Id, SupplierId = supNadec.Id,   IsPrimary = false, CreatedAt = DateTime.UtcNow });
+        if (supSadia is not null)   supplierLinks.Add(new WarehouseSupplier { Id = Guid.NewGuid(), WarehouseId = whJeddah.Id, SupplierId = supSadia.Id,   IsPrimary = true,  CreatedAt = DateTime.UtcNow });
+        db.WarehouseSuppliers.AddRange(supplierLinks);
+
+        // Warehouse stock
+        var products = await db.Products.ToListAsync();
+        var whStocks = new List<WarehouseStock>();
+        foreach (var prod in products.Take(8))
+        {
+            whStocks.Add(new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = whRiyadh.Id, ProductId = prod.Id, Quantity = 500, ReorderLevel = 50, LastUpdated = DateTime.UtcNow, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        }
+        foreach (var prod in products.Skip(4).Take(6))
+        {
+            whStocks.Add(new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = whJeddah.Id, ProductId = prod.Id, Quantity = 300, ReorderLevel = 30, LastUpdated = DateTime.UtcNow, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        }
+        db.WarehouseStocks.AddRange(whStocks);
+        await db.SaveChangesAsync();
     }
 
     // ─── Backfill: Warehouse Requests ────────────────────────────────────────
@@ -377,7 +576,8 @@ public static class DataSeeder
             expenses.Add(new Expense
             {
                 Id = Guid.NewGuid(), ExpenseTypeId = typeUtils.Id, BranchId = brOlaya.Id,
-                Amount = 1250.00m, Description = "Monthly electricity bill — Olaya branch",
+                Amount = 1250.00m, PaidAmount = 1250.00m, PaymentMethod = "bank_transfer",
+                Description = "Monthly electricity bill — Olaya branch",
                 ReferenceNumber = "ELEC-JUN-001", RecordedBy = uAbdullah.Id,
                 ExpenseDate = DateTime.UtcNow.AddDays(-10),
                 Status = "approved", ApprovedBy = uAbdullah.Id,
@@ -388,7 +588,8 @@ public static class DataSeeder
             expenses.Add(new Expense
             {
                 Id = Guid.NewGuid(), ExpenseTypeId = typeMaint.Id, BranchId = brKhobar.Id,
-                Amount = 450.00m, Description = "Air conditioning maintenance service",
+                Amount = 450.00m, PaidAmount = 450.00m, PaymentMethod = "card",
+                Description = "Air conditioning maintenance service",
                 ReferenceNumber = "MAINT-AC-002", RecordedBy = uAbdullah.Id,
                 ExpenseDate = DateTime.UtcNow.AddDays(-5),
                 Status = "pending",
@@ -399,7 +600,8 @@ public static class DataSeeder
             expenses.Add(new Expense
             {
                 Id = Guid.NewGuid(), ExpenseTypeId = typeMeals.Id, BranchId = brJeddah.Id,
-                Amount = 185.00m, Description = "Staff lunch — peak shift team",
+                Amount = 185.00m, PaidAmount = 185.00m, PaymentMethod = "cash",
+                Description = "Staff lunch — peak shift team",
                 RecordedBy = uSara.Id,
                 ExpenseDate = DateTime.UtcNow.AddDays(-2),
                 Status = "approved", ApprovedBy = uSara.Id,
@@ -410,11 +612,37 @@ public static class DataSeeder
             expenses.Add(new Expense
             {
                 Id = Guid.NewGuid(), ExpenseTypeId = typeMkt.Id, BranchId = brOlaya.Id,
-                Amount = 3200.00m, Description = "Social media ads — Ramadan campaign",
+                Amount = 3200.00m, PaidAmount = 3200.00m, PaymentMethod = "bank_transfer",
+                Description = "Social media ads — Ramadan campaign",
                 ReferenceNumber = "MKT-RAM-003", RecordedBy = uAbdullah.Id,
                 ExpenseDate = DateTime.UtcNow.AddDays(-14),
                 Status = "approved", ApprovedBy = uAbdullah.Id,
                 CreatedAt = DateTime.UtcNow.AddDays(-14), UpdatedAt = DateTime.UtcNow.AddDays(-12)
+            });
+
+        // Additional recent expenses with varied methods
+        var typeStat = await db.ExpenseTypes.FirstOrDefaultAsync(e => e.Name == "Stationery");
+        if (typeStat is not null && brOlaya is not null)
+            expenses.Add(new Expense
+            {
+                Id = Guid.NewGuid(), ExpenseTypeId = typeStat.Id, BranchId = brOlaya.Id,
+                Amount = 380.00m, PaidAmount = 180.00m, PaymentMethod = "card",
+                Description = "Cleaning supplies — Olaya",
+                ReferenceNumber = "CLEAN-MAY-001", RecordedBy = uAbdullah.Id,
+                ExpenseDate = DateTime.UtcNow.AddDays(-19),
+                Status = "approved", ApprovedBy = uAbdullah.Id,
+                CreatedAt = DateTime.UtcNow.AddDays(-19), UpdatedAt = DateTime.UtcNow.AddDays(-18)
+            });
+        if (typeMaint is not null && brOlaya is not null)
+            expenses.Add(new Expense
+            {
+                Id = Guid.NewGuid(), ExpenseTypeId = typeMaint.Id, BranchId = brOlaya.Id,
+                Amount = 850.00m, PaidAmount = 850.00m, PaymentMethod = "bank_transfer",
+                Description = "Printer maintenance contract",
+                ReferenceNumber = "PRINT-MAY-002", RecordedBy = uAbdullah.Id,
+                ExpenseDate = DateTime.UtcNow.AddDays(-20),
+                Status = "approved", ApprovedBy = uAbdullah.Id,
+                CreatedAt = DateTime.UtcNow.AddDays(-20), UpdatedAt = DateTime.UtcNow.AddDays(-19)
             });
 
         db.Expenses.AddRange(expenses);

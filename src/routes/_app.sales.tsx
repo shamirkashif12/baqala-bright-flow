@@ -1,11 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
-import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
-import { Wallet, Receipt, Percent, RotateCcw } from "lucide-react";
-import { api, type Order } from "@/lib/api";
+import { DataTable, StatusBadge } from "@/components/module-placeholder";
+import { Wallet, Receipt, Percent, RotateCcw, X } from "lucide-react";
+import { api, type Order, type Branch } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/sales")({ component: Sales });
@@ -14,21 +17,45 @@ const bars = [42, 58, 36, 72, 64, 88, 92, 76, 58, 64, 82, 70];
 
 function Sales() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [branchId, setBranchId] = useState("all");
+  const [payFilter, setPayFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
-    api.getOrders()
+    api.getBranches("active").then(setBranches).catch(() => {});
+  }, []);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.getOrders({
+      branchId: branchId !== "all" ? branchId : undefined,
+      paymentStatus: payFilter !== "all" ? payFilter : undefined,
+      from: dateFrom || undefined,
+      to: dateTo || undefined,
+    })
       .then(setOrders)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [branchId, payFilter, dateFrom, dateTo]);
 
-  const totalRevenue = orders.filter(o => o.paymentStatus === "paid").reduce((s, o) => s + o.totalAmount, 0);
-  const refundedAmount = orders.filter(o => o.paymentStatus === "refunded").reduce((s, o) => s + o.totalAmount, 0);
-  const totalDiscount = orders.reduce((s, o) => s + o.discountAmount, 0);
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = orders.filter(o =>
+    !q ||
+    o.orderNumber?.toLowerCase().includes(q.toLowerCase()) ||
+    o.branch?.name?.toLowerCase().includes(q.toLowerCase()) ||
+    o.cashier?.fullName?.toLowerCase().includes(q.toLowerCase())
+  );
+
+  const totalRevenue = filtered.filter(o => o.paymentStatus === "paid").reduce((s, o) => s + o.totalAmount, 0);
+  const refundedAmount = filtered.filter(o => o.paymentStatus === "refunded").reduce((s, o) => s + o.totalAmount, 0);
+  const totalDiscount = filtered.reduce((s, o) => s + o.discountAmount, 0);
   const avgDiscountPct = totalRevenue > 0 ? ((totalDiscount / totalRevenue) * 100).toFixed(1) + "%" : "0%";
   const fmt = (n: number) => fmtSAR(n);
-
   const max = Math.max(...bars);
 
   return (
@@ -52,22 +79,53 @@ function Sales() {
         </div>
       </Card>
 
-      <Toolbar placeholder="Search invoice ID…" primaryLabel="New Sale" />
+      <div className="flex flex-wrap items-center gap-2">
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, branch, cashier…" className="h-9 w-56 flex-shrink-0" />
+        <Select value={branchId} onValueChange={setBranchId}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Branches</SelectItem>
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={payFilter} onValueChange={setPayFilter}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Payment Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="paid">Paid</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="refunded">Refunded</SelectItem>
+            <SelectItem value="partial">Partial</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
+          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          <span className="text-xs text-muted-foreground">–</span>
+          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          {(dateFrom || dateTo) && (
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+
       {loading ? (
         <div className="text-muted-foreground text-sm py-4">Loading…</div>
       ) : (
         <DataTable
           columns={[
             { key: "orderNumber", label: "Invoice", render: (r: Order) => <span className="font-mono text-sm font-semibold">{r.orderNumber}</span> },
-            { key: "createdAt", label: "Time", render: (r: Order) => new Date(r.createdAt).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" }) },
-            { key: "branch", label: "Branch", render: (r: Order) => (r as Order & { branch?: { name: string } }).branch?.name ?? "—" },
-            { key: "cashier", label: "Cashier", render: (r: Order) => (r as Order & { cashier?: { fullName: string } }).cashier?.fullName ?? "—" },
+            { key: "createdAt", label: "Date / Time", render: (r: Order) => new Date(r.createdAt).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" }) },
+            { key: "branch", label: "Branch", render: (r: Order) => r.branch?.name ?? "—" },
+            { key: "cashier", label: "Cashier", render: (r: Order) => r.cashier?.fullName ?? "—" },
             { key: "method", label: "Method", render: (r: Order) => r.payments?.[0]?.paymentMethod ?? "—" },
             { key: "items", label: "Items", render: (r: Order) => r.items?.length ?? "—" },
             { key: "totalAmount", label: "Total", render: (r: Order) => <span className="tabular-nums font-semibold"><SARIcon />{fmt(r.totalAmount)}</span> },
             { key: "paymentStatus", label: "Status", render: (r: Order) => <StatusBadge status={r.paymentStatus} /> },
           ]}
-          rows={orders}
+          rows={filtered}
         />
       )}
     </PageShell>

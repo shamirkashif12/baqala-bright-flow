@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Eye, Pencil, X, Monitor, Activity, Plus } from "lucide-react";
+import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi } from "lucide-react";
 import { api, type Terminal, type Branch, type User } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/terminals")({ component: Terminals });
@@ -91,23 +91,27 @@ function Terminals() {
   const [form, setForm] = useState<TerminalForm>(emptyForm);
   const [saving, setSaving] = useState(false);
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
-    Promise.all([api.getTerminals(), api.getBranches(), api.getUsers()])
+    Promise.all([
+      api.getTerminals({
+        branchId: br !== "all" ? br : undefined,
+        status: st !== "all" ? st : undefined,
+      }),
+      api.getBranches(),
+      api.getUsers(),
+    ])
       .then(([t, b, u]) => { setTerminals(t); setBranches(b); setUsers(u); })
       .finally(() => setLoading(false));
-  };
-  useEffect(load, []);
+  }, [br, st]);
+  useEffect(() => { load(); }, [load]);
 
-  const branchNames = [...new Set(terminals.map(t => t.branch?.name).filter(Boolean))];
   const cashiers = users.filter(u => u.roleName?.toLowerCase().includes("cashier"));
 
-  const filtered = terminals.filter(t => {
-    const matchQ = !q || t.terminalCode?.toLowerCase().includes(q.toLowerCase()) || t.name?.toLowerCase().includes(q.toLowerCase());
-    const matchBr = br === "all" || t.branch?.name === br;
-    const matchSt = st === "all" || t.status === st;
-    return matchQ && matchBr && matchSt;
-  });
+  // Status filter applied on BE; only search applied client-side
+  const filtered = terminals.filter(t =>
+    !q || t.terminalCode?.toLowerCase().includes(q.toLowerCase()) || t.name?.toLowerCase().includes(q.toLowerCase())
+  );
 
   const openEdit = (t: Terminal) => {
     setEditTerm(t);
@@ -146,16 +150,17 @@ function Terminals() {
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Branches</SelectItem>
-            {branchNames.map(b => <SelectItem key={b!} value={b!}>{b}</SelectItem>)}
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={st} onValueChange={setSt}>
           <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="all">All Statuses</SelectItem>
             <SelectItem value="active">Active</SelectItem>
             <SelectItem value="inactive">Inactive</SelectItem>
             <SelectItem value="maintenance">Maintenance</SelectItem>
+            <SelectItem value="syncing">Syncing</SelectItem>
           </SelectContent>
         </Select>
         <div className="flex-1" />
@@ -176,6 +181,8 @@ function Terminals() {
                   <th className="px-3 py-3 font-semibold">Name</th>
                   <th className="px-3 py-3 font-semibold">Branch</th>
                   <th className="px-3 py-3 font-semibold">Cashier</th>
+                  <th className="px-3 py-3 font-semibold">Network</th>
+                  <th className="px-3 py-3 font-semibold">Session</th>
                   <th className="px-3 py-3 font-semibold">Last Sync</th>
                   <th className="px-3 py-3 font-semibold">Status</th>
                   <th className="px-3 py-3 font-semibold"></th>
@@ -188,6 +195,14 @@ function Terminals() {
                     <td className="px-3 py-3 font-medium">{t.name}</td>
                     <td className="px-3 py-3 text-xs">{t.branch?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{t.assignedCashier?.fullName ?? "Unassigned"}</td>
+                    <td className="px-3 py-3 text-xs">
+                      <span className="flex items-center gap-1 text-primary"><Wifi className="h-3.5 w-3.5" />Wi-Fi</span>
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {t.status === "active"
+                        ? <span className="inline-flex items-center gap-1 rounded-full bg-success/15 text-success px-2 py-0.5 text-[10px] font-semibold"><Activity className="h-3 w-3" />Session Open</span>
+                        : <span className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold">No Session</span>}
+                    </td>
                     <td className="px-3 py-3 text-xs">{t.lastSync ? new Date(t.lastSync).toLocaleString("en-SA") : "—"}</td>
                     <td className="px-3 py-3"><StatusBadge status={t.status} /></td>
                     <td className="px-3 py-3">
@@ -202,7 +217,7 @@ function Terminals() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={7} className="text-center py-10 text-muted-foreground text-sm">No terminals found.</td></tr>
+                  <tr><td colSpan={9} className="text-center py-10 text-muted-foreground text-sm">No terminals found.</td></tr>
                 )}
               </tbody>
             </table>

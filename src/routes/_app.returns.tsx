@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -200,6 +200,7 @@ function Returns() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -211,16 +212,23 @@ function Returns() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
-    api.getReturns().then(setReturns).finally(() => setLoading(false));
-  };
-  useEffect(load, []);
+    api.getReturns({
+      branchId: branchFilter !== "all" ? branchFilter : undefined,
+      status: statusFilter !== "all" ? statusFilter : undefined,
+    }).then(setReturns).finally(() => setLoading(false));
+  }, [branchFilter, statusFilter]);
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    api.getBranches().then(setBranches).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!sheetOpen) return;
-    Promise.all([api.getOrders(), api.getCustomers(), api.getBranches()])
-      .then(([o, c, b]) => { setOrders(o); setCustomers(c); setBranches(b); })
+    Promise.all([api.getOrders(), api.getCustomers()])
+      .then(([o, c]) => { setOrders(o); setCustomers(c); })
       .catch(console.error);
   }, [sheetOpen]);
 
@@ -229,10 +237,9 @@ function Returns() {
       || r.returnNumber?.toLowerCase().includes(q.toLowerCase())
       || r.customer?.fullName?.toLowerCase().includes(q.toLowerCase())
       || r.order?.orderNumber?.toLowerCase().includes(q.toLowerCase());
-    const matchSt = statusFilter === "all" || r.status === statusFilter;
     const mdf = !dateFrom || (!!r.createdAt && r.createdAt >= dateFrom);
     const mdt = !dateTo || (!!r.createdAt && r.createdAt <= dateTo + "T23:59:59");
-    return matchQ && matchSt && mdf && mdt;
+    return matchQ && mdf && mdt;
   });
 
   const setF = (k: keyof ReturnForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -284,7 +291,7 @@ function Returns() {
     }
     setSaving(true); setError(null);
     try {
-      const items: Partial<CustomerReturnItem>[] = selectedItems.map(r => ({
+      const items: CustomerReturnItem[] = selectedItems.map(r => ({
         productId: r.productId,
         orderItemId: r.orderItemId || undefined,
         quantity: r.qty,
@@ -335,6 +342,13 @@ function Returns() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search return#, customer, order…" className="h-9 w-56 flex-shrink-0" />
+        <Select value={branchFilter} onValueChange={setBranchFilter}>
+          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Branches</SelectItem>
+            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -502,6 +516,7 @@ function Returns() {
                   <th className="px-3 py-3 font-semibold">Return#</th>
                   <th className="px-3 py-3 font-semibold">Invoice</th>
                   <th className="px-3 py-3 font-semibold">Customer</th>
+                  <th className="px-3 py-3 font-semibold">Branch</th>
                   <th className="px-3 py-3 font-semibold">Reason</th>
                   <th className="px-3 py-3 font-semibold">Refund</th>
                   <th className="px-3 py-3 font-semibold">Method</th>
@@ -516,6 +531,7 @@ function Returns() {
                     <td className="px-3 py-3 font-mono text-xs font-bold">{r.returnNumber}</td>
                     <td className="px-3 py-3 font-mono text-xs">{r.order?.orderNumber ?? "—"}</td>
                     <td className="px-3 py-3">{r.customer?.fullName ?? "—"}</td>
+                    <td className="px-3 py-3 text-xs">{branches.find(b => b.id === r.branchId)?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs max-w-[130px] truncate">{r.reason ?? "—"}</td>
                     <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{r.refundAmount.toFixed(2)}</td>
                     <td className="px-3 py-3 text-xs capitalize">{r.refundMethod?.replace(/_/g, " ") ?? "—"}</td>
@@ -549,7 +565,7 @@ function Returns() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={9} className="text-center py-10 text-muted-foreground text-sm">No returns found.</td></tr>
+                  <tr><td colSpan={10} className="text-center py-10 text-muted-foreground text-sm">No returns found.</td></tr>
                 )}
               </tbody>
             </table>
