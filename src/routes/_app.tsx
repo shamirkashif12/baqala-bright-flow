@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { I18nProvider } from "@/lib/i18n";
+import { BranchProvider } from "@/lib/branch-context";
 
 export const Route = createFileRoute("/_app")({
   ssr: false,
@@ -20,14 +21,16 @@ export const Route = createFileRoute("/_app")({
 function AppLayout() {
   return (
     <I18nProvider>
-      <SidebarProvider>
-        <div className="min-h-screen flex w-full bg-background">
-          <AppSidebar />
-          <div className="flex-1 flex flex-col min-w-0">
-            <Outlet />
+      <BranchProvider>
+        <SidebarProvider>
+          <div className="min-h-screen flex w-full bg-background">
+            <AppSidebar />
+            <div className="flex-1 flex flex-col min-w-0">
+              <Outlet />
+            </div>
           </div>
-        </div>
-      </SidebarProvider>
+        </SidebarProvider>
+      </BranchProvider>
     </I18nProvider>
   );
 }

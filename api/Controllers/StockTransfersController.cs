@@ -185,7 +185,15 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         // Auto-create credit note when return-to-supplier transfer is completed
         if (transfer.TransferType == "warehouse_to_supplier" && transfer.DestSupplierId.HasValue)
         {
-            var creditAmount = transfer.Items.Sum(i => (i.ReceivedQuantity ?? i.RequestedQuantity) * (i.UnitCost ?? 0));
+            // Prefer item-level unit cost; fall back to product cost price so RTS notes are never 0
+            decimal creditAmount = 0;
+            foreach (var item in transfer.Items)
+            {
+                var unitCost = (item.UnitCost ?? 0) > 0
+                    ? item.UnitCost!.Value
+                    : (await db.Products.FindAsync(item.ProductId))?.CostPrice ?? 0;
+                creditAmount += (item.ReceivedQuantity ?? item.RequestedQuantity) * unitCost;
+            }
             var cnNumber = $"CN-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
             db.SupplierCreditNotes.Add(new SupplierCreditNote
             {

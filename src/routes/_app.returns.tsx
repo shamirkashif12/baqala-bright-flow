@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, ScanLine, Loader2 } from "lucide-react";
 import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type Branch, type OrderItem } from "@/lib/api";
+import { useBranch } from "@/lib/branch-context";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/returns")({ component: Returns });
@@ -192,6 +193,7 @@ const emptyForm: ReturnForm = {
 type ItemRow = { orderItemId: string; productId: string; productName: string; unitPrice: number; maxQty: number; qty: number; condition: string; restock: boolean; selected: boolean; };
 
 function Returns() {
+  const { branches: allBranches } = useBranch();
   const [returns, setReturns] = useState<CustomerReturn[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -210,6 +212,7 @@ function Returns() {
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceError, setInvoiceError] = useState("");
   const [matchedOrder, setMatchedOrder] = useState<Order | null>(null);
+  const [matchedBranchName, setMatchedBranchName] = useState<string>("");
   const [loadingItems, setLoadingItems] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -294,6 +297,7 @@ function Returns() {
     setLoadingItems(true);
     setItemRows([]);
     setMatchedOrder(null);
+    setMatchedBranchName("");
     try {
       // Quick check in preloaded list to get the ID, then fetch full order with products
       const cached = orders.find(o => o.orderNumber.toLowerCase() === num.toLowerCase());
@@ -305,6 +309,13 @@ function Returns() {
       }
       if (!order) { setInvoiceError("Invoice not found. Check the number and try again."); return; }
       setMatchedOrder(order);
+      // Resolve branch name from the order (use embedded branch object, or look up from context list)
+      const branchName =
+        order.branch?.name ??
+        allBranches.find(b => b.id === order!.branchId)?.name ??
+        branches.find(b => b.id === order!.branchId)?.name ??
+        "Unknown branch";
+      setMatchedBranchName(branchName);
       setForm(p => ({ ...p, orderId: order!.id, branchId: order!.branchId, customerId: order!.customerId ?? p.customerId }));
       const rows: ItemRow[] = (order.items ?? []).map((oi: OrderItem) => ({
         orderItemId: oi.id ?? "",
@@ -326,7 +337,7 @@ function Returns() {
 
   const handleSubmit = async () => {
     const row = itemRows[selectedItemIdx];
-    if (!form.orderId || !form.reason || !row) {
+    if (!form.orderId || !form.branchId || !form.reason || !row) {
       setError("Scan an invoice, pick an item, and select a reason.");
       return;
     }
@@ -357,6 +368,7 @@ function Returns() {
       setItemRows([]);
       setInvoiceNumber("");
       setMatchedOrder(null);
+      setMatchedBranchName("");
       setInvoiceError("");
       setSelectedItemIdx(0);
       load();
@@ -416,7 +428,7 @@ function Returns() {
           )}
         </div>
         <div className="flex-1" />
-        <Sheet open={sheetOpen} onOpenChange={v => { setSheetOpen(v); if (!v) { setForm(emptyForm); setItemRows([]); setInvoiceNumber(""); setMatchedOrder(null); setInvoiceError(""); setSelectedItemIdx(0); setError(null); } }}>
+        <Sheet open={sheetOpen} onOpenChange={v => { setSheetOpen(v); if (!v) { setForm(emptyForm); setItemRows([]); setInvoiceNumber(""); setMatchedOrder(null); setMatchedBranchName(""); setInvoiceError(""); setSelectedItemIdx(0); setError(null); } }}>
           <SheetTrigger asChild>
             <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9">
               <Plus className="h-4 w-4" /> New Return
@@ -443,7 +455,13 @@ function Returns() {
                 </div>
                 {invoiceError && <p className="text-xs text-destructive mt-1">{invoiceError}</p>}
                 {matchedOrder && (
-                  <p className="text-xs text-success mt-1">✓ {matchedOrder.orderNumber} · SAR {matchedOrder.totalAmount.toFixed(2)} · {matchedOrder.items?.length ?? 0} item(s)</p>
+                  <div className="mt-1 space-y-1">
+                    <p className="text-xs text-success">✓ {matchedOrder.orderNumber} · SAR {matchedOrder.totalAmount.toFixed(2)} · {matchedOrder.items?.length ?? 0} item(s)</p>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                      Branch: <span className="font-medium text-foreground">{matchedBranchName}</span>
+                    </div>
+                  </div>
                 )}
               </FieldRow>
 

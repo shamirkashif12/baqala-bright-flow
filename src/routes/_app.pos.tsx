@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { QRCodeSVG } from "qrcode.react";
-import { api, type Product, type Branch, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule } from "@/lib/api";
+import { api, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule } from "@/lib/api";
+import { useBranch } from "@/lib/branch-context";
 import { SARIcon } from "@/lib/currency";
 
 // ─── ZATCA Phase 2 TLV QR encoder ────────────────────────────────────────────
@@ -79,10 +80,12 @@ type InvoiceSnapshot = {
 };
 
 function POS() {
+  // ─── Branch from global context ───────────────────────────────────────────────
+  const { selectedBranch: branch } = useBranch();
+
   // ─── Data ─────────────────────────────────────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([]);
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
-  const [branch, setBranch] = useState<Branch | null>(null);
   const [taxRate, setTaxRate] = useState(0.15);
   const [taxLabel, setTaxLabel] = useState("VAT 15%");
   const [vatNumber, setVatNumber] = useState("300123456700003");
@@ -137,18 +140,15 @@ function POS() {
   // ─── Invoice snapshot (preserved after cart is cleared) ───────────────────────
   const [invoice, setInvoice] = useState<InvoiceSnapshot | null>(null);
 
-  // ─── Load all data on mount ────────────────────────────────────────────────────
+  // ─── Load products, tax rules, shifts on mount ────────────────────────────────
   useEffect(() => {
     Promise.all([
       api.getProducts(),
-      api.getBranches(),
       api.getTaxRules(),
       api.getActiveShifts(),
     ])
-      .then(([prods, branches, taxRules, shifts]) => {
+      .then(([prods, taxRules, shifts]) => {
         setProducts(prods);
-        const activeBranch = branches.find((b) => b.status === "active") ?? branches[0] ?? null;
-        setBranch(activeBranch);
 
         const vatRule = taxRules.find((r) => r.ruleType === "vat" && r.status === "active");
         if (vatRule) {
@@ -158,24 +158,6 @@ function POS() {
 
         const shift = shifts.find((s) => s.status === "open") ?? null;
         setActiveShift(shift);
-
-        if (activeBranch) {
-          api
-            .getStock({ branchId: activeBranch.id })
-            .then((stocks) => {
-              const map = new Map<string, number>();
-              stocks.forEach((s) => map.set(s.productId, Math.max(0, s.quantity - (s.reservedQuantity ?? 0))));
-              setStockMap(map);
-            })
-            .catch(() => {});
-
-          api.getZatcaSettings(activeBranch.id)
-            .then((z) => {
-              if (z.vatRegistrationNumber) setVatNumber(z.vatRegistrationNumber);
-              if (z.sellerName) setSellerName(z.sellerName);
-            })
-            .catch(() => {});
-        }
       })
       .finally(() => {
         setLoading(false);
@@ -188,6 +170,26 @@ function POS() {
       setCustomFees(rules.filter(r => r.ruleType === "custom_fee" && r.status === "active"))
     ).catch(() => {});
   }, []);
+
+  // ─── Reload stock & ZATCA settings whenever selected branch changes ────────────
+  useEffect(() => {
+    if (!branch) return;
+    api
+      .getStock({ branchId: branch.id })
+      .then((stocks) => {
+        const map = new Map<string, number>();
+        stocks.forEach((s) => map.set(s.productId, Math.max(0, s.quantity - (s.reservedQuantity ?? 0))));
+        setStockMap(map);
+      })
+      .catch(() => {});
+
+    api.getZatcaSettings(branch.id)
+      .then((z) => {
+        if (z.vatRegistrationNumber) setVatNumber(z.vatRegistrationNumber);
+        if (z.sellerName) setSellerName(z.sellerName);
+      })
+      .catch(() => {});
+  }, [branch]);
 
   // Keep refs fresh so the scanner listener never has stale closures
   useEffect(() => { productsRef.current = products; }, [products]);
@@ -432,14 +434,18 @@ function POS() {
     const q = query.trim().toLowerCase();
     if (!q) return [];
     return products
-      .filter(
-        (p) =>
+      .filter((p) => {
+        // Hide products with no stock record or zero stock in the selected branch
+        const stock = stockMap.get(p.id);
+        if (stock === undefined || stock <= 0) return false;
+        return (
           p.name.toLowerCase().includes(q) ||
           p.sku.toLowerCase().includes(q) ||
           (p.barcode && p.barcode.toLowerCase().includes(q))
-      )
+        );
+      })
       .slice(0, 8);
-  }, [query, products]);
+  }, [query, products, stockMap]);
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
