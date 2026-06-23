@@ -106,6 +106,7 @@ export const api = {
     return request<Order[]>(`/api/orders${q ? `?${q}` : ""}`);
   },
   getOrder: (id: string) => request<Order>(`/api/orders/${id}`),
+  getOrderByNumber: (num: string) => request<Order>(`/api/orders/by-number/${encodeURIComponent(num)}`),
   createOrder: (data: Partial<Order>) =>
     request<Order>("/api/orders", { method: "POST", body: JSON.stringify(data) }),
   updateOrderStatus: (id: string, status: string) =>
@@ -242,7 +243,7 @@ export const api = {
     request<PurchaseOrder>("/api/purchase-orders", { method: "POST", body: JSON.stringify(data) }),
   updatePoStatus: (id: string, status: string, approvedBy?: string) =>
     request<PurchaseOrder>(`/api/purchase-orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, approvedBy }) }),
-  receivePurchaseOrder: (id: string, items: { productId: string; quantity: number; expiryDate?: string }[]) =>
+  receivePurchaseOrder: (id: string, items: { productId: string; quantity: number; expiryDate?: string; batchNumber?: string }[]) =>
     request<PurchaseOrder>(`/api/purchase-orders/${id}/receive`, { method: "POST", body: JSON.stringify(items) }),
   addSupplierPayment: (poId: string, data: Partial<SupplierPayment>) =>
     request<SupplierPayment>(`/api/purchase-orders/${poId}/payments`, { method: "POST", body: JSON.stringify(data) }),
@@ -258,6 +259,8 @@ export const api = {
     request<StockTransfer>("/api/stock-transfers", { method: "POST", body: JSON.stringify(data) }),
   updateTransferStatus: (id: string, status: string, approvedBy?: string) =>
     request<StockTransfer>(`/api/stock-transfers/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, approvedBy }) }),
+  receiveStockTransfer: (id: string, items: { itemId: string; receivedQuantity: number; notes?: string }[], approvedBy?: string) =>
+    request<StockTransfer>(`/api/stock-transfers/${id}/receive`, { method: "POST", body: JSON.stringify({ items, approvedBy }) }),
 
   // Product Variants
   getProductVariants: (productId: string) =>
@@ -347,6 +350,26 @@ export const api = {
     request<Discount>(`/api/discounts/${id}/toggle`, { method: "PATCH" }),
   deleteDiscount: (id: string) =>
     request<void>(`/api/discounts/${id}`, { method: "DELETE" }),
+
+  // Supply Chain Finance (Discrepancies & Credit Notes)
+  getDiscrepancies: (params?: { supplierId?: string; poId?: string; transferId?: string; status?: string }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
+    return request<StockDiscrepancy[]>(`/api/supply-chain/discrepancies${q ? `?${q}` : ""}`);
+  },
+  updateDiscrepancyStatus: (id: string, status: string, notes?: string) =>
+    request<StockDiscrepancy>(`/api/supply-chain/discrepancies/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, notes }) }),
+  raiseDebitNote: (id: string) =>
+    request<SupplierCreditNote>(`/api/supply-chain/discrepancies/${id}/raise-debit-note`, { method: "POST", body: JSON.stringify({}) }),
+  raiseShortageDebitNote: (data: { poId: string; productId: string; expectedQuantity: number; receivedQuantity: number; unitCost: number }) =>
+    request<{ discrepancy: StockDiscrepancy; creditNote: SupplierCreditNote }>(`/api/supply-chain/raise-shortage-debit-note`, { method: "POST", body: JSON.stringify(data) }),
+  getCreditNotes: (params?: { supplierId?: string; status?: string; creditType?: string }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
+    return request<SupplierCreditNote[]>(`/api/supply-chain/credit-notes${q ? `?${q}` : ""}`);
+  },
+  applyCreditNote: (id: string, applyToPoId?: string) => {
+    const q = applyToPoId ? `?applyToPoId=${applyToPoId}` : "";
+    return request<SupplierCreditNote>(`/api/supply-chain/credit-notes/${id}/apply${q}`, { method: "PATCH", body: JSON.stringify({}) });
+  },
 
   // Offers
   getOffers: (params?: { isActive?: boolean; offerType?: string }) => {
@@ -697,6 +720,28 @@ export interface ProductVariant {
   id: string; productId: string; variantType: string; variantValue: string;
   skuSuffix?: string; barcode?: string; priceModifier: number;
   status: string; createdAt: string; updatedAt: string;
+}
+
+export interface StockDiscrepancy {
+  id: string; poId?: string; transferId?: string;
+  supplierId: string; productId: string;
+  expectedQuantity: number; receivedQuantity: number;
+  discrepancyQuantity: number; unitCost: number; discrepancyValue: number;
+  discrepancyType: string; // shortage | excess | damage | substitution
+  status: string; // open | acknowledged | debit_note_raised | resolved
+  notes?: string; createdAt: string; updatedAt: string;
+  supplier?: { id: string; name: string };
+  product?: Product;
+}
+
+export interface SupplierCreditNote {
+  id: string; creditNoteNumber?: string;
+  supplierId: string; poId?: string; transferId?: string; discrepancyId?: string;
+  amount: number;
+  creditType: string; // rts_return | damage_claim | shortage_claim | price_adjustment
+  status: string; // draft | confirmed | applied | cancelled
+  notes?: string; issuedDate: string; createdAt: string; updatedAt: string;
+  supplier?: { id: string; name: string };
 }
 
 export interface DashboardMetrics {

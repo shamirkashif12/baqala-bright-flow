@@ -53,6 +53,8 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<StockTransfer> StockTransfers { get; set; }
     public DbSet<StockTransferItem> StockTransferItems { get; set; }
     public DbSet<ProductVariant> ProductVariants { get; set; }
+    public DbSet<StockDiscrepancy> StockDiscrepancies { get; set; }
+    public DbSet<SupplierCreditNote> SupplierCreditNotes { get; set; }
 
     // Finance
     public DbSet<ExpenseType> ExpenseTypes { get; set; }

@@ -45,6 +45,18 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService) : 
         return order is null ? NotFound() : Ok(order);
     }
 
+    [HttpGet("by-number/{orderNumber}")]
+    public async Task<IActionResult> GetByOrderNumber(string orderNumber)
+    {
+        var order = await db.Orders
+            .Include(o => o.Items).ThenInclude(i => i.Product)
+            .Include(o => o.Payments)
+            .Include(o => o.Customer)
+            .Include(o => o.Branch)
+            .FirstOrDefaultAsync(o => o.OrderNumber == orderNumber);
+        return order is null ? NotFound() : Ok(order);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Order order)
     {

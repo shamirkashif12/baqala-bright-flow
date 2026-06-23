@@ -381,6 +381,7 @@ function ReceiveSheet({ open, onClose, po, onReceived }: {
 }) {
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const [expiries, setExpiries] = useState<Record<string, string>>({});
+  const [batches, setBatches] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -390,15 +391,23 @@ function ReceiveSheet({ open, onClose, po, onReceived }: {
     if (open && po) {
       const q: Record<string, number> = {};
       const e: Record<string, string> = {};
-      (po.items ?? []).forEach(it => { q[it.productId] = it.orderedQuantity - it.receivedQuantity; e[it.productId] = it.expiryDate ?? ""; });
-      setQtys(q); setExpiries(e); setError("");
+      const b: Record<string, string> = {};
+      (po.items ?? []).forEach(it => {
+        q[it.productId] = it.orderedQuantity - it.receivedQuantity;
+        e[it.productId] = it.expiryDate ?? "";
+        b[it.productId] = "";
+      });
+      setQtys(q); setExpiries(e); setBatches(b); setError("");
     }
   }, [open, po]);
 
   const handleConfirm = async () => {
     if (!po) return;
     const payload = items.filter(it => qtys[it.productId] > 0).map(it => ({
-      productId: it.productId, quantity: qtys[it.productId], expiryDate: expiries[it.productId] || undefined,
+      productId: it.productId,
+      quantity: qtys[it.productId],
+      expiryDate: expiries[it.productId] || undefined,
+      batchNumber: batches[it.productId] || undefined,
     }));
     if (!payload.length) return setError("Enter at least one quantity.");
     setSaving(true); setError("");
@@ -410,41 +419,42 @@ function ReceiveSheet({ open, onClose, po, onReceived }: {
   if (!po) return null;
   return (
     <Sheet open={open} onOpenChange={v => !v && onClose()}>
-      <SheetContent style={{ width: 480, maxWidth: "100vw" }} className="overflow-y-auto">
+      <SheetContent style={{ width: 560, maxWidth: "100vw" }} className="overflow-y-auto">
         <SheetHeader><SheetTitle>Receive Goods — {po.poNumber}</SheetTitle></SheetHeader>
         <div className="mt-4 space-y-4">
           {items.length === 0 ? (
             <p className="text-sm text-muted-foreground">All items fully received.</p>
           ) : (
-            <div className="rounded-lg border border-border/60 overflow-hidden">
-              <table className="w-full text-xs">
-                <thead className="bg-muted/40">
-                  <tr>
-                    <th className="text-left px-3 py-2">Product</th>
-                    <th className="text-right px-2 py-2">Ordered</th>
-                    <th className="text-right px-2 py-2">Received</th>
-                    <th className="text-right px-2 py-2">Now</th>
-                    <th className="text-right px-2 py-2">Expiry</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map(it => (
-                    <tr key={it.id} className="border-t border-border/40">
-                      <td className="px-3 py-2">{it.product?.name ?? it.productId}</td>
-                      <td className="px-2 py-2 text-right">{it.orderedQuantity}</td>
-                      <td className="px-2 py-2 text-right text-muted-foreground">{it.receivedQuantity}</td>
-                      <td className="px-2 py-2 text-right">
-                        <Input type="number" min={0} max={it.orderedQuantity - it.receivedQuantity} className="h-7 w-14 text-xs text-right"
-                          value={qtys[it.productId] ?? 0} onChange={e => setQtys(p => ({ ...p, [it.productId]: Number(e.target.value) }))} />
-                      </td>
-                      <td className="px-2 py-2 text-right">
-                        <Input type="date" className="h-7 w-28 text-xs"
-                          value={expiries[it.productId] ?? ""} onChange={e => setExpiries(p => ({ ...p, [it.productId]: e.target.value }))} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-3">
+              {items.map(it => (
+                <div key={it.id} className="rounded-xl border border-border/60 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{it.product?.name ?? it.productId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Ordered: {it.orderedQuantity} · Already received: {it.receivedQuantity}
+                      </p>
+                    </div>
+                    <div className="shrink-0 space-y-1">
+                      <Label className="text-[11px] font-medium">Qty Now</Label>
+                      <Input type="number" min={0} max={it.orderedQuantity - it.receivedQuantity} className="h-7 w-16 text-xs text-center"
+                        value={qtys[it.productId] ?? 0} onChange={e => setQtys(p => ({ ...p, [it.productId]: Number(e.target.value) }))} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium">Batch Number</Label>
+                      <Input className="h-7 text-xs" placeholder="Auto-generated if empty"
+                        value={batches[it.productId] ?? ""} onChange={e => setBatches(p => ({ ...p, [it.productId]: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium">Expiry Date</Label>
+                      <Input type="date" className="h-7 text-xs"
+                        value={expiries[it.productId] ?? ""} onChange={e => setExpiries(p => ({ ...p, [it.productId]: e.target.value }))} />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
           {error && <p className="text-xs text-destructive">{error}</p>}
@@ -471,6 +481,27 @@ function ViewPOSheet({ open, onClose, po, onRefresh }: {
   const [payNotes, setPayNotes] = useState("");
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState("");
+  const [raisedDns, setRaisedDns] = useState<Set<string>>(new Set());
+  const [raisingDn, setRaisingDn] = useState<string | null>(null);
+
+  // Reset raised-DN tracking when switching POs
+  useEffect(() => { if (!open) setRaisedDns(new Set()); }, [open, po?.id]);
+
+  const handleRaiseShortage = async (item: PurchaseOrderItem) => {
+    const key = item.productId;
+    setRaisingDn(key);
+    try {
+      await api.raiseShortageDebitNote({
+        poId: po!.id,
+        productId: item.productId,
+        expectedQuantity: item.orderedQuantity,
+        receivedQuantity: item.receivedQuantity,
+        unitCost: item.unitCost,
+      });
+      setRaisedDns(prev => new Set(prev).add(key));
+    } catch (e) { alert(e instanceof Error ? e.message : "Failed to raise debit note."); }
+    finally { setRaisingDn(null); }
+  };
 
   if (!po) return null;
 
@@ -529,6 +560,43 @@ function ViewPOSheet({ open, onClose, po, onRefresh }: {
             </TabsContent>
 
             <TabsContent value="items" className="mt-4 space-y-3">
+              {/* Shortage banners — derived directly from PO item data, no DB fetch needed */}
+              {(() => {
+                const shortfalls = (po.items ?? []).filter(it => it.orderedQuantity > it.receivedQuantity);
+                if (!shortfalls.length) return null;
+                return (
+                  <div className="space-y-1.5">
+                    {shortfalls.map(it => {
+                      const shortage = it.orderedQuantity - it.receivedQuantity;
+                      const value = shortage * it.unitCost;
+                      const key = it.productId;
+                      const done = raisedDns.has(key);
+                      return (
+                        <div key={it.id} className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-warning-foreground">
+                              ⚠ Shortage — {it.product?.name ?? it.productId}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Ordered {it.orderedQuantity} · Received {it.receivedQuantity} · Short {shortage} units · SAR {fmt(value)}
+                            </p>
+                          </div>
+                          {done ? (
+                            <span className="shrink-0 text-xs text-success font-medium">DN Raised ✓</span>
+                          ) : (
+                            <Button size="sm" variant="outline"
+                              className="shrink-0 h-7 text-xs border-warning/60 text-warning-foreground hover:bg-warning/20"
+                              disabled={raisingDn === key}
+                              onClick={() => handleRaiseShortage(it)}>
+                              {raisingDn === key ? <Loader2 className="h-3 w-3 animate-spin" /> : "Raise Debit Note"}
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
               <div className="rounded-lg border border-border/60 overflow-hidden">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/40">
@@ -536,20 +604,32 @@ function ViewPOSheet({ open, onClose, po, onRefresh }: {
                       <th className="text-left px-3 py-2">Product</th>
                       <th className="text-right px-2 py-2">Ordered</th>
                       <th className="text-right px-2 py-2">Received</th>
+                      <th className="text-right px-2 py-2">Delta</th>
                       <th className="text-right px-2 py-2">Cost</th>
                       <th className="text-right px-2 py-2">Subtotal</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(po.items ?? []).map(it => (
-                      <tr key={it.id} className="border-t border-border/40">
-                        <td className="px-3 py-2">{it.product?.name ?? it.productId}</td>
-                        <td className="px-2 py-2 text-right">{it.orderedQuantity}</td>
-                        <td className="px-2 py-2 text-right text-muted-foreground">{it.receivedQuantity}</td>
-                        <td className="px-2 py-2 text-right tabular-nums">{fmt(it.unitCost)}</td>
-                        <td className="px-2 py-2 text-right tabular-nums font-medium">{fmt(it.subtotal)}</td>
-                      </tr>
-                    ))}
+                    {(po.items ?? []).map(it => {
+                      const delta = it.receivedQuantity - it.orderedQuantity;
+                      const hasDiscrepancy = it.receivedQuantity > 0 && it.receivedQuantity < it.orderedQuantity;
+                      return (
+                        <tr key={it.id} className={`border-t border-border/40 ${hasDiscrepancy ? "bg-warning/5" : ""}`}>
+                          <td className="px-3 py-2">{it.product?.name ?? it.productId}</td>
+                          <td className="px-2 py-2 text-right">{it.orderedQuantity}</td>
+                          <td className="px-2 py-2 text-right">{it.receivedQuantity > 0 ? it.receivedQuantity : <span className="text-muted-foreground">—</span>}</td>
+                          <td className="px-2 py-2 text-right">
+                            {it.receivedQuantity > 0 ? (
+                              <span className={delta < 0 ? "text-destructive font-semibold" : delta > 0 ? "text-success font-semibold" : "text-muted-foreground"}>
+                                {delta > 0 ? "+" : ""}{delta}
+                              </span>
+                            ) : <span className="text-muted-foreground">—</span>}
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmt(it.unitCost)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums font-medium">{fmt(it.subtotal)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -1103,8 +1103,9 @@ function POS() {
                 <div className="text-center space-y-0.5">
                   <p className="font-bold text-sm">{invoice.sellerName}</p>
                   <p className="text-muted-foreground">VAT {invoice.vatNumber}</p>
-                  <p className="font-bold mt-1">{invoice.orderNumber}</p>
-                  <p>{new Date(invoice.createdAt).toLocaleString("en-SA")}</p>
+                  <p className="text-muted-foreground text-[10px] tracking-widest uppercase mt-1">Invoice No.</p>
+                  <p className="font-bold">{invoice.orderNumber}</p>
+                  <p className="text-muted-foreground">{new Date(invoice.createdAt).toLocaleString("en-SA")}</p>
                   {invoice.customerName && <p>Customer: {invoice.customerName}</p>}
                 </div>
                 <div className="border-t border-dashed border-border pt-2 space-y-0.5">

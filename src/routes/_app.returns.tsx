@@ -1,16 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X } from "lucide-react";
+import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, ScanLine, Loader2 } from "lucide-react";
 import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type Branch, type OrderItem } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 
@@ -208,9 +206,14 @@ function Returns() {
   const [viewReturn, setViewReturn] = useState<CustomerReturn | null>(null);
   const [form, setForm] = useState<ReturnForm>(emptyForm);
   const [itemRows, setItemRows] = useState<ItemRow[]>([]);
+  const [selectedItemIdx, setSelectedItemIdx] = useState<number>(0);
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceError, setInvoiceError] = useState("");
+  const [matchedOrder, setMatchedOrder] = useState<Order | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const invoiceInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -284,29 +287,67 @@ function Returns() {
       setForm(p => ({ ...p, refundAmount: totalRefund.toFixed(2) }));
   }, [totalRefund]);
 
+  const lookupInvoice = async () => {
+    const num = invoiceNumber.trim();
+    if (!num) return;
+    setInvoiceError("");
+    setLoadingItems(true);
+    setItemRows([]);
+    setMatchedOrder(null);
+    try {
+      // Quick check in preloaded list to get the ID, then fetch full order with products
+      const cached = orders.find(o => o.orderNumber.toLowerCase() === num.toLowerCase());
+      let order: Order | null = null;
+      if (cached) {
+        order = await api.getOrder(cached.id).catch(() => null);
+      } else {
+        order = await api.getOrderByNumber(num).catch(() => null);
+      }
+      if (!order) { setInvoiceError("Invoice not found. Check the number and try again."); return; }
+      setMatchedOrder(order);
+      setForm(p => ({ ...p, orderId: order!.id, branchId: order!.branchId, customerId: order!.customerId ?? p.customerId }));
+      const rows: ItemRow[] = (order.items ?? []).map((oi: OrderItem) => ({
+        orderItemId: oi.id ?? "",
+        productId: oi.productId,
+        productName: oi.product?.name ?? oi.productId,
+        unitPrice: oi.unitPrice,
+        maxQty: Number(oi.quantity),
+        qty: 1,
+        condition: "good",
+        restock: true,
+        selected: false,
+      }));
+      setItemRows(rows);
+      setSelectedItemIdx(0);
+    } catch {
+      setInvoiceError("Failed to look up invoice. Try again.");
+    } finally { setLoadingItems(false); }
+  };
+
   const handleSubmit = async () => {
-    if (!form.orderId || !form.customerId || !form.branchId || !form.reason) {
-      setError("Order, customer, branch and reason are required.");
+    const row = itemRows[selectedItemIdx];
+    if (!form.orderId || !form.reason || !row) {
+      setError("Scan an invoice, pick an item, and select a reason.");
       return;
     }
     setSaving(true); setError(null);
     try {
-      const items: CustomerReturnItem[] = selectedItems.map(r => ({
-        productId: r.productId,
-        orderItemId: r.orderItemId || undefined,
-        quantity: r.qty,
-        unitPrice: r.unitPrice,
-        refundAmount: r.qty * r.unitPrice,
-        condition: r.condition,
-        restock: r.restock,
-      }));
+      const items: CustomerReturnItem[] = [{
+        productId: row.productId,
+        orderItemId: row.orderItemId || undefined,
+        quantity: row.qty,
+        unitPrice: row.unitPrice,
+        refundAmount: row.qty * row.unitPrice,
+        condition: row.condition,
+        restock: row.restock,
+      }];
       await api.createReturn({
         orderId: form.orderId,
-        customerId: form.customerId,
+        customerId: form.customerId || undefined,
         branchId: form.branchId,
         returnType: form.returnType,
         refundMethod: form.refundMethod,
-        refundAmount: Number(form.refundAmount),
+        refundAmount: row.qty * row.unitPrice,
         reason: form.reason,
         notes: form.notes || undefined,
         items,
@@ -314,6 +355,10 @@ function Returns() {
       setSheetOpen(false);
       setForm(emptyForm);
       setItemRows([]);
+      setInvoiceNumber("");
+      setMatchedOrder(null);
+      setInvoiceError("");
+      setSelectedItemIdx(0);
       load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to submit return.");
@@ -371,116 +416,85 @@ function Returns() {
           )}
         </div>
         <div className="flex-1" />
-        <Sheet open={sheetOpen} onOpenChange={v => { setSheetOpen(v); if (!v) { setForm(emptyForm); setItemRows([]); setError(null); } }}>
+        <Sheet open={sheetOpen} onOpenChange={v => { setSheetOpen(v); if (!v) { setForm(emptyForm); setItemRows([]); setInvoiceNumber(""); setMatchedOrder(null); setInvoiceError(""); setSelectedItemIdx(0); setError(null); } }}>
           <SheetTrigger asChild>
             <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9">
               <Plus className="h-4 w-4" /> New Return
             </Button>
           </SheetTrigger>
-          <SheetContent className="max-w-lg overflow-y-auto">
-            <SheetHeader><SheetTitle>New Return</SheetTitle></SheetHeader>
-            <div className="mt-4 space-y-4">
-              <FieldRow label="Order">
-                <Select value={form.orderId} onValueChange={setS("orderId")}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select order" /></SelectTrigger>
+          <SheetContent className="w-[420px] overflow-y-auto">
+            <SheetHeader><SheetTitle className="text-lg">Process customer return</SheetTitle></SheetHeader>
+            <div className="mt-6 space-y-5">
+
+              {/* Original Invoice */}
+              <FieldRow label="Original invoice">
+                <div className="flex gap-2">
+                  <Input
+                    ref={invoiceInputRef}
+                    value={invoiceNumber}
+                    onChange={e => setInvoiceNumber(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && lookupInvoice()}
+                    placeholder="ORD-20260623-ABCDEF"
+                    className="h-11 text-sm flex-1"
+                  />
+                  <Button variant="outline" className="h-11 px-4 gap-2 shrink-0" onClick={loadingItems ? undefined : lookupInvoice} disabled={loadingItems}>
+                    {loadingItems ? <Loader2 className="h-4 w-4 animate-spin" /> : <><ScanLine className="h-4 w-4" />Scan</>}
+                  </Button>
+                </div>
+                {invoiceError && <p className="text-xs text-destructive mt-1">{invoiceError}</p>}
+                {matchedOrder && (
+                  <p className="text-xs text-success mt-1">✓ {matchedOrder.orderNumber} · SAR {matchedOrder.totalAmount.toFixed(2)} · {matchedOrder.items?.length ?? 0} item(s)</p>
+                )}
+              </FieldRow>
+
+              {/* Item */}
+              <FieldRow label="Item">
+                <Select
+                  value={itemRows.length ? String(selectedItemIdx) : ""}
+                  onValueChange={v => setSelectedItemIdx(Number(v))}
+                  disabled={!itemRows.length}
+                >
+                  <SelectTrigger className="h-11"><SelectValue placeholder="Auto-fill from invoice" /></SelectTrigger>
                   <SelectContent>
-                    {orders.map(o => (
-                      <SelectItem key={o.id} value={o.id}>{o.orderNumber} — <SARIcon />{o.totalAmount.toFixed(2)}</SelectItem>
+                    {itemRows.map((row, i) => (
+                      <SelectItem key={i} value={String(i)}>{row.productName} · SAR {row.unitPrice.toFixed(2)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </FieldRow>
 
-              {/* Items from the selected order */}
-              {loadingItems && <p className="text-xs text-muted-foreground">Loading order items…</p>}
+              {/* Qty */}
               {itemRows.length > 0 && (
-                <div>
-                  <Label className="text-xs mb-2 block">Select Items to Return</Label>
-                  <div className="space-y-2">
-                    {itemRows.map((row, i) => (
-                      <div key={i} className={`rounded-lg border p-3 transition-colors ${row.selected ? "border-primary/40 bg-primary/5" : "border-border/40"}`}>
-                        <div className="flex items-start gap-2">
-                          <Checkbox checked={row.selected} onCheckedChange={v => updateRow(i, { selected: !!v })} className="mt-0.5" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{row.productName}</p>
-                            <p className="text-xs text-muted-foreground"><SARIcon />{row.unitPrice.toFixed(2)}/unit · max {row.maxQty}</p>
-                          </div>
-                        </div>
-                        {row.selected && (
-                          <div className="mt-2 grid grid-cols-3 gap-2">
-                            <div>
-                              <Label className="text-xs">Qty</Label>
-                              <Input type="number" min={1} max={row.maxQty} value={row.qty}
-                                onChange={e => updateRow(i, { qty: Math.min(Number(e.target.value), row.maxQty) })}
-                                className="h-8 text-xs" />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Condition</Label>
-                              <Select value={row.condition} onValueChange={v => updateRow(i, { condition: v, restock: v === "good" })}>
-                                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="good">Good</SelectItem>
-                                  <SelectItem value="damaged">Damaged</SelectItem>
-                                  <SelectItem value="expired">Expired</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="flex flex-col justify-end">
-                              <Label className="text-xs mb-1">Restock</Label>
-                              <div className="flex items-center gap-1.5 h-8">
-                                <Switch checked={row.restock} disabled={row.condition !== "good"}
-                                  onCheckedChange={v => updateRow(i, { restock: v })} />
-                                <span className="text-xs text-muted-foreground">{row.restock ? "Yes" : "No"}</span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  {selectedItems.length > 0 && (
-                    <div className="mt-2 rounded-lg bg-muted/50 px-3 py-2 flex justify-between text-sm">
-                      <span className="text-muted-foreground">{selectedItems.length} item(s) · auto refund</span>
-                      <span className="font-semibold"><SARIcon />{totalRefund.toFixed(2)}</span>
-                    </div>
-                  )}
-                </div>
+                <FieldRow label="Qty">
+                  <Input
+                    type="number" min={1} max={itemRows[selectedItemIdx]?.maxQty ?? 1}
+                    value={itemRows[selectedItemIdx]?.qty ?? 1}
+                    onChange={e => updateRow(selectedItemIdx, { qty: Math.min(Number(e.target.value), itemRows[selectedItemIdx]?.maxQty ?? 1) })}
+                    className="h-11 text-sm"
+                  />
+                </FieldRow>
               )}
 
-              <FieldRow label="Customer">
-                <Select value={form.customerId} onValueChange={v => setForm(p => ({ ...p, customerId: v }))}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select customer" /></SelectTrigger>
+              {/* Reason */}
+              <FieldRow label="Reason">
+                <Select value={form.reason} onValueChange={v => setForm(p => ({ ...p, reason: v }))}>
+                  <SelectTrigger className="h-11"><SelectValue placeholder="Select reason" /></SelectTrigger>
                   <SelectContent>
-                    {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.fullName} — {c.phone}</SelectItem>)}
+                    <SelectItem value="Damaged packaging">Damaged packaging</SelectItem>
+                    <SelectItem value="Wrong item received">Wrong item received</SelectItem>
+                    <SelectItem value="Expired product">Expired product</SelectItem>
+                    <SelectItem value="Quality issue">Quality issue</SelectItem>
+                    <SelectItem value="Customer changed mind">Customer changed mind</SelectItem>
+                    <SelectItem value="Duplicate purchase">Duplicate purchase</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               </FieldRow>
-              <FieldRow label="Branch">
-                <Select value={form.branchId} onValueChange={v => setForm(p => ({ ...p, branchId: v }))}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
-                  <SelectContent>
-                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </FieldRow>
-              <div className="grid grid-cols-2 gap-3">
-                <FieldRow label="Return Type">
-                  <Select value={form.returnType} onValueChange={setS("returnType")}>
-                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="full_return">Full Return</SelectItem>
-                      <SelectItem value="partial_return">Partial Return</SelectItem>
-                      <SelectItem value="exchange">Exchange</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FieldRow>
-                <FieldRow label="Refund Amount (SAR)">
-                  <Input type="number" value={form.refundAmount} onChange={setF("refundAmount")} className="h-9" placeholder="0.00" />
-                </FieldRow>
-              </div>
-              <FieldRow label="Refund Method">
-                <Select value={form.refundMethod} onValueChange={setS("refundMethod")}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+
+              {/* Refund method */}
+              <FieldRow label="Refund method">
+                <Select value={form.refundMethod} onValueChange={v => setForm(p => ({ ...p, refundMethod: v }))}>
+                  <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="cash">Cash</SelectItem>
                     <SelectItem value="card_reversal">Card Reversal</SelectItem>
@@ -489,15 +503,42 @@ function Returns() {
                   </SelectContent>
                 </Select>
               </FieldRow>
-              <FieldRow label="Reason">
-                <Textarea value={form.reason} onChange={setF("reason")} placeholder="Reason for return…" rows={3} />
+
+              {/* Notes */}
+              <FieldRow label="Notes">
+                <Textarea value={form.notes} onChange={setF("notes")} placeholder="Optional notes for audit…" rows={3} className="resize-none text-sm" />
               </FieldRow>
-              <FieldRow label="Notes (optional)">
-                <Textarea value={form.notes} onChange={setF("notes")} placeholder="Additional notes…" rows={2} />
-              </FieldRow>
+
+              {/* Restock badge */}
+              {itemRows.length > 0 && (
+                <div className="flex items-center justify-between rounded-xl border border-border/60 px-4 py-3">
+                  <span className="text-sm text-muted-foreground">Restock item to inventory</span>
+                  <button
+                    type="button"
+                    onClick={() => updateRow(selectedItemIdx, { restock: !(itemRows[selectedItemIdx]?.restock ?? true) })}
+                    className={`px-4 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer select-none ${
+                      (itemRows[selectedItemIdx]?.restock ?? true)
+                        ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                        : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
+                    }`}
+                  >
+                    {(itemRows[selectedItemIdx]?.restock ?? true) ? "Yes" : "No"}
+                  </button>
+                </div>
+              )}
+
+              {/* Refund preview */}
+              {itemRows.length > 0 && (
+                <div className="rounded-xl bg-muted/40 px-4 py-2.5 flex justify-between text-sm">
+                  <span className="text-muted-foreground">Refund amount</span>
+                  <span className="font-semibold"><SARIcon />{((itemRows[selectedItemIdx]?.qty ?? 1) * (itemRows[selectedItemIdx]?.unitPrice ?? 0)).toFixed(2)}</span>
+                </div>
+              )}
+
               {error && <p className="text-xs text-destructive">{error}</p>}
-              <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={handleSubmit} disabled={saving}>
-                {saving ? "Submitting…" : "Submit Return"}
+              <Button className="w-full gradient-primary text-primary-foreground border-0 h-11 text-sm font-semibold" onClick={handleSubmit} disabled={saving || !matchedOrder}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Submit return
               </Button>
             </div>
           </SheetContent>

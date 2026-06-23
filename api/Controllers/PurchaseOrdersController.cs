@@ -116,7 +116,9 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
             var batch = new InventoryBatch
             {
                 Id = Guid.NewGuid(),
-                BatchNumber = $"BATCH-{po.PoNumber}-{recv.ProductId.ToString()[..4].ToUpper()}",
+                BatchNumber = !string.IsNullOrEmpty(recv.BatchNumber)
+                    ? recv.BatchNumber
+                    : $"BATCH-{po.PoNumber}-{recv.ProductId.ToString()[..4].ToUpper()}",
                 ProductId = recv.ProductId,
                 BranchId = po.BranchId ?? Guid.Empty,
                 SupplierId = po.SupplierId,
@@ -172,6 +174,32 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         var supplier = await db.Suppliers.FindAsync(po.SupplierId);
         if (supplier != null) supplier.LastSupplyDate = DateTime.UtcNow;
 
+        // Create discrepancy records for any shortfalls / excess
+        foreach (var recv in items)
+        {
+            var item = po.Items.FirstOrDefault(i => i.ProductId == recv.ProductId);
+            if (item is null) continue;
+            var diff = recv.Quantity - item.OrderedQuantity;
+            if (diff == 0) continue;
+            db.StockDiscrepancies.Add(new StockDiscrepancy
+            {
+                Id = Guid.NewGuid(),
+                PoId = po.Id,
+                SupplierId = po.SupplierId,
+                ProductId = recv.ProductId,
+                ExpectedQuantity = item.OrderedQuantity,
+                ReceivedQuantity = recv.Quantity,
+                DiscrepancyQuantity = diff,
+                UnitCost = item.UnitCost,
+                DiscrepancyValue = Math.Abs(diff) * item.UnitCost,
+                DiscrepancyType = diff < 0 ? "shortage" : "excess",
+                Status = "open",
+                Notes = $"Auto-detected on PO {po.PoNumber} receive",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+
         await db.SaveChangesAsync();
         return Ok(po);
     }
@@ -205,7 +233,7 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
 }
 
 public record UpdatePoStatusRequest(string Status, Guid? ApprovedBy);
-public record ReceiveItemRequest(Guid ProductId, decimal Quantity, DateTime? ExpiryDate);
+public record ReceiveItemRequest(Guid ProductId, decimal Quantity, DateTime? ExpiryDate, string? BatchNumber);
 public record CreatePoItemRequest(Guid ProductId, decimal OrderedQuantity, decimal UnitCost);
 public record CreatePoRequest(
     Guid SupplierId,

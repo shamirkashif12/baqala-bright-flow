@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260622095623_AddDiscrepancyAndCreditNotes")]
+    partial class AddDiscrepancyAndCreditNotes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -489,7 +492,7 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid?>("CustomerId")
+                    b.Property<Guid>("CustomerId")
                         .HasColumnType("char(36)")
                         .HasColumnName("customer_id");
 
@@ -3436,7 +3439,9 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasOne("BaqalaPOS.Api.Models.Customer", "Customer")
                         .WithMany("Returns")
-                        .HasForeignKey("CustomerId");
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.HasOne("BaqalaPOS.Api.Models.Order", "Order")
                         .WithMany("Returns")

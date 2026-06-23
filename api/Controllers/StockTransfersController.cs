@@ -75,6 +75,139 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = transfer.Id }, transfer);
     }
 
+    // Receive a transfer with per-line actual quantities, then mark completed and move stock
+    [HttpPost("{id:guid}/receive")]
+    public async Task<IActionResult> ReceiveTransfer(Guid id, [FromBody] ReceiveTransferRequest req)
+    {
+        var transfer = await db.StockTransfers.Include(t => t.Items).FirstOrDefaultAsync(t => t.Id == id);
+        if (transfer is null) return NotFound();
+        if (transfer.Status != "in_transit") return BadRequest("Transfer must be in_transit to receive.");
+
+        // Update per-item received quantities
+        foreach (var recv in req.Items ?? [])
+        {
+            var item = transfer.Items.FirstOrDefault(i => i.Id == recv.ItemId);
+            if (item is null) continue;
+            item.ReceivedQuantity = recv.ReceivedQuantity;
+            if (!string.IsNullOrEmpty(recv.Notes)) item.Notes = recv.Notes;
+        }
+
+        transfer.Status = "completed";
+        transfer.CompletedDate = DateTime.UtcNow;
+        transfer.UpdatedAt = DateTime.UtcNow;
+        if (req.ApprovedBy.HasValue) transfer.ApprovedBy = req.ApprovedBy;
+
+        foreach (var item in transfer.Items)
+        {
+            var qty = item.ReceivedQuantity ?? item.ApprovedQuantity ?? item.RequestedQuantity;
+
+            if (transfer.SourceBranchId.HasValue)
+            {
+                var src = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.SourceBranchId && s.ProductId == item.ProductId);
+                if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+            }
+            else if (transfer.SourceWarehouseId.HasValue)
+            {
+                var src = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.SourceWarehouseId && s.ProductId == item.ProductId);
+                if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+            }
+
+            if (transfer.DestBranchId.HasValue)
+            {
+                var dst = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.DestBranchId && s.ProductId == item.ProductId)
+                          ?? new InventoryStock { Id = Guid.NewGuid(), BranchId = transfer.DestBranchId.Value, ProductId = item.ProductId };
+                if (!await db.InventoryStocks.AnyAsync(s => s.Id == dst.Id))
+                    db.InventoryStocks.Add(dst);
+                dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
+
+                // Create InventoryBatch so expiry date and cost are tracked
+                db.InventoryBatches.Add(new InventoryBatch
+                {
+                    Id = Guid.NewGuid(),
+                    BatchNumber = $"TRF-{transfer.TransferNumber}-{item.ProductId.ToString()[..4].ToUpper()}",
+                    ProductId = item.ProductId,
+                    BranchId = transfer.DestBranchId.Value,
+                    SupplierId = transfer.SourceSupplierId,
+                    Quantity = qty,
+                    RemainingQuantity = qty,
+                    PurchaseCost = item.UnitCost ?? 0,
+                    ExpiryDate = item.ExpiryDate,
+                    ReceivedDate = DateTime.UtcNow,
+                    Status = "active",
+                    Notes = $"Received via transfer {transfer.TransferNumber}",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+            else if (transfer.DestWarehouseId.HasValue)
+            {
+                var dst = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.DestWarehouseId && s.ProductId == item.ProductId);
+                if (dst is null) { dst = new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = transfer.DestWarehouseId.Value, ProductId = item.ProductId }; db.WarehouseStocks.Add(dst); }
+                dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        // Discrepancy records for qty mismatches
+        var supplierId = transfer.SourceSupplierId;
+        if (!supplierId.HasValue && transfer.PurchaseOrderId.HasValue)
+        {
+            var linkedPo = await db.PurchaseOrders.FindAsync(transfer.PurchaseOrderId.Value);
+            supplierId = linkedPo?.SupplierId;
+        }
+
+        foreach (var item in transfer.Items)
+        {
+            var expected = item.ApprovedQuantity ?? item.RequestedQuantity;
+            var received = item.ReceivedQuantity ?? expected;
+            var diff = received - expected;
+            if (diff != 0 && supplierId.HasValue)
+            {
+                db.StockDiscrepancies.Add(new StockDiscrepancy
+                {
+                    Id = Guid.NewGuid(),
+                    TransferId = transfer.Id,
+                    SupplierId = supplierId.Value,
+                    ProductId = item.ProductId,
+                    ExpectedQuantity = expected,
+                    ReceivedQuantity = received,
+                    DiscrepancyQuantity = diff,
+                    UnitCost = item.UnitCost ?? 0,
+                    DiscrepancyValue = Math.Abs(diff) * (item.UnitCost ?? 0),
+                    DiscrepancyType = diff < 0 ? "shortage" : "excess",
+                    Status = "open",
+                    Notes = $"Auto-detected on transfer {transfer.TransferNumber}",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+        }
+
+        // Auto-create credit note when return-to-supplier transfer is completed
+        if (transfer.TransferType == "warehouse_to_supplier" && transfer.DestSupplierId.HasValue)
+        {
+            var creditAmount = transfer.Items.Sum(i => (i.ReceivedQuantity ?? i.RequestedQuantity) * (i.UnitCost ?? 0));
+            var cnNumber = $"CN-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+            db.SupplierCreditNotes.Add(new SupplierCreditNote
+            {
+                Id = Guid.NewGuid(),
+                CreditNoteNumber = cnNumber,
+                SupplierId = transfer.DestSupplierId.Value,
+                TransferId = transfer.Id,
+                PoId = transfer.PurchaseOrderId,
+                Amount = creditAmount,
+                CreditType = "rts_return",
+                Status = "confirmed",
+                Notes = $"Auto-created from RTS transfer {transfer.TransferNumber}" + (string.IsNullOrEmpty(transfer.ReturnReason) ? "" : $". Return reason: {transfer.ReturnReason}"),
+                IssuedDate = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        return Ok(transfer);
+    }
+
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateTransferStatusRequest req)
     {
@@ -129,6 +262,8 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
 }
 
 public record UpdateTransferStatusRequest(string Status, Guid? ApprovedBy);
+public record ReceiveTransferItemRequest(Guid ItemId, decimal ReceivedQuantity, string? Notes);
+public record ReceiveTransferRequest(List<ReceiveTransferItemRequest>? Items, Guid? ApprovedBy);
 
 public record CreateTransferItemRequest(
     Guid ProductId,

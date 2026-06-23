@@ -16,8 +16,8 @@ public class CustomerReturn
     [Required, Column("order_id")]
     public Guid OrderId { get; set; }
 
-    [Required, Column("customer_id")]
-    public Guid CustomerId { get; set; }
+    [Column("customer_id")]
+    public Guid? CustomerId { get; set; }
 
     [Required, Column("branch_id")]
     public Guid BranchId { get; set; }

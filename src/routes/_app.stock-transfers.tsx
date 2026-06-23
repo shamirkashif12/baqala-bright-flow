@@ -593,6 +593,116 @@ function CreateTransferSheet({
   );
 }
 
+// ─── Receive Items Sheet ──────────────────────────────────────────────────────
+
+interface ReceiveItemRow { itemId: string; productName: string; requestedQty: number; receivedQty: number; notes: string }
+
+function ReceiveItemsSheet({
+  transfer,
+  open,
+  onOpenChange,
+  onReceived,
+}: { transfer: StockTransfer | null; open: boolean; onOpenChange: (v: boolean) => void; onReceived: () => void }) {
+  const { user } = useAuth();
+  const [rows, setRows] = useState<ReceiveItemRow[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open && transfer) {
+      setRows((transfer.items ?? []).map(i => ({
+        itemId: i.id,
+        productName: i.product?.name ?? "Unknown",
+        requestedQty: i.requestedQuantity,
+        receivedQty: i.approvedQuantity ?? i.requestedQuantity,
+        notes: "",
+      })));
+      setError("");
+    }
+  }, [open, transfer?.id]);
+
+  const update = (itemId: string, patch: Partial<ReceiveItemRow>) =>
+    setRows(r => r.map(row => row.itemId === itemId ? { ...row, ...patch } : row));
+
+  const handleSubmit = async () => {
+    if (!transfer) return;
+    setSaving(true); setError("");
+    try {
+      await api.receiveStockTransfer(
+        transfer.id,
+        rows.map(r => ({ itemId: r.itemId, receivedQuantity: r.receivedQty, notes: r.notes || undefined })),
+        user?.id,
+      );
+      onReceived();
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to receive transfer.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={v => { onOpenChange(v); if (!v) setError(""); }}>
+      <SheetContent side="right" className="w-full sm:max-w-[520px] overflow-y-auto">
+        <SheetHeader className="pb-4 border-b border-border/60">
+          <SheetTitle className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 text-success" /> Receive Transfer
+          </SheetTitle>
+          {transfer && <p className="text-xs text-muted-foreground font-mono">{transfer.transferNumber}</p>}
+        </SheetHeader>
+        <div className="mt-5 space-y-4">
+          <p className="text-xs text-muted-foreground">Enter the actual quantities received for each item. Leave unchanged to confirm the approved quantity.</p>
+          {rows.map(row => (
+            <Card key={row.itemId} className="border-border/60">
+              <CardContent className="p-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{row.productName}</p>
+                    <p className="text-xs text-muted-foreground">Requested: {row.requestedQty}</p>
+                  </div>
+                  <div className="space-y-1 shrink-0">
+                    <Label className="text-[11px] font-medium">Received Qty</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={row.requestedQty * 2}
+                      className="h-8 w-24 text-sm text-center"
+                      value={row.receivedQty}
+                      onChange={e => update(row.itemId, { receivedQty: Number(e.target.value) || 0 })}
+                    />
+                  </div>
+                </div>
+                {row.receivedQty !== row.requestedQty && (
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-warning-foreground font-medium">
+                      Discrepancy: {row.receivedQty - row.requestedQty > 0 ? "+" : ""}{row.receivedQty - row.requestedQty} — Add note
+                    </Label>
+                    <Input
+                      className="h-7 text-xs"
+                      placeholder="e.g. Damaged in transit, short shipment…"
+                      value={row.notes}
+                      onChange={e => update(row.itemId, { notes: e.target.value })}
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <div className="flex gap-2 pt-2 border-t border-border/60">
+            <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleSubmit} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
+              {saving ? "Confirming…" : "Confirm Receipt"}
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 // ─── Timeline Tab ─────────────────────────────────────────────────────────────
 
 function TimelineTab({ transfer }: { transfer: StockTransfer }) {
@@ -660,6 +770,7 @@ function ViewTransferSheet({
 }) {
   const { user } = useAuth();
   const [updating, setUpdating] = useState(false);
+  const [receiveOpen, setReceiveOpen] = useState(false);
 
   if (!transfer) return null;
 
@@ -841,13 +952,19 @@ function ViewTransferSheet({
             <Button
               className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
               disabled={updating}
-              onClick={() => updateStatus("completed")}
+              onClick={() => setReceiveOpen(true)}
             >
-              {updating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
               <CheckCircle2 className="mr-1.5 h-4 w-4" /> Mark Received
             </Button>
           )}
         </div>
+
+        <ReceiveItemsSheet
+          transfer={transfer}
+          open={receiveOpen}
+          onOpenChange={setReceiveOpen}
+          onReceived={() => { setReceiveOpen(false); onStatusUpdate(); }}
+        />
       </SheetContent>
     </Sheet>
   );
@@ -858,9 +975,11 @@ function ViewTransferSheet({
 function RowStatusAction({
   transfer,
   onAction,
+  onReceive,
 }: {
   transfer: StockTransfer;
   onAction: (id: string, status: string) => void;
+  onReceive: (t: StockTransfer) => void;
 }) {
   if (transfer.status === "draft") {
     return (
@@ -890,8 +1009,8 @@ function RowStatusAction({
   }
   if (transfer.status === "in_transit") {
     return (
-      <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onAction(transfer.id, "completed")}>
-        <CheckCircle2 className="h-3 w-3 mr-1" /> Received
+      <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onReceive(transfer)}>
+        <CheckCircle2 className="h-3 w-3 mr-1" /> Receive
       </Button>
     );
   }
@@ -917,6 +1036,7 @@ function StockTransfers() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [viewTransfer, setViewTransfer] = useState<StockTransfer | null>(null);
+  const [receiveTarget, setReceiveTarget] = useState<StockTransfer | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -977,6 +1097,26 @@ function StockTransfers() {
         <MetricCard label="In Transit" value={String(inTransit)} icon={Truck} accent="primary" />
         <MetricCard label="Pending Approval" value={String(pendingApproval)} icon={Clock} accent="warning" />
         <MetricCard label="Completed Today" value={String(completedToday)} icon={CheckCircle2} accent="success" />
+      </div>
+
+      {/* Quick-filter chips — RTS is a first-class shortcut */}
+      <div className="flex gap-2 flex-wrap">
+        {[
+          { label: "All Transfers", value: "all" },
+          { label: "Supplier → WH", value: "supplier_to_warehouse" },
+          { label: "WH → Branch", value: "warehouse_to_branch" },
+          { label: "Branch → WH", value: "branch_to_warehouse" },
+          { label: "Return to Supplier (RTS)", value: "warehouse_to_supplier" },
+        ].map(chip => (
+          <button
+            key={chip.value}
+            onClick={() => setTypeFilter(chip.value)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${typeFilter === chip.value ? "bg-primary text-primary-foreground border-primary" : "bg-background text-muted-foreground border-border/60 hover:border-primary/40"} ${chip.value === "warehouse_to_supplier" && typeFilter !== chip.value ? "border-warning/60 text-warning-foreground hover:bg-warning/10" : ""}`}
+          >
+            {chip.label}
+            {chip.value === "warehouse_to_supplier" && <span className="ml-1 text-[10px] font-bold uppercase tracking-wide opacity-70">RTS</span>}
+          </button>
+        ))}
       </div>
 
       {/* Filter Bar */}
@@ -1089,7 +1229,7 @@ function StockTransfers() {
                         >
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
-                        <RowStatusAction transfer={t} onAction={handleStatusAction} />
+                        <RowStatusAction transfer={t} onAction={handleStatusAction} onReceive={setReceiveTarget} />
                       </div>
                     </td>
                   </tr>
@@ -1116,6 +1256,14 @@ function StockTransfers() {
         transfer={viewTransfer}
         onClose={() => setViewTransfer(null)}
         onStatusUpdate={() => { load(); setViewTransfer(null); }}
+      />
+
+      {/* Row-level receive sheet */}
+      <ReceiveItemsSheet
+        transfer={receiveTarget}
+        open={!!receiveTarget}
+        onOpenChange={v => { if (!v) setReceiveTarget(null); }}
+        onReceived={() => { setReceiveTarget(null); load(); }}
       />
     </PageShell>
   );
