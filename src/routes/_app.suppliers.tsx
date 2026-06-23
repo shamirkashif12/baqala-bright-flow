@@ -454,12 +454,7 @@ function SuppliersTab() {
 function Suppliers() {
   return (
     <PageShell title="Suppliers" subtitle="Vendor management · warehouses · supply channels">
-      <Tabs defaultValue="suppliers">
-        <TabsList className="mb-4">
-          <TabsTrigger value="suppliers" className="gap-1.5"><Truck className="h-3.5 w-3.5" />Suppliers</TabsTrigger>
-        </TabsList>
-        <TabsContent value="suppliers" className="mt-0"><SuppliersTab /></TabsContent>
-      </Tabs>
+      <SuppliersTab />
     </PageShell>
   );
 }

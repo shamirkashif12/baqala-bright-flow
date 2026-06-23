@@ -239,6 +239,8 @@ export const api = {
     return request<PurchaseOrder[]>(`/api/purchase-orders${q ? `?${q}` : ""}`);
   },
   getPurchaseOrder: (id: string) => request<PurchaseOrder>(`/api/purchase-orders/${id}`),
+  getPurchaseOrderByNumber: (number: string) =>
+    request<PurchaseOrder>(`/api/purchase-orders/by-number/${encodeURIComponent(number)}`),
   createPurchaseOrder: (data: Partial<PurchaseOrder>) =>
     request<PurchaseOrder>("/api/purchase-orders", { method: "POST", body: JSON.stringify(data) }),
   updatePoStatus: (id: string, status: string, approvedBy?: string) =>
@@ -249,12 +251,14 @@ export const api = {
     request<SupplierPayment>(`/api/purchase-orders/${poId}/payments`, { method: "POST", body: JSON.stringify(data) }),
 
   // Stock Transfers
-  getStockTransfers: (params?: { transferType?: string; status?: string }) => {
+  getStockTransfers: (params?: { transferType?: string; status?: string; sourceWarehouseId?: string; destWarehouseId?: string }) => {
     const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
     const q = new URLSearchParams(filtered).toString();
     return request<StockTransfer[]>(`/api/stock-transfers${q ? `?${q}` : ""}`);
   },
   getStockTransfer: (id: string) => request<StockTransfer>(`/api/stock-transfers/${id}`),
+  getStockTransferByNumber: (number: string) =>
+    request<StockTransfer>(`/api/stock-transfers/by-number/${encodeURIComponent(number)}`),
   createStockTransfer: (data: Partial<StockTransfer>) =>
     request<StockTransfer>("/api/stock-transfers", { method: "POST", body: JSON.stringify(data) }),
   updateTransferStatus: (id: string, status: string, approvedBy?: string) =>

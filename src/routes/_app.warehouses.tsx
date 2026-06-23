@@ -21,7 +21,9 @@ import {
   api,
   type WarehouseRequest, type Warehouse as WarehouseType,
   type Branch, type Product, type Supplier, type WarehouseStock,
+  type PurchaseOrder, type StockTransfer,
 } from "@/lib/api";
+import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/warehouses")({ component: Warehouses });
 
@@ -183,6 +185,9 @@ function WarehouseProfileDrawer({
   const [loadingStock, setLoadingStock] = useState(false);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [activeTab, setActiveTab] = useState("overview");
+  const [wPos, setWPos] = useState<PurchaseOrder[]>([]);
+  const [rtsTransfers, setRtsTransfers] = useState<StockTransfer[]>([]);
+  const [loadingLedger, setLoadingLedger] = useState(false);
 
   useEffect(() => {
     if (!warehouse) return;
@@ -190,6 +195,14 @@ function WarehouseProfileDrawer({
     setLoadingStock(true);
     api.getWarehouseStock(warehouse.id).then(setStock).finally(() => setLoadingStock(false));
     api.getSuppliers().then(setSuppliers).catch(() => {});
+    setLoadingLedger(true);
+    Promise.allSettled([
+      api.getPurchaseOrders({ warehouseId: warehouse.id }),
+      api.getStockTransfers({ sourceWarehouseId: warehouse.id, transferType: "warehouse_to_supplier" }),
+    ]).then(([posRes, rtsRes]) => {
+      if (posRes.status === "fulfilled") setWPos(posRes.value);
+      if (rtsRes.status === "fulfilled") setRtsTransfers(rtsRes.value);
+    }).finally(() => setLoadingLedger(false));
   }, [warehouse?.id]);
 
   const linkedSuppliers = warehouse?.warehouseSuppliers ?? [];
@@ -235,11 +248,12 @@ function WarehouseProfileDrawer({
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid grid-cols-4 h-8 text-xs">
+              <TabsList className="grid grid-cols-5 h-8 text-xs">
                 <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
                 <TabsTrigger value="inventory" className="text-xs">Inventory</TabsTrigger>
                 <TabsTrigger value="suppliers" className="text-xs">Suppliers</TabsTrigger>
                 <TabsTrigger value="branches" className="text-xs">Branches</TabsTrigger>
+                <TabsTrigger value="ledger" className="text-xs">Ledger</TabsTrigger>
               </TabsList>
 
               {/* Overview */}
@@ -341,6 +355,108 @@ function WarehouseProfileDrawer({
                     ))}
                   </div>
                 )}
+              </TabsContent>
+
+              {/* Ledger */}
+              <TabsContent value="ledger" className="mt-4">
+                {loadingLedger ? (
+                  <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 rounded-xl" />)}</div>
+                ) : (() => {
+                  const itemsValue = (t: StockTransfer) => (t.items ?? []).reduce((si, i) => si + (i.receivedQuantity ?? i.requestedQuantity) * (i.unitCost ?? 0), 0);
+                  const receivedPos = wPos.filter(p => p.status === "partial_received" || p.status === "fully_received");
+                  const totalReceived = receivedPos.reduce((s, p) => s + p.totalAmount, 0);
+                  const totalPaid = wPos.reduce((s, p) => s + p.paidAmount, 0);
+                  const completedRts = rtsTransfers.filter(t => t.status === "completed");
+                  const rtsCredits = completedRts.reduce((s, t) => s + itemsValue(t), 0);
+                  const netBalance = totalReceived - totalPaid - rtsCredits;
+                  const allPayments = wPos
+                    .flatMap(p => (p.payments ?? []).map(pay => ({ ...pay, poNumber: p.poNumber })))
+                    .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate));
+
+                  return (
+                    <div className="space-y-1.5">
+                      {/* Summary — 3 cards matching supplier ledger */}
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {[
+                          { label: "Total Invoiced", val: totalReceived, cls: "" },
+                          { label: "Paid", val: totalPaid, cls: "text-success" },
+                          { label: "RTS Credits", val: rtsCredits, cls: "text-primary" },
+                        ].map(({ label, val, cls }) => (
+                          <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-2.5 text-center">
+                            <p className={`text-sm font-bold ${cls}`}><SARIcon />{val.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                            <p className="text-[10px] text-muted-foreground">{label}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Net balance banner */}
+                      {netBalance !== 0 && (
+                        <div className={`rounded-xl border px-3 py-2 text-sm font-semibold flex justify-between ${netBalance > 0 ? "border-destructive/40 bg-destructive/5 text-destructive" : "border-success/40 bg-success/5 text-success"}`}>
+                          <span>{netBalance > 0 ? "Net Amount Owed to Suppliers" : "Net Credit from Suppliers"}</span>
+                          <span><SARIcon />{Math.abs(netBalance).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                        </div>
+                      )}
+                      {/* Goods received (payables) */}
+                      {receivedPos.length > 0 && (
+                        <div className="mt-3">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Goods Received (Payables)</p>
+                          {receivedPos.map(p => (
+                            <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
+                              <div>
+                                <p className="font-medium font-mono">{p.poNumber}</p>
+                                <p className="text-muted-foreground">
+                                  {new Date(p.receivedDate ?? p.updatedAt).toLocaleDateString("en-SA")}
+                                  {p.supplier?.name ? ` · ${p.supplier.name}` : ""}
+                                  {" · "}
+                                  <span className={p.paymentStatus === "paid" ? "text-success" : p.paymentStatus === "partial" ? "text-amber-600" : "text-destructive"}>
+                                    {p.paymentStatus === "paid" ? "Paid" : p.paymentStatus === "partial" ? `Partial — SAR ${p.paidAmount.toLocaleString()} paid` : "Unpaid"}
+                                  </span>
+                                </p>
+                              </div>
+                              <span className="font-semibold text-destructive flex items-center gap-0.5"><SARIcon />{p.totalAmount.toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Payments made */}
+                      {allPayments.length > 0 && (
+                        <div className="mt-3">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Payments Made</p>
+                          {allPayments.map(pay => (
+                            <div key={pay.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
+                              <div>
+                                <p className="font-medium">{new Date(pay.paymentDate).toLocaleDateString("en-SA")}</p>
+                                <p className="text-muted-foreground">{pay.poNumber} · {pay.paymentMethod.replace(/_/g, " ")}</p>
+                              </div>
+                              <span className="font-semibold text-success flex items-center gap-0.5"><SARIcon />{pay.amount.toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* RTS returns */}
+                      {completedRts.length > 0 && (
+                        <div className="mt-3">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Returns to Supplier (RTS)</p>
+                          {completedRts.map(t => (
+                            <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
+                              <div>
+                                <p className="font-medium font-mono">{t.transferNumber}</p>
+                                <p className="text-muted-foreground">
+                                  {new Date(t.completedDate ?? t.updatedAt).toLocaleDateString("en-SA")}
+                                  {t.destSupplier?.name ? ` · ${t.destSupplier.name}` : ""}
+                                  {t.returnReason ? ` · ${t.returnReason}` : ""}
+                                </p>
+                              </div>
+                              <span className="font-semibold text-primary flex items-center gap-0.5"><SARIcon />{itemsValue(t).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {receivedPos.length === 0 && allPayments.length === 0 && completedRts.length === 0 && (
+                        <p className="text-center py-6 text-sm text-muted-foreground">No ledger entries yet.</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </TabsContent>
             </Tabs>
           </>

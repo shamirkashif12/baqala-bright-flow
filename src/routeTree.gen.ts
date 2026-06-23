@@ -23,6 +23,7 @@ import { Route as AppTerminalSessionsRouteImport } from './routes/_app.terminal-
 import { Route as AppTaxReportsRouteImport } from './routes/_app.tax-reports'
 import { Route as AppTaxFeesRouteImport } from './routes/_app.tax-fees'
 import { Route as AppSuppliersRouteImport } from './routes/_app.suppliers'
+import { Route as AppSupplierReturnsRouteImport } from './routes/_app.supplier-returns'
 import { Route as AppStocksRouteImport } from './routes/_app.stocks'
 import { Route as AppStockTransfersRouteImport } from './routes/_app.stock-transfers'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
@@ -131,6 +132,11 @@ const AppTaxFeesRoute = AppTaxFeesRouteImport.update({
 const AppSuppliersRoute = AppSuppliersRouteImport.update({
   id: '/suppliers',
   path: '/suppliers',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSupplierReturnsRoute = AppSupplierReturnsRouteImport.update({
+  id: '/supplier-returns',
+  path: '/supplier-returns',
   getParentRoute: () => AppRoute,
 } as any)
 const AppStocksRoute = AppStocksRouteImport.update({
@@ -377,6 +383,7 @@ export interface FileRoutesByFullPath {
   '/staff': typeof AppStaffRoute
   '/stock-transfers': typeof AppStockTransfersRoute
   '/stocks': typeof AppStocksRoute
+  '/supplier-returns': typeof AppSupplierReturnsRoute
   '/suppliers': typeof AppSuppliersRoute
   '/tax-fees': typeof AppTaxFeesRoute
   '/tax-reports': typeof AppTaxReportsRoute
@@ -432,6 +439,7 @@ export interface FileRoutesByTo {
   '/staff': typeof AppStaffRoute
   '/stock-transfers': typeof AppStockTransfersRoute
   '/stocks': typeof AppStocksRoute
+  '/supplier-returns': typeof AppSupplierReturnsRoute
   '/suppliers': typeof AppSuppliersRoute
   '/tax-fees': typeof AppTaxFeesRoute
   '/tax-reports': typeof AppTaxReportsRoute
@@ -489,6 +497,7 @@ export interface FileRoutesById {
   '/_app/staff': typeof AppStaffRoute
   '/_app/stock-transfers': typeof AppStockTransfersRoute
   '/_app/stocks': typeof AppStocksRoute
+  '/_app/supplier-returns': typeof AppSupplierReturnsRoute
   '/_app/suppliers': typeof AppSuppliersRoute
   '/_app/tax-fees': typeof AppTaxFeesRoute
   '/_app/tax-reports': typeof AppTaxReportsRoute
@@ -546,6 +555,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/stock-transfers'
     | '/stocks'
+    | '/supplier-returns'
     | '/suppliers'
     | '/tax-fees'
     | '/tax-reports'
@@ -601,6 +611,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/stock-transfers'
     | '/stocks'
+    | '/supplier-returns'
     | '/suppliers'
     | '/tax-fees'
     | '/tax-reports'
@@ -657,6 +668,7 @@ export interface FileRouteTypes {
     | '/_app/staff'
     | '/_app/stock-transfers'
     | '/_app/stocks'
+    | '/_app/supplier-returns'
     | '/_app/suppliers'
     | '/_app/tax-fees'
     | '/_app/tax-reports'
@@ -775,6 +787,13 @@ declare module '@tanstack/react-router' {
       path: '/suppliers'
       fullPath: '/suppliers'
       preLoaderRoute: typeof AppSuppliersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/supplier-returns': {
+      id: '/_app/supplier-returns'
+      path: '/supplier-returns'
+      fullPath: '/supplier-returns'
+      preLoaderRoute: typeof AppSupplierReturnsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/stocks': {
@@ -1112,6 +1131,7 @@ interface AppRouteChildren {
   AppStaffRoute: typeof AppStaffRoute
   AppStockTransfersRoute: typeof AppStockTransfersRoute
   AppStocksRoute: typeof AppStocksRoute
+  AppSupplierReturnsRoute: typeof AppSupplierReturnsRoute
   AppSuppliersRoute: typeof AppSuppliersRoute
   AppTaxFeesRoute: typeof AppTaxFeesRoute
   AppTaxReportsRoute: typeof AppTaxReportsRoute
@@ -1164,6 +1184,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppStaffRoute: AppStaffRoute,
   AppStockTransfersRoute: AppStockTransfersRoute,
   AppStocksRoute: AppStocksRoute,
+  AppSupplierReturnsRoute: AppSupplierReturnsRoute,
   AppSuppliersRoute: AppSuppliersRoute,
   AppTaxFeesRoute: AppTaxFeesRoute,
   AppTaxReportsRoute: AppTaxReportsRoute,

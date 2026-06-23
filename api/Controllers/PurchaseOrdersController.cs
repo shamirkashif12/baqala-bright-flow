@@ -43,6 +43,19 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         return po is null ? NotFound() : Ok(po);
     }
 
+    [HttpGet("by-number/{number}")]
+    public async Task<IActionResult> GetByNumber(string number)
+    {
+        var po = await db.PurchaseOrders
+            .Include(p => p.Supplier)
+            .Include(p => p.Warehouse)
+            .Include(p => p.Branch)
+            .Include(p => p.Items).ThenInclude(i => i.Product)
+            .Include(p => p.Payments)
+            .FirstOrDefaultAsync(p => p.PoNumber == number);
+        return po is null ? NotFound() : Ok(po);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreatePoRequest req)
     {

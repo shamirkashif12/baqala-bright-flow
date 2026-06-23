@@ -116,6 +116,8 @@ function POS() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerLoading, setCustomerLoading] = useState(false);
   const [customerNotFound, setCustomerNotFound] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
 
   // ─── Coupon ───────────────────────────────────────────────────────────────────
   const [couponCode, setCouponCode] = useState("");
@@ -477,6 +479,22 @@ function POS() {
     }
   };
 
+  // ─── Create new customer from POS ─────────────────────────────────────────────
+  const createNewCustomer = async () => {
+    if (!newCustomerName.trim() || !customerPhone.trim()) return;
+    setCreatingCustomer(true);
+    try {
+      const c = await api.createCustomer({ fullName: newCustomerName.trim(), phone: customerPhone.trim() });
+      setCustomer(c);
+      setCustomerNotFound(false);
+      setNewCustomerName("");
+    } catch {
+      // leave not-found state so cashier can retry
+    } finally {
+      setCreatingCustomer(false);
+    }
+  };
+
   // ─── Coupon ────────────────────────────────────────────────────────────────────
   const applyCoupon = async () => {
     if (!couponCode.trim()) return;
@@ -530,6 +548,8 @@ function POS() {
     setCustomer(null);
     setCustomerPhone("");
     setCustomerNotFound(false);
+    setNewCustomerName("");
+    setCreatingCustomer(false);
   };
 
   // ─── Charge handler ────────────────────────────────────────────────────────────
@@ -770,7 +790,7 @@ function POS() {
         </div>
 
         {/* ─── Right: order panel ───────────────────────────────────────────── */}
-        <Card className="border-border/60 shadow-elegant flex flex-col lg:h-[calc(100vh-180px)] lg:sticky lg:top-20">
+        <Card className="border-border/60 shadow-elegant flex flex-col lg:h-[calc(100vh-100px)] lg:sticky lg:top-20 overflow-hidden">
           <div className="p-4 border-b border-border/60 flex items-center justify-between">
             <div>
               <h3 className="font-semibold">New Order</h3>
@@ -786,10 +806,13 @@ function POS() {
             </div>
           </div>
 
-          {/* Cart mini-list */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 text-sm text-muted-foreground">
+          {/* Scrollable middle: cart items · customer/coupon · line-item breakdown */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+
+          {/* Cart items */}
+          <div className="p-3 text-sm text-muted-foreground border-b border-border/60">
             {cart.length === 0 ? (
-              <p className="text-center pt-6">Scan or search a product to start a sale.</p>
+              <p className="text-center py-3 text-muted-foreground">Scan or search a product to start a sale.</p>
             ) : (
               <ul className="space-y-1">
                 {cart.map((i) => (
@@ -803,7 +826,7 @@ function POS() {
           </div>
 
           {/* Customer + Coupon section */}
-          <div className="px-4 py-3 border-t border-border/60 space-y-3 shrink-0">
+          <div className="px-4 py-3 border-b border-border/60 space-y-3">
             {/* Customer lookup */}
             {customer ? (
               <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2">
@@ -812,9 +835,37 @@ function POS() {
                   <p className="text-xs font-semibold truncate">{customer.fullName}</p>
                   <p className="text-[10px] text-muted-foreground">{customer.phone}</p>
                 </div>
-                <button onClick={() => { setCustomer(null); setCustomerPhone(""); setCustomerNotFound(false); }} className="text-muted-foreground hover:text-destructive">
+                <button onClick={() => { setCustomer(null); setCustomerPhone(""); setCustomerNotFound(false); setNewCustomerName(""); }} className="text-muted-foreground hover:text-destructive">
                   <X className="h-3.5 w-3.5" />
                 </button>
+              </div>
+            ) : customerNotFound ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5 space-y-2">
+                <p className="text-[10px] font-medium text-amber-700 dark:text-amber-400">Not found — save as new customer?</p>
+                <Input
+                  value={newCustomerName}
+                  onChange={(e) => setNewCustomerName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
+                  placeholder="Full name…"
+                  className="h-8 text-xs"
+                  autoFocus
+                />
+                <div className="flex gap-1.5">
+                  <Input
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    placeholder="Phone…"
+                    className="h-8 text-xs flex-1"
+                  />
+                  <Button size="sm" className="h-8 px-3 text-xs gradient-primary text-primary-foreground border-0"
+                    onClick={createNewCustomer} disabled={creatingCustomer || !newCustomerName.trim()}>
+                    {creatingCustomer ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
+                    onClick={() => { setCustomerNotFound(false); setNewCustomerName(""); }}>
+                    Skip
+                  </Button>
+                </div>
               </div>
             ) : (
               <div className="flex gap-1.5">
@@ -833,7 +884,6 @@ function POS() {
                 </Button>
               </div>
             )}
-            {customerNotFound && <p className="text-[10px] text-destructive -mt-2">No customer found for this phone number.</p>}
 
             {/* Coupon */}
             {appliedCoupon ? (
@@ -870,8 +920,8 @@ function POS() {
             {couponError && <p className="text-[10px] text-destructive -mt-2">{couponError}</p>}
           </div>
 
-          {/* Totals + actions */}
-          <div className="p-4 border-t border-border/60 space-y-2 shrink-0">
+          {/* Line-item breakdown: subtotal · discounts · fees · VAT */}
+          <div className="px-4 pt-2 pb-3 space-y-1">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Subtotal</span>
               <span className="tabular-nums"><SARIcon />{subtotal.toFixed(2)}</span>
@@ -929,7 +979,6 @@ function POS() {
                 if (getItem) {
                   saving = (o.getQuantity ?? 1) * Math.max(0, getItem.price - (o.offerPrice ?? 0));
                 } else {
-                  // Trigger met but get-product not in cart yet — show nudge
                   const getPrice = o.offerPrice != null ? o.offerPrice : null;
                   const freeLabel: ReactNode = getPrice === 0 || getPrice == null ? "FREE" : <><SARIcon />{getPrice.toFixed(2)}</>;
                   return (
@@ -988,20 +1037,30 @@ function POS() {
               <span className="text-muted-foreground">{taxLabel}</span>
               <span className="tabular-nums"><SARIcon />{vatAmount.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between items-baseline pt-2 border-t border-dashed border-border">
-              <span className="font-semibold">Total</span>
-              <span className="text-2xl font-bold text-primary tabular-nums"><SARIcon />{total.toFixed(2)}</span>
-            </div>
+          </div>
 
+          </div>{/* end scrollable middle */}
+
+          {/* Total — always pinned */}
+          <div className="px-4 py-2 border-t border-border/60 flex justify-between items-baseline shrink-0">
+            <span className="font-semibold">Total</span>
+            <span className="text-2xl font-bold text-primary tabular-nums"><SARIcon />{total.toFixed(2)}</span>
+          </div>
+
+          {/* Charge button — always pinned */}
+          <div className="px-4 pb-2 shrink-0">
             <Button
-              className="w-full h-12 text-base gradient-primary text-primary-foreground border-0 shadow-glow mt-2"
+              className="w-full h-11 text-base gradient-primary text-primary-foreground border-0 shadow-glow"
               disabled={cart.length === 0}
               onClick={() => setPayOpen(true)}
             >
               Charge <SARIcon />{total.toFixed(2)}
             </Button>
+          </div>
 
-            <div className="grid grid-cols-4 gap-1.5 pt-1">
+          {/* Action buttons — always pinned */}
+          <div className="px-3 pb-2 shrink-0">
+            <div className="grid grid-cols-4 gap-1">
               <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={hold} disabled={cart.length === 0}>
                 <Pause className="h-3 w-3" />Hold
               </Button>
@@ -1020,10 +1079,9 @@ function POS() {
                 <MessageSquare className="h-3 w-3" />Send
               </Button>
             </div>
-
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-success/10 text-success text-xs">
-              <QrCode className="h-4 w-4" /> ZATCA QR will be embedded on receipt
-            </div>
+          </div>
+          <div className="px-3 py-1.5 border-t border-success/20 bg-success/5 text-success shrink-0 flex items-center gap-2 text-xs">
+            <QrCode className="h-3.5 w-3.5 shrink-0" /> ZATCA QR will be embedded on receipt
           </div>
         </Card>
       </div>

@@ -208,7 +208,6 @@ function Returns() {
   const [viewReturn, setViewReturn] = useState<CustomerReturn | null>(null);
   const [form, setForm] = useState<ReturnForm>(emptyForm);
   const [itemRows, setItemRows] = useState<ItemRow[]>([]);
-  const [selectedItemIdx, setSelectedItemIdx] = useState<number>(0);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceError, setInvoiceError] = useState("");
   const [matchedOrder, setMatchedOrder] = useState<Order | null>(null);
@@ -285,11 +284,6 @@ function Returns() {
   const selectedItems = itemRows.filter(r => r.selected);
   const totalRefund = selectedItems.reduce((s, r) => s + r.qty * r.unitPrice, 0);
 
-  useEffect(() => {
-    if (selectedItems.length > 0)
-      setForm(p => ({ ...p, refundAmount: totalRefund.toFixed(2) }));
-  }, [totalRefund]);
-
   const lookupInvoice = async () => {
     const num = invoiceNumber.trim();
     if (!num) return;
@@ -329,21 +323,20 @@ function Returns() {
         selected: false,
       }));
       setItemRows(rows);
-      setSelectedItemIdx(0);
     } catch {
       setInvoiceError("Failed to look up invoice. Try again.");
     } finally { setLoadingItems(false); }
   };
 
   const handleSubmit = async () => {
-    const row = itemRows[selectedItemIdx];
-    if (!form.orderId || !form.branchId || !form.reason || !row) {
-      setError("Scan an invoice, pick an item, and select a reason.");
+    const selectedItems = itemRows.filter(r => r.selected && r.qty > 0);
+    if (!form.orderId || !form.branchId || !form.reason || selectedItems.length === 0) {
+      setError("Scan an invoice, select at least one item, and choose a reason.");
       return;
     }
     setSaving(true); setError(null);
     try {
-      const items: CustomerReturnItem[] = [{
+      const items: CustomerReturnItem[] = selectedItems.map(row => ({
         productId: row.productId,
         orderItemId: row.orderItemId || undefined,
         quantity: row.qty,
@@ -351,14 +344,15 @@ function Returns() {
         refundAmount: row.qty * row.unitPrice,
         condition: row.condition,
         restock: row.restock,
-      }];
+      }));
+      const totalRefundAmount = selectedItems.reduce((s, r) => s + r.qty * r.unitPrice, 0);
       await api.createReturn({
         orderId: form.orderId,
         customerId: form.customerId || undefined,
         branchId: form.branchId,
         returnType: form.returnType,
         refundMethod: form.refundMethod,
-        refundAmount: row.qty * row.unitPrice,
+        refundAmount: totalRefundAmount,
         reason: form.reason,
         notes: form.notes || undefined,
         items,
@@ -370,7 +364,6 @@ function Returns() {
       setMatchedOrder(null);
       setMatchedBranchName("");
       setInvoiceError("");
-      setSelectedItemIdx(0);
       load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to submit return.");
@@ -428,7 +421,7 @@ function Returns() {
           )}
         </div>
         <div className="flex-1" />
-        <Sheet open={sheetOpen} onOpenChange={v => { setSheetOpen(v); if (!v) { setForm(emptyForm); setItemRows([]); setInvoiceNumber(""); setMatchedOrder(null); setMatchedBranchName(""); setInvoiceError(""); setSelectedItemIdx(0); setError(null); } }}>
+        <Sheet open={sheetOpen} onOpenChange={v => { setSheetOpen(v); if (!v) { setForm(emptyForm); setItemRows([]); setInvoiceNumber(""); setMatchedOrder(null); setMatchedBranchName(""); setInvoiceError(""); setError(null); } }}>
           <SheetTrigger asChild>
             <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9">
               <Plus className="h-4 w-4" /> New Return
@@ -465,31 +458,40 @@ function Returns() {
                 )}
               </FieldRow>
 
-              {/* Item */}
-              <FieldRow label="Item">
-                <Select
-                  value={itemRows.length ? String(selectedItemIdx) : ""}
-                  onValueChange={v => setSelectedItemIdx(Number(v))}
-                  disabled={!itemRows.length}
-                >
-                  <SelectTrigger className="h-11"><SelectValue placeholder="Auto-fill from invoice" /></SelectTrigger>
-                  <SelectContent>
-                    {itemRows.map((row, i) => (
-                      <SelectItem key={i} value={String(i)}>{row.productName} · SAR {row.unitPrice.toFixed(2)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FieldRow>
-
-              {/* Qty */}
+              {/* Items — multi-select with per-item quantity */}
               {itemRows.length > 0 && (
-                <FieldRow label="Qty">
-                  <Input
-                    type="number" min={1} max={itemRows[selectedItemIdx]?.maxQty ?? 1}
-                    value={itemRows[selectedItemIdx]?.qty ?? 1}
-                    onChange={e => updateRow(selectedItemIdx, { qty: Math.min(Number(e.target.value), itemRows[selectedItemIdx]?.maxQty ?? 1) })}
-                    className="h-11 text-sm"
-                  />
+                <FieldRow label={`Select items to return (${selectedItems.length} selected)`}>
+                  <div className="space-y-2 mt-1">
+                    {itemRows.map((row, i) => (
+                      <div
+                        key={i}
+                        className={`flex items-center gap-3 rounded-lg border p-2.5 cursor-pointer transition-colors ${row.selected ? "border-primary/50 bg-primary/5" : "border-border/60 hover:border-border"}`}
+                        onClick={() => updateRow(i, { selected: !row.selected })}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={row.selected}
+                          readOnly
+                          className="h-4 w-4 accent-primary shrink-0 pointer-events-none"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{row.productName}</p>
+                          <p className="text-xs text-muted-foreground"><SARIcon />{row.unitPrice.toFixed(2)}/unit · max {row.maxQty}</p>
+                        </div>
+                        {row.selected && (
+                          <Input
+                            type="number"
+                            min={1}
+                            max={row.maxQty}
+                            value={row.qty}
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => updateRow(i, { qty: Math.min(Math.max(1, Number(e.target.value) || 1), row.maxQty) })}
+                            className="h-8 w-20 text-center text-sm shrink-0"
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </FieldRow>
               )}
 
@@ -527,34 +529,39 @@ function Returns() {
                 <Textarea value={form.notes} onChange={setF("notes")} placeholder="Optional notes for audit…" rows={3} className="resize-none text-sm" />
               </FieldRow>
 
-              {/* Restock badge */}
-              {itemRows.length > 0 && (
+              {/* Restock toggle — applies to all selected items */}
+              {selectedItems.length > 0 && (
                 <div className="flex items-center justify-between rounded-xl border border-border/60 px-4 py-3">
-                  <span className="text-sm text-muted-foreground">Restock item to inventory</span>
+                  <span className="text-sm text-muted-foreground">Restock selected items to inventory</span>
                   <button
                     type="button"
-                    onClick={() => updateRow(selectedItemIdx, { restock: !(itemRows[selectedItemIdx]?.restock ?? true) })}
+                    onClick={() => {
+                      const nextRestock = !(selectedItems[0]?.restock ?? true);
+                      setItemRows(prev => prev.map(r => r.selected ? { ...r, restock: nextRestock } : r));
+                    }}
                     className={`px-4 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer select-none ${
-                      (itemRows[selectedItemIdx]?.restock ?? true)
+                      selectedItems[0]?.restock ?? true
                         ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
                         : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
                     }`}
                   >
-                    {(itemRows[selectedItemIdx]?.restock ?? true) ? "Yes" : "No"}
+                    {selectedItems[0]?.restock ?? true ? "Yes" : "No"}
                   </button>
                 </div>
               )}
 
               {/* Refund preview */}
-              {itemRows.length > 0 && (
+              {selectedItems.length > 0 && (
                 <div className="rounded-xl bg-muted/40 px-4 py-2.5 flex justify-between text-sm">
-                  <span className="text-muted-foreground">Refund amount</span>
-                  <span className="font-semibold"><SARIcon />{((itemRows[selectedItemIdx]?.qty ?? 1) * (itemRows[selectedItemIdx]?.unitPrice ?? 0)).toFixed(2)}</span>
+                  <span className="text-muted-foreground">
+                    Total refund ({selectedItems.length} item{selectedItems.length !== 1 ? "s" : ""})
+                  </span>
+                  <span className="font-semibold"><SARIcon />{totalRefund.toFixed(2)}</span>
                 </div>
               )}
 
               {error && <p className="text-xs text-destructive">{error}</p>}
-              <Button className="w-full gradient-primary text-primary-foreground border-0 h-11 text-sm font-semibold" onClick={handleSubmit} disabled={saving || !matchedOrder}>
+              <Button className="w-full gradient-primary text-primary-foreground border-0 h-11 text-sm font-semibold" onClick={handleSubmit} disabled={saving || !matchedOrder || selectedItems.length === 0}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Submit return
               </Button>

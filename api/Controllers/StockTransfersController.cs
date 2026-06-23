@@ -10,7 +10,11 @@ namespace BaqalaPOS.Api.Controllers;
 public class StockTransfersController(BaqalaDbContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] string? transferType, [FromQuery] string? status)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] string? transferType,
+        [FromQuery] string? status,
+        [FromQuery] Guid? sourceWarehouseId,
+        [FromQuery] Guid? destWarehouseId)
     {
         var query = db.StockTransfers
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
@@ -19,6 +23,8 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
             .AsQueryable();
         if (!string.IsNullOrEmpty(transferType)) query = query.Where(t => t.TransferType == transferType);
         if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);
+        if (sourceWarehouseId.HasValue) query = query.Where(t => t.SourceWarehouseId == sourceWarehouseId);
+        if (destWarehouseId.HasValue) query = query.Where(t => t.DestWarehouseId == destWarehouseId);
         return Ok(await query.OrderByDescending(t => t.CreatedAt).ToListAsync());
     }
 
@@ -30,6 +36,17 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
             .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
             .Include(t => t.Items).ThenInclude(i => i.Product)
             .FirstOrDefaultAsync(t => t.Id == id);
+        return t is null ? NotFound() : Ok(t);
+    }
+
+    [HttpGet("by-number/{number}")]
+    public async Task<IActionResult> GetByNumber(string number)
+    {
+        var t = await db.StockTransfers
+            .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
+            .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
+            .Include(t => t.Items).ThenInclude(i => i.Product)
+            .FirstOrDefaultAsync(t => t.TransferNumber == number);
         return t is null ? NotFound() : Ok(t);
     }
 
