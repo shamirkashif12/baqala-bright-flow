@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Search, ScanBarcode, Pause, RotateCcw, Printer, MessageSquare,
-  Plus, Minus, Trash2, CreditCard, Banknote, Wallet, Split,
+  Plus, Minus, Trash2, CreditCard, Banknote, Split,
   Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode, Camera, CameraOff,
+  Building2,
 } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { QRCodeSVG } from "qrcode.react";
@@ -77,7 +78,144 @@ type InvoiceSnapshot = {
   sellerName: string;
   customerName?: string;
   paymentMethod?: string;
+  splitBreakdown?: Array<{ method: string; amount: number }>;
 };
+
+// ─── Quick Stock In Dialog ────────────────────────────────────────────────────
+function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onStockAdded }: {
+  open: boolean; onClose: () => void;
+  products: Product[]; stockMap: Map<string, number>;
+  branchId: string;
+  onStockAdded: (product: Product, newStock: number) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Product | null>(null);
+  const [qty, setQty] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) { setQuery(""); setSelected(null); setQty(1); setError(""); setTimeout(() => inputRef.current?.focus(), 80); }
+  }, [open]);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || selected) return [];
+    return products.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      (p.barcode && p.barcode.toLowerCase().includes(q))
+    ).slice(0, 6);
+  }, [query, selected, products]);
+
+  const currentStock = selected ? (stockMap.get(selected.id) ?? 0) : 0;
+
+  const handleConfirm = async () => {
+    if (!selected) return;
+    setError("");
+    setSaving(true);
+    try {
+      try {
+        // Try standard adjustment first (works if stock record already exists)
+        await api.adjustInventory({ productId: selected.id, branchId, quantity: qty, adjustmentType: "receive", reason: "Quick stock-in from POS" });
+      } catch {
+        // No stock record yet — create one via receiveBatch
+        await api.receiveBatch({ productId: selected.id, branchId, quantity: qty, remainingQuantity: qty, receivedDate: new Date().toISOString(), status: "active" });
+      }
+      onStockAdded(selected, currentStock + qty);
+    } catch (e: any) {
+      setError(e.message ?? "Failed to add stock.");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Package className="h-4 w-4 text-primary" /> Quick Stock In
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-1">
+          {!selected ? (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
+                placeholder="Search product name, SKU or barcode…" className="pl-9 h-9" />
+              {results.length > 0 && (
+                <div className="absolute z-10 top-full mt-1 w-full bg-background border rounded-lg shadow-lg overflow-hidden">
+                  {results.map(p => (
+                    <button key={p.id} className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted text-sm text-left gap-3"
+                      onMouseDown={e => { e.preventDefault(); setSelected(p); setQuery(p.name); }}>
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{p.name}</p>
+                        <p className="text-xs text-muted-foreground">{p.sku} · SAR {p.basePrice.toFixed(2)}</p>
+                      </div>
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 font-medium ${(stockMap.get(p.id) ?? 0) > 0 ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+                        Stock: {stockMap.get(p.id) ?? 0}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {query.trim().length > 0 && results.length === 0 && (
+                <p className="text-xs text-muted-foreground mt-2 px-1">
+                  No product found — create it in <span className="font-medium">Inventory → Products</span> first.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{selected.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {selected.sku} · Current stock:{" "}
+                  <span className={currentStock === 0 ? "text-amber-600 font-semibold" : "text-green-600 font-semibold"}>{currentStock} units</span>
+                </p>
+              </div>
+              <button className="text-muted-foreground hover:text-foreground shrink-0" onClick={() => { setSelected(null); setQuery(""); }}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {selected && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Quantity to Add</p>
+              <div className="flex items-center gap-3">
+                <button className="h-9 w-9 rounded-lg border flex items-center justify-center hover:bg-muted disabled:opacity-30"
+                  disabled={qty <= 1} onClick={() => setQty(q => Math.max(1, q - 1))}>
+                  <Minus className="h-4 w-4" />
+                </button>
+                <Input type="number" min={1} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="h-9 text-center w-20 tabular-nums font-semibold text-base" />
+                <button className="h-9 w-9 rounded-lg border flex items-center justify-center hover:bg-muted"
+                  onClick={() => setQty(q => q + 1)}>
+                  <Plus className="h-4 w-4" />
+                </button>
+                <p className="text-xs text-muted-foreground">
+                  New stock: <span className="font-semibold text-foreground">{currentStock + qty}</span>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 rounded px-3 py-2">{error}</p>}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button className="gradient-primary text-primary-foreground border-0 gap-1.5"
+            onClick={handleConfirm} disabled={!selected || saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
+            Add to Stock & Cart
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function POS() {
   // ─── Branch from global context ───────────────────────────────────────────────
@@ -110,6 +248,8 @@ function POS() {
   const scanBuf = useRef("");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastKeyAt = useRef(0);
+  const prevBranchIdRef = useRef<string | null>(null);
+  const [branchSwitchBanner, setBranchSwitchBanner] = useState<string | null>(null);
 
   // ─── Customer ─────────────────────────────────────────────────────────────────
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -138,6 +278,7 @@ function POS() {
   const [payOpen, setPayOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
+  const [stockInOpen, setStockInOpen] = useState(false);
 
   // ─── Invoice snapshot (preserved after cart is cleared) ───────────────────────
   const [invoice, setInvoice] = useState<InvoiceSnapshot | null>(null);
@@ -173,15 +314,46 @@ function POS() {
     ).catch(() => {});
   }, []);
 
-  // ─── Reload stock & ZATCA settings whenever selected branch changes ────────────
+  // ─── Branch change: clear & reload; remount: restore saved cart ──────────────
   useEffect(() => {
     if (!branch) return;
-    api
-      .getStock({ branchId: branch.id })
+
+    const isBranchSwitch = prevBranchIdRef.current !== null && prevBranchIdRef.current !== branch.id;
+    prevBranchIdRef.current = branch.id;
+
+    if (isBranchSwitch) {
+      // Active branch switch — wipe cart and all transient sale state
+      setCart([]);
+      setAppliedCoupon(null);
+      setCouponCode("");
+      setCouponError(null);
+      setCustomer(null);
+      setCustomerPhone("");
+      setCustomerNotFound(false);
+      setNewCustomerName("");
+      setBranchSwitchBanner(branch.name);
+      setTimeout(() => setBranchSwitchBanner(null), 3000);
+    } else {
+      // Initial mount / tab return — restore the saved cart for this branch
+      try {
+        const saved = sessionStorage.getItem(`pos_cart_${branch.id}`);
+        setCart(saved ? (JSON.parse(saved) as CartItem[]) : []);
+      } catch { setCart([]); }
+    }
+
+    // Always reload stock, active shift, and ZATCA for the (new) branch
+    api.getStock({ branchId: branch.id })
       .then((stocks) => {
         const map = new Map<string, number>();
         stocks.forEach((s) => map.set(s.productId, Math.max(0, s.quantity - (s.reservedQuantity ?? 0))));
         setStockMap(map);
+      })
+      .catch(() => {});
+
+    api.getActiveShifts()
+      .then((shifts) => {
+        const shift = shifts.find((s) => s.status === "open") ?? null;
+        setActiveShift(shift);
       })
       .catch(() => {});
 
@@ -191,7 +363,13 @@ function POS() {
         if (z.sellerName) setSellerName(z.sellerName);
       })
       .catch(() => {});
-  }, [branch]);
+  }, [branch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Persist cart to session storage (survives tab navigation) ───────────────
+  useEffect(() => {
+    if (!branch) return;
+    sessionStorage.setItem(`pos_cart_${branch.id}`, JSON.stringify(cart));
+  }, [cart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep refs fresh so the scanner listener never has stale closures
   useEffect(() => { productsRef.current = products; }, [products]);
@@ -396,6 +574,16 @@ function POS() {
 
   const totalAutoDiscount = discountSavings + offerDiscount;
 
+  // Product-level discounts set in inventory (discount + discountType fields on Product)
+  const productDiscountTotal = cart.reduce((sum, ci) => {
+    const prod = products.find(p => p.id === ci.productId);
+    if (!prod?.discount || prod.discount <= 0) return sum;
+    const saving = prod.discountType === "percentage"
+      ? ci.qty * ci.price * (prod.discount / 100)
+      : Math.min(prod.discount * ci.qty, ci.qty * ci.price);
+    return sum + saving;
+  }, 0);
+
   // Active custom fees that apply to every order
   const allOrderFees = customFees.filter(f =>
     f.applicableTo === "all_products" || f.applicableTo === "all_orders"
@@ -407,7 +595,7 @@ function POS() {
     return sum;
   }, 0) : 0;
 
-  const taxable = subtotal - couponDiscount - totalAutoDiscount + tobaccoExcise;
+  const taxable = subtotal - couponDiscount - totalAutoDiscount - productDiscountTotal + tobaccoExcise;
   const vatAmount = Math.max(0, taxable) * taxRate;
   const total = Math.max(0, taxable) + vatAmount + customFeeTotal;
 
@@ -572,7 +760,7 @@ function POS() {
       customerId: customer?.id,
       cashierId: activeShift?.cashierId,
       subtotal,
-      discountAmount: couponDiscount + totalAutoDiscount,
+      discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal,
       taxAmount: vatAmount + customFeeTotal,
       totalAmount: total,
       paymentStatus: "paid",
@@ -592,7 +780,7 @@ function POS() {
       createdAt: order.createdAt ?? new Date().toISOString(),
       items: [...cart],
       subtotal,
-      discount: couponDiscount + totalAutoDiscount,
+      discount: couponDiscount + totalAutoDiscount + productDiscountTotal,
       vat: vatAmount,
       total,
       taxLabel,
@@ -601,6 +789,7 @@ function POS() {
       sellerName: sellerName || branch.name,
       customerName: customer?.fullName,
       paymentMethod: splitPayments ? "Split" : paymentMethod,
+      splitBreakdown: splitPayments?.filter(p => p.amount > 0),
     });
   };
 
@@ -679,6 +868,12 @@ function POS() {
                 <ScanBarcode className="h-4 w-4" /> Item scanned — added to cart
               </div>
             )}
+            {branchSwitchBanner && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-primary bg-primary/10 border border-primary/20 rounded-lg px-3 py-2 font-medium">
+                <Building2 className="h-4 w-4 shrink-0" />
+                Switched to <span className="font-bold">{branchSwitchBanner}</span> — stock &amp; shift updated, cart restored
+              </div>
+            )}
 
             {loading && (
               <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground px-1">
@@ -735,11 +930,16 @@ function POS() {
                   {cart.reduce((s, i) => s + i.qty, 0)} units
                 </Badge>
               </div>
-              {cart.length > 0 && (
-                <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => setCart([])}>
-                  Clear all
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setStockInOpen(true)}>
+                  <Package className="h-3 w-3" /> Stock In
                 </Button>
-              )}
+                {cart.length > 0 && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => setCart([])}>
+                    Clear all
+                  </Button>
+                )}
+              </div>
             </div>
 
             {cart.length === 0 ? (
@@ -932,6 +1132,27 @@ function POS() {
                 <span className="tabular-nums text-success">− <SARIcon />{couponDiscount.toFixed(2)}</span>
               </div>
             )}
+            {cart.map((ci) => {
+              const prod = products.find(p => p.id === ci.productId);
+              if (!prod?.discount || prod.discount <= 0) return null;
+              const saving = prod.discountType === "percentage"
+                ? ci.qty * ci.price * (prod.discount / 100)
+                : Math.min(prod.discount * ci.qty, ci.qty * ci.price);
+              if (saving <= 0) return null;
+              const label = prod.discountType === "percentage"
+                ? `${prod.discount}% off`
+                : `SAR ${prod.discount} off`;
+              return (
+                <div key={ci.productId} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground flex items-center gap-1 truncate max-w-[160px]">
+                    <Tag className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{ci.name}</span>
+                    <span className="text-[10px] shrink-0">({label})</span>
+                  </span>
+                  <span className="tabular-nums text-success">− <SARIcon />{saving.toFixed(2)}</span>
+                </div>
+              );
+            })}
             {activeDiscounts.filter(d => {
               const now = new Date();
               if (d.startDate && new Date(d.startDate) > now) return false;
@@ -1072,12 +1293,12 @@ function POS() {
                   </span>
                 )}
               </Button>
-              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={() => setInvOpen(true)} disabled={!invoice}>
+              {/* <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={() => setInvOpen(true)} disabled={!invoice}>
                 <Printer className="h-3 w-3" />Print
               </Button>
               <Button variant="ghost" size="sm" className="h-8 text-xs gap-1">
                 <MessageSquare className="h-3 w-3" />Send
-              </Button>
+              </Button> */}
             </div>
           </div>
           <div className="px-3 py-1.5 border-t border-success/20 bg-success/5 text-success shrink-0 flex items-center gap-2 text-xs">
@@ -1190,7 +1411,17 @@ function POS() {
                     <span>Total</span>
                     <span className="tabular-nums">SAR {invoice.total.toFixed(2)}</span>
                   </div>
-                  {invoice.paymentMethod && (
+                  {invoice.splitBreakdown ? (
+                    <>
+                      <div className="flex justify-between text-muted-foreground"><span>Payment</span><span>Split</span></div>
+                      {invoice.splitBreakdown.map(p => (
+                        <div key={p.method} className="flex justify-between pl-2 text-muted-foreground">
+                          <span className="capitalize">↳ {p.method}</span>
+                          <span className="tabular-nums">{p.amount.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </>
+                  ) : invoice.paymentMethod && (
                     <div className="flex justify-between text-muted-foreground"><span>Payment</span><span className="capitalize">{invoice.paymentMethod}</span></div>
                   )}
                 </div>
@@ -1217,6 +1448,23 @@ function POS() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <QuickStockInDialog
+        open={stockInOpen}
+        onClose={() => setStockInOpen(false)}
+        products={products}
+        stockMap={stockMap}
+        branchId={branch?.id ?? ""}
+        onStockAdded={(product, newStock) => {
+          setStockMap(prev => { const next = new Map(prev); next.set(product.id, newStock); return next; });
+          setCart(c => {
+            const ex = c.find(i => i.sku === product.sku);
+            if (ex) return c.map(i => i.sku === product.sku ? { ...i, qty: i.qty + 1 } : i);
+            return [...c, { name: product.name, sku: product.sku, productId: product.id, qty: 1, price: product.basePrice, stock: newStock }];
+          });
+          setStockInOpen(false);
+        }}
+      />
     </PageShell>
   );
 }
@@ -1247,24 +1495,21 @@ function PaymentDialog({
   const [received, setReceived] = useState(total.toFixed(2));
   const [status, setStatus] = useState<"idle" | "waiting" | "success" | "failed">("idle");
 
-  // Split payment inputs
+  // Split payment inputs (cash + card only)
   const [splitCash, setSplitCash] = useState("0.00");
   const [splitCard, setSplitCard] = useState("0.00");
-  const [splitWallet, setSplitWallet] = useState("0.00");
 
   const change = Math.max(0, parseFloat(received || "0") - total);
-  const splitTotal =
-    (parseFloat(splitCash) || 0) + (parseFloat(splitCard) || 0) + (parseFloat(splitWallet) || 0);
+  const splitTotal = (parseFloat(splitCash) || 0) + (parseFloat(splitCard) || 0);
   const splitOk = Math.abs(splitTotal - total) < 0.01;
 
   // Reset state when dialog opens
   useEffect(() => {
     if (open) {
-      setReceived(total.toFixed(2));
+      setReceived("");
       setStatus("idle");
       setSplitCash(total.toFixed(2));
       setSplitCard("0.00");
-      setSplitWallet("0.00");
     }
   }, [open, total]);
 
@@ -1275,7 +1520,6 @@ function PaymentDialog({
         const splitPayments = [
           { method: "cash", amount: parseFloat(splitCash) || 0 },
           { method: "card", amount: parseFloat(splitCard) || 0 },
-          { method: "wallet", amount: parseFloat(splitWallet) || 0 },
         ];
         await onCharge("split", splitPayments);
       } else {
@@ -1299,26 +1543,36 @@ function PaymentDialog({
         <DialogHeader><DialogTitle>Take Payment — <SARIcon />{total.toFixed(2)}</DialogTitle></DialogHeader>
 
         <Tabs value={tab} onValueChange={(v) => { setTab(v); setStatus("idle"); }}>
-          <TabsList className="grid grid-cols-4 w-full">
+          <TabsList className="grid grid-cols-3 w-full">
             <TabsTrigger value="cash"><Banknote className="h-3.5 w-3.5 mr-1" />Cash</TabsTrigger>
             <TabsTrigger value="card"><CreditCard className="h-3.5 w-3.5 mr-1" />Card</TabsTrigger>
-            <TabsTrigger value="wallet"><Wallet className="h-3.5 w-3.5 mr-1" />Wallet</TabsTrigger>
+            {/* <TabsTrigger value="wallet"><Wallet className="h-3.5 w-3.5 mr-1" />Wallet</TabsTrigger> */}
             <TabsTrigger value="split"><Split className="h-3.5 w-3.5 mr-1" />Split</TabsTrigger>
           </TabsList>
 
           <TabsContent value="cash" className="space-y-3 mt-4">
             <div className="space-y-1">
-              <Label className="text-xs">Amount Received</Label>
-              <Input className="h-11 text-lg font-bold" value={received} onChange={(e) => setReceived(e.target.value)} />
+              <Label className="text-xs text-muted-foreground">Customer Gives</Label>
+              <Input
+                className="h-14 text-2xl font-bold text-center tracking-wide"
+                inputMode="decimal"
+                autoFocus
+                value={received}
+                onChange={(e) => setReceived(e.target.value.replace(/[^0-9.]/g, ""))}
+                onFocus={(e) => e.target.select()}
+                placeholder={total.toFixed(2)}
+              />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {[50, 100, 200, 500].map((d) => (
                 <Button key={d} variant="outline" onClick={() => setReceived(String(d))}><SARIcon />{d}</Button>
               ))}
+              <Button variant="outline" onClick={() => setReceived("1000")}><SARIcon />1000</Button>
+              <Button variant="outline" onClick={() => setReceived(total.toFixed(2))}>Exact</Button>
             </div>
-            <div className="rounded-lg bg-muted/40 p-3 flex justify-between">
-              <span className="text-sm text-muted-foreground">Change</span>
-              <span className="font-bold text-lg text-success tabular-nums"><SARIcon />{change.toFixed(2)}</span>
+            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3 flex justify-between items-center">
+              <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Exchange</span>
+              <span className="font-bold text-2xl text-emerald-600 dark:text-emerald-400 tabular-nums"><SARIcon />{change.toFixed(2)}</span>
             </div>
           </TabsContent>
 
@@ -1329,6 +1583,7 @@ function PaymentDialog({
             </div>
           </TabsContent>
 
+          {/* Wallet tab hidden
           <TabsContent value="wallet" className="space-y-3 mt-4">
             <CardMachineStatus status={status} />
             <div className="grid grid-cols-3 gap-2">
@@ -1337,20 +1592,17 @@ function PaymentDialog({
               ))}
             </div>
           </TabsContent>
+          */}
 
           <TabsContent value="split" className="space-y-3 mt-4">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <Label className="text-[10px]">Cash</Label>
-                <Input className="h-9" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} />
+                <Input className="h-9" type="number" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} onFocus={(e) => e.target.select()} />
               </div>
               <div className="space-y-1">
                 <Label className="text-[10px]">Card</Label>
-                <Input className="h-9" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-[10px]">Wallet</Label>
-                <Input className="h-9" value={splitWallet} onChange={(e) => setSplitWallet(e.target.value)} />
+                <Input className="h-9" type="number" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} onFocus={(e) => e.target.select()} />
               </div>
             </div>
             <div className={`flex justify-between text-sm p-2 rounded-lg ${splitOk ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>

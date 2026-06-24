@@ -8,12 +8,14 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader as DHeader, DialogTitle as DTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Printer, Download, Globe, Pencil, Package, CreditCard,
   User, Store, ChevronRight, Loader2, RefreshCw,
-  CheckCircle2, XCircle, Clock, Truck, AlertCircle, X,
+  CheckCircle2, XCircle, Clock, Truck, AlertCircle, X, RotateCcw,
 } from "lucide-react";
-import { api, type Order, type Branch } from "@/lib/api";
+import { api, type Order, type Branch, type CustomerReturnItem } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/orders")({ component: Orders });
@@ -116,6 +118,242 @@ function printOrders(orders: Order[]) {
   setTimeout(() => { win.print(); win.close(); }, 400);
 }
 
+function printReceipt(order: Order) {
+  const payMethod = order.payments?.[0]?.paymentMethod ?? "—";
+  const items = (order.items ?? []).map(item => `
+    <tr>
+      <td style="padding:4px 0">${(item as any).product?.name ?? "Product"}</td>
+      <td style="padding:4px 0;text-align:center">${item.quantity}</td>
+      <td style="padding:4px 0;text-align:right">SAR ${item.unitPrice.toFixed(2)}</td>
+      <td style="padding:4px 0;text-align:right">SAR ${item.totalPrice.toFixed(2)}</td>
+    </tr>`).join("");
+
+  const win = window.open("", "_blank", "width=400,height=700");
+  if (!win) return;
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Receipt ${order.orderNumber}</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Courier New', monospace; font-size: 12px; color: #000; width: 300px; margin: 0 auto; padding: 16px 8px; }
+      .center { text-align: center; }
+      .bold { font-weight: bold; }
+      .large { font-size: 15px; }
+      .small { font-size: 10px; color: #555; }
+      .divider { border-top: 1px dashed #000; margin: 8px 0; }
+      table { width: 100%; border-collapse: collapse; }
+      th { font-size: 10px; text-align: left; border-bottom: 1px solid #000; padding-bottom: 4px; }
+      th:nth-child(2) { text-align: center; }
+      th:nth-child(3), th:nth-child(4) { text-align: right; }
+      .totals td { padding: 2px 0; }
+      .totals td:last-child { text-align: right; font-weight: bold; }
+      .total-row td { border-top: 1px solid #000; padding-top: 4px; font-size: 14px; font-weight: bold; }
+      @media print { body { padding: 0; } }
+    </style>
+  </head><body>
+    <div class="center bold large">${order.branch?.name ?? "Store"}</div>
+    <div class="center small" style="margin-top:2px">Tax Receipt</div>
+    <div class="divider"></div>
+    <div class="small">Order: <span class="bold">${order.orderNumber}</span></div>
+    <div class="small">Date: ${new Date(order.createdAt).toLocaleString("en-SA", { dateStyle: "medium", timeStyle: "short" })}</div>
+    ${order.cashier ? `<div class="small">Cashier: ${order.cashier.fullName}</div>` : ""}
+    ${order.customer ? `<div class="small">Customer: ${order.customer.fullName}</div>` : ""}
+    <div class="small">Payment: <span style="text-transform:capitalize">${payMethod}</span></div>
+    <div class="divider"></div>
+    <table>
+      <thead><tr>
+        <th>Item</th><th>Qty</th><th>Price</th><th>Total</th>
+      </tr></thead>
+      <tbody>${items}</tbody>
+    </table>
+    <div class="divider"></div>
+    <table class="totals">
+      <tr><td>Subtotal</td><td>SAR ${order.subtotal.toFixed(2)}</td></tr>
+      ${order.discountAmount > 0 ? `<tr><td>Discount</td><td>-SAR ${order.discountAmount.toFixed(2)}</td></tr>` : ""}
+      <tr><td>VAT (15%)</td><td>SAR ${order.taxAmount.toFixed(2)}</td></tr>
+      <tr class="total-row"><td>TOTAL</td><td>SAR ${order.totalAmount.toFixed(2)}</td></tr>
+    </table>
+    <div class="divider"></div>
+    <div class="center small" style="margin-top:8px">Thank you for your purchase!</div>
+  </body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); win.close(); }, 400);
+}
+
+// ─── Refund Dialog ────────────────────────────────────────────────────────────
+const REFUND_METHODS = [
+  { value: "cash", label: "Cash" },
+  { value: "card", label: "Card / Bank Transfer" },
+  { value: "online", label: "Online" },
+  { value: "loyalty_points", label: "Loyalty Points" },
+  { value: "store_credit", label: "Store Credit" },
+];
+
+function RefundDialog({ order, open, onClose, onDone }: {
+  order: Order; open: boolean; onClose: () => void; onDone: () => void;
+}) {
+  const items = order.items ?? [];
+  type ItemState = { selected: boolean; qty: number };
+  const [itemStates, setItemStates] = useState<Record<number, ItemState>>(() =>
+    Object.fromEntries(items.map((item, i) => [i, { selected: true, qty: item.quantity }]))
+  );
+  const [refundMethod, setRefundMethod] = useState("cash");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const allSelected = items.length > 0 && items.every((_, i) => itemStates[i]?.selected);
+  const someSelected = items.some((_, i) => itemStates[i]?.selected);
+  const refundTotal = items.reduce((sum, item, i) => {
+    const s = itemStates[i];
+    return s?.selected ? sum + item.unitPrice * s.qty : sum;
+  }, 0);
+
+  const toggleAll = (checked: boolean) =>
+    setItemStates(prev => Object.fromEntries(items.map((item, i) => [i, { selected: checked, qty: prev[i]?.qty ?? item.quantity }])));
+
+  const handleConfirm = async () => {
+    if (!reason.trim()) { setError("Please provide a reason for the refund."); return; }
+    if (!someSelected) { setError("Please select at least one item to refund."); return; }
+    setError("");
+    setSaving(true);
+    try {
+      const returnItems: CustomerReturnItem[] = items
+        .map((item, i) => ({ item, state: itemStates[i] }))
+        .filter(({ state }) => state?.selected)
+        .map(({ item, state }) => ({
+          productId: item.productId,
+          orderItemId: item.id,
+          quantity: state!.qty,
+          unitPrice: item.unitPrice,
+          refundAmount: +(item.unitPrice * state!.qty).toFixed(2),
+          condition: "good",
+          restock: true,
+        }));
+
+      await api.createReturn({
+        orderId: order.id,
+        branchId: order.branchId,
+        ...(order.customerId ? { customerId: order.customerId } : {}),
+        returnType: "refund",
+        refundMethod,
+        refundAmount: +refundTotal.toFixed(2),
+        reason: reason.trim(),
+        status: "completed",
+        items: returnItems,
+      });
+      await api.updateOrderStatus(order.id, "refunded");
+      onDone();
+    } catch (e: any) {
+      setError(e.message ?? "Failed to process refund.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+        <DHeader>
+          <DTitle className="flex items-center gap-2 text-base">
+            <RotateCcw className="h-4 w-4 text-red-500" /> Process Refund — {order.orderNumber}
+          </DTitle>
+          <DialogDescription className="text-xs">
+            Select the items to refund and choose the refund payment method.
+          </DialogDescription>
+        </DHeader>
+
+        <div className="overflow-y-auto flex-1 space-y-4 py-1 pr-1">
+          {/* Items */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Checkbox id="refund-all" checked={allSelected} onCheckedChange={v => toggleAll(!!v)} />
+              <label htmlFor="refund-all" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none">
+                Items to Refund
+              </label>
+            </div>
+            <div className="space-y-2">
+              {items.map((item, i) => {
+                const s = itemStates[i] ?? { selected: false, qty: item.quantity };
+                return (
+                  <div key={i} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors ${s.selected ? "border-primary/40 bg-primary/5" : "border-border bg-muted/20 opacity-60"}`}>
+                    <Checkbox
+                      checked={s.selected}
+                      onCheckedChange={v => setItemStates(prev => ({ ...prev, [i]: { ...prev[i], selected: !!v } }))}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{(item as any).product?.name ?? "Product"}</p>
+                      <p className="text-xs text-muted-foreground">SAR {item.unitPrice.toFixed(2)} × each</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        className="h-6 w-6 rounded border flex items-center justify-center text-sm leading-none disabled:opacity-30 hover:bg-muted"
+                        disabled={!s.selected || s.qty <= 1}
+                        onClick={() => setItemStates(prev => ({ ...prev, [i]: { ...prev[i], qty: prev[i].qty - 1 } }))}
+                      >−</button>
+                      <span className="w-6 text-center text-sm tabular-nums font-medium">{s.qty}</span>
+                      <button
+                        className="h-6 w-6 rounded border flex items-center justify-center text-sm leading-none disabled:opacity-30 hover:bg-muted"
+                        disabled={!s.selected || s.qty >= item.quantity}
+                        onClick={() => setItemStates(prev => ({ ...prev, [i]: { ...prev[i], qty: prev[i].qty + 1 } }))}
+                      >+</button>
+                    </div>
+                    <p className="text-sm font-semibold w-20 text-right tabular-nums">
+                      SAR {(item.unitPrice * s.qty).toFixed(2)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Refund method */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Refund Method</p>
+            <Select value={refundMethod} onValueChange={setRefundMethod}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {REFUND_METHODS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Reason */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+              Reason <span className="text-red-500">*</span>
+            </p>
+            <Input
+              value={reason}
+              onChange={e => { setReason(e.target.value); setError(""); }}
+              placeholder="e.g. Damaged product, wrong item delivered…"
+              className="h-9"
+            />
+          </div>
+
+          {error && <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 rounded px-3 py-2">{error}</p>}
+        </div>
+
+        <DialogFooter className="mt-2 flex-row items-center gap-2">
+          <div className="flex-1 text-sm">
+            <span className="text-muted-foreground">Refund total:</span>
+            <span className="font-bold ml-1.5 text-primary">SAR {refundTotal.toFixed(2)}</span>
+          </div>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button
+            className="gradient-primary text-primary-foreground border-0"
+            onClick={handleConfirm}
+            disabled={saving || !someSelected}
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+            Confirm Refund
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Order Detail Drawer ──────────────────────────────────────────────────────
 function OrderDetail({ orderId, onStatusChanged }: {
   orderId: string; onStatusChanged: () => void;
@@ -125,6 +363,7 @@ function OrderDetail({ orderId, onStatusChanged }: {
   const [editing, setEditing] = useState(false);
   const [newStatus, setNewStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showRefundDialog, setShowRefundDialog] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -133,6 +372,10 @@ function OrderDetail({ orderId, onStatusChanged }: {
 
   const saveStatus = async () => {
     if (!order) return;
+    if (newStatus === "refunded") {
+      setShowRefundDialog(true);
+      return;
+    }
     setSaving(true);
     try {
       await api.updateOrderStatus(order.id, newStatus);
@@ -165,6 +408,9 @@ function OrderDetail({ orderId, onStatusChanged }: {
         <div className="flex flex-col items-end gap-1.5">
           <SBadge status={order.orderStatus} />
           <SBadge status={order.paymentStatus} />
+          <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs mt-0.5" onClick={() => printReceipt(order)}>
+            <Printer className="h-3.5 w-3.5" /> Print Receipt
+          </Button>
         </div>
       </div>
 
@@ -286,6 +532,20 @@ function OrderDetail({ orderId, onStatusChanged }: {
           </div>
         )}
       </div>
+
+      {showRefundDialog && (
+        <RefundDialog
+          order={order}
+          open={showRefundDialog}
+          onClose={() => setShowRefundDialog(false)}
+          onDone={() => {
+            setShowRefundDialog(false);
+            setEditing(false);
+            setOrder(o => o ? { ...o, orderStatus: "refunded", paymentStatus: "refunded" } : o);
+            onStatusChanged();
+          }}
+        />
+      )}
     </div>
   );
 }
