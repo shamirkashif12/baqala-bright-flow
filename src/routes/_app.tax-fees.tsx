@@ -24,8 +24,9 @@ type FeeForm = {
   feeType: "fixed" | "percent";
   value: string;
   applicableTo: string;
+  status: string;
 };
-const emptyFeeForm: FeeForm = { ruleName: "", feeType: "fixed", value: "0.00", applicableTo: "all_products" };
+const emptyFeeForm: FeeForm = { ruleName: "", feeType: "fixed", value: "0.00", applicableTo: "all_products", status: "active" };
 
 // KSA tobacco excise formula: minimum 25 SAR rule
 function tobaccoFee(base: number): number {
@@ -84,15 +85,24 @@ function TaxFees() {
   );
   const activeCustomFeesCount = rules.filter(r => r.ruleType === "custom_fee" && r.status === "active").length;
 
-  const openCreate = () => { setEditRule(null); setForm(emptyFeeForm); setFeeDialogOpen(true); };
+  const openCreate = () => { setEditRule(null); setForm({ ...emptyFeeForm, status: "active" }); setFeeDialogOpen(true); };
   const openEdit = (r: TaxFeeRule) => {
     setEditRule(r);
     const ft: "fixed" | "percent" = r.customFeeAmount > 0 ? "fixed" : "percent";
     const val = r.customFeeAmount > 0
       ? String(r.customFeeAmount)
       : r.excisePercentage > 0 ? String(r.excisePercentage) : String(r.vatPercentage);
-    setForm({ ruleName: r.ruleName, feeType: ft, value: val, applicableTo: r.applicableTo });
+    setForm({ ruleName: r.ruleName, feeType: ft, value: val, applicableTo: r.applicableTo, status: r.status });
     setFeeDialogOpen(true);
+  };
+
+  const toggleStatus = async (r: TaxFeeRule) => {
+    const newStatus = r.status === "active" ? "inactive" : "active";
+    try {
+      await api.updateTaxRule(r.id, { ...r, status: newStatus });
+      toast.success(`Fee ${newStatus === "active" ? "activated" : "deactivated"}`);
+      load();
+    } catch { toast.error("Failed to update status"); }
   };
 
   const handleSave = async () => {
@@ -106,7 +116,7 @@ function TaxFees() {
         vatPercentage: 0,
         applicableTo: form.applicableTo,
         isTobacco: false,
-        status: "active",
+        status: form.status,
         effectiveDate: new Date().toISOString().slice(0, 10),
       };
       if (editRule) {
@@ -286,10 +296,15 @@ function TaxFees() {
                           <td className="px-4 py-2.5 text-muted-foreground">{applicableToLabel(r.applicableTo)}</td>
                           <td className="px-4 py-2.5 text-muted-foreground">All</td>
                           <td className="px-4 py-2.5">
-                            <span className={`inline-flex items-center gap-1.5 text-xs font-medium`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${r.status === "active" ? "bg-success" : "bg-muted-foreground"}`} />
-                              <span className="capitalize">{r.status}</span>
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={r.status === "active"}
+                                onCheckedChange={() => toggleStatus(r)}
+                              />
+                              <span className={`text-xs font-medium ${r.status === "active" ? "text-success" : "text-muted-foreground"}`}>
+                                {r.status === "active" ? "Active" : "Inactive"}
+                              </span>
+                            </div>
                           </td>
                           <td className="px-4 py-2.5">
                             <Button
@@ -471,6 +486,16 @@ function TaxFees() {
                   <SelectItem value="delivery_orders">Delivery orders</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2.5">
+              <div>
+                <p className="text-sm font-medium">Active</p>
+                <p className="text-xs text-muted-foreground">Fee is applied at checkout when active</p>
+              </div>
+              <Switch
+                checked={form.status === "active"}
+                onCheckedChange={v => setForm(p => ({ ...p, status: v ? "active" : "inactive" }))}
+              />
             </div>
           </div>
           <DialogFooter>

@@ -63,6 +63,8 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         product.Status = updated.Status;
         product.WeightBased = updated.WeightBased;
         product.IsTobacco = updated.IsTobacco;
+        product.Discount = updated.Discount;
+        product.DiscountType = updated.DiscountType;
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(product);
@@ -94,6 +96,30 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         db.Categories.Add(category);
         await db.SaveChangesAsync();
         return Created($"/api/categories/{category.Id}", category);
+    }
+
+    [HttpPut("/api/categories/{id:guid}")]
+    public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] Category updated)
+    {
+        var category = await db.Categories.FindAsync(id);
+        if (category is null) return NotFound();
+        category.Name = updated.Name;
+        category.NameAr = updated.NameAr;
+        category.IsActive = updated.IsActive;
+        category.SortOrder = updated.SortOrder;
+        category.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(category);
+    }
+
+    [HttpDelete("/api/categories/{id:guid}")]
+    public async Task<IActionResult> DeleteCategory(Guid id)
+    {
+        var category = await db.Categories.FindAsync(id);
+        if (category is null) return NotFound();
+        db.Categories.Remove(category);
+        await db.SaveChangesAsync();
+        return NoContent();
     }
 
     // ─── Product Variants ────────────────────────────────────────────────────

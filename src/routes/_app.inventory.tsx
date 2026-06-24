@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
-  Boxes, ScanLine, Loader2, Download, CheckCircle2,
+  Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag,
 } from "lucide-react";
 import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
@@ -185,6 +185,13 @@ function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppli
 
 // ─── Add Product Dialog ───────────────────────────────────────────────────────
 
+function generateSKU(name: string): string {
+  const words = name.trim().split(/\s+/).filter(w => w.length >= 2);
+  const parts = words.slice(0, 3).map(w => w.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3));
+  const suffix = String(Date.now()).slice(-4);
+  return parts.length ? `${parts.join("-")}-${suffix}` : `SKU-${suffix}`;
+}
+
 function AddProductDialog({ open, onClose, categories, branches, warehouses, onDone }: {
   open: boolean; onClose: () => void;
   categories: Category[]; branches: Branch[]; warehouses: Warehouse[];
@@ -194,26 +201,41 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [skuManual, setSkuManual] = useState(false);
   const [form, setForm] = useState({
     name: "", sku: "", barcode: "", categoryId: "",
     branchId: "", warehouseId: "",
     purchasePrice: "", sellingPrice: "",
     quantity: "100", expiryDate: "",
     vatPct: "15", customFee: "0.00", isTobacco: false,
+    discountType: "percentage" as "percentage" | "fixed",
+    discount: "",
   });
 
   const set = (k: keyof typeof form) => (v: string) => setForm(p => ({ ...p, [k]: v }));
-  const reset = () => setForm({ name: "", sku: "", barcode: "", categoryId: "", branchId: "", warehouseId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false });
+  const reset = () => {
+    setSkuManual(false);
+    setForm({ name: "", sku: "", barcode: "", categoryId: "", branchId: "", warehouseId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "" });
+  };
+
+  // Auto-generate SKU when name changes (unless user typed it manually)
+  useEffect(() => {
+    if (!skuManual && form.name.trim().length >= 2) {
+      setForm(p => ({ ...p, sku: generateSKU(form.name) }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.name]);
 
   const handleSave = async () => {
     if (!form.name || !form.sku || !form.sellingPrice) return setError("Name, SKU and selling price are required.");
+    if (!form.categoryId) return setError("Category is required.");
     if (!form.branchId) return setError("Branch is required to create a stock entry.");
     setSaving(true); setError("");
     try {
       const product = await api.createProduct({
         name: form.name, sku: form.sku,
         barcode: form.barcode || undefined,
-        categoryId: form.categoryId || undefined,
+        categoryId: form.categoryId,
         basePrice: Number(form.sellingPrice),
         costPrice: Number(form.purchasePrice) || undefined,
         taxPercentage: Number(form.vatPct) || 15,
@@ -222,7 +244,8 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
         status: "active",
         weightBased: false,
         isTobacco: form.isTobacco,
-      });
+        ...(form.discount ? { discount: Number(form.discount), discountType: form.discountType } : {}),
+      } as Parameters<typeof api.createProduct>[0]);
       // Create an initial stock record so the product appears in the inventory list
       await api.receiveBatch({
         productId: product.id,
@@ -239,14 +262,23 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Add Product</DialogTitle></DialogHeader>
         <div className="grid grid-cols-2 gap-3 mt-2">
           <FieldRow label="Product Name *">
             <Input className="h-9" placeholder="Almarai Laban 1L" value={form.name} onChange={e => set("name")(e.target.value)} />
           </FieldRow>
           <FieldRow label="SKU *">
-            <Input className="h-9" placeholder="ALM-LB-1L" value={form.sku} onChange={e => set("sku")(e.target.value)} />
+            <div className="relative">
+              <Input className="h-9 pr-16" placeholder="ALM-LB-1L" value={form.sku}
+                onChange={e => { setSkuManual(true); set("sku")(e.target.value); }} />
+              {skuManual && (
+                <button type="button" onClick={() => { setSkuManual(false); setForm(p => ({ ...p, sku: generateSKU(p.name) })); }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-primary hover:underline">
+                  Auto
+                </button>
+              )}
+            </div>
           </FieldRow>
           <FieldRow label="Barcode">
             <div className="flex gap-1">
@@ -261,13 +293,15 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
               </Button>
             </div>
           </FieldRow>
-          <FieldRow label="Category">
+          <FieldRow label="Category *">
             <Select value={form.categoryId} onValueChange={set("categoryId")}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select category" /></SelectTrigger>
+              <SelectTrigger className={`h-9 ${!form.categoryId ? "border-destructive/50" : ""}`}>
+                <SelectValue placeholder="Select category" />
+              </SelectTrigger>
               <SelectContent>{categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
             </Select>
           </FieldRow>
-          <FieldRow label="Branch">
+          <FieldRow label="Branch *">
             <Select value={form.branchId} onValueChange={set("branchId")}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
               <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
@@ -291,6 +325,27 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
           <FieldRow label="Expiry Date">
             <Input type="date" className="h-9" value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
           </FieldRow>
+
+          {/* Discount */}
+          <div className="col-span-2">
+            <FieldRow label="Discount (optional)">
+              <div className="flex gap-2">
+                <div className="flex rounded-lg border border-border/60 overflow-hidden shrink-0">
+                  {(["percentage", "fixed"] as const).map(t => (
+                    <button key={t} type="button" onClick={() => setForm(p => ({ ...p, discountType: t }))}
+                      className={`px-3 py-1.5 text-xs flex items-center gap-1 transition-colors ${form.discountType === t ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted/50"}`}>
+                      {t === "percentage" ? <Percent className="h-3 w-3" /> : <Tag className="h-3 w-3" />}
+                      {t === "percentage" ? "%" : "SAR"}
+                    </button>
+                  ))}
+                </div>
+                <Input type="number" step="0.01" min={0} className="h-9 flex-1"
+                  placeholder={form.discountType === "percentage" ? "e.g. 10 for 10%" : "e.g. 2.00"}
+                  value={form.discount} onChange={e => set("discount")(e.target.value)} />
+              </div>
+            </FieldRow>
+          </div>
+
           <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Optional tax / fee fields</p>
           <FieldRow label="VAT %">
             <Input type="number" className="h-9" placeholder="15" value={form.vatPct} onChange={e => set("vatPct")(e.target.value)} />
@@ -333,6 +388,8 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
     name: "", sku: "", barcode: "", categoryId: "",
     sellingPrice: "", purchasePrice: "",
     vatPct: "15", customFee: "0.00", isTobacco: false,
+    discountType: "percentage" as "percentage" | "fixed",
+    discount: "",
   });
 
   useEffect(() => {
@@ -348,6 +405,8 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
       vatPct: String(p.taxPercentage ?? 15),
       customFee: String(p.customFee ?? 0),
       isTobacco: p.isTobacco ?? false,
+      discountType: (p.discountType as "percentage" | "fixed") ?? "percentage",
+      discount: p.discount != null ? String(p.discount) : "",
     });
     setError("");
   }, [item]);
@@ -367,6 +426,8 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
         taxPercentage: Number(form.vatPct) || 15,
         customFee: Number(form.customFee) || 0,
         isTobacco: form.isTobacco,
+        discount: form.discount ? Number(form.discount) : undefined,
+        discountType: form.discount ? form.discountType : undefined,
         status: "active",
         weightBased: false,
         reorderLevel: item.reorderLevel ?? 10,
@@ -381,7 +442,7 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
 
   return (
     <Dialog open={!!item} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Edit Product</DialogTitle></DialogHeader>
         <div className="grid grid-cols-2 gap-3 mt-2">
           <FieldRow label="Product Name *">
@@ -405,6 +466,27 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
           <FieldRow label="Selling Price *">
             <Input type="number" step="0.01" className="h-9" value={form.sellingPrice} onChange={set("sellingPrice")} placeholder="6.50" />
           </FieldRow>
+
+          {/* Discount */}
+          <div className="col-span-2">
+            <FieldRow label="Discount (optional)">
+              <div className="flex gap-2">
+                <div className="flex rounded-lg border border-border/60 overflow-hidden shrink-0">
+                  {(["percentage", "fixed"] as const).map(t => (
+                    <button key={t} type="button" onClick={() => setForm(p => ({ ...p, discountType: t }))}
+                      className={`px-3 py-1.5 text-xs flex items-center gap-1 transition-colors ${form.discountType === t ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted/50"}`}>
+                      {t === "percentage" ? <Percent className="h-3 w-3" /> : <Tag className="h-3 w-3" />}
+                      {t === "percentage" ? "%" : "SAR"}
+                    </button>
+                  ))}
+                </div>
+                <Input type="number" step="0.01" min={0} className="h-9 flex-1"
+                  placeholder={form.discountType === "percentage" ? "e.g. 10 for 10%" : "e.g. 2.00"}
+                  value={form.discount} onChange={e => setForm(p => ({ ...p, discount: e.target.value }))} />
+              </div>
+            </FieldRow>
+          </div>
+
           <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tax / fee fields</p>
           <FieldRow label="VAT %">
             <Input type="number" className="h-9" value={form.vatPct} onChange={set("vatPct")} />

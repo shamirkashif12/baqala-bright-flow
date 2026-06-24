@@ -76,6 +76,8 @@ export const api = {
     request<Category>("/api/categories", { method: "POST", body: JSON.stringify(data) }),
   updateCategory: (id: string, data: Partial<Category>) =>
     request<Category>(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteCategory: (id: string) =>
+    request<void>(`/api/categories/${id}`, { method: "DELETE" }),
 
   // Inventory
   getStock: (params?: { branchId?: string; lowStock?: boolean; categoryId?: string }) => {
@@ -434,6 +436,7 @@ export interface Product {
   categoryId?: string; brand?: string; basePrice: number; costPrice?: number;
   taxPercentage: number; customFee: number; reorderLevel: number;
   status: string; weightBased: boolean; isTobacco: boolean;
+  discount?: number; discountType?: "percentage" | "fixed";
   category?: { id: string; name: string; nameAr?: string };
 }
 

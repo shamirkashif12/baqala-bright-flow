@@ -32,6 +32,7 @@ import {
   Briefcase,
   Radar,
   Cigarette,
+  Tag,
   Undo2 as ReturnIcon,
   RotateCcw,
   History,
@@ -136,6 +137,7 @@ const navGroups: NavGroup[] = [
     label: "Admin",
     items: [
       { title: "Admin Overview",         url: "/admin-overview", icon: LayoutDashboard, roles: ["tenant_admin"] },
+      { title: "Categories",             url: "/categories",     icon: Tag,             roles: ["tenant_admin"] },
       { title: "Rules Engine",           url: "/rules",          icon: Workflow,    module: "Rules Engine" },
       { title: "Registered Users",       url: "/users",          icon: UserCog,     module: "Users" },
       { title: "Roles & Permissions",    url: "/roles",          icon: Lock,        module: "Roles" },
