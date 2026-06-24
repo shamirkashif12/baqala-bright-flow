@@ -10,12 +10,21 @@ namespace BaqalaPOS.Api.Controllers;
 public class ShiftsController(BaqalaDbContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] Guid? cashierId, [FromQuery] string? status)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] Guid? branchId,
+        [FromQuery] Guid? cashierId,
+        [FromQuery] Guid? terminalId,
+        [FromQuery] string? status,
+        [FromQuery] DateTime? dateFrom,
+        [FromQuery] DateTime? dateTo)
     {
         var query = db.CashierShifts.Include(s => s.Cashier).Include(s => s.Terminal).AsQueryable();
-        if (branchId.HasValue) query = query.Where(s => s.BranchId == branchId);
-        if (cashierId.HasValue) query = query.Where(s => s.CashierId == cashierId);
+        if (branchId.HasValue)   query = query.Where(s => s.BranchId == branchId);
+        if (cashierId.HasValue)  query = query.Where(s => s.CashierId == cashierId);
+        if (terminalId.HasValue) query = query.Where(s => s.TerminalId == terminalId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(s => s.Status == status);
+        if (dateFrom.HasValue) query = query.Where(s => s.OpenedAt >= dateFrom.Value);
+        if (dateTo.HasValue)   query = query.Where(s => s.OpenedAt <= dateTo.Value.AddDays(1).AddTicks(-1));
         return Ok(await query.OrderByDescending(s => s.OpenedAt).ToListAsync());
     }
 
@@ -43,14 +52,22 @@ public class ShiftsController(BaqalaDbContext db) : ControllerBase
             .AnyAsync(s => s.CashierId == req.CashierId && s.Status == "open");
         if (existing) return Conflict("Cashier already has an open shift.");
 
+        var now = DateTime.UtcNow;
         var shift = new CashierShift
         {
             Id = Guid.NewGuid(), CashierId = req.CashierId,
             BranchId = req.BranchId, TerminalId = req.TerminalId,
             OpeningAmount = req.OpeningAmount, Status = "open",
-            OpenedAt = DateTime.UtcNow
+            OpenedAt = now
         };
         db.CashierShifts.Add(shift);
+
+        if (req.TerminalId.HasValue)
+        {
+            var terminal = await db.Terminals.FindAsync(req.TerminalId.Value);
+            if (terminal != null) { terminal.LastSync = now; terminal.UpdatedAt = now; }
+        }
+
         await db.SaveChangesAsync();
         return Created($"/api/shifts/{shift.Id}", shift);
     }
@@ -61,11 +78,19 @@ public class ShiftsController(BaqalaDbContext db) : ControllerBase
         var shift = await db.CashierShifts.FindAsync(id);
         if (shift is null) return NotFound();
         if (shift.Status == "closed") return BadRequest("Shift already closed.");
+        var now = DateTime.UtcNow;
         shift.ClosingAmount = req.ClosingAmount;
         shift.Notes = req.Notes;
         shift.Status = "closed";
-        shift.ClosedAt = DateTime.UtcNow;
+        shift.ClosedAt = now;
         shift.Variance = req.ClosingAmount - (shift.OpeningAmount + shift.CashSales);
+
+        if (shift.TerminalId.HasValue)
+        {
+            var terminal = await db.Terminals.FindAsync(shift.TerminalId.Value);
+            if (terminal != null) { terminal.LastSync = now; terminal.UpdatedAt = now; }
+        }
+
         await db.SaveChangesAsync();
         return Ok(shift);
     }

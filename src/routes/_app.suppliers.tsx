@@ -229,7 +229,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                     {/* Goods Received — creates a payable */}
                     {pos.filter(p => p.status === "partial_received" || p.status === "fully_received").length > 0 && (
                       <div className="mt-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Goods Received (Payables)</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Payables to Supplier</p>
                         {pos.filter(p => p.status === "partial_received" || p.status === "fully_received").map(p => (
                           <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
                             <div>
@@ -250,7 +250,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                     {/* Payments */}
                     {pos.flatMap(p => p.payments ?? []).length > 0 && (
                       <div className="mt-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Payments Made</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Payments to Supplier</p>
                         {pos.flatMap(p => (p.payments ?? []).map(pay => ({ ...pay, poNumber: p.poNumber }))).sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)).map(pay => (
                           <div key={pay.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
                             <div>
@@ -265,7 +265,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                     {/* Credit Notes (RTS + Shortage Claims) */}
                     {creditNotes.length > 0 && (
                       <div className="mt-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Credit Notes</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Credit Notes from Supplier</p>
                         {creditNotes.map(cn => (
                           <div key={cn.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
                             <div>

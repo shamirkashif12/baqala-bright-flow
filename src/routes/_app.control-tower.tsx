@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api, type Branch, type Terminal, type User, type CashierShift } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
+import { useBranch } from "@/lib/branch-context";
 
 export const Route = createFileRoute("/_app/control-tower")({ component: ControlTower });
 
@@ -66,6 +67,7 @@ function elapsed(openedAt: string) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 function ControlTower() {
+  const { selectedBranch: globalSelectedBranch } = useBranch();
   const [tab, setTab] = useState("map");
   const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -237,13 +239,15 @@ function ControlTower() {
             <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search user, terminal, branch…"
               className="pl-9 h-9 bg-muted/40 border-transparent focus-visible:bg-card" />
           </div>
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Branch" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          {tab !== "map" && (
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Branch" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="h-9 w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
@@ -261,7 +265,6 @@ function ControlTower() {
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="map">Live Map</TabsTrigger>
-          <TabsTrigger value="branches">Branches</TabsTrigger>
           <TabsTrigger value="terminals">
             Terminals
             {totals.alerts > 0 && (
@@ -284,19 +287,118 @@ function ControlTower() {
               </span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="branches">Branches</TabsTrigger>
         </TabsList>
 
         {/* ── MAP ── */}
-        <TabsContent value="map" className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            {filteredBranches.map(b => (
-              <BranchDiagram key={b.id} branch={b}
-                terminals={terminals.filter(t => t.branchId === b.id)}
-                users={users.filter(u => u.branchId === b.id)}
-                activeShifts={activeShifts.filter(s => s.branchId === b.id)}
-              />
-            ))}
-          </div>
+        <TabsContent value="map" className="space-y-6">
+          {!globalSelectedBranch ? (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/10 py-16 gap-3">
+              <Building2 className="h-8 w-8 text-muted-foreground/40" />
+              <p className="text-sm text-muted-foreground font-medium">Select a branch from the header to view its live map</p>
+            </div>
+          ) : (() => {
+            const mapBranch = branches.find(b => b.id === globalSelectedBranch.id) ?? null;
+            if (!mapBranch) return null;
+            const mapTerminals = terminals.filter(t => t.branchId === mapBranch.id);
+            const mapShifts = activeShifts.filter(s => s.branchId === mapBranch.id);
+            return (
+              <div className="space-y-4">
+                {/* Branch header */}
+                <div className="flex items-center gap-3 px-1">
+                  <div className="h-9 w-9 rounded-xl gradient-primary text-primary-foreground flex items-center justify-center shadow-glow flex-shrink-0">
+                    <Building2 className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-sm">{mapBranch.name}</h3>
+                    <p className="text-[11px] text-muted-foreground">{mapBranch.city ?? "—"} · {mapBranch.branchCode} · {mapTerminals.length} terminal{mapTerminals.length !== 1 ? "s" : ""}</p>
+                  </div>
+                  <span className={healthChip(branchHealth(mapBranch.id, terminals))}>{branchHealth(mapBranch.id, terminals)}</span>
+                </div>
+                {/* Terminal cards — 3 per row */}
+                {mapTerminals.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic px-1">No terminals for this branch.</p>
+                ) : (
+                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                    {mapTerminals.map((t, idx) => {
+                      const meta = getStatusMeta(t.status);
+                      const shift = mapShifts.find(s => s.terminalId === t.id);
+                      const cashier = shift?.cashier ?? t.assignedCashier;
+                      const isOffline = t.status === "offline";
+                      const noCashier = !cashier;
+                      return (
+                        <Card key={t.id} className="border-border/60 shadow-card overflow-hidden">
+                          {/* ── Issue banner at top ── */}
+                          {isOffline && (
+                            <div className="flex items-center gap-2 bg-destructive/10 border-b border-destructive/20 px-3 py-2">
+                              <WifiOff className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
+                              <span className="text-[11px] font-semibold text-destructive">Terminal Offline — No connection</span>
+                            </div>
+                          )}
+                          {!isOffline && noCashier && (
+                            <div className="flex items-center gap-2 bg-yellow-50 dark:bg-yellow-900/10 border-b border-yellow-200 dark:border-yellow-800 px-3 py-2">
+                              <AlertTriangle className="h-3.5 w-3.5 text-yellow-600 flex-shrink-0" />
+                              <span className="text-[11px] font-semibold text-yellow-700 dark:text-yellow-400">No cashier assigned</span>
+                            </div>
+                          )}
+                          <div className="p-4 space-y-3">
+                            {/* Terminal row */}
+                            <div className={`relative flex items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2 ring-1 ${meta.ring}`}>
+                              {(t.status === "active" || t.status === "syncing") && (
+                                <span className={`absolute -inset-px rounded-xl ${meta.dot} opacity-10 animate-pulse pointer-events-none`} />
+                              )}
+                              <div className="h-8 w-8 rounded-lg flex items-center justify-center bg-primary/10 text-primary flex-shrink-0">
+                                <ScanBarcode className="h-4 w-4" />
+                              </div>
+                              <div className="leading-tight min-w-0 flex-1">
+                                <div className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-0.5">Terminal {idx + 1}</div>
+                                <div className="text-xs font-semibold tabular-nums">{t.terminalCode}</div>
+                                <div className="text-[10px] text-muted-foreground truncate">{t.name}</div>
+                              </div>
+                              <StatusPill status={t.status} />
+                            </div>
+                            {/* Dashed connector */}
+                            <div className="relative h-px">
+                              <div className="absolute inset-0 border-t border-dashed border-border" />
+                              {(t.status === "active" || t.status === "syncing") && (
+                                <span className={`absolute top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full ${meta.dot} shadow-[0_0_8px_currentColor] animate-[ping_1.6s_ease-in-out_infinite]`}
+                                  style={{ left: "40%" }} />
+                              )}
+                            </div>
+                            {/* Cashier row */}
+                            {cashier ? (
+                              <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                                <div className="relative flex-shrink-0">
+                                  <div className="h-8 w-8 rounded-full gradient-primary flex items-center justify-center text-primary-foreground text-[10px] font-bold">
+                                    {cashier.fullName.split(" ").map((p: string) => p[0]).slice(0, 2).join("")}
+                                  </div>
+                                  {shift && <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-success border-2 border-card" />}
+                                </div>
+                                <div className="leading-tight min-w-0 flex-1">
+                                  <div className="text-xs font-semibold truncate">{cashier.fullName}</div>
+                                  <div className="text-[10px] text-muted-foreground">
+                                    {shift ? `On shift · ${elapsed(shift.openedAt)}` : "Assigned"}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="h-[52px] rounded-xl border border-dashed border-border/40 bg-muted/10" />
+                            )}
+                            {/* View button */}
+                            <div className="flex justify-end pt-0.5">
+                              <button disabled className={buttonVariants({ variant: "outline", size: "sm" }) + " gap-1 h-7 text-xs opacity-40 cursor-not-allowed"}>
+                                View <ArrowRight className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <MiniInsights branches={branches} terminals={terminals} activeShifts={activeShifts} />
         </TabsContent>
 
@@ -572,10 +674,9 @@ function BranchDiagram({ branch, terminals, users, activeShifts }: {
             <p className="text-[11px] text-muted-foreground">{branch.city ?? "—"} · {branch.branchCode}</p>
           </div>
         </div>
-        <Link to="/control-tower/$branchId" params={{ branchId: branch.id }}
-          className={buttonVariants({ variant: "outline", size: "sm" }) + " gap-1.5"}>
+        <button disabled className={buttonVariants({ variant: "outline", size: "sm" }) + " gap-1.5 opacity-40 cursor-not-allowed"}>
           View <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
+        </button>
       </div>
       <div className="relative p-5">
         <div className="grid grid-cols-3 gap-2 mb-5">
@@ -716,7 +817,7 @@ function MiniInsights({ branches, terminals, activeShifts }: { branches: Branch[
 
   const insights = [
     { label: "Total Branches",    value: String(branches.length),                                        icon: Building2 },
-    { label: "Active Terminals",  value: String(terminals.filter(t => t.status === "active").length),   icon: Activity },
+    { label: "Total Terminals",   value: String(terminals.length),                                       icon: Activity },
     { label: "Offline Terminals", value: String(terminals.filter(t => t.status === "offline").length),  icon: WifiOff },
     { label: "Shifts Open",       value: String(activeShifts.length),                                    icon: Clock },
     { label: "Cash in Drawers",   value: <><SARIcon />{activeShifts.reduce((a, s) => a + s.openingAmount + s.cashSales, 0).toFixed(0)}</>, icon: Zap },

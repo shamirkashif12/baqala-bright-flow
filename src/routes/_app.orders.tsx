@@ -298,7 +298,6 @@ function POSTab() {
   const [q, setQ] = useState("");
   const [branchId, setBranchId] = useState("all");
   const [stFilter, setStFilter] = useState("all");
-  const [payFilter, setPayFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -312,11 +311,10 @@ function POSTab() {
     api.getOrders({
       branchId: branchId !== "all" ? branchId : undefined,
       status: stFilter !== "all" ? stFilter : undefined,
-      paymentStatus: payFilter !== "all" ? payFilter : undefined,
       from: dateFrom || undefined,
       to: dateTo || undefined,
     }).then(setOrders).finally(() => setLoading(false));
-  }, [branchId, stFilter, payFilter, dateFrom, dateTo]);
+  }, [branchId, stFilter, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -363,13 +361,6 @@ function POSTab() {
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
             {ORDER_STATUSES.map(s => <SelectItem key={s} value={s} className="capitalize">{s.replace(/_/g, " ")}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={payFilter} onValueChange={setPayFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Payment" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Payments</SelectItem>
-            {PAYMENT_STATUSES.map(s => <SelectItem key={s} value={s} className="capitalize">{s.replace(/_/g, " ")}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="flex items-center gap-1">

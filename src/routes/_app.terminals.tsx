@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi } from "lucide-react";
-import { api, type Terminal, type Branch, type User } from "@/lib/api";
+import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut } from "lucide-react";
+import { api, type Terminal, type Branch, type User, type CashierShift } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/terminals")({ component: Terminals });
 
@@ -77,19 +77,108 @@ function Row({ label, value }: { label: string; value: string }) {
 type TerminalForm = { name: string; terminalCode: string; branchId: string; status: string; assignedCashierId: string; };
 const emptyForm: TerminalForm = { name: "", terminalCode: "", branchId: "", status: "active", assignedCashierId: "" };
 
+function relTime(d: Date): string {
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+type SyncLogEntry = { time: string; event: string; detail: string; type: "success" | "info" | "warn" | "error" };
+
+function buildSyncLog(t: Terminal, shifts: CashierShift[]): SyncLogEntry[] {
+  const now = new Date();
+  const lastSync = t.lastSync ? new Date(t.lastSync) : null;
+  const entries: SyncLogEntry[] = [];
+
+  const activeShift = shifts.find(s => s.status === "open") ?? null;
+  const closedShifts = shifts
+    .filter(s => s.status === "closed")
+    .sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+
+  // Current terminal state entry (use shift openedAt to avoid "just now" flicker)
+  if (t.status === "active" && activeShift) {
+    const cashierName = activeShift.cashier?.fullName ?? t.assignedCashier?.fullName ?? "Unassigned";
+    entries.push({ time: activeShift.openedAt, event: "Session Active", detail: `Cashier: ${cashierName}`, type: "success" });
+    entries.push({ time: activeShift.openedAt, event: "Session Opened", detail: `${cashierName} checked in`, type: "info" });
+    if (lastSync) {
+      entries.push({ time: lastSync.toISOString(), event: "Sales Synced", detail: "Transactions uploaded to server", type: "success" });
+    }
+  } else if (t.status === "offline") {
+    entries.push({ time: now.toISOString(), event: "Terminal Offline", detail: "No network connection detected", type: "error" });
+    if (lastSync) {
+      entries.push({ time: new Date(lastSync.getTime() + 2 * 60000).toISOString(), event: "Connection Lost", detail: "Network unreachable", type: "error" });
+      entries.push({ time: lastSync.toISOString(), event: "Last Sync Before Offline", detail: "Final data sync completed", type: "warn" });
+    }
+  } else if (t.status === "syncing") {
+    entries.push({ time: now.toISOString(), event: "Sync In Progress", detail: "Uploading pending transactions…", type: "info" });
+    entries.push({ time: new Date(now.getTime() - 2 * 60000).toISOString(), event: "Sync Triggered", detail: "Auto-sync interval reached", type: "info" });
+    if (lastSync) entries.push({ time: lastSync.toISOString(), event: "Previous Sync Completed", detail: "All transactions uploaded", type: "success" });
+  } else if (!activeShift) {
+    entries.push({ time: now.toISOString(), event: t.status === "active" ? "No Active Session" : "Terminal Inactive", detail: "Not currently in service", type: "warn" });
+    if (lastSync) entries.push({ time: lastSync.toISOString(), event: "Final Sync", detail: "Last data upload", type: "info" });
+  }
+
+  // Historical closed shifts
+  for (const shift of closedShifts) {
+    const cashierName = shift.cashier?.fullName ?? "Cashier";
+    if (shift.closedAt) {
+      entries.push({ time: shift.closedAt, event: "Session Closed", detail: `${cashierName} checked out`, type: "warn" });
+    }
+    entries.push({ time: shift.openedAt, event: "Session Opened", detail: `${cashierName} checked in`, type: "info" });
+  }
+
+  return entries.sort((a, b) => b.time.localeCompare(a.time));
+}
+
+const LOG_ICON: Record<SyncLogEntry["type"], React.FC<{ className?: string }>> = {
+  success: CheckCircle2,
+  info: Clock,
+  warn: AlertCircle,
+  error: WifiOff,
+};
+const LOG_COLOR: Record<SyncLogEntry["type"], string> = {
+  success: "text-success",
+  info: "text-primary",
+  warn: "text-warning-foreground",
+  error: "text-destructive",
+};
+
 function Terminals() {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [allTerminals, setAllTerminals] = useState<Terminal[]>([]); // unfiltered — for Session Logs dropdown
   const [branches, setBranches] = useState<Branch[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  // allShifts: used only by the view-sheet sync log (needs full history per terminal)
+  const [allShifts, setAllShifts] = useState<CashierShift[]>([]);
+  // sessionLogs: session logs tab — fetched from BE with filters applied
+  const [sessionLogs, setSessionLogs] = useState<CashierShift[]>([]);
   const [loading, setLoading] = useState(true);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [syncLogFilter, setSyncLogFilter] = useState("all");
+  const [mainTab, setMainTab] = useState("terminals");
+  const [slTerminal, setSlTerminal] = useState("all");
+  const [slStatus, setSlStatus] = useState("all");
+  const [slDateFrom, setSlDateFrom] = useState("");
+  const [slDateTo, setSlDateTo] = useState("");
   const [q, setQ] = useState("");
   const [br, setBr] = useState("all");
   const [st, setSt] = useState("all");
+  const [syncFrom, setSyncFrom] = useState("");
+  const [syncTo, setSyncTo] = useState("");
   const [viewTerm, setViewTerm] = useState<Terminal | null>(null);
   const [editTerm, setEditTerm] = useState<Terminal | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<TerminalForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+
+  // Load all terminals once (unfiltered) for the Session Logs dropdown
+  useEffect(() => {
+    api.getTerminals().then(setAllTerminals);
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -100,18 +189,34 @@ function Terminals() {
       }),
       api.getBranches(),
       api.getUsers(),
+      api.getShifts(),  // unfiltered — feeds view-sheet sync log
     ])
-      .then(([t, b, u]) => { setTerminals(t); setBranches(b); setUsers(u); })
+      .then(([t, b, u, s]) => { setTerminals(t); setBranches(b); setUsers(u); setAllShifts(s); })
       .finally(() => setLoading(false));
   }, [br, st]);
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    setLogsLoading(true);
+    api.getShifts({
+      terminalId: slTerminal !== "all" ? slTerminal : undefined,
+      status:     slStatus   !== "all" ? slStatus   : undefined,
+      dateFrom:   slDateFrom || undefined,
+      dateTo:     slDateTo   || undefined,
+    })
+      .then(setSessionLogs)
+      .finally(() => setLogsLoading(false));
+  }, [slTerminal, slStatus, slDateFrom, slDateTo]);
+
   const cashiers = users.filter(u => u.roleName?.toLowerCase().includes("cashier"));
 
-  // Status filter applied on BE; only search applied client-side
-  const filtered = terminals.filter(t =>
-    !q || t.terminalCode?.toLowerCase().includes(q.toLowerCase()) || t.name?.toLowerCase().includes(q.toLowerCase())
-  );
+  // Status filter applied on BE; search + sync-date filtering client-side
+  const filtered = useMemo(() => terminals.filter(t => {
+    if (q && !t.terminalCode?.toLowerCase().includes(q.toLowerCase()) && !t.name?.toLowerCase().includes(q.toLowerCase())) return false;
+    if (syncFrom && (!t.lastSync || t.lastSync < syncFrom)) return false;
+    if (syncTo && (!t.lastSync || t.lastSync > syncTo + "T23:59:59")) return false;
+    return true;
+  }), [terminals, q, syncFrom, syncTo]);
 
   const openEdit = (t: Terminal) => {
     setEditTerm(t);
@@ -142,88 +247,231 @@ function Terminals() {
   const setS = (k: keyof TerminalForm) => (v: string) =>
     setForm(p => ({ ...p, [k]: v }));
 
+  const openShiftCount = allShifts.filter(s => s.status === "open").length;  // from unfiltered allShifts for badge accuracy
+
   return (
     <PageShell title="Terminals" subtitle="POS terminal registry, sessions and sync status">
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search code or name…" className="h-9 w-48 flex-shrink-0" />
-        <Select value={br} onValueChange={setBr}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={st} onValueChange={setSt}>
-          <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-            <SelectItem value="maintenance">Maintenance</SelectItem>
-            <SelectItem value="syncing">Syncing</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="flex-1" />
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
-          <Plus className="h-4 w-4" /> Add Terminal
-        </Button>
-      </div>
+      <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-4">
+        {/* ── Tab bar + per-tab actions ── */}
+        <div className="flex flex-wrap items-center gap-2">
+          <TabsList>
+            <TabsTrigger value="terminals">Terminals</TabsTrigger>
+            <TabsTrigger value="session-logs">
+              Session Logs
+            </TabsTrigger>
+          </TabsList>
+          <div className="flex-1" />
+          {mainTab === "terminals" && (
+            <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
+              <Plus className="h-4 w-4" /> Add Terminal
+            </Button>
+          )}
+        </div>
 
-      {loading ? (
-        <div className="text-muted-foreground text-sm">Loading…</div>
-      ) : (
-        <Card className="overflow-hidden border-border/60 shadow-card">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
-                  <th className="px-3 py-3 font-semibold">Code</th>
-                  <th className="px-3 py-3 font-semibold">Name</th>
-                  <th className="px-3 py-3 font-semibold">Branch</th>
-                  <th className="px-3 py-3 font-semibold">Cashier</th>
-                  <th className="px-3 py-3 font-semibold">Network</th>
-                  <th className="px-3 py-3 font-semibold">Session</th>
-                  <th className="px-3 py-3 font-semibold">Last Sync</th>
-                  <th className="px-3 py-3 font-semibold">Status</th>
-                  <th className="px-3 py-3 font-semibold"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((t) => (
-                  <tr key={t.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
-                    <td className="px-3 py-3 font-mono text-xs font-bold">{t.terminalCode}</td>
-                    <td className="px-3 py-3 font-medium">{t.name}</td>
-                    <td className="px-3 py-3 text-xs">{t.branch?.name ?? "—"}</td>
-                    <td className="px-3 py-3 text-xs">{t.assignedCashier?.fullName ?? "Unassigned"}</td>
-                    <td className="px-3 py-3 text-xs">
-                      <span className="flex items-center gap-1 text-primary"><Wifi className="h-3.5 w-3.5" />Wi-Fi</span>
-                    </td>
-                    <td className="px-3 py-3 text-xs">
-                      {t.status === "active"
-                        ? <span className="inline-flex items-center gap-1 rounded-full bg-success/15 text-success px-2 py-0.5 text-[10px] font-semibold"><Activity className="h-3 w-3" />Session Open</span>
-                        : <span className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold">No Session</span>}
-                    </td>
-                    <td className="px-3 py-3 text-xs">{t.lastSync ? new Date(t.lastSync).toLocaleString("en-SA") : "—"}</td>
-                    <td className="px-3 py-3"><StatusBadge status={t.status} /></td>
-                    <td className="px-3 py-3">
-                      <div className="flex gap-1 justify-end">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTerm(t)}><Eye className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>
-                        {t.status === "active" && (
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => handleDeactivate(t)}><X className="h-3.5 w-3.5" /></Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
-                  <tr><td colSpan={9} className="text-center py-10 text-muted-foreground text-sm">No terminals found.</td></tr>
-                )}
-              </tbody>
-            </table>
+        {/* ── TERMINALS TAB ── */}
+        <TabsContent value="terminals" className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search code or name…" className="h-9 w-48 flex-shrink-0" />
+            <Select value={br} onValueChange={setBr}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={st} onValueChange={setSt}>
+              <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
+                <SelectItem value="maintenance">Maintenance</SelectItem>
+                <SelectItem value="syncing">Syncing</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Sync Date:</span>
+              <Input type="date" className="h-9 w-36" value={syncFrom} onChange={e => setSyncFrom(e.target.value)} />
+              <span className="text-xs text-muted-foreground">–</span>
+              <Input type="date" className="h-9 w-36" value={syncTo} onChange={e => setSyncTo(e.target.value)} />
+              {(syncFrom || syncTo) && (
+                <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setSyncFrom(""); setSyncTo(""); }}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
           </div>
-        </Card>
-      )}
+
+          {loading ? (
+            <div className="text-muted-foreground text-sm">Loading…</div>
+          ) : (
+            <Card className="overflow-hidden border-border/60 shadow-card">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-3 font-semibold">Code</th>
+                      <th className="px-3 py-3 font-semibold">Name</th>
+                      <th className="px-3 py-3 font-semibold">Branch</th>
+                      <th className="px-3 py-3 font-semibold">Cashier</th>
+                      <th className="px-3 py-3 font-semibold">Network</th>
+                      <th className="px-3 py-3 font-semibold">Session</th>
+                      <th className="px-3 py-3 font-semibold">Last Sync</th>
+                      <th className="px-3 py-3 font-semibold">Status</th>
+                      <th className="px-3 py-3 font-semibold"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((t) => (
+                      <tr key={t.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
+                        <td className="px-3 py-3 font-mono text-xs font-bold">{t.terminalCode}</td>
+                        <td className="px-3 py-3 font-medium">{t.name}</td>
+                        <td className="px-3 py-3 text-xs">{t.branch?.name ?? "—"}</td>
+                        <td className="px-3 py-3 text-xs">{t.assignedCashier?.fullName ?? "Unassigned"}</td>
+                        <td className="px-3 py-3 text-xs">
+                          <span className="flex items-center gap-1 text-primary"><Wifi className="h-3.5 w-3.5" />Wi-Fi</span>
+                        </td>
+                        <td className="px-3 py-3 text-xs">
+                          {t.status === "active"
+                            ? <span className="inline-flex items-center gap-1 rounded-full bg-success/15 text-success px-2 py-0.5 text-[10px] font-semibold"><Activity className="h-3 w-3" />Session Open</span>
+                            : <span className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold">No Session</span>}
+                        </td>
+                        <td className="px-3 py-3 text-xs">
+                          {t.lastSync
+                            ? <span title={new Date(t.lastSync).toLocaleString("en-SA")} className="cursor-default">
+                                <span className="font-medium">{relTime(new Date(t.lastSync))}</span>
+                                <span className="text-muted-foreground ml-1">· {new Date(t.lastSync).toLocaleDateString("en-SA")}</span>
+                              </span>
+                            : <span className="text-muted-foreground italic">Never synced</span>}
+                        </td>
+                        <td className="px-3 py-3"><StatusBadge status={t.status} /></td>
+                        <td className="px-3 py-3">
+                          <div className="flex gap-1 justify-end">
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTerm(t)}><Eye className="h-3.5 w-3.5" /></Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>
+                            {t.status === "active" && (
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => handleDeactivate(t)}><X className="h-3.5 w-3.5" /></Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {filtered.length === 0 && (
+                      <tr><td colSpan={9} className="text-center py-10 text-muted-foreground text-sm">No terminals found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ── SESSION LOGS TAB ── */}
+        <TabsContent value="session-logs" className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={slTerminal} onValueChange={setSlTerminal}>
+              <SelectTrigger className="h-9 w-52"><SelectValue placeholder="All Terminals" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Terminals</SelectItem>
+                {allTerminals.map(t => <SelectItem key={t.id} value={t.id}>{t.terminalCode} — {t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={slStatus} onValueChange={setSlStatus}>
+              <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sessions</SelectItem>
+                <SelectItem value="open">Open</SelectItem>
+                <SelectItem value="closed">Closed</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
+              <Input type="date" className="h-9 w-36" value={slDateFrom} onChange={e => setSlDateFrom(e.target.value)} />
+              <span className="text-xs text-muted-foreground">–</span>
+              <Input type="date" className="h-9 w-36" value={slDateTo} onChange={e => setSlDateTo(e.target.value)} />
+              {(slDateFrom || slDateTo) && (
+                <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setSlDateFrom(""); setSlDateTo(""); }}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+            <span className="text-xs text-muted-foreground ml-auto">{sessionLogs.length} session{sessionLogs.length !== 1 ? "s" : ""}</span>
+          </div>
+
+          {logsLoading ? (
+            <div className="text-muted-foreground text-sm">Loading…</div>
+          ) : (
+            <Card className="overflow-hidden border-border/60 shadow-card">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-3 font-semibold">Terminal</th>
+                      <th className="px-3 py-3 font-semibold">Branch</th>
+                      <th className="px-3 py-3 font-semibold">Cashier</th>
+                      <th className="px-3 py-3 font-semibold">Status</th>
+                      <th className="px-3 py-3 font-semibold">Opened At</th>
+                      <th className="px-3 py-3 font-semibold">Closed At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionLogs.map(s => {
+                      const term = terminals.find(t => t.id === s.terminalId);
+                      return (
+                        <tr key={s.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
+                          <td className="px-3 py-3">
+                            <div className="font-mono text-xs font-bold text-primary">{s.terminal?.terminalCode ?? term?.terminalCode ?? "—"}</div>
+                            <div className="text-[10px] text-muted-foreground">{s.terminal?.name ?? term?.name ?? ""}</div>
+                          </td>
+                          <td className="px-3 py-3 text-xs">{term?.branch?.name ?? "—"}</td>
+                          <td className="px-3 py-3">
+                            {s.cashier ? (
+                              <div className="flex items-center gap-1.5">
+                                <div className="h-6 w-6 rounded-full gradient-primary flex items-center justify-center text-primary-foreground text-[9px] font-bold flex-shrink-0">
+                                  {s.cashier.fullName.split(" ").map(p => p[0]).slice(0, 2).join("")}
+                                </div>
+                                <span className="text-xs font-medium">{s.cashier.fullName}</span>
+                              </div>
+                            ) : <span className="text-xs text-muted-foreground">—</span>}
+                          </td>
+                          <td className="px-3 py-3">
+                            {s.status === "open" ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-success/15 text-success border border-success/30 px-2 py-0.5 text-[10px] font-semibold">
+                                <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" /> Open
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground border border-border px-2 py-0.5 text-[10px] font-semibold">
+                                Closed
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-xs tabular-nums">
+                            <div className="flex items-center gap-1 text-success">
+                              <LogIn className="h-3 w-3 flex-shrink-0" />
+                              {new Date(s.openedAt).toLocaleString("en-SA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-xs tabular-nums">
+                            {s.closedAt ? (
+                              <div className="flex items-center gap-1 text-muted-foreground">
+                                <LogOut className="h-3 w-3 flex-shrink-0" />
+                                {new Date(s.closedAt).toLocaleString("en-SA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                              </div>
+                            ) : <span className="text-muted-foreground italic">Active</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {sessionLogs.length === 0 && (
+                      <tr><td colSpan={6} className="text-center py-10 text-muted-foreground text-sm">No sessions found. Check in a cashier to see data here.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* View sheet */}
       <Sheet open={!!viewTerm} onOpenChange={v => !v && setViewTerm(null)}>
@@ -234,31 +482,80 @@ function Terminals() {
               {viewTerm?.terminalCode} — {viewTerm?.name}
             </SheetTitle>
           </SheetHeader>
-          {viewTerm && (
+          {viewTerm && (() => {
+            const viewTermShifts = allShifts.filter(s => s.terminalId === viewTerm.id);
+            const viewShift = viewTermShifts.find(s => s.status === "open") ?? null;
+            const allLogEntries = buildSyncLog(viewTerm, viewTermShifts);
+            const logEntries = syncLogFilter === "all" ? allLogEntries : allLogEntries.filter(e => e.type === syncLogFilter);
+            return (
             <Tabs defaultValue="info" className="mt-4">
               <TabsList>
                 <TabsTrigger value="info">Info</TabsTrigger>
                 <TabsTrigger value="session">Session</TabsTrigger>
+                <TabsTrigger value="synclog">Sync Log</TabsTrigger>
               </TabsList>
               <TabsContent value="info" className="mt-4 space-y-3">
                 <Row label="Code" value={viewTerm.terminalCode} />
                 <Row label="Name" value={viewTerm.name} />
                 <Row label="Branch" value={viewTerm.branch?.name ?? "—"} />
                 <Row label="Assigned Cashier" value={viewTerm.assignedCashier?.fullName ?? "Unassigned"} />
+                <Row label="Active Shift Cashier" value={viewShift?.cashier?.fullName ?? "—"} />
                 <Row label="Status" value={viewTerm.status} />
-                <Row label="Last Sync" value={viewTerm.lastSync ? new Date(viewTerm.lastSync).toLocaleString("en-SA") : "—"} />
+                <Row label="Last Sync" value={viewTerm.lastSync ? `${relTime(new Date(viewTerm.lastSync))} · ${new Date(viewTerm.lastSync).toLocaleString("en-SA")}` : "Never synced"} />
+                {viewTerm.uptimeMinutes != null && <Row label="Uptime" value={`${Math.floor(viewTerm.uptimeMinutes / 60)}h ${viewTerm.uptimeMinutes % 60}m`} />}
               </TabsContent>
               <TabsContent value="session" className="mt-4">
                 <div className="rounded-xl border border-border/60 p-4 space-y-3">
                   <div className="flex items-center gap-2 text-sm font-semibold">
                     <Activity className="h-4 w-4 text-success" />
-                    {viewTerm.status === "active" ? "Session Active" : "No Active Session"}
+                    {viewShift ? "Session Active" : viewTerm.status === "active" ? "Session Active" : "No Active Session"}
                   </div>
-                  <p className="text-xs text-muted-foreground">Cashier: {viewTerm.assignedCashier?.fullName ?? "—"}</p>
+                  <p className="text-xs text-muted-foreground">Cashier: {viewShift?.cashier?.fullName ?? viewTerm.assignedCashier?.fullName ?? "—"}</p>
+                  {viewShift && (
+                    <p className="text-xs text-muted-foreground">
+                      Opened: {new Date(viewShift.openedAt).toLocaleString("en-SA")}
+                    </p>
+                  )}
+                </div>
+              </TabsContent>
+              <TabsContent value="synclog" className="mt-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Select value={syncLogFilter} onValueChange={setSyncLogFilter}>
+                    <SelectTrigger className="h-8 text-xs w-36"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Events</SelectItem>
+                      <SelectItem value="success">Success</SelectItem>
+                      <SelectItem value="info">Info</SelectItem>
+                      <SelectItem value="warn">Warning</SelectItem>
+                      <SelectItem value="error">Error</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-[11px] text-muted-foreground">{logEntries.length} event{logEntries.length !== 1 ? "s" : ""}</span>
+                </div>
+                <div className="space-y-1">
+                  {logEntries.map((entry, i) => {
+                    const Icon = LOG_ICON[entry.type];
+                    return (
+                      <div key={i} className="flex items-start gap-3 py-2.5 border-b border-border/30 last:border-0">
+                        <div className="flex-shrink-0 mt-0.5">
+                          <Icon className={`h-3.5 w-3.5 ${LOG_COLOR[entry.type]}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs font-semibold ${LOG_COLOR[entry.type]}`}>{entry.event}</p>
+                          <p className="text-[11px] text-muted-foreground">{entry.detail}</p>
+                        </div>
+                        <div className="flex-shrink-0 text-right">
+                          <p className="text-[10px] text-muted-foreground tabular-nums">{relTime(new Date(entry.time))}</p>
+                          <p className="text-[10px] text-muted-foreground/60">{new Date(entry.time).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </TabsContent>
             </Tabs>
-          )}
+          );
+          })()}
         </SheetContent>
       </Sheet>
 

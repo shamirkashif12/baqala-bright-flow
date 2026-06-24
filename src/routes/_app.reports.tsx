@@ -12,7 +12,7 @@ const reports = [
   { name: "Daily Sales", desc: "Hour-by-hour sales for any single day", icon: Calendar, color: "primary" },
   { name: "Monthly Sales", desc: "Trend with profit margin breakdown", icon: TrendingUp, color: "primary" },
   { name: "Branch Sales", desc: "Compare performance across branches", icon: Building2, color: "primary" },
-  { name: "Terminal Sales", desc: "Per-terminal breakdown and uptime", icon: ShoppingCart, color: "primary" },
+  { name: "Terminal", desc: "Per-terminal breakdown and uptime", icon: ShoppingCart, color: "primary" },
   { name: "Cashier Sales", desc: "Cashier-level shift performance", icon: TrendingUp, color: "primary" },
   { name: "Product Sales", desc: "Top SKUs, dead stock, velocity", icon: Tag, color: "warning" },
   { name: "Category Performance", desc: "Margin & velocity by category", icon: Tag, color: "warning" },

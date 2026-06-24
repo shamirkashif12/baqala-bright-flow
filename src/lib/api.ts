@@ -113,7 +113,7 @@ export const api = {
     request<Order>(`/api/orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
 
   // Cashier Shifts
-  getShifts: (params?: { branchId?: string; status?: string }) => {
+  getShifts: (params?: { branchId?: string; cashierId?: string; terminalId?: string; status?: string; dateFrom?: string; dateTo?: string }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<CashierShift[]>(`/api/shifts${q ? `?${q}` : ""}`);
   },
