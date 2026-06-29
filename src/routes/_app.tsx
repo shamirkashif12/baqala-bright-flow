@@ -3,6 +3,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { I18nProvider } from "@/lib/i18n";
 import { BranchProvider } from "@/lib/branch-context";
+import { RouteGuard } from "@/components/route-guard";
 
 export const Route = createFileRoute("/_app")({
   ssr: false,
@@ -26,7 +27,9 @@ function AppLayout() {
           <div className="min-h-screen flex w-full bg-background">
             <AppSidebar />
             <div className="flex-1 flex flex-col min-w-0">
-              <Outlet />
+              <RouteGuard>
+                <Outlet />
+              </RouteGuard>
             </div>
           </div>
         </SidebarProvider>

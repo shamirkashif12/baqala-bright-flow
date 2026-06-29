@@ -12,6 +12,7 @@ import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { HardDrive, Activity, Power, Wifi, Plus, Eye, Pencil, Battery, Thermometer, Signal } from "lucide-react";
 import { api, type DeviceRecord, type Branch, type Terminal } from "@/lib/api";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/devices")({ component: Devices });
 
@@ -84,6 +85,7 @@ function DeviceFormFields({ form, set, branches, terminals }: {
 }
 
 function Devices() {
+  const { canCreate, canEdit } = usePermission("Devices");
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
@@ -174,9 +176,11 @@ function Devices() {
             <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
             <SelectContent>{["All", "active", "maintenance", "offline"].map(o => <SelectItem key={o} value={o}>{o === "All" ? "All Status" : o}</SelectItem>)}</SelectContent>
           </Select>
-          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
-            <Plus className="h-4 w-4" /> Register Device
-          </Button>
+          {canCreate && (
+            <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
+              <Plus className="h-4 w-4" /> Register Device
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -195,7 +199,7 @@ function Devices() {
             key: "a", label: "", render: (r: DeviceRecord) => (
               <div className="flex gap-1 justify-end">
                 <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setView(r)}><Eye className="h-4 w-4" /></Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
+                {canEdit && <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>}
               </div>
             )
           },

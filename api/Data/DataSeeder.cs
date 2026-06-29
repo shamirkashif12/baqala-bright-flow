@@ -1091,6 +1091,35 @@ public static class DataSeeder
         }
     }
 
+    // ─── Patch: correct specific permission flags that changed after initial seed ─
+    // Runs on every startup — idempotent, only writes when a value is wrong.
+    public static async Task PatchPermissionsAsync(BaqalaDbContext db)
+    {
+        // Storekeeper and Picker must NOT be able to create warehouses.
+        // Earlier seeder versions had canCreate=true for both roles.
+        var roleIds = await db.Roles
+            .Where(r => r.Name == "Storekeeper" || r.Name == "Picker")
+            .Select(r => r.Id)
+            .ToListAsync();
+
+        if (roleIds.Count == 0) return;
+
+        var patches = await db.RolePermissions
+            .Where(p => roleIds.Contains(p.RoleId) &&
+                        p.Module == "Warehouses" &&
+                        p.CanCreate)
+            .ToListAsync();
+
+        foreach (var p in patches)
+        {
+            p.CanCreate = false;
+            p.CanApprove = false;
+        }
+
+        if (patches.Count > 0)
+            await db.SaveChangesAsync();
+    }
+
     // ─── Backfill: Role Permissions ──────────────────────────────────────────
     private static async Task SeedRolePermissionsAsync(BaqalaDbContext db)
     {
@@ -1230,7 +1259,7 @@ public static class DataSeeder
                 P(r, "Inventory",           true,  true,  true,  false, true,  true),
                 P(r, "Stocks",              true,  true,  true,  false, true,  true),
                 P(r, "Batches",             true,  true,  true,  false, false, true),
-                P(r, "Warehouses",          true,  true,  true,  false, true,  false),
+                P(r, "Warehouses",          true,  false, true,  false, false, false),
                 P(r, "Stock Transfers",     true,  true,  true,  false, true,  false),
                 P(r, "Suppliers",           true,  false, false, false, false, false),
                 P(r, "Purchase Orders",     false, false, false, false, false, false),
@@ -1362,7 +1391,7 @@ public static class DataSeeder
                 P(r, "Inventory",           true,  false, false, false, false, false),
                 P(r, "Stocks",              true,  false, false, false, false, false),
                 P(r, "Batches",             true,  false, false, false, false, false),
-                P(r, "Warehouses",          true,  true,  false, false, false, false),
+                P(r, "Warehouses",          true,  false, false, false, false, false),
                 P(r, "Stock Transfers",     true,  true,  true,  false, false, false),
                 P(r, "Suppliers",           false, false, false, false, false, false),
                 P(r, "Purchase Orders",     false, false, false, false, false, false),

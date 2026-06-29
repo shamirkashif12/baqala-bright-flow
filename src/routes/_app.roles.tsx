@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
-import { RoleGate } from "@/components/role-gate";
+import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,14 +11,14 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Lock, Plus, Shield, UserCog, Trash2, Loader2, Users, Sparkles, ShieldCheck } from "lucide-react";
+import { Lock, Plus, Shield, UserCog, Trash2, Loader2, Users, ShieldCheck } from "lucide-react";
 import { api, type Role, type RolePermission, type User } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/roles")({
   component: () => (
-    <RoleGate allow={["tenant_admin"]}>
+    <ModuleGate module="Roles">
       <Roles />
-    </RoleGate>
+    </ModuleGate>
   ),
 });
 
@@ -195,14 +195,47 @@ const RECOMMENDED: Record<string, RecommendedEntry[]> = {
     { module: "Inventory",  flags: ["canView"] },
   ],
 
-  // Picker: warehouse picking only
+  // Picker: order fulfillment — picks from warehouse, view-only on warehouses, no RTS
   "Picker": [
     { module: "Dashboard",       flags: ["canView"] },
-    { module: "Warehouses",      flags: ["canView", "canCreate"] },
+    { module: "Warehouses",      flags: ["canView"] },
     { module: "Stock Transfers", flags: ["canView", "canCreate"] },
     { module: "Stocks",          flags: ["canView"] },
     { module: "Inventory",       flags: ["canView"] },
     { module: "Batches",         flags: ["canView"] },
+  ],
+
+  // Storekeeper: inventory ops — warehouse management, stock transfers, receive POs
+  "Storekeeper": [
+    { module: "Dashboard",       flags: ["canView"] },
+    { module: "Inventory",       flags: ["canView", "canCreate", "canEdit"] },
+    { module: "Stocks",          flags: ["canView", "canCreate", "canEdit", "canExport"] },
+    { module: "Batches",         flags: ["canView", "canCreate", "canEdit"] },
+    { module: "Warehouses",      flags: ["canView", "canEdit"] },
+    { module: "Stock Transfers", flags: ["canView", "canCreate", "canEdit", "canApprove"] },
+    { module: "Suppliers",       flags: ["canView"] },
+    { module: "Purchase Orders", flags: ["canView", "canCreate", "canEdit"] },
+    { module: "Supplier Returns",flags: ["canView", "canCreate"] },
+    { module: "Returns",         flags: ["canView"] },
+    { module: "Reports",         flags: ["canView"] },
+  ],
+
+  // Finance User: accounting, payables, tax, reports — no ops
+  "Finance User": [
+    { module: "Dashboard",            flags: ["canView"] },
+    { module: "Orders",               flags: ["canView", "canExport"] },
+    { module: "Coupons",              flags: ["canView", "canExport"] },
+    { module: "Stocks",               flags: ["canView"] },
+    { module: "Stock Transfers",      flags: ["canView", "canExport"] },
+    { module: "Accounting & Finance", flags: ["canView", "canCreate", "canEdit", "canExport"] },
+    { module: "Tax & Fees",           flags: ["canView", "canEdit"] },
+    { module: "Suppliers",            flags: ["canView"] },
+    { module: "Purchase Orders",      flags: ["canView", "canExport"] },
+    { module: "Supplier Returns",     flags: ["canView", "canExport"] },
+    { module: "Sales",                flags: ["canView", "canExport"] },
+    { module: "Control Tower",        flags: ["canView"] },
+    { module: "Reports",              flags: ["canView", "canExport"] },
+    { module: "Cashier Shifts",       flags: ["canView", "canExport"] },
   ],
 
   // Branch Admin: full branch operations — orders, inventory, staff, finance view, no system admin
@@ -260,19 +293,6 @@ function buildPermRows(perms: RolePermission[]): PermRow[] {
   const map = new Map(perms.map(p => [p.module, p]));
   return ALL_MODULES.map(mod => map.get(mod) ?? {
     module: mod, canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canExport: false,
-  });
-}
-
-function applyRecommended(roleName: string): PermRow[] {
-  const entries = RECOMMENDED[roleName];
-  const base = ALL_MODULES.map(m => ({ module: m, canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canExport: false }));
-  if (!entries) return base;
-  return base.map(row => {
-    const entry = entries.find(e => e.module === row.module);
-    if (!entry) return row;
-    const updated = { ...row };
-    for (const f of entry.flags) updated[f] = true;
-    return updated;
   });
 }
 
@@ -420,12 +440,6 @@ function Roles() {
     finally { setSaving(false); }
   };
 
-  const handleApplyRecommended = () => {
-    if (!active) return;
-    setLocalPerms(applyRecommended(active.name));
-    setDirty(true);
-  };
-
   const handleDelete = async (roleId: string) => {
     if (!confirm("Delete this role? Users assigned to it must be reassigned.")) return;
     setDeleting(roleId);
@@ -447,7 +461,6 @@ function Roles() {
 
   const roleMembers = users.filter(u => u.roleId === active?.id);
   const initials = (name: string) => name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
-  const hasRecommended = active ? !!RECOMMENDED[active.name] : false;
 
   return (
     <PageShell title="Roles & Permissions" subtitle="Access control · permission matrix · custom roles">
@@ -504,11 +517,6 @@ function Roles() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {hasRecommended && (
-                        <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs" onClick={handleApplyRecommended}>
-                          <Sparkles className="h-3.5 w-3.5 text-amber-500" /> Apply Recommended
-                        </Button>
-                      )}
                       <Button size="sm" className="gradient-primary text-primary-foreground border-0 h-8" onClick={handleSave} disabled={saving || !dirty}>
                         {saving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
                         {saving ? "Saving…" : "Save Changes"}

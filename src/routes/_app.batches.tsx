@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { CalendarClock, PackageCheck, Ban, ShieldAlert, Plus, Download, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type InventoryBatch, type Branch, type Product, type Supplier } from "@/lib/api";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/batches")({ component: Batches });
 
@@ -66,6 +67,7 @@ function exportCSV(data: InventoryBatch[]) {
 function ReceiveBatchDialog({ branches, products, suppliers, onDone }: {
   branches: Branch[]; products: Product[]; suppliers: Supplier[]; onDone: () => void;
 }) {
+  const { canCreate } = usePermission("Batches");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -107,6 +109,8 @@ function ReceiveBatchDialog({ branches, products, suppliers, onDone }: {
       setSaving(false);
     }
   }
+
+  if (!canCreate) return null;
 
   return (
     <>

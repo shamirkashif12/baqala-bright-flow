@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, ScanLine, Loader2 } from "lucide-react";
 import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type Branch, type OrderItem } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
+import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/returns")({ component: Returns });
@@ -46,8 +47,8 @@ function dispositionLabel(item: CustomerReturnItem) {
 }
 
 // ─── Detail / Action Sheet ────────────────────────────────────────────────────
-function DetailSheet({ ret, onClose, onAction }: {
-  ret: CustomerReturn | null; onClose: () => void; onAction: () => void;
+function DetailSheet({ ret, onClose, onAction, canApprove }: {
+  ret: CustomerReturn | null; onClose: () => void; onAction: () => void; canApprove?: boolean;
 }) {
   const [acting, setActing] = useState<string | null>(null);
 
@@ -131,7 +132,7 @@ function DetailSheet({ ret, onClose, onAction }: {
 
         {/* Actions */}
         <div className="mt-5 space-y-2">
-          {ret.status === "pending" && (
+          {ret.status === "pending" && canApprove && (
             <>
               <p className="text-xs text-muted-foreground mb-2">Review and approve or reject this return request.</p>
               <Button className="w-full bg-green-600 hover:bg-green-700 text-white border-0 gap-2"
@@ -148,7 +149,7 @@ function DetailSheet({ ret, onClose, onAction }: {
               </Button>
             </>
           )}
-          {ret.status === "approved" && (
+          {ret.status === "approved" && canApprove && (
             <>
               <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-xs text-blue-700 mb-2">
                 On completion: good-condition items will be restocked; damaged/expired items will be written off.
@@ -193,6 +194,7 @@ const emptyForm: ReturnForm = {
 type ItemRow = { orderItemId: string; productId: string; productName: string; unitPrice: number; maxQty: number; qty: number; condition: string; restock: boolean; selected: boolean; };
 
 function Returns() {
+  const { canCreate, canApprove } = usePermission("Returns");
   const { branches: allBranches } = useBranch();
   const [returns, setReturns] = useState<CustomerReturn[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -422,11 +424,13 @@ function Returns() {
         </div>
         <div className="flex-1" />
         <Sheet open={sheetOpen} onOpenChange={v => { setSheetOpen(v); if (!v) { setForm(emptyForm); setItemRows([]); setInvoiceNumber(""); setMatchedOrder(null); setMatchedBranchName(""); setInvoiceError(""); setError(null); } }}>
-          <SheetTrigger asChild>
-            <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9">
-              <Plus className="h-4 w-4" /> New Return
-            </Button>
-          </SheetTrigger>
+          {canCreate && (
+            <SheetTrigger asChild>
+              <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9">
+                <Plus className="h-4 w-4" /> New Return
+              </Button>
+            </SheetTrigger>
+          )}
           <SheetContent className="w-[420px] overflow-y-auto">
             <SheetHeader><SheetTitle className="text-lg">Process customer return</SheetTitle></SheetHeader>
             <div className="mt-6 space-y-5">
@@ -608,7 +612,7 @@ function Returns() {
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewReturn(r)}>
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
-                        {r.status === "pending" && (
+                        {r.status === "pending" && canApprove && (
                           <>
                             <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600 hover:bg-green-50"
                               onClick={async () => { await api.approveReturn(r.id, true); load(); }}>
@@ -620,7 +624,7 @@ function Returns() {
                             </Button>
                           </>
                         )}
-                        {r.status === "approved" && (
+                        {r.status === "approved" && canApprove && (
                           <Button size="icon" variant="ghost" className="h-7 w-7 text-blue-600 hover:bg-blue-50" title="Process refund & restock"
                             onClick={async () => { await api.completeReturn(r.id); load(); }}>
                             <PackageCheck className="h-3.5 w-3.5" />
@@ -639,7 +643,7 @@ function Returns() {
         </Card>
       )}
 
-      <DetailSheet ret={viewReturn} onClose={() => setViewReturn(null)} onAction={load} />
+      <DetailSheet ret={viewReturn} onClose={() => setViewReturn(null)} onAction={load} canApprove={canApprove} />
     </PageShell>
   );
 }

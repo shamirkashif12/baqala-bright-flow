@@ -22,6 +22,7 @@ import {
   type Branch, type Warehouse as WarehouseType, type Supplier, type Product,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/stock-transfers")({ component: StockTransfers });
@@ -193,15 +194,20 @@ function StatusBadge({ status }: { status: string }) {
 function TypeSelectorStep({
   selected,
   onSelect,
+  allowedTypes,
 }: {
   selected: TransferType | null;
   onSelect: (t: TransferType) => void;
+  allowedTypes?: TransferType[];
 }) {
+  const visibleTypes = allowedTypes
+    ? TRANSFER_TYPES.filter(t => allowedTypes.includes(t.value))
+    : TRANSFER_TYPES;
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">Select the direction of the stock transfer.</p>
       <div className="grid grid-cols-2 gap-3">
-        {TRANSFER_TYPES.map(({ value, label, description, icon: Icon }) => (
+        {visibleTypes.map(({ value, label, description, icon: Icon }) => (
           <Card
             key={value}
             className={cn(
@@ -549,6 +555,9 @@ function CreateTransferSheet({
   onCreated: () => void;
 }) {
   const { user } = useAuth();
+  // Pickers handle order fulfillment — they only move stock from warehouse to branch
+  const allowedTransferTypes: TransferType[] | undefined =
+    user?.role === "picker" ? ["warehouse_to_branch"] : undefined;
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [transferType, setTransferType] = useState<TransferType | null>(null);
   const [form, setForm] = useState<CreateForm>(emptyForm);
@@ -798,7 +807,7 @@ function CreateTransferSheet({
 
         <div className="space-y-5 pb-6">
           {step === 1 && (
-            <TypeSelectorStep selected={transferType} onSelect={handleTypeSelect} />
+            <TypeSelectorStep selected={transferType} onSelect={handleTypeSelect} allowedTypes={allowedTransferTypes} />
           )}
 
           {step === 2 && transferType && (
@@ -1081,10 +1090,12 @@ function ViewTransferSheet({
   transfer,
   onClose,
   onStatusUpdate,
+  canApprove,
 }: {
   transfer: StockTransfer | null;
   onClose: () => void;
   onStatusUpdate: () => void;
+  canApprove?: boolean;
 }) {
   const { user } = useAuth();
   const [updating, setUpdating] = useState(false);
@@ -1229,7 +1240,7 @@ function ViewTransferSheet({
               Submit for Approval
             </Button>
           )}
-          {transfer.status === "pending_approval" && (
+          {transfer.status === "pending_approval" && canApprove && (
             <>
               <Button className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow" disabled={updating} onClick={() => updateStatus("approved")}>
                 {updating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
@@ -1240,13 +1251,13 @@ function ViewTransferSheet({
               </Button>
             </>
           )}
-          {transfer.status === "approved" && (
+          {transfer.status === "approved" && canApprove && (
             <Button className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow" disabled={updating} onClick={() => updateStatus("in_transit")}>
               {updating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
               <Truck className="mr-1.5 h-4 w-4" /> Mark In Transit
             </Button>
           )}
-          {transfer.status === "in_transit" && (
+          {transfer.status === "in_transit" && canApprove && (
             <Button className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow" disabled={updating} onClick={() => setReceiveOpen(true)}>
               <CheckCircle2 className="mr-1.5 h-4 w-4" /> Mark Received
             </Button>
@@ -1270,10 +1281,12 @@ function RowStatusAction({
   transfer,
   onAction,
   onReceive,
+  canApprove,
 }: {
   transfer: StockTransfer;
   onAction: (id: string, status: string) => void;
   onReceive: (t: StockTransfer) => void;
+  canApprove?: boolean;
 }) {
   if (transfer.status === "draft") {
     return (
@@ -1282,7 +1295,7 @@ function RowStatusAction({
       </Button>
     );
   }
-  if (transfer.status === "pending_approval") {
+  if (transfer.status === "pending_approval" && canApprove) {
     return (
       <div className="flex gap-1">
         <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onAction(transfer.id, "approved")}>
@@ -1431,6 +1444,7 @@ function PurchaseOrdersTab() {
 
 function StockTransfers() {
   const { user } = useAuth();
+  const { canCreate, canApprove } = usePermission("Stock Transfers");
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -1492,11 +1506,11 @@ function StockTransfers() {
     <PageShell
       title="Stock Transfers"
       subtitle="Manage inbound, outbound, and inter-location stock movements"
-      actions={
+      actions={canCreate ? (
         <Button className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-1.5" /> New Transfer
         </Button>
-      }
+      ) : undefined}
     >
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1646,7 +1660,7 @@ function StockTransfers() {
                               <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setViewTransfer(t)}>
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
-                              <RowStatusAction transfer={t} onAction={handleStatusAction} onReceive={setReceiveTarget} />
+                              <RowStatusAction transfer={t} onAction={handleStatusAction} onReceive={setReceiveTarget} canApprove={canApprove} />
                             </div>
                           </td>
                         </tr>
@@ -1674,6 +1688,7 @@ function StockTransfers() {
         transfer={viewTransfer}
         onClose={() => setViewTransfer(null)}
         onStatusUpdate={() => { load(); setViewTransfer(null); }}
+        canApprove={canApprove}
       />
 
       <ReceiveItemsSheet

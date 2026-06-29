@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { api, type Customer, type LoyaltyTransaction } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/customers")({ component: Customers });
 
@@ -62,6 +63,7 @@ function TierProgress({ spend }: { spend: number }) {
 
 // ─── Customer detail drawer ───────────────────────────────────────────────────
 function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () => void }) {
+  const { canEdit } = usePermission("Customers");
   const [history, setHistory] = useState<LoyaltyTransaction[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
 
@@ -176,9 +178,11 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
 
       <Separator />
 
-      <Button variant="outline" className="w-full gap-2" onClick={onEdit}>
-        Edit Customer Profile
-      </Button>
+      {canEdit && (
+        <Button variant="outline" className="w-full gap-2" onClick={onEdit}>
+          Edit Customer Profile
+        </Button>
+      )}
     </div>
   );
 }
@@ -263,6 +267,7 @@ function CustomerForm({ editing, onSaved, onCancel }: {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 function Customers() {
+  const { canCreate } = usePermission("Customers");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -341,9 +346,11 @@ function Customers() {
           )}
         </div>
         <div className="flex-1" />
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => setEditTarget("new")}>
-          <Plus className="h-4 w-4" /> Add Customer
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => setEditTarget("new")}>
+            <Plus className="h-4 w-4" /> Add Customer
+          </Button>
+        )}
       </div>
 
       {/* Table */}

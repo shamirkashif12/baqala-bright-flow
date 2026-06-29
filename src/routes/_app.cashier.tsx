@@ -111,12 +111,14 @@ function CashierWorkspace() {
     catch { return 0; }
   })();
 
+  const branchIdFilter = user?.role !== "tenant_admin" ? (user?.branchId ?? undefined) : undefined;
+
   const load = useCallback(() => {
     setLoading(true);
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     Promise.all([
       api.getActiveShifts(),
-      api.getOrders({ from: todayStart.toISOString() }),
+      api.getOrders({ from: todayStart.toISOString(), branchId: branchIdFilter }),
     ])
       .then(([shifts, orders]) => {
         setShift(shifts[0] ?? null);
@@ -124,7 +126,7 @@ function CashierWorkspace() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [branchIdFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -164,7 +166,7 @@ function CashierWorkspace() {
               </Badge>
             )}
             <h2 className="text-2xl font-bold mt-2">
-              السلام عليكم, {shift?.cashier?.fullName?.split(" ")[0] ?? user?.name?.split(" ")[0] ?? "Cashier"}
+              السلام عليكم, {user?.name?.split(" ")[0] ?? "Cashier"}
             </h2>
             <p className="text-primary-foreground/80 text-sm mt-1">
               {shift?.terminal?.terminalCode ? `${shift.terminal.terminalCode} · ` : ""}

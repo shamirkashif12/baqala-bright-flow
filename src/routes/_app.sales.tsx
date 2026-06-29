@@ -9,6 +9,7 @@ import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { Wallet, Receipt, Percent, RotateCcw, X } from "lucide-react";
 import { api, type Order, type Branch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/sales")({ component: Sales });
@@ -16,18 +17,25 @@ export const Route = createFileRoute("/_app/sales")({ component: Sales });
 const bars = [42, 58, 36, 72, 64, 88, 92, 76, 58, 64, 82, 70];
 
 function Sales() {
+  const { user } = useAuth();
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [payFilter, setPayFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
-    api.getBranches("active").then(setBranches).catch(() => {});
-  }, []);
+    if (lockedBranchId) setBranchId(lockedBranchId);
+  }, [lockedBranchId]);
+
+  useEffect(() => {
+    if (!lockedBranchId) api.getBranches("active").then(setBranches).catch(() => {});
+  }, [lockedBranchId]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -81,13 +89,15 @@ function Sales() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, branch, cashier…" className="h-9 w-56 flex-shrink-0" />
-        <Select value={branchId} onValueChange={setBranchId}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {!lockedBranchId && (
+          <Select value={branchId} onValueChange={setBranchId}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={payFilter} onValueChange={setPayFilter}>
           <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Payment Status" /></SelectTrigger>
           <SelectContent>

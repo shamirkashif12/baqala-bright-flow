@@ -15,6 +15,7 @@ import { ShieldCheck, Cigarette, Receipt, Calculator, Plus, Link as LinkIcon, Pe
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { api, type TaxFeeRule, type Product } from "@/lib/api";
+import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/tax-fees")({ component: TaxFees });
@@ -55,6 +56,7 @@ function feeTypeDisplay(r: TaxFeeRule): { type: string; value: React.ReactNode }
 }
 
 function TaxFees() {
+  const { canCreate, canEdit } = usePermission("Tax & Fees");
   const [rules, setRules] = useState<TaxFeeRule[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
@@ -252,13 +254,15 @@ function TaxFees() {
             <p className="text-sm text-muted-foreground">
               Custom fees are added at checkout and printed on the invoice.
             </p>
-            <Button
-              size="sm"
-              className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow"
-              onClick={openCreate}
-            >
-              <Plus className="h-4 w-4" /> New Fee
-            </Button>
+            {canCreate && (
+              <Button
+                size="sm"
+                className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow"
+                onClick={openCreate}
+              >
+                <Plus className="h-4 w-4" /> New Fee
+              </Button>
+            )}
           </div>
 
           {customFees.length === 0 ? (
@@ -299,7 +303,8 @@ function TaxFees() {
                             <div className="flex items-center gap-2">
                               <Switch
                                 checked={r.status === "active"}
-                                onCheckedChange={() => toggleStatus(r)}
+                                onCheckedChange={canEdit ? () => toggleStatus(r) : undefined}
+                                disabled={!canEdit}
                               />
                               <span className={`text-xs font-medium ${r.status === "active" ? "text-success" : "text-muted-foreground"}`}>
                                 {r.status === "active" ? "Active" : "Inactive"}
@@ -307,15 +312,17 @@ function TaxFees() {
                             </div>
                           </td>
                           <td className="px-4 py-2.5">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7"
-                              onClick={() => openEdit(r)}
-                              title="Edit fee"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
+                            {canEdit && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => openEdit(r)}
+                                title="Edit fee"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                           </td>
                         </tr>
                       );

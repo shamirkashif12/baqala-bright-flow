@@ -17,6 +17,7 @@ import {
 import { api, type Branch, type Terminal, type User, type CashierShift } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useBranch } from "@/lib/branch-context";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app/control-tower")({ component: ControlTower });
 
@@ -67,11 +68,19 @@ function elapsed(openedAt: string) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 function ControlTower() {
+  const { user } = useAuth();
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
   const { selectedBranch: globalSelectedBranch } = useBranch();
   const [tab, setTab] = useState("map");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
+
+  // Sync if user loads after mount
+  useEffect(() => {
+    if (lockedBranchId) setBranchFilter(lockedBranchId);
+  }, [lockedBranchId]);
 
   const [branches, setBranches]   = useState<Branch[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
@@ -83,14 +92,20 @@ function ControlTower() {
 
   const loadAll = useCallback((silent = false) => {
     if (!silent) setLoading(true);
-    Promise.all([api.getBranches(), api.getTerminals(), api.getUsers(), api.getShifts()])
+    Promise.all([
+      api.getBranches(),
+      api.getTerminals({ branchId: lockedBranchId ?? undefined }),
+      api.getUsers(),
+      api.getShifts({ branchId: lockedBranchId ?? undefined }),
+    ])
       .then(([b, t, u, s]) => {
         setBranches(b); setTerminals(t); setUsers(u); setShifts(s);
         setLastRefresh(new Date());
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedBranchId]);
 
   useEffect(() => {
     loadAll();
@@ -239,7 +254,7 @@ function ControlTower() {
             <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search user, terminal, branch…"
               className="pl-9 h-9 bg-muted/40 border-transparent focus-visible:bg-card" />
           </div>
-          {tab !== "map" && (
+          {tab !== "map" && !lockedBranchId && (
             <Select value={branchFilter} onValueChange={setBranchFilter}>
               <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Branch" /></SelectTrigger>
               <SelectContent>

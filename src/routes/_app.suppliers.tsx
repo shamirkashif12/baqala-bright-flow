@@ -15,6 +15,7 @@ import { StatusBadge } from "@/components/module-placeholder";
 import { Truck, Eye, Pencil, Plus, Trash2, Package, CheckCircle, Clock, ShoppingCart } from "lucide-react";
 import { SARIcon } from "@/lib/currency";
 import { api, type Supplier, type PurchaseOrder, type SupplierCreditNote } from "@/lib/api";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/suppliers")({ component: Suppliers });
 
@@ -85,6 +86,7 @@ const PO_STATUS_CLASS: Record<string, string> = {
 };
 
 function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Supplier | null; onClose: () => void; onEdit: (s: Supplier) => void }) {
+  const { canEdit } = usePermission("Suppliers");
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [creditNotes, setCreditNotes] = useState<SupplierCreditNote[]>([]);
   const [loadingPos, setLoadingPos] = useState(false);
@@ -119,9 +121,11 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusBadge status={supplier.status} />
-                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onEdit(supplier)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
+                  {canEdit && (
+                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onEdit(supplier)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </SheetHeader>
@@ -300,6 +304,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
 }
 
 function SuppliersTab() {
+  const { canCreate, canEdit, canDelete } = usePermission("Suppliers");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -376,9 +381,11 @@ function SuppliersTab() {
           </SelectContent>
         </Select>
         <div className="flex-1" />
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
-          <Plus className="h-4 w-4" /> Add Supplier
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
+            <Plus className="h-4 w-4" /> Add Supplier
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -410,8 +417,8 @@ function SuppliersTab() {
                     <td className="px-3 py-3">
                       <div className="flex gap-1 justify-end">
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewSupplier(s)}><Eye className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(s)}><Pencil className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(s)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(s)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(s)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                       </div>
                     </td>
                   </tr>

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
-import { RoleGate } from "@/components/role-gate";
+import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Card } from "@/components/ui/card";
@@ -12,12 +12,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Mail, Phone, Pencil, ShieldCheck, Power, Plus, Search, Calendar, X } from "lucide-react";
 import { api, type User, type Branch, type Role } from "@/lib/api";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/users")({
   component: () => (
-    <RoleGate allow={["tenant_admin", "branch_manager"]}>
+    <ModuleGate module="Users">
       <RegisteredUsers />
-    </RoleGate>
+    </ModuleGate>
   ),
 });
 
@@ -25,6 +26,7 @@ type UserForm = { fullName: string; email: string; username: string; password: s
 const emptyForm: UserForm = { fullName: "", email: "", username: "", password: "", roleId: "", branchId: "", status: "active" };
 
 function RegisteredUsers() {
+  const { canCreate, canEdit } = usePermission("Users");
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -63,14 +65,14 @@ function RegisteredUsers() {
   const openCreate = () => { setEditUser(null); setForm(emptyForm); setDlgOpen(true); };
   const openEdit = (u: User) => {
     setEditUser(u);
-    setForm({ fullName: u.fullName, email: u.email, username: u.username, password: "", roleId: u.roleId, branchId: u.branchId ?? "all_branches", status: u.status });
+    setForm({ fullName: u.fullName, email: u.email, username: u.username, password: "", roleId: u.roleId, branchId: u.branchId ?? "", status: u.status });
     setDlgOpen(true);
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const branchId = form.branchId === "all_branches" ? undefined : form.branchId || undefined;
+      const branchId = form.branchId || undefined;
       if (editUser) {
         await api.updateUser(editUser.id, { fullName: form.fullName, email: form.email, username: form.username, roleId: form.roleId, branchId, status: form.status });
       } else {
@@ -94,6 +96,8 @@ function RegisteredUsers() {
     setForm(p => ({ ...p, [k]: e.target.value }));
   const setS = (k: keyof UserForm) => (v: string) =>
     setForm(p => ({ ...p, [k]: v }));
+
+  const isTenantAdminRole = roles.find(r => r.id === form.roleId)?.name === "Tenant Administrator";
 
   const initials = (name: string) => name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const avatarColor = (name: string) => {
@@ -144,9 +148,11 @@ function RegisteredUsers() {
           )}
         </div>
         <div className="flex-1" />
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openCreate}>
-          <Plus className="h-4 w-4" /> Add User
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openCreate}>
+            <Plus className="h-4 w-4" /> Add User
+          </Button>
+        )}
       </div>
 
       <p className="text-xs text-muted-foreground mb-4">{filtered.length} of {users.length} users</p>
@@ -175,15 +181,19 @@ function RegisteredUsers() {
                 {u.lastLogin && <p className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5 shrink-0" />Last login: {new Date(u.lastLogin).toLocaleString("en-SA")}</p>}
               </div>
               <div className="mt-4 flex gap-1.5">
-                <Button size="sm" variant="outline" className="flex-1 h-8 text-xs" onClick={() => openEdit(u)}>
-                  <Pencil className="h-3 w-3 mr-1" /> Edit
-                </Button>
+                {canEdit && (
+                  <Button size="sm" variant="outline" className="flex-1 h-8 text-xs" onClick={() => openEdit(u)}>
+                    <Pencil className="h-3 w-3 mr-1" /> Edit
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" className="h-8 px-2.5" title="Manage Permissions" onClick={() => window.location.href = "/roles"}>
                   <ShieldCheck className="h-3.5 w-3.5" />
                 </Button>
-                <Button size="sm" variant="outline" className={`h-8 px-2.5 ${u.status === "active" ? "text-destructive hover:text-destructive" : "text-success hover:text-success"}`} title={u.status === "active" ? "Deactivate" : "Activate"} onClick={() => toggleStatus(u)}>
-                  <Power className="h-3.5 w-3.5" />
-                </Button>
+                {canEdit && (
+                  <Button size="sm" variant="outline" className={`h-8 px-2.5 ${u.status === "active" ? "text-destructive hover:text-destructive" : "text-success hover:text-success"}`} title={u.status === "active" ? "Deactivate" : "Activate"} onClick={() => toggleStatus(u)}>
+                    <Power className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
             </Card>
           ))}
@@ -233,10 +243,15 @@ function RegisteredUsers() {
               </div>
               <div>
                 <Label className="text-xs">Branch</Label>
-                <Select value={form.branchId || "all_branches"} onValueChange={v => setS("branchId")(v === "all_branches" ? "" : v)}>
-                  <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="All branches" /></SelectTrigger>
+                <Select
+                  value={form.branchId || (isTenantAdminRole ? "all_branches" : "")}
+                  onValueChange={v => setS("branchId")(v === "all_branches" ? "" : v)}
+                >
+                  <SelectTrigger className="mt-1 h-9">
+                    <SelectValue placeholder={isTenantAdminRole ? "All branches" : "Select branch"} />
+                  </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all_branches">All branches</SelectItem>
+                    {isTenantAdminRole && <SelectItem value="all_branches">All branches</SelectItem>}
                     {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
                   </SelectContent>
                 </Select>

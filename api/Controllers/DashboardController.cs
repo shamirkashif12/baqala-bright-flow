@@ -9,28 +9,76 @@ namespace BaqalaPOS.Api.Controllers;
 public class DashboardController(BaqalaDbContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetMetrics()
+    public async Task<IActionResult> GetMetrics(
+        [FromQuery] string? period = "today",
+        [FromQuery] string? branchId = null)
     {
-        var today = DateTime.UtcNow.Date;
-        var todayEnd = today.AddDays(1);
+        // ─── Date range ────────────────────────────────────────────────────
+        var now = DateTime.UtcNow;
+        var today = now.Date;
+        DateTime rangeStart, rangeEnd;
+        switch (period?.ToLowerInvariant())
+        {
+            case "yesterday":
+                rangeStart = today.AddDays(-1);
+                rangeEnd   = today;
+                break;
+            case "week":
+                rangeStart = today.AddDays(-6);
+                rangeEnd   = today.AddDays(1);
+                break;
+            case "month":
+                rangeStart = new DateTime(today.Year, today.Month, 1);
+                rangeEnd   = today.AddDays(1);
+                break;
+            default: // "today"
+                rangeStart = today;
+                rangeEnd   = today.AddDays(1);
+                break;
+        }
 
-        // Order counts by status (today)
-        var ordersByStatus = await db.Orders
-            .Where(o => o.CreatedAt >= today && o.CreatedAt < todayEnd)
+        // ─── Branch-scoped queryables ───────────────────────────────────────
+        var branchGuid = Guid.TryParse(branchId, out var g) ? g : (Guid?)null;
+
+        var ordersQ    = db.Orders.AsQueryable();
+        var paymentsQ  = db.OrderPayments.AsQueryable();
+        var shiftsQ    = db.CashierShifts.AsQueryable();
+        var terminalsQ = db.Terminals.AsQueryable();
+        var stocksQ    = db.InventoryStocks.AsQueryable();
+        var batchesQ   = db.InventoryBatches.AsQueryable();
+        var usersQ     = db.Users.AsQueryable();
+        var returnsQ   = db.CustomerReturns.AsQueryable();
+
+        if (branchGuid.HasValue)
+        {
+            var bid = branchGuid.Value;
+            ordersQ    = ordersQ.Where(o => o.BranchId == bid);
+            paymentsQ  = paymentsQ.Where(p => p.Order.BranchId == bid);
+            shiftsQ    = shiftsQ.Where(s => s.BranchId == bid);
+            terminalsQ = terminalsQ.Where(t => t.BranchId == bid);
+            stocksQ    = stocksQ.Where(s => s.BranchId == bid);
+            batchesQ   = batchesQ.Where(b => b.BranchId == bid);
+            usersQ     = usersQ.Where(u => u.BranchId == bid);
+            returnsQ   = returnsQ.Where(r => r.BranchId == bid);
+        }
+
+        // ─── Order counts by status (in period) ────────────────────────────
+        var ordersByStatus = await ordersQ
+            .Where(o => o.CreatedAt >= rangeStart && o.CreatedAt < rangeEnd)
             .GroupBy(o => o.OrderStatus)
             .Select(g => new { status = g.Key, count = g.Count() })
             .ToListAsync();
 
         var statusMap = ordersByStatus.ToDictionary(x => x.status, x => x.count);
 
-        // Total sales today (paid orders)
-        var totalSalesToday = await db.Orders
-            .Where(o => o.CreatedAt >= today && o.CreatedAt < todayEnd && o.PaymentStatus == "paid")
+        // ─── Total sales (paid orders in period) ───────────────────────────
+        var totalSalesToday = await ordersQ
+            .Where(o => o.CreatedAt >= rangeStart && o.CreatedAt < rangeEnd && o.PaymentStatus == "paid")
             .SumAsync(o => o.TotalAmount);
 
-        // Payment method breakdown today
-        var paymentMix = await db.OrderPayments
-            .Where(p => p.CreatedAt >= today && p.CreatedAt < todayEnd && p.Status == "completed")
+        // ─── Payment method breakdown (in period) ──────────────────────────
+        var paymentMix = await paymentsQ
+            .Where(p => p.CreatedAt >= rangeStart && p.CreatedAt < rangeEnd && p.Status == "completed")
             .GroupBy(p => p.PaymentMethod)
             .Select(g => new { method = g.Key, total = g.Sum(p => p.Amount) })
             .ToListAsync();
@@ -40,78 +88,60 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
         {
             method = p.method,
             amount = p.total,
-            pct = payTotal > 0 ? Math.Round(p.total / payTotal * 100, 1) : 0
+            pct    = payTotal > 0 ? Math.Round(p.total / payTotal * 100, 1) : 0
         }).ToList();
 
-        // Active shifts
-        var activeShifts = await db.CashierShifts.CountAsync(s => s.Status == "open");
-        var totalCashiers = await db.Users.CountAsync(u => u.Status == "active");
+        // ─── Active shifts & cashier count ─────────────────────────────────
+        var activeShifts  = await shiftsQ.CountAsync(s => s.Status == "open");
+        var totalCashiers = await usersQ.CountAsync(u => u.Status == "active");
 
-        // Terminals
-        var totalTerminals = await db.Terminals.CountAsync();
-        var activeTerminals = await db.Terminals.CountAsync(t => t.Status == "active");
+        // ─── Terminals ─────────────────────────────────────────────────────
+        var totalTerminals  = await terminalsQ.CountAsync();
+        var activeTerminals = await terminalsQ.CountAsync(t => t.Status == "active");
 
-        // Low stock items
-        var lowStockCount = await db.InventoryStocks
-            .CountAsync(s => s.Quantity > 0 && s.Quantity <= s.ReorderLevel);
-        var outOfStockCount = await db.InventoryStocks.CountAsync(s => s.Quantity == 0);
+        // ─── Low stock ─────────────────────────────────────────────────────
+        var lowStockCount   = await stocksQ.CountAsync(s => s.Quantity > 0 && s.Quantity <= s.ReorderLevel);
+        var outOfStockCount = await stocksQ.CountAsync(s => s.Quantity == 0);
 
-        // Low stock detail (top 5)
-        var lowStockItems = await db.InventoryStocks
+        var lowStockItems = await stocksQ
             .Include(s => s.Product)
             .Include(s => s.Branch)
             .Where(s => s.Quantity > 0 && s.Quantity <= s.ReorderLevel)
             .OrderBy(s => s.Quantity)
             .Take(5)
-            .Select(s => new
-            {
-                name = s.Product.Name,
-                qty = s.Quantity,
-                branch = s.Branch.Name
-            })
+            .Select(s => new { name = s.Product.Name, qty = s.Quantity, branch = s.Branch.Name })
             .ToListAsync();
 
-        // Expiring batches (next 7 days)
-        var cutoff7 = DateTime.UtcNow.AddDays(7);
-        var today2 = DateTime.UtcNow;
-        var expiringCount = await db.InventoryBatches
-            .CountAsync(b => b.ExpiryDate != null && b.ExpiryDate >= today2 && b.ExpiryDate <= cutoff7 && b.RemainingQuantity > 0);
+        // ─── Expiring batches (next 7 days) ────────────────────────────────
+        var cutoff7 = now.AddDays(7);
+        var expiringCount = await batchesQ
+            .CountAsync(b => b.ExpiryDate != null && b.ExpiryDate >= now && b.ExpiryDate <= cutoff7 && b.RemainingQuantity > 0);
 
-        // Expiring detail (top 5 soonest) — compute daysLeft in memory to avoid EF/MySQL TimeSpan coercion
-        var expiringRaw = await db.InventoryBatches
+        var expiringRaw = await batchesQ
             .Include(b => b.Product)
             .Include(b => b.Branch)
-            .Where(b => b.ExpiryDate != null && b.ExpiryDate >= today2 && b.ExpiryDate <= cutoff7 && b.RemainingQuantity > 0)
+            .Where(b => b.ExpiryDate != null && b.ExpiryDate >= now && b.ExpiryDate <= cutoff7 && b.RemainingQuantity > 0)
             .OrderBy(b => b.ExpiryDate)
             .Take(5)
             .Select(b => new { name = b.Product.Name, expiryDate = b.ExpiryDate!.Value, branch = b.Branch.Name })
             .ToListAsync();
 
-        var expiringItems = expiringRaw.Select(b => new
-        {
-            name = b.name,
-            daysLeft = (int)((b.expiryDate - today2).TotalDays),
-            branch = b.branch
-        }).ToList();
+        var expiringItems = expiringRaw
+            .Select(b => new { name = b.name, daysLeft = (int)((b.expiryDate - now).TotalDays), branch = b.branch })
+            .ToList();
 
-        // Cashier performance from shifts (today)
-        var cashierPerf = await db.CashierShifts
+        // ─── Cashier performance (in period) ───────────────────────────────
+        var cashierPerf = await shiftsQ
             .Include(s => s.Cashier)
-            .Where(s => s.OpenedAt >= today)
-            .Select(s => new
-            {
-                name = s.Cashier != null ? s.Cashier.FullName : "Unknown",
-                sales = s.TotalSales,
-                status = s.Status
-            })
+            .Where(s => s.OpenedAt >= rangeStart)
+            .Select(s => new { name = s.Cashier != null ? s.Cashier.FullName : "Unknown", sales = s.TotalSales, status = s.Status })
             .OrderByDescending(s => s.sales)
             .Take(5)
             .ToListAsync();
 
-        // Branch performance from orders (today) — split into two queries to avoid
-        // EF Core MySQL limitation with navigation properties inside GroupBy keys
-        var branchPerfRaw = await db.Orders
-            .Where(o => o.CreatedAt >= today && o.CreatedAt < todayEnd && o.PaymentStatus == "paid")
+        // ─── Branch performance (paid orders in period) ────────────────────
+        var branchPerfRaw = await ordersQ
+            .Where(o => o.CreatedAt >= rangeStart && o.CreatedAt < rangeEnd && o.PaymentStatus == "paid")
             .GroupBy(o => o.BranchId)
             .Select(g => new { branchId = g.Key, orders = g.Count(), sales = g.Sum(o => o.TotalAmount) })
             .ToListAsync();
@@ -126,48 +156,33 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
             {
                 branch = branchNameMap.GetValueOrDefault(b.branchId, "Unknown"),
                 orders = b.orders,
-                sales = b.sales
+                sales  = b.sales
             })
             .OrderByDescending(b => b.sales)
             .ToList();
 
-        // Returns today
-        var returnsToday = await db.CustomerReturns
-            .Where(r => r.CreatedAt >= today && r.CreatedAt < todayEnd)
-            .CountAsync();
-        var refundedToday = await db.CustomerReturns
-            .Where(r => r.CreatedAt >= today && r.CreatedAt < todayEnd)
-            .SumAsync(r => r.RefundAmount);
+        // ─── Returns (in period) ───────────────────────────────────────────
+        var returnsCount   = await returnsQ.Where(r => r.CreatedAt >= rangeStart && r.CreatedAt < rangeEnd).CountAsync();
+        var refundedAmount = await returnsQ.Where(r => r.CreatedAt >= rangeStart && r.CreatedAt < rangeEnd).SumAsync(r => r.RefundAmount);
 
         return Ok(new
         {
             orders = new
             {
-                pending = statusMap.GetValueOrDefault("pending", 0),
-                processing = statusMap.GetValueOrDefault("processing", 0),
-                readyToDeliver = statusMap.GetValueOrDefault("ready_to_deliver", 0),
-                delivered = statusMap.GetValueOrDefault("delivered", 0),
-                cancelled = statusMap.GetValueOrDefault("cancelled", 0),
-                totalToday = statusMap.Values.Sum()
+                pending         = statusMap.GetValueOrDefault("pending", 0),
+                processing      = statusMap.GetValueOrDefault("processing", 0),
+                readyToDeliver  = statusMap.GetValueOrDefault("ready_to_deliver", 0),
+                delivered       = statusMap.GetValueOrDefault("delivered", 0),
+                cancelled       = statusMap.GetValueOrDefault("cancelled", 0),
+                totalToday      = statusMap.Values.Sum()
             },
-            sales = new
-            {
-                totalToday = totalSalesToday,
-                paymentBreakdown
-            },
-            shifts = new { active = activeShifts, totalCashiers },
+            sales = new { totalToday = totalSalesToday, paymentBreakdown },
+            shifts    = new { active = activeShifts, totalCashiers },
             terminals = new { active = activeTerminals, total = totalTerminals },
-            inventory = new
-            {
-                lowStockCount,
-                outOfStockCount,
-                lowStockItems,
-                expiringCount,
-                expiringItems
-            },
+            inventory = new { lowStockCount, outOfStockCount, lowStockItems, expiringCount, expiringItems },
             cashierPerformance = cashierPerf,
-            branchPerformance = branchPerf,
-            returns = new { count = returnsToday, refundedAmount = refundedToday }
+            branchPerformance  = branchPerf,
+            returns = new { count = returnsCount, refundedAmount }
         });
     }
 }

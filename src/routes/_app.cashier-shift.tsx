@@ -15,6 +15,7 @@ import {
   RefreshCw, CheckCircle2, XCircle, Loader2, UserCheck,
 } from "lucide-react";
 import { api, type CashierShift, type User, type Branch, type Terminal } from "@/lib/api";
+import { useAuth, type AuthUser } from "@/lib/auth";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/cashier-shift")({ component: Shift });
@@ -31,20 +32,30 @@ function elapsed(openedAt: string) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 function Shift() {
+  const { user } = useAuth();
+  const isCashier = user?.role === "cashier";
+  // Non-admins locked to their branch; cashiers additionally locked to their own shifts
+  const effectiveBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? undefined) : undefined;
+  const effectiveCashierId = isCashier ? (user?.id ?? undefined) : undefined;
+
   const [shifts, setShifts] = useState<CashierShift[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkoutShift, setCheckoutShift] = useState<CashierShift | null>(null);
 
   const refetch = useCallback(() => {
     setLoading(true);
-    api.getShifts()
+    api.getShifts({ branchId: effectiveBranchId, cashierId: effectiveCashierId })
       .then(s => setShifts(s))
       .finally(() => setLoading(false));
-  }, []);
+  }, [effectiveBranchId, effectiveCashierId]);
 
   useEffect(() => { refetch(); }, [refetch]);
 
   const activeShifts = shifts.filter(s => s.status === "open");
+  // Cashier sees only their own active shift in the banner; managers see all
+  const bannerShifts = isCashier
+    ? activeShifts.filter(s => s.cashierId === user?.id)
+    : activeShifts;
   const totalCash = shifts.reduce((a, s) => a + s.cashSales, 0);
   const totalCard = shifts.reduce((a, s) => a + s.cardSales, 0);
   const totalDigital = shifts.reduce((a, s) => a + s.digitalSales, 0);
@@ -52,9 +63,9 @@ function Shift() {
   return (
     <PageShell title="Cashier Shift" subtitle="Check-in, check-out and shift totals">
       {/* Active shifts banner */}
-      {activeShifts.length > 0 ? (
+      {bannerShifts.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {activeShifts.map(s => (
+          {bannerShifts.map(s => (
             <Card key={s.id} className="p-4 border-2 border-success/40 bg-success/5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="h-10 w-10 rounded-xl bg-success/15 text-success flex items-center justify-center flex-shrink-0">
@@ -89,10 +100,12 @@ function Shift() {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wider font-bold text-muted-foreground">No Active Shift</p>
-                <p className="text-lg font-bold text-muted-foreground">Check in a cashier to begin</p>
+                <p className="text-lg font-bold text-muted-foreground">
+                  {isCashier ? "You have no active shift. Check in to begin." : "Check in a cashier to begin"}
+                </p>
               </div>
             </div>
-            <CheckInDialog onSuccess={refetch} />
+            <CheckInDialog onSuccess={refetch} currentUser={user} />
           </div>
         </Card>
       )}
@@ -106,8 +119,8 @@ function Shift() {
           <Button variant="outline" size="sm" onClick={refetch} className="gap-1.5">
             <RefreshCw className="h-3.5 w-3.5" />Refresh
           </Button>
-          <CheckInDialog onSuccess={refetch} />
-          <CheckOutDialog onSuccess={refetch} activeShifts={activeShifts} preSelected={null} onClose={() => {}} />
+          <CheckInDialog onSuccess={refetch} currentUser={user} />
+          <CheckOutDialog onSuccess={refetch} activeShifts={bannerShifts} preSelected={null} onClose={() => {}} />
         </div>
       </div>
 
@@ -174,7 +187,7 @@ function Shift() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {isOpen ? (
+                        {isOpen && (!isCashier || s.cashierId === user?.id) ? (
                           <Button
                             size="sm"
                             variant="outline"
@@ -207,7 +220,7 @@ function Shift() {
       {checkoutShift && (
         <CheckOutDialog
           onSuccess={() => { setCheckoutShift(null); refetch(); }}
-          activeShifts={activeShifts}
+          activeShifts={bannerShifts}
           preSelected={checkoutShift.id}
           onClose={() => setCheckoutShift(null)}
           autoOpen
@@ -218,13 +231,16 @@ function Shift() {
 }
 
 // ─── Check In dialog ──────────────────────────────────────────────────────────
-function CheckInDialog({ onSuccess }: { onSuccess: () => void }) {
+function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; currentUser: AuthUser | null }) {
+  const isCashierUser = currentUser?.role === "cashier";
+
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
-  const [cashierId, setCashierId] = useState("");
-  const [branchId, setBranchId] = useState("");
+  // Pre-fill and lock fields when the logged-in user is a cashier
+  const [cashierId, setCashierId] = useState(isCashierUser ? (currentUser?.id ?? "") : "");
+  const [branchId, setBranchId] = useState(isCashierUser ? (currentUser?.branchId ?? "") : "");
   const [terminalId, setTerminalId] = useState("");
   const [openingAmount, setOpeningAmount] = useState("500");
   const [submitting, setSubmitting] = useState(false);
@@ -232,14 +248,21 @@ function CheckInDialog({ onSuccess }: { onSuccess: () => void }) {
 
   useEffect(() => {
     if (!open) return;
-    Promise.all([api.getUsers(), api.getBranches(), api.getTerminals()])
-      .then(([u, b, t]) => {
-        setUsers(u.filter(u => u.status === "active"));
-        setBranches(b.filter(b => b.status === "active"));
-        setTerminals(t);
-      })
-      .catch(() => {});
-  }, [open]);
+    if (isCashierUser) {
+      // Cashier only needs terminals for their own branch
+      api.getTerminals({ branchId: currentUser?.branchId ?? undefined })
+        .then(t => setTerminals(t))
+        .catch(() => {});
+    } else {
+      Promise.all([api.getUsers(), api.getBranches(), api.getTerminals()])
+        .then(([u, b, t]) => {
+          setUsers(u.filter(u => u.status === "active"));
+          setBranches(b.filter(b => b.status === "active"));
+          setTerminals(t);
+        })
+        .catch(() => {});
+    }
+  }, [open, isCashierUser, currentUser?.branchId]);
 
   const branchTerminals = terminals.filter(t => t.branchId === branchId);
 
@@ -249,7 +272,8 @@ function CheckInDialog({ onSuccess }: { onSuccess: () => void }) {
     try {
       await api.openShift({ cashierId, branchId, terminalId: terminalId || undefined, openingAmount: parseFloat(openingAmount) || 0 });
       setOpen(false);
-      setCashierId(""); setBranchId(""); setTerminalId(""); setOpeningAmount("500");
+      if (!isCashierUser) { setCashierId(""); setBranchId(""); }
+      setTerminalId(""); setOpeningAmount("500");
       onSuccess();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to open shift.");
@@ -268,18 +292,26 @@ function CheckInDialog({ onSuccess }: { onSuccess: () => void }) {
         <div className="space-y-3">
           <div className="space-y-1">
             <Label className="text-xs">Cashier</Label>
-            <Select value={cashierId} onValueChange={setCashierId}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select cashier" /></SelectTrigger>
-              <SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}</SelectContent>
-            </Select>
+            {isCashierUser ? (
+              <Input className="h-9 bg-muted" value={currentUser?.name ?? "Me"} disabled />
+            ) : (
+              <Select value={cashierId} onValueChange={setCashierId}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select cashier" /></SelectTrigger>
+                <SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">Branch</Label>
-              <Select value={branchId} onValueChange={v => { setBranchId(v); setTerminalId(""); }}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Branch" /></SelectTrigger>
-                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-              </Select>
+              {isCashierUser ? (
+                <Input className="h-9 bg-muted" value={currentUser?.branch ?? "My Branch"} disabled />
+              ) : (
+                <Select value={branchId} onValueChange={v => { setBranchId(v); setTerminalId(""); }}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Branch" /></SelectTrigger>
+                  <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Terminal (optional)</Label>

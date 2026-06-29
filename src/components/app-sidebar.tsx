@@ -68,6 +68,8 @@ type NavItem = {
   // roles: fallback for items with no DB module (admin-only screens, POS terminal UI, etc.)
   // tenant_admin always sees everything regardless of both fields.
   roles?: AppRole[];
+  // blockRoles: hide from these roles even if the DB grants canView=true.
+  blockRoles?: AppRole[];
 };
 
 type NavGroup = { label: string; items: NavItem[] };
@@ -85,7 +87,7 @@ const navGroups: NavGroup[] = [
       { title: "Orders",              url: "/orders",        icon: ShoppingBag,    module: "Orders" },
       { title: "Customers",           url: "/customers",     icon: Users,          module: "Customers" },
       { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
-      { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts" },
+      { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
       { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower" },
     ],
   },
@@ -168,6 +170,8 @@ export function AppSidebar() {
   const canSee = (item: NavItem) => {
     // tenant_admin always sees everything regardless of permission map
     if (user?.role === "tenant_admin") return true;
+    // Explicit block overrides DB canView (e.g. finance_user on Cashier Shifts)
+    if (item.blockRoles?.includes(user?.role as AppRole)) return false;
     // Module-based items: check the live permission map
     if (item.module) return user?.permissions?.[item.module]?.canView === true;
     // Role-only items (no module)

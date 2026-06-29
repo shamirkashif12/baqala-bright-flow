@@ -76,6 +76,7 @@ if (app.Environment.IsDevelopment())
     await RenameRoles(db);
     await RenamePermissionModules(db);
     await DataSeeder.EnsurePermissionsAsync(db);
+    await DataSeeder.PatchPermissionsAsync(db);
     app.MapOpenApi();
 }
 

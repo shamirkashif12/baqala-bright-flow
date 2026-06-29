@@ -23,6 +23,7 @@ import {
   PurchaseOrder, StockTransfer,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/stocks")({ component: Stocks });
 
@@ -60,6 +61,7 @@ function StBadge({ status }: { status: string }) {
 // ─── Stock-In dialog ─────────────────────────────────────────────────────────
 
 function StockInDialog({ branches, products, suppliers, onDone }: { branches: Branch[]; products: Product[]; suppliers: Supplier[]; onDone: () => void }) {
+  const { canCreate } = usePermission("Stocks");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ productId: "", branchId: "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "" });
@@ -89,9 +91,11 @@ function StockInDialog({ branches, products, suppliers, onDone }: { branches: Br
 
   return (
     <>
-      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> Add Stock-In
-      </Button>
+      {canCreate && (
+        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+          <Plus className="h-4 w-4" /> Add Stock-In
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Add Stock-In</DialogTitle></DialogHeader>
@@ -152,6 +156,7 @@ function StockInDialog({ branches, products, suppliers, onDone }: { branches: Br
 
 function StockOutDialog({ branches, products, onDone }: { branches: Branch[]; products: Product[]; onDone: () => void }) {
   const { user } = useAuth();
+  const { canCreate } = usePermission("Stocks");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ productId: "", branchId: "", quantity: "", reason: "" });
@@ -172,9 +177,11 @@ function StockOutDialog({ branches, products, onDone }: { branches: Branch[]; pr
 
   return (
     <>
-      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> Add Stock-Out
-      </Button>
+      {canCreate && (
+        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+          <Plus className="h-4 w-4" /> Add Stock-Out
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Add Stock-Out</DialogTitle></DialogHeader>
@@ -271,6 +278,7 @@ function GrnReceiveDialog({ po, onDone }: { po: PurchaseOrder; onDone: () => voi
 
 function StoreDeliveryDialog({ branches, warehouses, products, onDone }: { branches: Branch[]; warehouses: Warehouse[]; products: Product[]; onDone: () => void }) {
   const { user } = useAuth();
+  const { canCreate } = usePermission("Stocks");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ sourceWarehouseId: "", destBranchId: "", notes: "", expectedDate: "" });
@@ -304,9 +312,11 @@ function StoreDeliveryDialog({ branches, warehouses, products, onDone }: { branc
 
   return (
     <>
-      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New Delivery
-      </Button>
+      {canCreate && (
+        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+          <Plus className="h-4 w-4" /> New Delivery
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>New Store Delivery</DialogTitle></DialogHeader>
@@ -363,6 +373,7 @@ function StoreDeliveryDialog({ branches, warehouses, products, onDone }: { branc
 
 function SupplierReturnDialog({ branches, suppliers, products, onDone }: { branches: Branch[]; suppliers: Supplier[]; products: Product[]; onDone: () => void }) {
   const { user } = useAuth();
+  const { canCreate } = usePermission("Stocks");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ sourceBranchId: "", destSupplierId: "", returnReason: "", notes: "" });
@@ -396,9 +407,11 @@ function SupplierReturnDialog({ branches, suppliers, products, onDone }: { branc
 
   return (
     <>
-      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> Create Return
-      </Button>
+      {canCreate && (
+        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+          <Plus className="h-4 w-4" /> Create Return
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Return to Supplier</DialogTitle></DialogHeader>
@@ -451,6 +464,7 @@ function SupplierReturnDialog({ branches, suppliers, products, onDone }: { branc
 
 function WastageDialog({ branches, products, onDone }: { branches: Branch[]; products: Product[]; onDone: () => void }) {
   const { user } = useAuth();
+  const { canCreate } = usePermission("Stocks");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ productId: "", branchId: "", quantity: "", reason: "" });
@@ -471,9 +485,11 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
 
   return (
     <>
-      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> Record Wastage
-      </Button>
+      {canCreate && (
+        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+          <Plus className="h-4 w-4" /> Record Wastage
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Record Wastage / Damage</DialogTitle></DialogHeader>
@@ -514,6 +530,9 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function Stocks() {
+  const { user } = useAuth();
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -533,12 +552,12 @@ function Stocks() {
 
   const [tab, setTab] = useState("overview");
   const [search, setSearch] = useState("");
-  const [overviewBranch, setOverviewBranch] = useState("all");
+  const [overviewBranch, setOverviewBranch] = useState(lockedBranchId ?? "all");
   const [categoryFilter, setCategoryFilter] = useState("all"); // stores category ID or "all"
   const [allCategoryOptions, setAllCategoryOptions] = useState<{ id: string; name: string }[]>([]);
 
   // Sub-tab filters — passed to BE when tab is active
-  const [siBranch, setSiBranch] = useState("all");
+  const [siBranch, setSiBranch] = useState(lockedBranchId ?? "all");
   const [siStatus, setSiStatus] = useState("all");
   const [grnStatus, setGrnStatus] = useState("all");
   const [dlStatus, setDlStatus] = useState("all");
@@ -660,6 +679,14 @@ function Stocks() {
     api.getExpiringBatches(undefined, 30).then(bt => setExpiringSoonCount(bt?.length ?? 0)).catch(() => {});
   }, []);
 
+  // Sync branch filters when user loads (auth hydration after mount)
+  useEffect(() => {
+    if (lockedBranchId) {
+      setOverviewBranch(lockedBranchId);
+      setSiBranch(lockedBranchId);
+    }
+  }, [lockedBranchId]);
+
   // Lazy-load products/suppliers/warehouses only when a form dialog is first opened
   const metadataLoaded = products.length > 0 || suppliers.length > 0 || warehouses.length > 0;
   function ensureDialogMetadata() {
@@ -768,13 +795,15 @@ function Stocks() {
             <CardHeader className="pb-2 flex flex-row items-center gap-2 justify-between flex-wrap">
               <CardTitle className="text-base">Stock Overview</CardTitle>
               <div className="flex items-center gap-2 flex-wrap">
-                <Select value={overviewBranch} onValueChange={setOverviewBranch}>
-                  <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Branches</SelectItem>
-                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {!lockedBranchId && (
+                  <Select value={overviewBranch} onValueChange={setOverviewBranch}>
+                    <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Branches</SelectItem>
+                      {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                   <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Categories" /></SelectTrigger>
                   <SelectContent>
@@ -835,13 +864,15 @@ function Stocks() {
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Stock-In Records</CardTitle>
               <div className="flex items-center gap-2 flex-wrap">
-                <Select value={siBranch} onValueChange={setSiBranch}>
-                  <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Branch" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Branches</SelectItem>
-                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {!lockedBranchId && (
+                  <Select value={siBranch} onValueChange={setSiBranch}>
+                    <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Branch" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Branches</SelectItem>
+                      {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
                 <Select value={siStatus} onValueChange={setSiStatus}>
                   <SelectTrigger className="h-8 w-32"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>

@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusBadge } from "@/components/module-placeholder";
 import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut } from "lucide-react";
 import { api, type Terminal, type Branch, type User, type CashierShift } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/terminals")({ component: Terminals });
 
@@ -178,6 +180,10 @@ const LOG_COLOR: Record<SyncLogEntry["type"], string> = {
 };
 
 function Terminals() {
+  const { user } = useAuth();
+  const { canCreate, canEdit } = usePermission("Terminals");
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [allTerminals, setAllTerminals] = useState<Terminal[]>([]); // unfiltered — for Session Logs dropdown
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -195,8 +201,13 @@ function Terminals() {
   const [slDateFrom, setSlDateFrom] = useState("");
   const [slDateTo, setSlDateTo] = useState("");
   const [q, setQ] = useState("");
-  const [br, setBr] = useState("all");
+  const [br, setBr] = useState(lockedBranchId ?? "all");
   const [st, setSt] = useState("all");
+
+  // Sync if user loads after mount
+  useEffect(() => {
+    if (lockedBranchId) setBr(lockedBranchId);
+  }, [lockedBranchId]);
   const [syncFrom, setSyncFrom] = useState("");
   const [syncTo, setSyncTo] = useState("");
   const [viewTerm, setViewTerm] = useState<Terminal | null>(null);
@@ -291,7 +302,7 @@ function Terminals() {
             </TabsTrigger>
           </TabsList>
           <div className="flex-1" />
-          {mainTab === "terminals" && (
+          {mainTab === "terminals" && canCreate && (
             <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
               <Plus className="h-4 w-4" /> Add Terminal
             </Button>
@@ -302,13 +313,15 @@ function Terminals() {
         <TabsContent value="terminals" className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search code or name…" className="h-9 w-48 flex-shrink-0" />
-            <Select value={br} onValueChange={setBr}>
-              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {!lockedBranchId && (
+              <Select value={br} onValueChange={setBr}>
+                <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
             <Select value={st} onValueChange={setSt}>
               <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
@@ -391,7 +404,7 @@ function Terminals() {
                         <td className="px-3 py-3">
                           <div className="flex gap-1 justify-end">
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTerm(t)}><Eye className="h-3.5 w-3.5" /></Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>
+                            {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>}
                             {t.status === "active" && (
                               <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => handleDeactivate(t)}><X className="h-3.5 w-3.5" /></Button>
                             )}

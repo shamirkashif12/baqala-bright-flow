@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
+import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/inventory")({ component: Inventory });
 
@@ -667,6 +669,10 @@ function exportCSV(data: StockItem[]) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 function Inventory() {
+  const { user } = useAuth();
+  const { canCreate, canEdit } = usePermission("Inventory");
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
   const [stock, setStock] = useState<StockItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -675,7 +681,7 @@ function Inventory() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
 
@@ -687,7 +693,7 @@ function Inventory() {
 
   const load = () => {
     setLoading(true);
-    Promise.all([api.getStock(), api.getCategories(), api.getBranches(), api.getWarehouses()])
+    Promise.all([api.getStock({ branchId: lockedBranchId ?? undefined }), api.getCategories(), api.getBranches(), api.getWarehouses()])
       .then(([s, c, b, w]) => {
         // Build warehouse map: branchId -> warehouse name (primary or first)
         const whMap = new Map<string, string>();
@@ -723,7 +729,11 @@ function Inventory() {
       })
       .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [lockedBranchId]);
+  useEffect(() => {
+    if (lockedBranchId) setBranchFilter(lockedBranchId);
+  }, [lockedBranchId]);
 
   // Lazy-load suppliers only when the Receive Batch dialog is first opened
   useEffect(() => {
@@ -758,12 +768,16 @@ function Inventory() {
       subtitle="Catalog · stock · VAT · custom fees"
       actions={
         <div className="flex gap-2">
-          <Button variant="outline" className="h-9 gap-1.5" onClick={() => setBatchOpen(true)}>
-            <Package className="h-4 w-4" />Receive Batch
-          </Button>
-          <Button className="gradient-primary text-primary-foreground border-0 shadow-glow h-9 gap-1.5" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" />Add Product
-          </Button>
+          {canCreate && (
+            <Button variant="outline" className="h-9 gap-1.5" onClick={() => setBatchOpen(true)}>
+              <Package className="h-4 w-4" />Receive Batch
+            </Button>
+          )}
+          {canCreate && (
+            <Button className="gradient-primary text-primary-foreground border-0 shadow-glow h-9 gap-1.5" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4" />Add Product
+            </Button>
+          )}
         </div>
       }
     >
@@ -858,13 +872,15 @@ function Inventory() {
             {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={branchFilter} onValueChange={setBranchFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {!lockedBranchId && (
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
           <Input type="date" className="h-9 w-36" value={expiryFrom} onChange={e => setExpiryFrom(e.target.value)} title="Expiry from" />
@@ -927,8 +943,8 @@ function Inventory() {
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-1">
                         <Button size="icon" variant="ghost" className="h-7 w-7" title="View" onClick={() => setViewItem(s)}><Eye className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={() => setEditItem(s)}><Pencil className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" title="Adjust stock" onClick={() => setAdjustItem(s)}><LayoutGrid className="h-3.5 w-3.5" /></Button>
+                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={() => setEditItem(s)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" title="Adjust stock" onClick={() => setAdjustItem(s)}><LayoutGrid className="h-3.5 w-3.5" /></Button>}
                       </div>
                     </td>
                   </tr>

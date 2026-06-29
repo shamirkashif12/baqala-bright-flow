@@ -24,6 +24,7 @@ import {
   type PurchaseOrder, type StockTransfer,
 } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/warehouses")({ component: Warehouses });
 
@@ -181,6 +182,7 @@ function WarehouseProfileDrawer({
 }: {
   warehouse: WarehouseType | null; onClose: () => void; onEdit: (w: WarehouseType) => void;
 }) {
+  const { canEdit } = usePermission("Warehouses");
   const [stock, setStock] = useState<WarehouseStock[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -225,9 +227,11 @@ function WarehouseProfileDrawer({
                   <Badge variant="outline" className={warehouse.status === "active" ? "bg-success/15 text-success border-success/30 text-xs" : "bg-muted text-muted-foreground text-xs"}>
                     {warehouse.status}
                   </Badge>
-                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onEdit(warehouse)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
+                  {canEdit && (
+                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onEdit(warehouse)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </SheetHeader>
@@ -469,6 +473,7 @@ function WarehouseProfileDrawer({
 // ─── Warehouse Management Tab ─────────────────────────────────────────────────
 
 function WarehouseManagement() {
+  const { canCreate, canEdit } = usePermission("Warehouses");
   const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -516,9 +521,11 @@ function WarehouseManagement() {
           </SelectContent>
         </Select>
         <div className="flex-1" />
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4 mr-1.5" /> New Warehouse
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4 mr-1.5" /> New Warehouse
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -572,9 +579,11 @@ function WarehouseManagement() {
                   <Button size="sm" variant="ghost" className="h-7 text-xs px-2 gap-1" onClick={() => setProfileTarget(w)}>
                     <Eye className="h-3.5 w-3.5" /> View
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs px-2 gap-1" onClick={() => { setEditTarget(w); setCreateOpen(true); }}>
-                    <Pencil className="h-3.5 w-3.5" /> Edit
-                  </Button>
+                  {canEdit && (
+                    <Button size="sm" variant="ghost" className="h-7 text-xs px-2 gap-1" onClick={() => { setEditTarget(w); setCreateOpen(true); }}>
+                      <Pencil className="h-3.5 w-3.5" /> Edit
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

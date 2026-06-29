@@ -14,6 +14,8 @@ import { StatusBadge } from "@/components/module-placeholder";
 import { Plus, Receipt, Tags, CheckCircle, XCircle, X, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Expense, type ExpenseType, type Branch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/expenses")({ component: Expenses });
@@ -35,12 +37,16 @@ const emptyForm: ExpenseForm = {
 };
 
 function EntriesTab() {
+  const { user } = useAuth();
+  const { canCreate, canEdit, canDelete, canApprove } = usePermission("Accounting & Finance");
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [expenseTypes, setExpenseTypes] = useState<ExpenseType[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [methodFilter, setMethodFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -52,10 +58,13 @@ function EntriesTab() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    Promise.all([api.getExpenseTypes(), api.getBranches()])
-      .then(([t, b]) => { setExpenseTypes(t); setBranches(b); })
-      .catch(() => {});
-  }, []);
+    if (lockedBranchId) setBranchFilter(lockedBranchId);
+  }, [lockedBranchId]);
+
+  useEffect(() => {
+    api.getExpenseTypes().then(setExpenseTypes).catch(() => {});
+    if (!lockedBranchId) api.getBranches().then(setBranches).catch(() => {});
+  }, [lockedBranchId]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -144,13 +153,15 @@ function EntriesTab() {
       {/* ─── Toolbar ─── */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search ref or description…" className="h-9 w-52 flex-shrink-0" />
-        <Select value={branchFilter} onValueChange={setBranchFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {!lockedBranchId && (
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Types" /></SelectTrigger>
           <SelectContent>
@@ -176,9 +187,11 @@ function EntriesTab() {
           )}
         </div>
         <div className="flex-1" />
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openAdd}>
-          <Plus className="h-4 w-4" /> Add Expense
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openAdd}>
+            <Plus className="h-4 w-4" /> Add Expense
+          </Button>
+        )}
       </div>
 
       {/* ─── Table ─── */}
@@ -218,7 +231,7 @@ function EntriesTab() {
                     <td className="px-3 py-3"><StatusBadge status={e.status} /></td>
                     <td className="px-3 py-3">
                       <div className="flex gap-1 justify-end">
-                        {e.status === "pending" && (
+                        {canApprove && e.status === "pending" && (
                           <>
                             <Button size="icon" variant="ghost" className="h-7 w-7 text-success" title="Approve" onClick={() => handleApprove(e.id, true)}>
                               <CheckCircle className="h-3.5 w-3.5" />
@@ -228,12 +241,16 @@ function EntriesTab() {
                             </Button>
                           </>
                         )}
-                        <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={() => openEdit(e)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Delete" onClick={() => setDelId(e.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canEdit && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={() => openEdit(e)}>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Delete" onClick={() => setDelId(e.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -322,6 +339,7 @@ type TypeForm = { name: string; nameAr: string; description: string; isActive: b
 const emptyTypeForm: TypeForm = { name: "", nameAr: "", description: "", isActive: true };
 
 function TypesTab() {
+  const { canCreate, canEdit, canDelete } = usePermission("Accounting & Finance");
   const [types, setTypes] = useState<ExpenseType[]>([]);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -372,9 +390,11 @@ function TypesTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{types.filter(t => t.isActive).length} active types</p>
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openAdd}>
-          <Plus className="h-4 w-4" /> Add Type
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openAdd}>
+            <Plus className="h-4 w-4" /> Add Type
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -405,10 +425,12 @@ function TypesTab() {
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex gap-1 justify-end">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" disabled={deleting === t.id} onClick={() => handleDelete(t.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" disabled={deleting === t.id} onClick={() => handleDelete(t.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>

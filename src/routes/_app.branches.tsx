@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Building2, MapPin, Phone, Plus, Search, Pencil, Trash2, ShoppingBag, Terminal } from "lucide-react";
 import { api, type Branch } from "@/lib/api";
 import { toast } from "sonner";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/branches")({ component: Branches });
 
@@ -41,6 +42,7 @@ function StatusBadge({ status }: { status: string }) {
 function ViewSheet({ branch, stats, onClose, onEdit }: {
   branch: Branch | null; stats?: BranchStats; onClose: () => void; onEdit: () => void;
 }) {
+  const { canEdit } = usePermission("Branches");
   if (!branch) return null;
   return (
     <Sheet open={!!branch} onOpenChange={v => !v && onClose()}>
@@ -89,9 +91,11 @@ function ViewSheet({ branch, stats, onClose, onEdit }: {
           ))}
         </div>
 
-        <Button className="w-full mt-5 gradient-primary text-primary-foreground border-0 gap-2" onClick={() => { onClose(); onEdit(); }}>
-          <Pencil className="h-4 w-4" /> Edit Branch
-        </Button>
+        {canEdit && (
+          <Button className="w-full mt-5 gradient-primary text-primary-foreground border-0 gap-2" onClick={() => { onClose(); onEdit(); }}>
+            <Pencil className="h-4 w-4" /> Edit Branch
+          </Button>
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -185,6 +189,7 @@ function BranchDialog({ open, branch, onClose, onDone }: {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 function Branches() {
+  const { canCreate, canEdit, canDelete } = usePermission("Branches");
   const [branches, setBranches] = useState<Branch[]>([]);
   const [stats, setStats] = useState<Record<string, BranchStats>>({});
   const [loading, setLoading] = useState(true);
@@ -235,9 +240,11 @@ function Branches() {
       title="Branches"
       subtitle="Multi-location management across the Kingdom"
       actions={
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" /> New Branch
-        </Button>
+        canCreate ? (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" /> New Branch
+          </Button>
+        ) : undefined
       }
     >
       {/* Summary strip */}
@@ -340,17 +347,21 @@ function Branches() {
                     <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Created</p>
                     <p className="text-xs font-medium">{new Date(b.createdAt).toLocaleDateString("en-SA")}</p>
                   </div>
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                    onClick={() => handleDelete(b)}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {canDelete && (
+                    <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                      onClick={() => handleDelete(b)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
 
                 {/* Actions */}
                 <div className="flex gap-2 mt-3">
                   <Button variant="outline" size="sm" className="flex-1" onClick={() => setViewBranch(b)}>View</Button>
-                  <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0"
-                    onClick={() => setEditBranch(b)}>Manage</Button>
+                  {canEdit && (
+                    <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0"
+                      onClick={() => setEditBranch(b)}>Manage</Button>
+                  )}
                 </div>
               </Card>
             );

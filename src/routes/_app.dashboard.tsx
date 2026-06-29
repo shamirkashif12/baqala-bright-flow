@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { api, type DashboardMetrics, type CashierShift, type Branch, type InventoryStock, type Terminal } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
+import { useAuth } from "@/lib/auth";
 import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowRight,
@@ -260,8 +261,15 @@ function CustomizeDialog({
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 function Dashboard() {
+  const { user } = useAuth();
+  // Only tenant_admin sees cross-branch data and has the branch selector
+  const isAdmin = user?.role === "tenant_admin";
+  // For non-admins, lock to their assigned branch
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+
   const [period, setPeriod] = useState<(typeof periods)[number]>("Daily");
-  const [branch, setBranch] = useState("all");
+  // Non-admin users locked to their assigned branch; admins start with "all"
+  const [branch, setBranch] = useState(lockedBranchId ?? "all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -293,9 +301,15 @@ function Dashboard() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([...ids]));
   };
 
+  // Sync branch when user loads after mount (auth hydration timing)
   useEffect(() => {
-    api.getBranches("active").then(setBranches).catch(() => {});
-  }, []);
+    if (lockedBranchId) setBranch(lockedBranchId);
+  }, [lockedBranchId]);
+
+  useEffect(() => {
+    // Only admins need the full branch list for the selector
+    if (isAdmin) api.getBranches("active").then(setBranches).catch(() => {});
+  }, [isAdmin]);
 
   useEffect(() => {
     setLoading(true);
@@ -335,7 +349,7 @@ function Dashboard() {
   useEffect(() => {
     if (activeTab !== "terminals" || terminalTabLoaded) return;
     setTerminalTabLoading(true);
-    api.getTerminals(branch !== "all" ? branch : undefined)
+    api.getTerminals({ branchId: branch !== "all" ? branch : undefined })
       .then(items => { setTerminalItems(items); setTerminalTabLoaded(true); })
       .catch(() => {})
       .finally(() => setTerminalTabLoading(false));
@@ -359,13 +373,23 @@ function Dashboard() {
       {/* Filter bar */}
       <Card className="p-3 border-border/60 shadow-card">
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={branch} onValueChange={setBranch}>
-            <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          {isAdmin ? (
+            <Select value={branch} onValueChange={setBranch}>
+              <SelectTrigger className="h-9 w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map(b => (
+                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Badge variant="outline" className="h-9 px-3 text-xs font-medium">
+              {user?.branch?.split(" — ").at(-1) ?? "My Branch"}
+            </Badge>
+          )}
 
           <div className="flex flex-wrap gap-1">
             {periods.map((f) => (

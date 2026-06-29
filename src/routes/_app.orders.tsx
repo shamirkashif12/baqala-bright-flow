@@ -16,6 +16,8 @@ import {
   CheckCircle2, XCircle, Clock, Truck, AlertCircle, X, RotateCcw,
 } from "lucide-react";
 import { api, type Order, type Branch, type CustomerReturnItem } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/orders")({ component: Orders });
@@ -358,6 +360,7 @@ function RefundDialog({ order, open, onClose, onDone }: {
 function OrderDetail({ orderId, onStatusChanged }: {
   orderId: string; onStatusChanged: () => void;
 }) {
+  const { canEdit, canApprove } = usePermission("Orders");
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -373,6 +376,7 @@ function OrderDetail({ orderId, onStatusChanged }: {
   const saveStatus = async () => {
     if (!order) return;
     if (newStatus === "refunded") {
+      if (!canApprove) return;
       setShowRefundDialog(true);
       return;
     }
@@ -526,9 +530,11 @@ function OrderDetail({ orderId, onStatusChanged }: {
         ) : (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">{statusIcon(order.orderStatus)}<span className="capitalize text-sm">{order.orderStatus.replace(/_/g, " ")}</span></div>
-            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setEditing(true)}>
-              <Pencil className="h-3.5 w-3.5" /> Change
-            </Button>
+            {canEdit && (
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setEditing(true)}>
+                <Pencil className="h-3.5 w-3.5" /> Change
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -552,19 +558,27 @@ function OrderDetail({ orderId, onStatusChanged }: {
 
 // ─── POS Tab ──────────────────────────────────────────────────────────────────
 function POSTab() {
+  const { user } = useAuth();
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [stFilter, setStFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Sync if user loads after mount (auth hydration)
   useEffect(() => {
-    api.getBranches("active").then(setBranches).catch(() => {});
-  }, []);
+    if (lockedBranchId) setBranchId(lockedBranchId);
+  }, [lockedBranchId]);
+
+  useEffect(() => {
+    if (!lockedBranchId) api.getBranches("active").then(setBranches).catch(() => {});
+  }, [lockedBranchId]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -609,13 +623,15 @@ function POSTab() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search order number, branch, cashier…" className="h-9 w-64 flex-shrink-0" />
-        <Select value={branchId} onValueChange={setBranchId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {!lockedBranchId && (
+          <Select value={branchId} onValueChange={setBranchId}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={stFilter} onValueChange={setStFilter}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Statuses" /></SelectTrigger>
           <SelectContent>

@@ -61,7 +61,7 @@ function BranchDetail() {
   useEffect(() => {
     Promise.all([
       api.getBranches(),
-      api.getTerminals(branchId),
+      api.getTerminals({ branchId }),
       api.getUsers({ branchId }),
     ])
       .then(([branches, terms, staff]) => {

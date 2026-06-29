@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X } from "lucide-react";
 import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/purchase-orders")({ component: PurchaseOrders });
@@ -721,6 +722,7 @@ function ViewPOSheet({ open, onClose, po, onRefresh }: {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 function PurchaseOrders() {
+  const { canCreate, canApprove, canDelete } = usePermission("Purchase Orders");
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -792,11 +794,11 @@ function PurchaseOrders() {
     <PageShell
       title="Purchase Orders"
       subtitle="Accounting & Finance · PO does not increase inventory until Goods Receiving"
-      actions={
+      actions={canCreate ? (
         <Button className="gradient-primary text-primary-foreground border-0 shadow-glow h-9 gap-1.5" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" />New Purchase Order
         </Button>
-      }
+      ) : undefined}
     >
       {/* Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -875,17 +877,17 @@ function PurchaseOrders() {
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setViewPO(po)} title="View"><Eye className="h-3.5 w-3.5" /></Button>
-                            {po.status === "draft" && (
+                            {po.status === "draft" && canApprove && (
                               <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleSend(po)} disabled={isSending}>
                                 {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}Send
                               </Button>
                             )}
-                            {(po.status === "sent" || po.status === "partial_received") && (
+                            {(po.status === "sent" || po.status === "partial_received") && canApprove && (
                               <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setReceiveTarget(po)}>
                                 <Package className="h-3 w-3" />{po.status === "partial_received" ? "More" : "Receive"}
                               </Button>
                             )}
-                            {po.status !== "cancelled" && po.status !== "fully_received" && (
+                            {po.status !== "cancelled" && po.status !== "fully_received" && canDelete && (
                               <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleCancel(po)} disabled={isCancelling}>
                                 {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : null}Cancel
                               </Button>

@@ -12,6 +12,7 @@ const authStore: AuthState = {
   logout: () => {},
   hasRole: () => false,
   canViewModule: () => true,
+  refreshPermissions: async () => {},
 };
 
 export const getRouter = () => {

@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { toast } from "sonner";
 import { api, type Coupon, type Discount, type Offer, type Product, type Branch } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
+import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/coupons")({ component: Coupons });
 
@@ -104,6 +105,7 @@ type CouponForm = { name: string; code: string; type: string; value: string; sta
 const emptyCoupon: CouponForm = { name: "", code: "", type: "percentage", value: "", startDate: today, endDate: nextMonth, usageLimit: "", status: "active" };
 
 function CouponsTab() {
+  const { canCreate, canEdit, canDelete } = usePermission("Coupons");
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -148,9 +150,11 @@ function CouponsTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>
-          <Plus className="h-4 w-4" /> New Coupon
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>
+            <Plus className="h-4 w-4" /> New Coupon
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -195,9 +199,9 @@ function CouponsTab() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 justify-end">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(c)}><Pencil className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className={`h-7 w-7 ${c.status === "active" ? "text-destructive" : "text-success"}`} onClick={() => toggleStatus(c)}><Power className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(c)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(c)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                        {canEdit && <Button size="icon" variant="ghost" className={`h-7 w-7 ${c.status === "active" ? "text-destructive" : "text-success"}`} onClick={() => toggleStatus(c)}><Power className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(c)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                       </div>
                     </td>
                   </tr>
@@ -266,6 +270,7 @@ const emptyDiscount: DiscountForm = {
 };
 
 function DiscountsTab() {
+  const { canCreate, canEdit, canDelete } = usePermission("Coupons");
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -339,9 +344,11 @@ function DiscountsTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>
-          <Plus className="h-4 w-4" /> New Discount
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>
+            <Plus className="h-4 w-4" /> New Discount
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -378,9 +385,9 @@ function DiscountsTab() {
                     <td className="px-4 py-3"><StatusDot active={d.isActive} /></td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 justify-end">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(d)}><Pencil className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className={`h-7 w-7 ${d.isActive ? "text-destructive" : "text-success"}`} onClick={async () => { await api.toggleDiscount(d.id); load(); }}><Power className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(d)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(d)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                        {canEdit && <Button size="icon" variant="ghost" className={`h-7 w-7 ${d.isActive ? "text-destructive" : "text-success"}`} onClick={async () => { await api.toggleDiscount(d.id); load(); }}><Power className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(d)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                       </div>
                     </td>
                   </tr>
@@ -484,6 +491,7 @@ const emptyOffer: OfferForm = {
 };
 
 function OffersTab() {
+  const { canCreate, canEdit, canDelete } = usePermission("Coupons");
   const [offers, setOffers] = useState<Offer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -602,9 +610,11 @@ function OffersTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>
-          <Plus className="h-4 w-4" /> New Offer
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>
+            <Plus className="h-4 w-4" /> New Offer
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -649,9 +659,9 @@ function OffersTab() {
                     <td className="px-4 py-3"><StatusDot active={o.isActive} /></td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 justify-end">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(o)}><Pencil className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className={`h-7 w-7 ${o.isActive ? "text-destructive" : "text-success"}`} onClick={async () => { await api.toggleOffer(o.id); load(); }}><Power className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(o)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(o)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                        {canEdit && <Button size="icon" variant="ghost" className={`h-7 w-7 ${o.isActive ? "text-destructive" : "text-success"}`} onClick={async () => { await api.toggleOffer(o.id); load(); }}><Power className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(o)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                       </div>
                     </td>
                   </tr>

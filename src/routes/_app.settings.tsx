@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
-import { RoleGate } from "@/components/role-gate";
+import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,9 +17,9 @@ import { useBranch } from "@/lib/branch-context";
 
 export const Route = createFileRoute("/_app/settings")({
   component: () => (
-    <RoleGate allow={["tenant_admin", "branch_manager"]}>
+    <ModuleGate module="Settings">
       <Settings />
-    </RoleGate>
+    </ModuleGate>
   ),
 });
 

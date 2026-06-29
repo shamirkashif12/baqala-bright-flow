@@ -36,6 +36,7 @@ export interface AuthUser {
   email: string;
   role: AppRole;
   roleId: string;
+  branchId: string | null;
   branch: string;
   initials: string;
   permissions: Record<string, RolePermFlags>;
@@ -49,6 +50,7 @@ export interface AuthState {
   loading: boolean;
   hasRole: (role: AppRole | AppRole[]) => boolean;
   canViewModule: (module: string) => boolean;
+  refreshPermissions: () => Promise<void>;
 }
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
@@ -119,6 +121,7 @@ function buildUser(claims: JwtClaims): AuthUser {
     email:       claims.email,
     role:        claims.role as AppRole,
     roleId:      claims.roleId ?? "",
+    branchId:    claims.branchId ?? null,
     branch:      claims.branchName || "Riyadh — Olaya Branch",
     initials,
     permissions: {},
@@ -219,6 +222,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshPermissions = useCallback(async () => {
+    setAuthUser(current => {
+      if (!current) return current;
+      fetchPermissions(current.roleId, current.id).then(perms => {
+        setAuthUser(u => u ? { ...u, permissions: perms } : null);
+      });
+      return current;
+    });
+  }, []);
+
+  // Auto-refresh permissions when the tab regains focus (handles admin changing perms in another tab)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        setAuthUser(current => {
+          if (!current) return current;
+          fetchPermissions(current.roleId, current.id).then(perms => {
+            setAuthUser(u => u ? { ...u, permissions: perms } : null);
+          });
+          return current;
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
   const logout = useCallback(() => {
     clearSession();
     setAuthUser(null);
@@ -243,7 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout, loading, hasRole, canViewModule }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout, loading, hasRole, canViewModule, refreshPermissions }}>
       {children}
     </AuthContext.Provider>
   );

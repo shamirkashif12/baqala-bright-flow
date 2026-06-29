@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RoleGate } from "@/components/role-gate";
+import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,9 +17,9 @@ import { api, type AuditLog, type User } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/audit-logs")({
   component: () => (
-    <RoleGate allow={["tenant_admin", "branch_manager"]}>
+    <ModuleGate module="Audit Logs">
       <AuditLogs />
-    </RoleGate>
+    </ModuleGate>
   ),
 });
 
