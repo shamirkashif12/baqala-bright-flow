@@ -77,6 +77,9 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     // Audit
     public DbSet<AuditLog> AuditLogs { get; set; }
 
+    // Generic key-value settings per branch
+    public DbSet<TenantSetting> TenantSettings { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -109,6 +112,9 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
         modelBuilder.Entity<PosSettings>()
             .HasIndex(p => p.BranchId).IsUnique();
+
+        modelBuilder.Entity<TenantSetting>()
+            .HasIndex(t => new { t.BranchId, t.SettingKey }).IsUnique();
 
         // ─── Self-referential: Category ───────────────────────────────────────
         modelBuilder.Entity<Category>()

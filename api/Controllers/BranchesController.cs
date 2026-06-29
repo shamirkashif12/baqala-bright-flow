@@ -1,5 +1,6 @@
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,7 +8,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class BranchesController(BaqalaDbContext db) : ControllerBase
+public class BranchesController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status)
@@ -30,7 +31,6 @@ public class BranchesController(BaqalaDbContext db) : ControllerBase
         branch.Id = Guid.NewGuid();
         branch.CreatedAt = branch.UpdatedAt = DateTime.UtcNow;
 
-        // Auto-generate branch code: BR-001, BR-002, …
         var lastCode = await db.Branches
             .Where(b => b.BranchCode != null && b.BranchCode.StartsWith("BR-"))
             .OrderByDescending(b => b.BranchCode)
@@ -42,6 +42,14 @@ public class BranchesController(BaqalaDbContext db) : ControllerBase
 
         db.Branches.Add(branch);
         await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "Branch created",
+            entityType: "Branch",
+            entityId: branch.Id,
+            branchId: branch.Id,
+            details: $"{branch.Name} ({branch.BranchCode}) · {branch.City}");
+
         return CreatedAtAction(nameof(GetById), new { id = branch.Id }, branch);
     }
 
@@ -55,9 +63,19 @@ public class BranchesController(BaqalaDbContext db) : ControllerBase
         branch.Address = updated.Address;
         branch.City = updated.City;
         branch.ContactNumber = updated.ContactNumber;
+        branch.CommercialRegistration = updated.CommercialRegistration;
+        branch.Email = updated.Email;
         branch.Status = updated.Status;
         branch.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "Branch updated",
+            entityType: "Branch",
+            entityId: branch.Id,
+            branchId: branch.Id,
+            details: $"{branch.Name} · status: {branch.Status}");
+
         return Ok(branch);
     }
 
@@ -69,6 +87,14 @@ public class BranchesController(BaqalaDbContext db) : ControllerBase
         branch.Status = "disabled";
         branch.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "Branch disabled",
+            entityType: "Branch",
+            entityId: branch.Id,
+            branchId: branch.Id,
+            details: $"{branch.Name} disabled");
+
         return NoContent();
     }
 }

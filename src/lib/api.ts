@@ -306,6 +306,26 @@ export const api = {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<{ total: number; items: AuditLog[] }>(`/api/auditlogs${q ? `?${q}` : ""}`);
   },
+  createAuditLog: (data: { action: string; entityType?: string; userId?: string; branchId?: string; details?: string }) =>
+    request<AuditLog>("/api/auditlogs", { method: "POST", body: JSON.stringify({
+      action: data.action,
+      entityType: data.entityType ?? null,
+      userId: data.userId ?? null,
+      branchId: data.branchId ?? null,
+      newValues: data.details ?? null,
+    }) }),
+
+  // POS Settings
+  getPosSettings: (branchId: string) =>
+    request<PosSettingsRecord>(`/api/settings/pos/${branchId}`),
+  updatePosSettings: (branchId: string, data: Partial<PosSettingsRecord>) =>
+    request<PosSettingsRecord>(`/api/settings/pos/${branchId}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  // Tenant key-value settings
+  getTenantSettings: (branchId: string) =>
+    request<Record<string, string | null>>(`/api/settings/tenant/${branchId}`),
+  updateTenantSettings: (branchId: string, data: Record<string, string | null>) =>
+    request<void>(`/api/settings/tenant/${branchId}`, { method: "PUT", body: JSON.stringify(data) }),
 
   // Attendance
   getAttendance: (params?: { branchId?: string }) => {
@@ -398,8 +418,9 @@ export const api = {
 
 export interface Branch {
   id: string; branchCode: string; name: string; nameAr?: string;
-  address?: string; city?: string; contactNumber?: string; status: string;
-  createdAt: string;
+  address?: string; city?: string; contactNumber?: string;
+  commercialRegistration?: string; email?: string;
+  status: string; createdAt: string;
 }
 
 export interface Role {
@@ -622,7 +643,41 @@ export interface StaffAttendance {
 
 export interface AuditLog {
   id: string; userId?: string; action: string; entityType?: string;
-  entityId?: string; createdAt: string; details?: string;
+  entityId?: string; createdAt: string;
+  details?: string;   // legacy alias
+  newValues?: string; // backend field — contains human-readable details
+  branchId?: string;
+}
+
+export interface PosSettingsRecord {
+  id?: string; branchId: string;
+  // Cashier tab
+  requireShiftOpen: boolean;
+  requireOpeningCashCount: boolean;
+  autoLockIdle: boolean;
+  allowCustomerViewPaidShifts: boolean;
+  // Terminal tab
+  allowTerminalSwitching: boolean;
+  preserveHeldOrders: boolean;
+  offlineModeEnabled: boolean;
+  // Invoice tab
+  autoPrintReceipt: boolean;
+  sendSmsInvoice: boolean;
+  // Permissions tab
+  cashierCanDiscount: boolean;
+  cashierCanCoupon: boolean;
+  cashierCanRefund: boolean;
+  cashierCanHoldOrder: boolean;
+  cashierCanEditOrder: boolean;
+  requireReasonForVoid: boolean;
+  requireManagerApprovalForRefund: boolean;
+  allowNegativeStock: boolean;
+  // Scan tab
+  beepOnScan: boolean;
+  warnNearExpiry: boolean;
+  allowNearExpirySale: boolean;
+  blockExpiredItems: boolean;
+  blockNonpermissibleItems: boolean;
 }
 
 export interface ComplianceRule {

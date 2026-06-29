@@ -1,22 +1,78 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
-import { ShieldCheck, Ban, AlertTriangle, Lock } from "lucide-react";
+import { ShieldCheck, Ban, AlertTriangle, Lock, Loader2 } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
-import { useEffect, useState } from "react";
-import { api, type TaxFeeRule } from "@/lib/api";
+import { api, type TaxFeeRule, type PosSettingsRecord } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
+import { useBranch } from "@/lib/branch-context";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/compliance")({ component: Compliance });
 
+interface Toggles {
+  blockExpiredItems: boolean;
+  warnNearExpiry: boolean;
+  requireManagerApprovalForRefund: boolean;
+  blockNonpermissibleItems: boolean;
+}
+
+const TOGGLE_DEFAULTS: Toggles = {
+  blockExpiredItems: true,
+  warnNearExpiry: true,
+  requireManagerApprovalForRefund: true,
+  blockNonpermissibleItems: true,
+};
+
 function Compliance() {
+  const { selectedBranch } = useBranch();
   const [rules, setRules] = useState<TaxFeeRule[]>([]);
+  const [toggles, setToggles] = useState<Toggles>(TOGGLE_DEFAULTS);
+  const [settingsId, setSettingsId] = useState<string | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api.getTaxRules().then(setRules).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!selectedBranch?.id) return;
+    setLoading(true);
+    api.getPosSettings(selectedBranch.id)
+      .then((data: PosSettingsRecord) => {
+        setSettingsId(data.id);
+        setToggles({
+          blockExpiredItems:               data.blockExpiredItems              ?? TOGGLE_DEFAULTS.blockExpiredItems,
+          warnNearExpiry:                  data.warnNearExpiry                 ?? TOGGLE_DEFAULTS.warnNearExpiry,
+          requireManagerApprovalForRefund: data.requireManagerApprovalForRefund ?? TOGGLE_DEFAULTS.requireManagerApprovalForRefund,
+          blockNonpermissibleItems:        data.blockNonpermissibleItems        ?? TOGGLE_DEFAULTS.blockNonpermissibleItems,
+        });
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [selectedBranch?.id]);
+
+  function toggle(key: keyof Toggles) {
+    return (v: boolean) => setToggles(prev => ({ ...prev, [key]: v }));
+  }
+
+  async function saveToggles() {
+    if (!selectedBranch?.id) return;
+    setSaving(true);
+    try {
+      await api.updatePosSettings(selectedBranch.id, { ...toggles, branchId: selectedBranch.id });
+      toast.success("Compliance settings saved", { description: "Global toggles updated for this branch." });
+    } catch {
+      toast.error("Failed to save compliance settings");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const activeCount = rules.filter((r) => r.status === "active").length;
   const inactiveCount = rules.filter((r) => r.status === "inactive").length;
@@ -31,19 +87,64 @@ function Compliance() {
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">
-        <h3 className="font-semibold mb-4">Global toggles</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold">Global toggles</h3>
+          {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        </div>
         <div className="grid sm:grid-cols-2 gap-3">
-          {[
-            { title: "Auto-block expired items", desc: "Cashier cannot complete sale" },
-            { title: "Warn 7 days before expiry", desc: "Soft warning to cashier" },
-            { title: "Require manager PIN for refunds > SAR 100", desc: "Approval workflow" },
-            { title: "Restrict alcohol-like SKUs", desc: "Always blocked in KSA" },
-          ].map((t) => (
-            <div key={t.title} className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
-              <div><p className="font-medium text-sm">{t.title}</p><p className="text-xs text-muted-foreground">{t.desc}</p></div>
-              <Switch defaultChecked />
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
+            <div>
+              <p className="font-medium text-sm">Auto-block expired items</p>
+              <p className="text-xs text-muted-foreground">Cashier cannot complete sale with expired SKU</p>
             </div>
-          ))}
+            <Switch
+              checked={toggles.blockExpiredItems}
+              onCheckedChange={toggle("blockExpiredItems")}
+              disabled={loading}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
+            <div>
+              <p className="font-medium text-sm">Warn 7 days before expiry</p>
+              <p className="text-xs text-muted-foreground">Soft warning shown to cashier</p>
+            </div>
+            <Switch
+              checked={toggles.warnNearExpiry}
+              onCheckedChange={toggle("warnNearExpiry")}
+              disabled={loading}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
+            <div>
+              <p className="font-medium text-sm">Require manager PIN for refunds</p>
+              <p className="text-xs text-muted-foreground">Approval workflow for all refunds</p>
+            </div>
+            <Switch
+              checked={toggles.requireManagerApprovalForRefund}
+              onCheckedChange={toggle("requireManagerApprovalForRefund")}
+              disabled={loading}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
+            <div>
+              <p className="font-medium text-sm">Restrict non-permissible items (KSA)</p>
+              <p className="text-xs text-muted-foreground">Always blocked per Saudi regulations</p>
+            </div>
+            <Switch
+              checked={toggles.blockNonpermissibleItems}
+              onCheckedChange={toggle("blockNonpermissibleItems")}
+              disabled={loading}
+            />
+          </div>
+        </div>
+        <div className="flex justify-end mt-4">
+          <Button
+            className="gradient-primary text-primary-foreground border-0"
+            onClick={saveToggles}
+            disabled={saving || loading}
+          >
+            {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save toggles"}
+          </Button>
         </div>
       </Card>
 

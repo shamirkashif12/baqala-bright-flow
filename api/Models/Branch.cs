@@ -28,6 +28,12 @@ public class Branch
     [MaxLength(50), Column("contact_number")]
     public string? ContactNumber { get; set; }
 
+    [MaxLength(50), Column("commercial_registration")]
+    public string? CommercialRegistration { get; set; }
+
+    [MaxLength(255), Column("email")]
+    public string? Email { get; set; }
+
     [Required, MaxLength(20), Column("status")]
     public string Status { get; set; } = "active"; // active | inactive | disabled
 

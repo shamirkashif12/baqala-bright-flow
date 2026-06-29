@@ -42,9 +42,14 @@ builder.Services.AddControllers()
         // Prevent circular reference crashes (EF navigation back-references)
         options.JsonSerializerOptions.ReferenceHandler =
             System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+        // Ensure all DateTime values are serialized with "Z" (UTC) suffix.
+        // EF reads MySQL datetimes as DateTimeKind.Unspecified; without this converter
+        // the JSON has no timezone marker and browsers interpret it as local time.
+        options.JsonSerializerOptions.Converters.Add(new BaqalaPOS.Api.Services.UtcDateTimeConverter());
     });
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
+builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
@@ -55,7 +60,18 @@ if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
-    try { db.Database.Migrate(); } catch { /* tables already exist */ }
+    var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    try
+    {
+        db.Database.Migrate();
+    }
+    catch (Exception migEx)
+    {
+        // Log the real error so migration failures are visible in the console.
+        // EF's Migrate() is idempotent for already-applied migrations, so any
+        // exception here is a genuine schema problem that needs attention.
+        startupLogger.LogError(migEx, "Database migration failed — check migration SQL and schema.");
+    }
     await DataSeeder.SeedAsync(db);
     await RenameRoles(db);
     await RenamePermissionModules(db);

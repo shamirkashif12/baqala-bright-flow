@@ -1,5 +1,6 @@
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,7 +8,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ShiftsController(BaqalaDbContext db) : ControllerBase
+public class ShiftsController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll(
@@ -69,6 +70,15 @@ public class ShiftsController(BaqalaDbContext db) : ControllerBase
         }
 
         await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "Shift opened",
+            entityType: "CashierShift",
+            entityId: shift.Id,
+            userId: req.CashierId,
+            branchId: req.BranchId,
+            details: $"Opening amount: SAR {req.OpeningAmount:F2}");
+
         return Created($"/api/shifts/{shift.Id}", shift);
     }
 
@@ -92,6 +102,15 @@ public class ShiftsController(BaqalaDbContext db) : ControllerBase
         }
 
         await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "Shift closed",
+            entityType: "CashierShift",
+            entityId: shift.Id,
+            userId: shift.CashierId,
+            branchId: shift.BranchId,
+            details: $"Closing: SAR {req.ClosingAmount:F2} · Variance: SAR {shift.Variance:F2}");
+
         return Ok(shift);
     }
 

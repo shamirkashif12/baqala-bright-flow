@@ -77,7 +77,26 @@ function Row({ label, value }: { label: string; value: string }) {
 type TerminalForm = { name: string; terminalCode: string; branchId: string; status: string; assignedCashierId: string; };
 const emptyForm: TerminalForm = { name: "", terminalCode: "", branchId: "", status: "active", assignedCashierId: "" };
 
-function relTime(d: Date): string {
+const KSA = { timeZone: "Asia/Riyadh" } as const;
+
+// MySQL datetimes may arrive without "Z" (DateTimeKind.Unspecified from EF).
+// Treat them as UTC so toLocaleString shows the correct KSA time (+3).
+function toUtc(iso: string): Date {
+  if (iso && !iso.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(iso)) {
+    return new Date(iso + "Z");
+  }
+  return new Date(iso);
+}
+
+function fmtDT(iso: string) {
+  return toUtc(iso).toLocaleString("en-SA", { ...KSA, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function fmtDate(iso: string) {
+  return toUtc(iso).toLocaleDateString("en-SA", { ...KSA });
+}
+
+function relTime(iso: string | Date): string {
+  const d = typeof iso === "string" ? toUtc(iso) : iso;
   const diff = Date.now() - d.getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
@@ -85,6 +104,17 @@ function relTime(d: Date): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function getEffectiveLastSync(t: Terminal, shifts: CashierShift[]): string | null {
+  if (t.lastSync) return t.lastSync;
+  const terminalShifts = shifts.filter(s => s.terminalId === t.id);
+  if (terminalShifts.length === 0) return null;
+  const dates = terminalShifts
+    .flatMap(s => [s.openedAt, ...(s.closedAt ? [s.closedAt] : [])])
+    .sort()
+    .reverse();
+  return dates[0] ?? null;
 }
 
 type SyncLogEntry = { time: string; event: string; detail: string; type: "success" | "info" | "warn" | "error" };
@@ -327,22 +357,35 @@ function Terminals() {
                         <td className="px-3 py-3 font-mono text-xs font-bold">{t.terminalCode}</td>
                         <td className="px-3 py-3 font-medium">{t.name}</td>
                         <td className="px-3 py-3 text-xs">{t.branch?.name ?? "—"}</td>
-                        <td className="px-3 py-3 text-xs">{t.assignedCashier?.fullName ?? "Unassigned"}</td>
+                        <td className="px-3 py-3 text-xs">
+                          {(() => {
+                            const openShift = allShifts.find(s => s.terminalId === t.id && s.status === "open");
+                            const name = openShift?.cashier?.fullName ?? t.assignedCashier?.fullName ?? "Unassigned";
+                            return openShift
+                              ? <span>{name} <span className="text-[10px] text-success">(on shift)</span></span>
+                              : name;
+                          })()}
+                        </td>
                         <td className="px-3 py-3 text-xs">
                           <span className="flex items-center gap-1 text-primary"><Wifi className="h-3.5 w-3.5" />Wi-Fi</span>
                         </td>
                         <td className="px-3 py-3 text-xs">
-                          {t.status === "active"
+                          {allShifts.some(s => s.terminalId === t.id && s.status === "open")
                             ? <span className="inline-flex items-center gap-1 rounded-full bg-success/15 text-success px-2 py-0.5 text-[10px] font-semibold"><Activity className="h-3 w-3" />Session Open</span>
                             : <span className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold">No Session</span>}
                         </td>
                         <td className="px-3 py-3 text-xs">
-                          {t.lastSync
-                            ? <span title={new Date(t.lastSync).toLocaleString("en-SA")} className="cursor-default">
-                                <span className="font-medium">{relTime(new Date(t.lastSync))}</span>
-                                <span className="text-muted-foreground ml-1">· {new Date(t.lastSync).toLocaleDateString("en-SA")}</span>
+                          {(() => {
+                            const eff = getEffectiveLastSync(t, allShifts);
+                            if (!eff) return <span className="text-muted-foreground italic">Never synced</span>;
+                            const d = new Date(eff);
+                            return (
+                              <span title={d.toLocaleString("en-SA", KSA)} className="cursor-default">
+                                <span className="font-medium">{relTime(d)}</span>
+                                <span className="text-muted-foreground ml-1">· {fmtDate(d.toISOString())}</span>
                               </span>
-                            : <span className="text-muted-foreground italic">Never synced</span>}
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-3"><StatusBadge status={t.status} /></td>
                         <td className="px-3 py-3">
@@ -416,7 +459,7 @@ function Terminals() {
                   </thead>
                   <tbody>
                     {sessionLogs.map(s => {
-                      const term = terminals.find(t => t.id === s.terminalId);
+                      const term = allTerminals.find(t => t.id === s.terminalId);
                       return (
                         <tr key={s.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
                           <td className="px-3 py-3">
@@ -448,14 +491,14 @@ function Terminals() {
                           <td className="px-3 py-3 text-xs tabular-nums">
                             <div className="flex items-center gap-1 text-success">
                               <LogIn className="h-3 w-3 flex-shrink-0" />
-                              {new Date(s.openedAt).toLocaleString("en-SA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                              {fmtDT(s.openedAt)}
                             </div>
                           </td>
                           <td className="px-3 py-3 text-xs tabular-nums">
                             {s.closedAt ? (
                               <div className="flex items-center gap-1 text-muted-foreground">
                                 <LogOut className="h-3 w-3 flex-shrink-0" />
-                                {new Date(s.closedAt).toLocaleString("en-SA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                {fmtDT(s.closedAt)}
                               </div>
                             ) : <span className="text-muted-foreground italic">Active</span>}
                           </td>
@@ -501,19 +544,22 @@ function Terminals() {
                 <Row label="Assigned Cashier" value={viewTerm.assignedCashier?.fullName ?? "Unassigned"} />
                 <Row label="Active Shift Cashier" value={viewShift?.cashier?.fullName ?? "—"} />
                 <Row label="Status" value={viewTerm.status} />
-                <Row label="Last Sync" value={viewTerm.lastSync ? `${relTime(new Date(viewTerm.lastSync))} · ${new Date(viewTerm.lastSync).toLocaleString("en-SA")}` : "Never synced"} />
+                <Row label="Last Sync" value={(() => {
+                  const eff = getEffectiveLastSync(viewTerm, allShifts.filter(s => s.terminalId === viewTerm.id));
+                  return eff ? `${relTime(eff)} · ${toUtc(eff).toLocaleString("en-SA", KSA)}` : "Never synced";
+                })()} />
                 {viewTerm.uptimeMinutes != null && <Row label="Uptime" value={`${Math.floor(viewTerm.uptimeMinutes / 60)}h ${viewTerm.uptimeMinutes % 60}m`} />}
               </TabsContent>
               <TabsContent value="session" className="mt-4">
                 <div className="rounded-xl border border-border/60 p-4 space-y-3">
                   <div className="flex items-center gap-2 text-sm font-semibold">
-                    <Activity className="h-4 w-4 text-success" />
-                    {viewShift ? "Session Active" : viewTerm.status === "active" ? "Session Active" : "No Active Session"}
+                    <Activity className={`h-4 w-4 ${viewShift ? "text-success" : "text-muted-foreground"}`} />
+                    {viewShift ? "Session Active" : "No Active Session"}
                   </div>
                   <p className="text-xs text-muted-foreground">Cashier: {viewShift?.cashier?.fullName ?? viewTerm.assignedCashier?.fullName ?? "—"}</p>
                   {viewShift && (
                     <p className="text-xs text-muted-foreground">
-                      Opened: {new Date(viewShift.openedAt).toLocaleString("en-SA")}
+                      Opened: {toUtc(viewShift.openedAt).toLocaleString("en-SA", KSA)}
                     </p>
                   )}
                 </div>
@@ -545,8 +591,8 @@ function Terminals() {
                           <p className="text-[11px] text-muted-foreground">{entry.detail}</p>
                         </div>
                         <div className="flex-shrink-0 text-right">
-                          <p className="text-[10px] text-muted-foreground tabular-nums">{relTime(new Date(entry.time))}</p>
-                          <p className="text-[10px] text-muted-foreground/60">{new Date(entry.time).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })}</p>
+                          <p className="text-[10px] text-muted-foreground tabular-nums">{relTime(entry.time)}</p>
+                          <p className="text-[10px] text-muted-foreground/60">{toUtc(entry.time).toLocaleTimeString("en-SA", { ...KSA, hour: "2-digit", minute: "2-digit" })}</p>
                         </div>
                       </div>
                     );

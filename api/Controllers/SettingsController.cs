@@ -1,5 +1,6 @@
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,7 +8,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class SettingsController(BaqalaDbContext db) : ControllerBase
+public class SettingsController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet("pos/{branchId:guid}")]
     public async Task<IActionResult> GetPosSettings(Guid branchId)
@@ -26,20 +27,101 @@ public class SettingsController(BaqalaDbContext db) : ControllerBase
             updated.BranchId = branchId;
             updated.CreatedAt = updated.UpdatedAt = DateTime.UtcNow;
             db.PosSettings.Add(updated);
+            settings = updated;
         }
         else
         {
-            settings.RequireShiftOpen = updated.RequireShiftOpen;
-            settings.RequireOpeningCashCount = updated.RequireOpeningCashCount;
-            settings.AllowNegativeStock = updated.AllowNegativeStock;
-            settings.RequireReasonForVoid = updated.RequireReasonForVoid;
-            settings.RequireManagerApprovalForRefund = updated.RequireManagerApprovalForRefund;
-            settings.AutoPrintReceipt = updated.AutoPrintReceipt;
-            settings.OfflineModeEnabled = updated.OfflineModeEnabled;
+            // Cashier tab
+            settings.RequireShiftOpen                 = updated.RequireShiftOpen;
+            settings.RequireOpeningCashCount          = updated.RequireOpeningCashCount;
+            settings.AutoLockIdle                     = updated.AutoLockIdle;
+            settings.AllowCustomerViewPaidShifts      = updated.AllowCustomerViewPaidShifts;
+            // Terminal tab
+            settings.AllowTerminalSwitching           = updated.AllowTerminalSwitching;
+            settings.PreserveHeldOrders               = updated.PreserveHeldOrders;
+            settings.OfflineModeEnabled               = updated.OfflineModeEnabled;
+            // Invoice tab
+            settings.AutoPrintReceipt                 = updated.AutoPrintReceipt;
+            settings.SendSmsInvoice                   = updated.SendSmsInvoice;
+            // Permissions tab
+            settings.CashierCanDiscount               = updated.CashierCanDiscount;
+            settings.CashierCanCoupon                 = updated.CashierCanCoupon;
+            settings.CashierCanRefund                 = updated.CashierCanRefund;
+            settings.CashierCanHoldOrder              = updated.CashierCanHoldOrder;
+            settings.CashierCanEditOrder              = updated.CashierCanEditOrder;
+            settings.RequireReasonForVoid             = updated.RequireReasonForVoid;
+            settings.RequireManagerApprovalForRefund  = updated.RequireManagerApprovalForRefund;
+            settings.AllowNegativeStock               = updated.AllowNegativeStock;
+            // Scan tab
+            settings.BeepOnScan                       = updated.BeepOnScan;
+            settings.WarnNearExpiry                   = updated.WarnNearExpiry;
+            settings.AllowNearExpirySale              = updated.AllowNearExpirySale;
+            settings.BlockExpiredItems                = updated.BlockExpiredItems;
+            settings.BlockNonpermissibleItems         = updated.BlockNonpermissibleItems;
+
             settings.UpdatedAt = DateTime.UtcNow;
         }
         await db.SaveChangesAsync();
-        return Ok(settings ?? updated);
+
+        await audit.LogAsync(
+            action: "POS settings updated",
+            entityType: "PosSettings",
+            entityId: settings.Id,
+            branchId: branchId,
+            details: $"RequireShiftOpen:{settings.RequireShiftOpen} AutoPrint:{settings.AutoPrintReceipt} Offline:{settings.OfflineModeEnabled} BlockExpired:{settings.BlockExpiredItems}");
+
+        return Ok(settings);
+    }
+
+    // ── Tenant key-value settings ────────────────────────────────────────────
+
+    [HttpGet("tenant/{branchId:guid}")]
+    public async Task<IActionResult> GetTenantSettings(Guid branchId)
+    {
+        var rows = await db.TenantSettings
+            .Where(s => s.BranchId == branchId)
+            .ToListAsync();
+        var dict = rows.ToDictionary(r => r.SettingKey, r => r.SettingValue);
+        return Ok(dict);
+    }
+
+    [HttpPut("tenant/{branchId:guid}")]
+    public async Task<IActionResult> UpsertTenantSettings(Guid branchId, [FromBody] Dictionary<string, string?> settings)
+    {
+        var existingRows = await db.TenantSettings
+            .Where(s => s.BranchId == branchId)
+            .ToListAsync();
+        var existing = existingRows.ToDictionary(s => s.SettingKey);
+
+        foreach (var (key, value) in settings)
+        {
+            if (existing.TryGetValue(key, out var row))
+            {
+                row.SettingValue = value;
+                row.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                db.TenantSettings.Add(new TenantSetting
+                {
+                    Id = Guid.NewGuid(),
+                    BranchId = branchId,
+                    SettingKey = key,
+                    SettingValue = value,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+        }
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "Tenant settings updated",
+            entityType: "TenantSettings",
+            branchId: branchId,
+            details: $"{settings.Count} key(s) updated");
+
+        return Ok(new { message = "Settings updated successfully.", updatedCount = settings.Count });
     }
 
     [HttpGet("attendance")]

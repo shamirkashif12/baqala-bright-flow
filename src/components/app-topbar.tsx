@@ -1,11 +1,12 @@
-import { Bell, Search, Languages, HelpCircle, ChevronDown, Building2, X, BookOpen, MessageCircle, ExternalLink, CheckCheck } from "lucide-react";
+import { Bell, Search, Languages, HelpCircle, ChevronDown, Building2, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api, type Terminal as TerminalRecord } from "@/lib/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,44 +22,138 @@ import {
 } from "@/components/ui/popover";
 
 // ── Notifications popover ──────────────────────────────────────────────────────
+type NotifItem = {
+  id: string;
+  tone: "info" | "warning" | "error";
+  Icon: React.FC<{ className?: string }>;
+  title: string;
+  body: string;
+  relTime: string;
+};
+
+const TONE_DOT: Record<NotifItem["tone"], string> = {
+  info: "bg-primary",
+  warning: "bg-amber-500",
+  error: "bg-destructive",
+};
+
 function NotificationsPopover() {
   const [open, setOpen] = useState(false);
+  const [notifications, setNotifications] = useState<NotifItem[]>([]);
+  const [read, setRead] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      api.getDashboard().catch(() => null),
+      api.getReturns({ status: "pending" }).catch(() => []),
+      api.getTerminals().catch(() => []),
+    ]).then(([dashboard, pendingReturns, terminals]) => {
+      const items: NotifItem[] = [];
+
+      const lowStockItems = dashboard?.inventory?.lowStockItems ?? [];
+      if (lowStockItems.length > 0) {
+        const branch = lowStockItems[0]?.branch ?? "";
+        items.push({
+          id: "low-stock",
+          tone: "warning",
+          Icon: Package,
+          title: `${lowStockItems.length} low-stock item${lowStockItems.length !== 1 ? "s" : ""}`,
+          body: `${lowStockItems.slice(0, 2).map((i: { name: string }) => i.name).join(", ")}${lowStockItems.length > 2 ? ` +${lowStockItems.length - 2} more` : ""}${branch ? ` · ${branch}` : ""}`,
+          relTime: "just now",
+        });
+      }
+
+      const outOfStock = dashboard?.inventory?.outOfStockCount ?? 0;
+      if (outOfStock > 0) {
+        items.push({
+          id: "out-of-stock",
+          tone: "error",
+          Icon: AlertTriangle,
+          title: `${outOfStock} SKU${outOfStock !== 1 ? "s" : ""} out of stock`,
+          body: "Replenishment required across branches",
+          relTime: "just now",
+        });
+      }
+
+      if (pendingReturns.length > 0) {
+        items.push({
+          id: "pending-returns",
+          tone: "info",
+          Icon: RotateCcw,
+          title: `${pendingReturns.length} pending return${pendingReturns.length !== 1 ? "s" : ""}`,
+          body: "Customer returns require your review and approval",
+          relTime: "just now",
+        });
+      }
+
+      const offlineTerminals = (terminals as TerminalRecord[]).filter(t => t.status === "offline");
+      if (offlineTerminals.length > 0) {
+        items.push({
+          id: "offline-terminals",
+          tone: "error",
+          Icon: WifiOff,
+          title: `${offlineTerminals.length} terminal${offlineTerminals.length !== 1 ? "s" : ""} offline`,
+          body: offlineTerminals.slice(0, 2).map(t => `${t.terminalCode}${t.branch?.name ? ` (${t.branch.name})` : ""}`).join(", "),
+          relTime: "just now",
+        });
+      }
+
+      const expiringCount = dashboard?.inventory?.expiringCount ?? 0;
+      if (expiringCount > 0) {
+        items.push({
+          id: "expiring",
+          tone: "warning",
+          Icon: AlertTriangle,
+          title: `${expiringCount} item${expiringCount !== 1 ? "s" : ""} expiring soon`,
+          body: "Products expiring within 30 days — check inventory",
+          relTime: "just now",
+        });
+      }
+
+      setNotifications(items);
+    });
+  }, []);
+
+  const unread = read ? 0 : notifications.length;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="h-9 w-9 relative">
           <Bell className="h-4 w-4" />
-          <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-destructive" />
+          {unread > 0 && (
+            <span className="absolute top-1.5 right-1.5 h-4 min-w-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center px-0.5">
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
-          <p className="text-sm font-semibold">Notifications</p>
+          <p className="text-sm font-semibold">Notifications {unread > 0 && <span className="ml-1 text-[10px] font-bold text-destructive">{unread} new</span>}</p>
           <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className="divide-y divide-border/40">
-          <div className="flex items-start gap-3 px-4 py-3">
-            <div className="h-2 w-2 rounded-full bg-primary mt-2 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium">Low stock alert</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">3 products are below reorder level at Al Khobar Corniche</p>
-              <p className="text-[10px] text-muted-foreground/70 mt-1">Just now</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-3 px-4 py-3">
-            <div className="h-2 w-2 rounded-full bg-amber-500 mt-2 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium">Pending return</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">A customer return requires your review and approval</p>
-              <p className="text-[10px] text-muted-foreground/70 mt-1">5 minutes ago</p>
-            </div>
-          </div>
+        <div className="divide-y divide-border/40 max-h-80 overflow-y-auto">
+          {notifications.length === 0 ? (
+            <div className="px-4 py-6 text-center text-xs text-muted-foreground">All clear — no alerts right now</div>
+          ) : (
+            notifications.map(n => (
+              <div key={n.id} className="flex items-start gap-3 px-4 py-3">
+                <div className={`h-2 w-2 rounded-full mt-2 shrink-0 ${TONE_DOT[n.tone]}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium">{n.title}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
+                  <p className="text-[10px] text-muted-foreground/70 mt-1">{n.relTime}</p>
+                </div>
+                <n.Icon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${n.tone === "error" ? "text-destructive" : n.tone === "warning" ? "text-amber-500" : "text-primary"}`} />
+              </div>
+            ))
+          )}
         </div>
         <div className="flex items-center justify-center py-2.5 border-t border-border/60">
-          <button className="flex items-center gap-1.5 text-xs text-primary hover:underline">
+          <button onClick={() => setRead(true)} className="flex items-center gap-1.5 text-xs text-primary hover:underline">
             <CheckCheck className="h-3.5 w-3.5" /> Mark all as read
           </button>
         </div>
