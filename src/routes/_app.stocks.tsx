@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,6 +56,211 @@ function StBadge({ status }: { status: string }) {
   };
   const cls = map[status] ?? "bg-gray-100 text-gray-600";
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{status.replace(/_/g, " ")}</span>;
+}
+
+// ─── Barcode Scan Stock-In dialog ────────────────────────────────────────────
+
+function BarcodeStockInDialog({
+  branches,
+  onDone,
+}: {
+  branches: Branch[];
+  onDone: () => void;
+}) {
+  const { user } = useAuth();
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
+  const [open, setOpen] = useState(false);
+  const [scanActive, setScanActive] = useState(false);
+  const [product, setProduct] = useState<Product | null>(null);
+  const [currentStock, setCurrentStock] = useState<number | null>(null);
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "");
+  const [quantity, setQuantity] = useState("1");
+  const [purchaseCost, setPurchaseCost] = useState("");
+  const [saving, setSaving] = useState(false);
+  const bufRef = useRef("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load current stock for selected branch when product/branch changes
+  useEffect(() => {
+    if (!product || !branchId) { setCurrentStock(null); return; }
+    api.getStock({ branchId })
+      .then(sk => setCurrentStock(sk?.find(s => s.productId === product.id)?.quantity ?? 0))
+      .catch(() => setCurrentStock(null));
+  }, [product?.id, branchId]);
+
+  // Global barcode scanner listener — active only when scanActive = true
+  useEffect(() => {
+    if (!scanActive) return;
+
+    function onKey(e: KeyboardEvent) {
+      // Ignore if user is typing in an input inside the dialog
+      const tag = (e.target as HTMLElement).tagName;
+      if (open && (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT")) return;
+
+      if (e.key === "Enter") {
+        const trimmed = bufRef.current.trim();
+        bufRef.current = "";
+        if (timerRef.current) clearTimeout(timerRef.current);
+        if (!trimmed) return;
+
+        const looksLikeBarcode = /^\d{6,}$/.test(trimmed);
+        if (!looksLikeBarcode) return;
+
+        setScanActive(false);
+        api.getProductByBarcode(trimmed)
+          .then(p => {
+            setProduct(p);
+            setBranchId(lockedBranchId ?? branches[0]?.id ?? "");
+            setQuantity("1");
+            setPurchaseCost(p.costPrice != null ? String(p.costPrice) : "");
+            setOpen(true);
+          })
+          .catch(() => {
+            toast.error(`Barcode "${trimmed}" not found`, {
+              description: "This product is not in inventory. Add it first via Inventory → Add Product.",
+              duration: 4000,
+            });
+            setScanActive(false);
+          });
+      } else if (e.key.length === 1) {
+        bufRef.current += e.key;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => { bufRef.current = ""; }, 100);
+      }
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [scanActive, open, branches, lockedBranchId]);
+
+  function handleClose() {
+    setOpen(false);
+    setProduct(null);
+    setCurrentStock(null);
+    setQuantity("1");
+    setPurchaseCost("");
+  }
+
+  async function handleSave() {
+    if (!product || !branchId || !quantity) { toast.error("Branch and quantity are required"); return; }
+    setSaving(true);
+    try {
+      await api.receiveBatch({
+        productId: product.id,
+        branchId,
+        quantity: Number(quantity),
+        purchaseCost: purchaseCost ? Number(purchaseCost) : undefined,
+      } as Parameters<typeof api.receiveBatch>[0]);
+      toast.success(`Stock updated — ${product.name} +${quantity} units`);
+      handleClose();
+      onDone();
+    } catch {
+      toast.error("Failed to add stock");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant={scanActive ? "default" : "outline"}
+        className={`gap-1.5 ${scanActive ? "gradient-primary text-primary-foreground border-0 shadow-glow animate-pulse" : ""}`}
+        onClick={() => {
+          if (scanActive) { setScanActive(false); return; }
+          // Ensure products don't need separate load — we use the API directly per scan
+          setScanActive(true);
+          toast.info("Scanner ready — scan a product barcode", { duration: 3000 });
+        }}
+      >
+        <ScanLine className="h-4 w-4" /> {scanActive ? "Scanning…" : "Scan Item"}
+      </Button>
+
+      <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ScanLine className="h-5 w-5 text-primary" /> Quick Stock-In
+            </DialogTitle>
+          </DialogHeader>
+
+          {product && (
+            <div className="space-y-3 py-1">
+              {/* Product summary */}
+              <div className="rounded-lg bg-muted/50 p-3 space-y-0.5">
+                <p className="font-semibold text-sm">{product.name}</p>
+                <p className="text-xs text-muted-foreground font-mono">{product.barcode} · SKU {product.sku}</p>
+                {currentStock !== null && (
+                  <p className="text-xs text-muted-foreground">
+                    Current stock: <span className="font-semibold text-foreground">{currentStock} units</span>
+                    {lockedBranchId && branches.find(b => b.id === lockedBranchId) && (
+                      <> at {branches.find(b => b.id === lockedBranchId)!.name}</>
+                    )}
+                  </p>
+                )}
+              </div>
+
+              {/* Branch (only for admins) */}
+              {!lockedBranchId && (
+                <div>
+                  <Label>Branch *</Label>
+                  <Select value={branchId} onValueChange={setBranchId}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* Qty + cost side by side */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Quantity to Add *</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    className="h-9 text-lg font-semibold"
+                    value={quantity}
+                    onChange={e => setQuantity(e.target.value)}
+                    autoFocus
+                    onKeyDown={e => { if (e.key === "Enter") handleSave(); }}
+                  />
+                </div>
+                <div>
+                  <Label>Purchase Cost (SAR)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="h-9"
+                    value={purchaseCost}
+                    onChange={e => setPurchaseCost(e.target.value)}
+                    placeholder={product.costPrice != null ? String(product.costPrice) : "0.00"}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={handleClose}>Cancel</Button>
+            <Button
+              onClick={handleSave}
+              disabled={saving || !product || !branchId || !quantity}
+              className="gradient-primary text-primary-foreground border-0"
+            >
+              {saving ? "Adding…" : `Add ${quantity || 0} Units`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 // ─── Stock-In dialog ─────────────────────────────────────────────────────────
@@ -763,9 +968,7 @@ function Stocks() {
       title="Stocks"
       subtitle="Stock-In · Stock-Out · GRN · Transfers · Wastage · Movement"
       actions={
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => toast.success("Scanner ready — point at barcode")}>
-          <ScanLine className="h-4 w-4" /> Scan Item
-        </Button>
+        <BarcodeStockInDialog branches={branches} onDone={refreshCurrentTab} />
       }
     >
       {/* Metrics */}

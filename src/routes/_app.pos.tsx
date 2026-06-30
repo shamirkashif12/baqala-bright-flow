@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { QRCodeSVG } from "qrcode.react";
+import { toast } from "sonner";
 import { api, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { SARIcon } from "@/lib/currency";
@@ -403,6 +404,11 @@ function POS() {
           setTimeout(() => setFlashSku(null), 600);
           setScanFlash(true);
           setTimeout(() => setScanFlash(false), 800);
+        } else {
+          toast.error(`Barcode "${code}" not found`, {
+            description: "This product is not in inventory. Add it first via Inventory → Add Product.",
+            duration: 4000,
+          });
         }
         return;
       }
@@ -646,7 +652,17 @@ function POS() {
       if (byBarcode) { addToCart(byBarcode); return; }
       const bySku = products.find((p) => p.sku === trimmed);
       if (bySku) { addToCart(bySku); return; }
-      if (matches[0]) addToCart(matches[0]);
+      // Only fall back to first text match if this looks like a typed search,
+      // not a scanned barcode (all digits 6+ chars = scanner input, don't guess)
+      const looksLikeBarcode = /^\d{6,}$/.test(trimmed);
+      if (!looksLikeBarcode && matches[0]) { addToCart(matches[0]); return; }
+      if (looksLikeBarcode) {
+        toast.error(`Barcode "${trimmed}" not found`, {
+          description: "This product is not in inventory. Add it first via Inventory → Add Product.",
+          duration: 4000,
+        });
+        setQuery("");
+      }
     }
     if (e.key === "Escape") setShowResults(false);
   };
