@@ -14,7 +14,9 @@ import { Separator } from "@/components/ui/separator";
 import {
   ArrowRight, Warehouse, Building2, Truck, Package, RefreshCcw,
   CheckCircle2, Clock, Plus, Trash2, Eye, ArrowLeftRight, Loader2, X, Search,
+  ChevronDown, Check,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
   api,
@@ -232,6 +234,43 @@ function TypeSelectorStep({
   );
 }
 
+// ─── Multi-select ────────────────────────────────────────────────────────────
+function MultiSelect({
+  options, value, onChange, placeholder = "Select…",
+}: {
+  options: { value: string; label: string }[];
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter(v => v !== id) : [...value, id]);
+  const label = value.length === 0 ? placeholder
+    : value.length === 1 ? (options.find(o => o.value === value[0])?.label ?? placeholder)
+    : `${value.length} selected`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
+          <span className={value.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
+          <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-2 max-h-60 overflow-y-auto">
+        {options.map(opt => (
+          <button key={opt.value} type="button" onClick={() => toggle(opt.value)}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-left">
+            <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${value.includes(opt.value) ? "bg-primary border-primary" : "border-input"}`}>
+              {value.includes(opt.value) && <Check className="h-3 w-3 text-primary-foreground" />}
+            </div>
+            <span className="font-medium truncate">{opt.label}</span>
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ─── Source/Dest Step ─────────────────────────────────────────────────────────
 
 function SourceDestStep({
@@ -241,6 +280,8 @@ function SourceDestStep({
   suppliers,
   form,
   onChange,
+  destIds,
+  onDestIdsChange,
 }: {
   transferType: TransferType;
   branches: Branch[];
@@ -248,6 +289,8 @@ function SourceDestStep({
   suppliers: Supplier[];
   form: CreateForm;
   onChange: (patch: Partial<CreateForm>) => void;
+  destIds: string[];
+  onDestIdsChange: (ids: string[]) => void;
 }) {
   const branchOptions = branches.map(b => ({ value: b.id, label: b.name }));
   const warehouseOptions = warehouses.map(w => ({ value: w.id, label: w.name }));
@@ -285,13 +328,43 @@ function SourceDestStep({
       {transferType === "supplier_to_warehouse" && (
         <>
           <SelectField label="Source — Supplier" value={form.sourceSupplierId} placeholder="Select supplier" options={supplierOptions} onValueChange={v => onChange({ sourceSupplierId: v })} />
-          <SelectField label="Destination — Warehouse" value={form.destWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ destWarehouseId: v })} />
+          <FieldRow label={`Destination — Warehouse(s) *${destIds.length > 0 ? ` (${destIds.length} selected)` : ""}`}>
+            <MultiSelect options={warehouseOptions} value={destIds} onChange={onDestIdsChange} placeholder="Select warehouse(s)…" />
+            {destIds.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {destIds.map(id => {
+                  const lbl = warehouseOptions.find(o => o.value === id)?.label ?? id;
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
+                      {lbl}<button type="button" onClick={() => onDestIdsChange(destIds.filter(v => v !== id))} className="hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {destIds.length > 1 && <p className="text-xs text-primary mt-0.5">{destIds.length} transfers will be created.</p>}
+          </FieldRow>
         </>
       )}
       {transferType === "warehouse_to_branch" && (
         <>
           <SelectField label="Source — Warehouse" value={form.sourceWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ sourceWarehouseId: v })} />
-          <SelectField label="Destination — Branch" value={form.destBranchId} placeholder="Select branch" options={branchOptions} onValueChange={v => onChange({ destBranchId: v })} />
+          <FieldRow label={`Destination — Branch(es) *${destIds.length > 0 ? ` (${destIds.length} selected)` : ""}`}>
+            <MultiSelect options={branchOptions} value={destIds} onChange={onDestIdsChange} placeholder="Select branch(es)…" />
+            {destIds.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {destIds.map(id => {
+                  const lbl = branchOptions.find(o => o.value === id)?.label ?? id;
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
+                      {lbl}<button type="button" onClick={() => onDestIdsChange(destIds.filter(v => v !== id))} className="hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {destIds.length > 1 && <p className="text-xs text-primary mt-0.5">{destIds.length} transfers will be created.</p>}
+          </FieldRow>
         </>
       )}
       {/* branch_to_warehouse is handled via PO lookup in step 2 */}
@@ -387,11 +460,13 @@ function ItemsStep({
   products,
   poItems,
   onChange,
+  destCount = 1,
 }: {
   items: ItemRow[];
   products: Product[];
   poItems?: PoItem[];
   onChange: (items: ItemRow[]) => void;
+  destCount?: number;
 }) {
   const addItem = () =>
     onChange([...items, { productId: "", requestedQuantity: 1, unitCost: "", expiryDate: "" }]);
@@ -515,20 +590,30 @@ function ItemsStep({
       </div>
       {items.length > 0 && (
         <div className={cn(
-          "flex items-center justify-between rounded-lg px-3 py-2.5",
+          "rounded-lg px-3 py-2.5 space-y-1.5",
           netAmount > 0 ? "bg-muted/40" : "bg-warning/10 border border-warning/20",
         )}>
-          <span className="text-xs text-muted-foreground">
-            {items.filter(i => i.productId).length} item(s) · Net Amount
-            {netAmount === 0 && (
-              <span className="ml-1.5 text-[11px] text-warning-foreground font-medium">
-                — enter unit costs to calculate
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              {items.filter(i => i.productId).length} item(s) · {destCount > 1 ? "per destination" : "Net Amount"}
+              {netAmount === 0 && (
+                <span className="ml-1.5 text-[11px] text-warning-foreground font-medium">
+                  — enter unit costs to calculate
+                </span>
+              )}
+            </span>
+            <span className={cn("text-sm font-semibold flex items-center gap-0.5", netAmount === 0 && "text-muted-foreground")}>
+              <SARIcon />{netAmount.toFixed(2)}
+            </span>
+          </div>
+          {destCount > 1 && netAmount > 0 && (
+            <div className="flex items-center justify-between border-t border-border/40 pt-1.5">
+              <span className="text-xs font-semibold text-primary">{destCount} destinations — Grand Total</span>
+              <span className="text-sm font-bold text-primary flex items-center gap-0.5">
+                <SARIcon />{(netAmount * destCount).toFixed(2)}
               </span>
-            )}
-          </span>
-          <span className={cn("text-sm font-semibold flex items-center gap-0.5", netAmount === 0 && "text-muted-foreground")}>
-            <SARIcon />{netAmount.toFixed(2)}
-          </span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -561,6 +646,9 @@ function CreateTransferSheet({
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [transferType, setTransferType] = useState<TransferType | null>(null);
   const [form, setForm] = useState<CreateForm>(emptyForm);
+  const [destIds, setDestIds] = useState<string[]>([]); // multi-destination (warehouse_to_branch, supplier_to_warehouse)
+  const [srcIds, setSrcIds] = useState<string[]>([]); // multi-source for return types (batch returns)
+  const [allSrcOptions, setAllSrcOptions] = useState<{ value: string; label: string }[]>([]); // all source options when original order was a batch
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -621,6 +709,9 @@ function CreateTransferSheet({
     setStep(1);
     setTransferType(null);
     setForm(emptyForm);
+    setDestIds([]);
+    setSrcIds([]);
+    setAllSrcOptions([]);
     setItems([]);
     setSaving(false);
     setPoNumber("");
@@ -637,6 +728,9 @@ function CreateTransferSheet({
 
   const handleTypeSelect = (t: TransferType) => {
     setTransferType(t);
+    setDestIds([]);
+    setSrcIds([]);
+    setAllSrcOptions([]);
     setPoNumber("");
     setPoError("");
     setFetchedPo(null);
@@ -658,7 +752,6 @@ function CreateTransferSheet({
         fetched = {
           id: trf.id,
           poNumber: trf.transferNumber ?? poNumber.trim(),
-          // For a return: original WH→Branch destBranch becomes source, sourceWarehouse becomes dest
           supplierId: undefined,
           warehouseId: trf.sourceWarehouseId,
           branchId: trf.destBranchId,
@@ -672,11 +765,27 @@ function CreateTransferSheet({
             unitCost: item.unitCost ?? 0,
           })),
         };
-        setForm(p => ({
-          ...p,
-          sourceBranchId: fetched.branchId ?? p.sourceBranchId,
-          destWarehouseId: fetched.warehouseId ?? p.destWarehouseId,
-        }));
+        // If original batch, find all sibling transfers → collect all dest branches (they return)
+        if (trf.batchId) {
+          const siblings = await api.getStockTransfersByBatch(trf.batchId);
+          const seen = new Set<string>();
+          const opts = siblings
+            .filter(s => s.destBranchId)
+            .map(s => ({ value: s.destBranchId!, label: s.destBranch?.name ?? s.destBranchId! }))
+            .filter(o => !seen.has(o.value) && !!seen.add(o.value));
+          setAllSrcOptions(opts);
+          setSrcIds(opts.map(o => o.value));
+          // dest warehouse is the same for all (original source)
+          setForm(p => ({ ...p, destWarehouseId: trf.sourceWarehouseId ?? p.destWarehouseId }));
+        } else {
+          setAllSrcOptions([]);
+          setSrcIds([]);
+          setForm(p => ({
+            ...p,
+            sourceBranchId: trf.destBranchId ?? p.sourceBranchId,
+            destWarehouseId: trf.sourceWarehouseId ?? p.destWarehouseId,
+          }));
+        }
       } else {
         // RTS (warehouse_to_supplier) and supplier_to_warehouse use PO number
         const po = await api.getPurchaseOrderByNumber(poNumber.trim());
@@ -697,17 +806,34 @@ function CreateTransferSheet({
           })),
         };
         if (transferType === "supplier_to_warehouse") {
+          setAllSrcOptions([]);
+          setSrcIds([]);
           setForm(p => ({
             ...p,
             sourceSupplierId: po.supplierId ?? p.sourceSupplierId,
             destWarehouseId: po.warehouseId ?? p.destWarehouseId,
           }));
         } else if (transferType === "warehouse_to_supplier") {
-          setForm(p => ({
-            ...p,
-            sourceWarehouseId: po.warehouseId ?? p.sourceWarehouseId,
-            destSupplierId: po.supplierId ?? p.destSupplierId,
-          }));
+          // If batch PO, find all sibling POs → collect all warehouse IDs (they are sources for RTS)
+          if (po.batchId) {
+            const siblings = await api.getPurchaseOrdersByBatch(po.batchId);
+            const seen = new Set<string>();
+            const opts = siblings
+              .filter(s => s.warehouseId)
+              .map(s => ({ value: s.warehouseId!, label: s.warehouse?.name ?? s.warehouseId! }))
+              .filter(o => !seen.has(o.value) && !!seen.add(o.value));
+            setAllSrcOptions(opts);
+            setSrcIds(opts.map(o => o.value));
+            setForm(p => ({ ...p, destSupplierId: po.supplierId ?? p.destSupplierId }));
+          } else {
+            setAllSrcOptions([]);
+            setSrcIds([]);
+            setForm(p => ({
+              ...p,
+              sourceWarehouseId: po.warehouseId ?? p.sourceWarehouseId,
+              destSupplierId: po.supplierId ?? p.destSupplierId,
+            }));
+          }
         }
       }
 
@@ -737,32 +863,50 @@ function CreateTransferSheet({
   const handleCreate = async () => {
     if (!transferType) return;
     setSaving(true);
+    const isMultiDest = transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse";
+    const isMultiSrc = isReturnType(transferType) && allSrcOptions.length > 1;
+
+    // Determine what to loop over
+    let loopIds: (string | undefined)[];
+    if (isMultiDest) {
+      loopIds = destIds;
+    } else if (isMultiSrc) {
+      loopIds = srcIds.length > 0 ? srcIds : [undefined];
+    } else {
+      loopIds = [undefined];
+    }
+
+    const needsBatch = (isMultiDest && destIds.length > 1) || (isMultiSrc && srcIds.length > 1);
+    const batchId = needsBatch ? crypto.randomUUID() : undefined;
+
     try {
-      const payload: Partial<StockTransfer> = {
-        transferType,
-        status: "draft",
-        sourceBranchId: form.sourceBranchId || undefined,
-        sourceWarehouseId: form.sourceWarehouseId || undefined,
-        sourceSupplierId: form.sourceSupplierId || undefined,
-        destBranchId: form.destBranchId || undefined,
-        destWarehouseId: form.destWarehouseId || undefined,
-        destSupplierId: form.destSupplierId || undefined,
-        // Only link a PO for PO-based lookups — branch_to_warehouse links a transfer, not a PO
-        purchaseOrderId: transferType !== "branch_to_warehouse" ? fetchedPo?.id || undefined : undefined,
-        returnReason: form.returnReason || undefined,
-        expectedDate: form.expectedDate || undefined,
-        notes: form.notes || undefined,
-        createdBy: user?.id,
-        items: items
-          .filter(item => item.productId)
-          .map(item => ({
-            productId: item.productId,
-            requestedQuantity: item.requestedQuantity,
-            unitCost: item.unitCost ? Number(item.unitCost) : undefined,
-            expiryDate: item.expiryDate || undefined,
-          })) as StockTransferItem[],
-      };
-      await api.createStockTransfer(payload);
+      for (const loopId of loopIds) {
+        const payload: Partial<StockTransfer> = {
+          transferType,
+          status: "draft",
+          sourceBranchId: (transferType === "branch_to_warehouse" && isMultiSrc ? loopId : form.sourceBranchId) || undefined,
+          sourceWarehouseId: (transferType === "warehouse_to_supplier" && isMultiSrc ? loopId : form.sourceWarehouseId) || undefined,
+          sourceSupplierId: form.sourceSupplierId || undefined,
+          destBranchId: (transferType === "warehouse_to_branch" && isMultiDest ? loopId : form.destBranchId) || undefined,
+          destWarehouseId: ((transferType === "supplier_to_warehouse" && isMultiDest ? loopId : form.destWarehouseId) as string) || undefined,
+          destSupplierId: form.destSupplierId || undefined,
+          purchaseOrderId: transferType !== "branch_to_warehouse" ? fetchedPo?.id || undefined : undefined,
+          returnReason: form.returnReason || undefined,
+          expectedDate: form.expectedDate || undefined,
+          notes: form.notes || undefined,
+          batchId,
+          createdBy: user?.id,
+          items: items
+            .filter(item => item.productId)
+            .map(item => ({
+              productId: item.productId,
+              requestedQuantity: item.requestedQuantity,
+              unitCost: item.unitCost ? Number(item.unitCost) : undefined,
+              expiryDate: item.expiryDate || undefined,
+            })) as StockTransferItem[],
+        };
+        await api.createStockTransfer(payload);
+      }
       onCreated();
       handleClose();
     } catch (e) {
@@ -776,10 +920,10 @@ function CreateTransferSheet({
   const canAdvanceStep2 = (() => {
     if (!transferType) return false;
     // Return types require a fetched PO (source/dest auto-filled from it)
-    if (transferType === "branch_to_warehouse") return fetchedPo !== null;
-    if (transferType === "warehouse_to_supplier") return fetchedPo !== null;
-    if (transferType === "supplier_to_warehouse") return !!form.sourceSupplierId && !!form.destWarehouseId;
-    if (transferType === "warehouse_to_branch") return !!form.sourceWarehouseId && !!form.destBranchId;
+    if (transferType === "branch_to_warehouse") return fetchedPo !== null && (allSrcOptions.length === 0 || srcIds.length > 0);
+    if (transferType === "warehouse_to_supplier") return fetchedPo !== null && (allSrcOptions.length === 0 || srcIds.length > 0);
+    if (transferType === "supplier_to_warehouse") return !!form.sourceSupplierId && destIds.length > 0;
+    if (transferType === "warehouse_to_branch") return !!form.sourceWarehouseId && destIds.length > 0;
     if (transferType === "branch_to_branch") return !!form.sourceBranchId && !!form.destBranchId && form.sourceBranchId !== form.destBranchId;
     if (transferType === "warehouse_to_warehouse") return !!form.sourceWarehouseId && !!form.destWarehouseId && form.sourceWarehouseId !== form.destWarehouseId;
     return false;
@@ -827,6 +971,38 @@ function CreateTransferSheet({
                     error={poError}
                     fetchedPo={fetchedPo}
                   />
+                  {fetchedPo && allSrcOptions.length > 1 && (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium">
+                        Returning from{" "}
+                        <span className="text-primary font-normal">
+                          ({srcIds.length}/{allSrcOptions.length} selected)
+                        </span>
+                      </Label>
+                      <p className="text-xs text-muted-foreground -mt-1">
+                        Original order went to {allSrcOptions.length} locations. Deselect any that are NOT returning.
+                      </p>
+                      <MultiSelect options={allSrcOptions} value={srcIds} onChange={setSrcIds} placeholder="Select returning locations…" />
+                      {srcIds.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {srcIds.map(id => {
+                            const lbl = allSrcOptions.find(o => o.value === id)?.label ?? id;
+                            return (
+                              <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
+                                {lbl}
+                                <button type="button" onClick={() => setSrcIds(prev => prev.filter(v => v !== id))} className="hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {srcIds.length < allSrcOptions.length && (
+                        <p className="text-xs text-muted-foreground">
+                          {allSrcOptions.length - srcIds.length} location{allSrcOptions.length - srcIds.length !== 1 ? "s" : ""} excluded from return
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 // Non-return transfers: manual source/dest dropdowns only
@@ -837,6 +1013,8 @@ function CreateTransferSheet({
                   suppliers={suppliers}
                   form={form}
                   onChange={patch => setForm(p => ({ ...p, ...patch }))}
+                  destIds={destIds}
+                  onDestIdsChange={setDestIds}
                 />
               )}
             </div>
@@ -849,6 +1027,11 @@ function CreateTransferSheet({
                 products={products}
                 poItems={fetchedPo?.items ?? (sourceStock !== null ? sourceStock : undefined)}
                 onChange={setItems}
+                destCount={
+                  (transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse")
+                    ? destIds.length
+                    : 1
+                }
               />
               <Separator />
               <div className="space-y-3">
@@ -912,7 +1095,11 @@ function CreateTransferSheet({
                 onClick={handleCreate}
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-                Create Transfer
+                {(transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse") && destIds.length > 1
+                  ? `Create ${destIds.length} Transfers`
+                  : (transferType === "warehouse_to_supplier" || transferType === "branch_to_warehouse") && srcIds.length > 1
+                  ? `Create ${srcIds.length} Return Transfers`
+                  : "Create Transfer"}
               </Button>
             )}
           </div>
@@ -1496,6 +1683,23 @@ function StockTransfers() {
     });
   }, [transfers, search, typeFilter, statusFilter, dateFrom, dateTo]);
 
+  // Group batch transfers into single display rows
+  const displayRows = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: Array<{ key: string; group: StockTransfer[]; isBatch: boolean }> = [];
+    for (const t of filtered) {
+      if (t.batchId) {
+        if (!seen.has(t.batchId)) {
+          seen.add(t.batchId);
+          rows.push({ key: t.batchId, group: filtered.filter(x => x.batchId === t.batchId), isBatch: true });
+        }
+      } else {
+        rows.push({ key: t.id, group: [t], isBatch: false });
+      }
+    }
+    return rows;
+  }, [filtered]);
+
   const today = todayStr();
   const totalTransfers = transfers.length;
   const inTransit = transfers.filter(t => t.status === "in_transit").length;
@@ -1600,7 +1804,7 @@ function StockTransfers() {
                   <Loader2 className="h-5 w-5 animate-spin" />
                   <span>Loading transfers…</span>
                 </div>
-              ) : filtered.length === 0 ? (
+              ) : displayRows.length === 0 ? (
                 <div className="py-20 text-center text-sm text-muted-foreground">
                   {transfers.length === 0 ? "No stock transfers yet. Create your first one." : "No transfers match your filters."}
                 </div>
@@ -1620,18 +1824,29 @@ function StockTransfers() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map(t => {
-                      const total = (t.items ?? []).reduce((s, i) => s + i.requestedQuantity * (i.unitCost ?? 0), 0);
+                    {displayRows.map(({ key, group, isBatch }) => {
+                      const t = group[0];
+                      const grandTotal = group.reduce((s, tr) => s + (tr.items ?? []).reduce((si, i) => si + i.requestedQuantity * (i.unitCost ?? 0), 0), 0);
+                      // For multi-dest batches, source is same; dest differs — show all dests
+                      // For multi-src batches, dest is same; source differs — show all sources
+                      const isMultiDestBatch = isBatch && group.every(tr => tr.sourceWarehouseId === t.sourceWarehouseId || tr.sourceSupplierId === t.sourceSupplierId);
+                      const sourceLabel = isBatch && !isMultiDestBatch
+                        ? group.map(tr => getSourceLabel(tr)).filter((v, i, a) => a.indexOf(v) === i).join(", ")
+                        : getSourceLabel(t);
+                      const destLabel = isBatch && isMultiDestBatch
+                        ? group.map(tr => getDestLabel(tr)).filter((v, i, a) => a.indexOf(v) === i).join(", ")
+                        : getDestLabel(t);
                       return (
-                        <tr key={t.id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
+                        <tr key={key} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
                           <td className="py-3 px-4">
                             <span className="font-mono text-xs font-semibold">{t.transferNumber}</span>
+                            {isBatch && <span className="ml-1.5 text-[10px] font-semibold bg-primary/15 text-primary px-1.5 py-0.5 rounded-full">×{group.length}</span>}
                           </td>
                           <td className="py-3 px-4">
                             <span className="text-xs text-muted-foreground">{getTypeLabel(t.transferType)}</span>
                           </td>
                           <td className="py-3 px-4">
-                            <span className="text-sm">{getSourceLabel(t)}</span>
+                            <span className="text-sm">{sourceLabel}</span>
                             {needsReturnReason(t.transferType) && t.returnReason && (
                               <Badge variant="outline" className="ml-1.5 text-[10px] capitalize">
                                 {t.returnReason.replace(/_/g, " ")}
@@ -1639,14 +1854,17 @@ function StockTransfers() {
                             )}
                           </td>
                           <td className="py-3 px-4">
-                            <span className="text-sm">{getDestLabel(t)}</span>
+                            <span className="text-sm">{destLabel}</span>
                           </td>
                           <td className="py-3 px-4 text-center">
                             <span className="text-sm font-medium">{t.items?.length ?? 0}</span>
                           </td>
                           <td className="py-3 px-4 text-right">
-                            {total > 0
-                              ? <span className="flex items-center gap-0.5 justify-end font-semibold text-sm"><SARIcon />{total.toFixed(2)}</span>
+                            {grandTotal > 0
+                              ? <span className="flex items-center gap-0.5 justify-end font-semibold text-sm">
+                                  <SARIcon />{grandTotal.toFixed(2)}
+                                  {isBatch && <span className="text-[10px] text-muted-foreground ml-1">(×{group.length})</span>}
+                                </span>
                               : <span className="text-muted-foreground">—</span>}
                           </td>
                           <td className="py-3 px-4">

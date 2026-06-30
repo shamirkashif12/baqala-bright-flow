@@ -11,11 +11,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Eye, CheckCircle, XCircle, Truck, Info, Package, ClipboardList,
-  Warehouse, Plus, Trash2, X, Building2, Users, BarChart3,
+  Warehouse, Plus, Trash2, X, Building2,
   Pencil, Link2, MapPin, Phone, User, Boxes, ArrowLeftRight,
+  ChevronDown, Check, Loader2, Search,
 } from "lucide-react";
 import {
   api,
@@ -609,21 +611,87 @@ function WarehouseManagement() {
 
 // ─── Stock Requests Tab ───────────────────────────────────────────────────────
 
+type TxType = "warehouse_to_branches" | "return_to_warehouse" | "supplier_to_warehouses";
 type RequestItem = { productId: string; product: Product; requestedQuantity: number };
+
+// ─── MultiSelect ─────────────────────────────────────────────────────────────
+
+function MultiSelect({
+  options, value, onChange, placeholder = "Select…", disabled = false,
+}: {
+  options: { id: string; label: string; sub?: string }[];
+  value: string[];
+  onChange: (ids: string[]) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = (id: string) =>
+    onChange(value.includes(id) ? value.filter(v => v !== id) : [...value, id]);
+  const selected = options.filter(o => value.includes(o.id));
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <span className={selected.length === 0 ? "text-muted-foreground" : "font-medium"}>
+            {selected.length === 0 ? placeholder : selected.length === 1 ? selected[0].label : `${selected.length} selected`}
+          </span>
+          <ChevronDown className="h-4 w-4 text-muted-foreground ml-2 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-1.5" align="start">
+        {options.length === 0 ? (
+          <p className="px-3 py-4 text-xs text-muted-foreground text-center">No options available.</p>
+        ) : (
+          <div className="max-h-56 overflow-y-auto space-y-0.5 pr-1">
+            {options.map(o => (
+              <button
+                key={o.id}
+                type="button"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 hover:bg-muted text-sm text-left"
+                onClick={() => toggle(o.id)}
+              >
+                <div className={`h-4 w-4 shrink-0 rounded border-2 flex items-center justify-center transition-colors ${value.includes(o.id) ? "bg-primary border-primary" : "border-input"}`}>
+                  {value.includes(o.id) && <Check className="h-2.5 w-2.5 text-primary-foreground" strokeWidth={3} />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium truncate">{o.label}</p>
+                  {o.sub && <p className="text-[11px] text-muted-foreground truncate">{o.sub}</p>}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── New Request Sheet ────────────────────────────────────────────────────────
 
 function NewRequestSheet({
   open, onOpenChange, onCreated,
 }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void }) {
+  const [txType, setTxType] = useState<TxType>("warehouse_to_branches");
   const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [sourceWarehouseId, setSourceWarehouseId] = useState("");
-  const [destinationBranchId, setDestinationBranchId] = useState("");
-  const [notes, setNotes] = useState("");
+  const [sourceSupplierId, setSourceSupplierId] = useState("");
+  const [destinationIds, setDestinationIds] = useState<string[]>([]);
+  const [returnNumber, setReturnNumber] = useState("");
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupError, setLookupError] = useState("");
   const [items, setItems] = useState<RequestItem[]>([]);
   const [pickProductId, setPickProductId] = useState("");
   const [pickQty, setPickQty] = useState("1");
   const [productSearch, setProductSearch] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -631,8 +699,76 @@ function NewRequestSheet({
     if (!open) return;
     api.getWarehouses().then(setWarehouses);
     api.getBranches("active").then(setBranches);
+    api.getSuppliers().then(setSuppliers);
     api.getProducts().then(setProducts);
   }, [open]);
+
+  const resetForm = () => {
+    setTxType("warehouse_to_branches");
+    setSourceWarehouseId(""); setSourceSupplierId("");
+    setDestinationIds([]);
+    setReturnNumber(""); setLookupError("");
+    setItems([]); setPickProductId(""); setPickQty("1"); setProductSearch("");
+    setNotes(""); setError(null);
+  };
+
+  const destOptions = useMemo(() => {
+    if (txType === "supplier_to_warehouses")
+      return warehouses.map(w => ({ id: w.id, label: w.name, sub: w.code }));
+    return branches.map(b => ({ id: b.id, label: b.name }));
+  }, [txType, warehouses, branches]);
+
+  const destLabel = txType === "supplier_to_warehouses"
+    ? "Destination Warehouses"
+    : txType === "return_to_warehouse"
+    ? "Branches Returning Stock"
+    : "Destination Branches";
+
+  const destPlaceholder = txType === "supplier_to_warehouses"
+    ? "Select warehouses…"
+    : txType === "return_to_warehouse"
+    ? "Select branches returning…"
+    : "Select branches…";
+
+  const lookupReturn = async () => {
+    const num = returnNumber.trim();
+    if (!num) return;
+    setLookingUp(true); setLookupError("");
+    try {
+      const all = await api.getWarehouseRequests();
+      const matches = all.filter(r => r.requestNumber?.toLowerCase() === num.toLowerCase());
+      if (matches.length === 0) { setLookupError(`Request "${num}" not found.`); return; }
+      const first = matches[0];
+      const srcWarehouse = warehouses.find(w =>
+        w.branchWarehouses?.some((bw: { branchId: string }) => bw.branchId === first.sourceBranchId)
+      );
+      if (srcWarehouse) setSourceWarehouseId(srcWarehouse.id);
+
+      // Check if this request belongs to a batch (multi-destination)
+      const batchMatch = first.notes?.match(/\[BATCH-([A-Z0-9]+)\]/);
+      let related = matches;
+      if (batchMatch) {
+        const batchTag = `[BATCH-${batchMatch[1]}]`;
+        related = all.filter(r => r.notes?.includes(batchTag));
+      }
+      const destBranchIds = [...new Set(related.map(r => r.destinationBranchId).filter(Boolean) as string[])];
+      setDestinationIds(destBranchIds);
+
+      if (first.items && first.items.length > 0 && items.length === 0) {
+        setItems(
+          first.items
+            .filter(mi => mi.product)
+            .map(mi => ({
+              productId: mi.productId,
+              product: mi.product!,
+              requestedQuantity: mi.approvedQuantity ?? mi.requestedQuantity,
+            }))
+        );
+      }
+    } catch {
+      setLookupError("Failed to look up request.");
+    } finally { setLookingUp(false); }
+  };
 
   const filteredProducts = products.filter(p =>
     !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku?.toLowerCase().includes(productSearch.toLowerCase())
@@ -643,38 +779,64 @@ function NewRequestSheet({
     if (!product) return;
     const qty = parseInt(pickQty) || 1;
     setItems(prev => {
-      const existing = prev.findIndex(i => i.productId === pickProductId);
-      if (existing >= 0) return prev.map((i, idx) => idx === existing ? { ...i, requestedQuantity: i.requestedQuantity + qty } : i);
+      const ex = prev.findIndex(i => i.productId === pickProductId);
+      if (ex >= 0) return prev.map((i, idx) => idx === ex ? { ...i, requestedQuantity: i.requestedQuantity + qty } : i);
       return [...prev, { productId: product.id, product, requestedQuantity: qty }];
     });
     setPickProductId(""); setPickQty("1"); setProductSearch("");
   };
-
-  const removeItem = (productId: string) => setItems(prev => prev.filter(i => i.productId !== productId));
-  const updateQty = (productId: string, qty: number) => setItems(prev => prev.map(i => i.productId === productId ? { ...i, requestedQuantity: Math.max(1, qty) } : i));
+  const removeItem = (pid: string) => setItems(prev => prev.filter(i => i.productId !== pid));
+  const updateQty = (pid: string, qty: number) =>
+    setItems(prev => prev.map(i => i.productId === pid ? { ...i, requestedQuantity: Math.max(1, qty) } : i));
 
   const handleSubmit = async () => {
-    if (!destinationBranchId) { setError("Destination branch is required."); return; }
+    if (destinationIds.length === 0) { setError("Select at least one destination."); return; }
     if (items.length === 0) { setError("Add at least one item."); return; }
+    if (txType === "warehouse_to_branches" && !sourceWarehouseId) { setError("Select a source warehouse."); return; }
+    if (txType === "supplier_to_warehouses" && !sourceSupplierId) { setError("Select a supplier."); return; }
     setSaving(true); setError(null);
     try {
-      const sourceBranch = sourceWarehouseId
-        ? warehouses.find(w => w.id === sourceWarehouseId)?.branchWarehouses?.[0]?.branchId
-        : undefined;
-      await api.createWarehouseRequest({
-        sourceBranchId: sourceBranch,
-        destinationBranchId,
-        notes: notes || undefined,
-        items: items.map(i => ({ productId: i.productId, requestedQuantity: i.requestedQuantity })) as never,
-      });
-      onCreated(); onOpenChange(false);
-      setSourceWarehouseId(""); setDestinationBranchId(""); setNotes(""); setItems([]);
+      const itemsPayload = items.map(i => ({ productId: i.productId, requestedQuantity: i.requestedQuantity })) as never;
+      const batchTag = destinationIds.length > 1
+        ? `[BATCH-${Math.random().toString(36).slice(2, 8).toUpperCase()}]`
+        : null;
+      const baseNotes = (batchTag ? `${batchTag} ` : "") + (notes || "");
+
+      if (txType === "warehouse_to_branches") {
+        const srcBranchId = warehouses.find(w => w.id === sourceWarehouseId)?.branchWarehouses?.[0]?.branchId;
+        for (const branchId of destinationIds) {
+          await api.createWarehouseRequest({ sourceBranchId: srcBranchId, destinationBranchId: branchId, notes: baseNotes || undefined, items: itemsPayload });
+        }
+      } else if (txType === "supplier_to_warehouses") {
+        for (const wid of destinationIds) {
+          const destBranchId = warehouses.find(w => w.id === wid)?.branchWarehouses?.[0]?.branchId ?? wid;
+          await api.createWarehouseRequest({ supplierId: sourceSupplierId, destinationBranchId: destBranchId, notes: baseNotes || undefined, items: itemsPayload });
+        }
+      } else {
+        // return_to_warehouse: each selected branch returns stock back to the warehouse
+        const destWhBranchId = sourceWarehouseId
+          ? warehouses.find(w => w.id === sourceWarehouseId)?.branchWarehouses?.[0]?.branchId
+          : undefined;
+        const returnNotes = `Return${returnNumber ? ` of ${returnNumber}` : ""}${batchTag ? ` ${batchTag}` : ""}${notes ? `. ${notes}` : ""}`;
+        for (const branchId of destinationIds) {
+          await api.createWarehouseRequest({
+            sourceBranchId: branchId,
+            destinationBranchId: destWhBranchId ?? branchId,
+            notes: returnNotes,
+            items: itemsPayload,
+          });
+        }
+      }
+      onCreated(); onOpenChange(false); resetForm();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to submit request.");
     } finally { setSaving(false); }
   };
 
   const totalUnits = items.reduce((s, i) => s + i.requestedQuantity, 0);
+  const destCount = destinationIds.length;
+  const totalValuePerDest = items.reduce((s, i) => s + i.requestedQuantity * (i.product.costPrice ?? 0), 0);
+  const grandTotal = totalValuePerDest * Math.max(destCount, 1);
 
   return (
     <Sheet open={open} onOpenChange={v => { onOpenChange(v); if (!v) setError(null); }}>
@@ -685,27 +847,124 @@ function NewRequestSheet({
           </SheetTitle>
         </SheetHeader>
         <div className="mt-5 space-y-5">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Source Warehouse</Label>
-              <Select value={sourceWarehouseId} onValueChange={setSourceWarehouseId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Select warehouse…" /></SelectTrigger>
-                <SelectContent>
-                  {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.code} — {w.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Destination Branch <span className="text-destructive">*</span></Label>
-              <Select value={destinationBranchId} onValueChange={setDestinationBranchId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Select branch…" /></SelectTrigger>
-                <SelectContent>
-                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+
+          {/* Transfer type selector */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Transfer Type</Label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                { v: "warehouse_to_branches" as TxType, label: "Warehouse → Branches" },
+                { v: "supplier_to_warehouses" as TxType, label: "Supplier → Warehouses" },
+                { v: "return_to_warehouse" as TxType, label: "Return to Warehouse" },
+              ]).map(({ v, label }) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => {
+                    setTxType(v);
+                    setDestinationIds([]); setSourceWarehouseId(""); setSourceSupplierId("");
+                    setReturnNumber(""); setLookupError("");
+                  }}
+                  className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors text-center leading-snug ${txType === v ? "border-primary bg-primary/10 text-primary" : "border-border/60 text-muted-foreground hover:border-primary/40 hover:text-foreground"}`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
+          {/* Return: original request number lookup */}
+          {txType === "return_to_warehouse" && (
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Original Request Number</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={returnNumber}
+                  onChange={e => { setReturnNumber(e.target.value); setLookupError(""); }}
+                  onKeyDown={e => e.key === "Enter" && lookupReturn()}
+                  placeholder="e.g. WR-0001"
+                  className="h-9 flex-1 font-mono"
+                />
+                <Button size="sm" variant="outline" className="h-9 px-3 gap-1.5" onClick={lookupReturn} disabled={!returnNumber.trim() || lookingUp}>
+                  {lookingUp ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                  Lookup
+                </Button>
+              </div>
+              {lookupError && <p className="text-xs text-destructive">{lookupError}</p>}
+              {!lookupError && !lookingUp && (
+                <p className="text-xs text-muted-foreground">Enter the original request number to auto-populate branches and items.</p>
+              )}
+            </div>
+          )}
+
+          {/* Source */}
+          <div className={`grid gap-3 ${txType === "warehouse_to_branches" ? "grid-cols-2" : "grid-cols-1"}`}>
+            {txType === "supplier_to_warehouses" ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Supplier <span className="text-destructive">*</span></Label>
+                <Select value={sourceSupplierId} onValueChange={setSourceSupplierId}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select supplier…" /></SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">
+                  {txType === "return_to_warehouse" ? "Returning to Warehouse" : "Source Warehouse"}
+                  {txType === "warehouse_to_branches" && <span className="text-destructive"> *</span>}
+                </Label>
+                <Select value={sourceWarehouseId} onValueChange={setSourceWarehouseId}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select warehouse…" /></SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.code} — {w.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Destination multi-select — inline col for warehouse_to_branches */}
+            {txType === "warehouse_to_branches" && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">
+                  {destLabel} <span className="text-destructive">*</span>
+                  {destCount > 0 && <span className="ml-1.5 text-primary font-normal">({destCount})</span>}
+                </Label>
+                <MultiSelect options={destOptions} value={destinationIds} onChange={setDestinationIds} placeholder={destPlaceholder} />
+              </div>
+            )}
+          </div>
+
+          {/* Full-width destination for supplier→warehouses and return */}
+          {txType !== "warehouse_to_branches" && (
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">
+                {destLabel} <span className="text-destructive">*</span>
+                {destCount > 0 && <span className="ml-1.5 text-primary font-normal">({destCount} selected)</span>}
+              </Label>
+              <MultiSelect options={destOptions} value={destinationIds} onChange={setDestinationIds} placeholder={destPlaceholder} />
+            </div>
+          )}
+
+          {/* Selected destination chips */}
+          {destinationIds.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 -mt-3">
+              {destinationIds.map(id => {
+                const lbl = destOptions.find(o => o.id === id)?.label ?? id;
+                return (
+                  <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium border border-primary/20">
+                    {lbl}
+                    <button type="button" onClick={() => setDestinationIds(p => p.filter(v => v !== id))} className="hover:text-destructive ml-0.5">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Items */}
           <div className="space-y-3">
             <Label className="text-xs font-medium">Items <span className="text-destructive">*</span></Label>
             <div className="rounded-xl border border-border/60 p-3 space-y-2 bg-muted/20">
@@ -739,7 +998,7 @@ function NewRequestSheet({
                     </div>
                     <div className="flex items-center gap-2 ml-3 shrink-0">
                       <Input type="number" min={1} value={item.requestedQuantity} onChange={e => updateQty(item.productId, parseInt(e.target.value) || 1)} className="h-7 w-16 text-xs text-center" />
-                      <span className="text-xs text-muted-foreground">units</span>
+                      <span className="text-xs text-muted-foreground">per dest.</span>
                       <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => removeItem(item.productId)}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
@@ -747,7 +1006,8 @@ function NewRequestSheet({
                   </div>
                 ))}
                 <p className="text-xs text-muted-foreground text-right pt-1">
-                  {items.length} product{items.length !== 1 ? "s" : ""} · {totalUnits} unit{totalUnits !== 1 ? "s" : ""} total
+                  {items.length} product{items.length !== 1 ? "s" : ""} · {totalUnits} unit{totalUnits !== 1 ? "s" : ""} per destination
+                  {destCount > 1 && <> · <span className="font-semibold text-primary">{destCount} destinations = {totalUnits * destCount} total</span></>}
                 </p>
               </div>
             ) : (
@@ -757,13 +1017,34 @@ function NewRequestSheet({
 
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Notes</Label>
-            <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Reason for request, urgency, special handling…" rows={3} className="resize-none text-sm" />
+            <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Reason for request, urgency, special handling…" rows={2} className="resize-none text-sm" />
           </div>
+
           {error && <p className="text-xs text-destructive">{error}</p>}
+
+          {/* Cost & batch summary */}
+          {items.length > 0 && totalValuePerDest > 0 && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Value per destination</span>
+                <span className="font-semibold flex items-center gap-0.5"><SARIcon />{totalValuePerDest.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              </div>
+              {destCount > 1 && (
+                <div className="flex justify-between items-center border-t border-primary/20 pt-1.5">
+                  <span className="text-primary font-semibold">{destCount} destinations — Grand Total</span>
+                  <span className="font-bold text-sm flex items-center gap-0.5 text-primary"><SARIcon />{grandTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {destCount > 1 && (
+                <p className="text-muted-foreground pt-0.5">{destCount} separate requests will be created — one per destination.</p>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2 pt-2 border-t border-border/60">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button className="flex-1 gradient-primary text-primary-foreground border-0" onClick={handleSubmit} disabled={saving}>
-              {saving ? "Submitting…" : "Submit Request"}
+              {saving ? "Submitting…" : destCount > 1 ? `Submit ${destCount} Requests` : "Submit Request"}
             </Button>
           </div>
         </div>

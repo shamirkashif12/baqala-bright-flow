@@ -14,7 +14,8 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         [FromQuery] string? transferType,
         [FromQuery] string? status,
         [FromQuery] Guid? sourceWarehouseId,
-        [FromQuery] Guid? destWarehouseId)
+        [FromQuery] Guid? destWarehouseId,
+        [FromQuery] string? batchId)
     {
         var query = db.StockTransfers
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
@@ -25,7 +26,21 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);
         if (sourceWarehouseId.HasValue) query = query.Where(t => t.SourceWarehouseId == sourceWarehouseId);
         if (destWarehouseId.HasValue) query = query.Where(t => t.DestWarehouseId == destWarehouseId);
+        if (!string.IsNullOrEmpty(batchId)) query = query.Where(t => t.BatchId == batchId);
         return Ok(await query.OrderByDescending(t => t.CreatedAt).ToListAsync());
+    }
+
+    [HttpGet("batch/{batchId}")]
+    public async Task<IActionResult> GetByBatchId(string batchId)
+    {
+        var transfers = await db.StockTransfers
+            .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
+            .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
+            .Include(t => t.Items).ThenInclude(i => i.Product)
+            .Where(t => t.BatchId == batchId)
+            .OrderBy(t => t.CreatedAt)
+            .ToListAsync();
+        return Ok(transfers);
     }
 
     [HttpGet("{id:guid}")]
@@ -82,6 +97,7 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
             Status = "draft",
             ReturnReason = req.ReturnReason,
             Notes = req.Notes,
+            BatchId = req.BatchId,
             ExpectedDate = req.ExpectedDate,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -310,6 +326,7 @@ public record CreateTransferRequest(
     Guid? CreatedBy,
     string? ReturnReason,
     string? Notes,
+    string? BatchId,
     DateTime? ExpectedDate,
     List<CreateTransferItemRequest>? Items
 );

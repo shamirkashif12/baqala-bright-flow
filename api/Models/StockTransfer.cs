@@ -62,6 +62,10 @@ public class StockTransfer
     [Column("notes")]
     public string? Notes { get; set; }
 
+    // Links all transfers created together (multi-destination batch)
+    [MaxLength(50), Column("batch_id")]
+    public string? BatchId { get; set; }
+
     [Column("expected_date")]
     public DateTime? ExpectedDate { get; set; }
 

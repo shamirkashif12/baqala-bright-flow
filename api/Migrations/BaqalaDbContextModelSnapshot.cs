@@ -1797,6 +1797,11 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("expected_delivery_date");
 
+                    b.Property<string>("BatchId")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("batch_id");
+
                     b.Property<string>("Notes")
                         .HasColumnType("longtext")
                         .HasColumnName("notes");
@@ -2388,6 +2393,11 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<DateTime?>("ExpectedDate")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("expected_date");
+
+                    b.Property<string>("BatchId")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("batch_id");
 
                     b.Property<string>("Notes")
                         .HasColumnType("longtext")

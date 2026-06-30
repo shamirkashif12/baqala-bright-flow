@@ -41,7 +41,66 @@ function buildZatcaTlv(sellerName: string, vatNumber: string, timestamp: string,
   return btoa(String.fromCharCode(...buf));
 }
 
-// ─── Print invoice in a new window ────────────────────────────────────────────
+// ─── Auto-download PDF receipt using jsPDF ────────────────────────────────────
+async function downloadInvoicePdf(invoice: InvoiceSnapshot) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: [80, 210] });
+  const W = 80;
+  let y = 8;
+
+  const line = () => { doc.setLineDashPattern([0.8, 0.8], 0); doc.line(4, y, W - 4, y); y += 4; };
+  const row = (left: string, right: string, bold = false) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(bold ? 9 : 8);
+    doc.text(left, 4, y);
+    doc.text(right, W - 4, y, { align: "right" });
+    y += 4;
+  };
+  const center = (text: string, size = 8, bold = false) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    doc.text(text, W / 2, y, { align: "center" });
+    y += size > 9 ? 5 : 4;
+  };
+
+  center(invoice.sellerName, 12, true);
+  center(`VAT: ${invoice.vatNumber}`, 7);
+  center("TAX INVOICE", 8, true);
+  center(invoice.orderNumber, 8);
+  center(new Date(invoice.createdAt).toLocaleString("en-SA"), 7);
+  if (invoice.customerName) center(`Customer: ${invoice.customerName}`, 7);
+  if (invoice.branchName) center(invoice.branchName, 7);
+  line();
+
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  invoice.items.forEach(item => {
+    const name = item.name.length > 30 ? item.name.substring(0, 27) + "…" : item.name;
+    doc.text(name, 4, y); y += 3.5;
+    row(`  ${item.qty} x SAR ${item.price.toFixed(2)}`, `SAR ${(item.qty * item.price).toFixed(2)}`);
+  });
+
+  line();
+  row("Subtotal:", `SAR ${invoice.subtotal.toFixed(2)}`);
+  if (invoice.discount > 0) row("Discount:", `-SAR ${invoice.discount.toFixed(2)}`);
+  row(invoice.taxLabel + ":", `SAR ${invoice.vat.toFixed(2)}`);
+  y += 1;
+  row("TOTAL:", `SAR ${invoice.total.toFixed(2)}`, true);
+  y += 1;
+
+  if (invoice.splitBreakdown?.length) {
+    row("Payment:", "Split");
+    invoice.splitBreakdown.forEach(p => row(`  ↳ ${p.method}`, `SAR ${p.amount.toFixed(2)}`));
+  } else if (invoice.paymentMethod) {
+    row("Payment:", invoice.paymentMethod);
+  }
+  y += 2;
+  center("شكراً لتسوقكم / Thank you!", 7);
+  center("ZATCA Phase 2 Compliant", 6);
+
+  doc.save(`Invoice-${invoice.orderNumber}.pdf`);
+}
+
+// ─── Silent print (opens receipt window → auto-prints) ────────────────────────
 function printInvoice(contentId: string) {
   const el = document.getElementById(contentId);
   if (!el) return;
@@ -49,7 +108,8 @@ function printInvoice(contentId: string) {
   if (!win) return;
   win.document.write(`<!DOCTYPE html><html><head><title>Tax Invoice</title>
     <style>
-      body{font-family:monospace;font-size:12px;padding:16px;color:#000;background:#fff}
+      @page{margin:4mm}
+      body{font-family:monospace;font-size:12px;padding:8px;color:#000;background:#fff;max-width:320px;margin:0 auto}
       .center{text-align:center} .bold{font-weight:bold} .row{display:flex;justify-content:space-between;margin:2px 0}
       .dashed{border-top:1px dashed #000;margin:6px 0;padding-top:6px}
       .discount{color:#16a34a} .total{font-weight:bold;font-size:14px}
@@ -57,7 +117,7 @@ function printInvoice(contentId: string) {
     </style></head><body>${el.innerHTML}</body></html>`);
   win.document.close();
   win.focus();
-  setTimeout(() => { win.print(); win.close(); }, 300);
+  setTimeout(() => { win.print(); win.close(); }, 250);
 }
 
 export const Route = createFileRoute("/_app/pos")({ component: POS });
@@ -370,6 +430,7 @@ function POS() {
     if (!branch) return;
     sessionStorage.setItem(`pos_cart_${branch.id}`, JSON.stringify(cart));
   }, [cart]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // Keep refs fresh so the scanner listener never has stale closures
   useEffect(() => { productsRef.current = products; }, [products]);
@@ -775,7 +836,7 @@ function POS() {
     });
 
     // Snapshot invoice data before cart is cleared
-    setInvoice({
+    const invoiceData: InvoiceSnapshot = {
       orderNumber: order.orderNumber,
       createdAt: order.createdAt ?? new Date().toISOString(),
       items: [...cart],
@@ -790,13 +851,18 @@ function POS() {
       customerName: customer?.fullName,
       paymentMethod: splitPayments ? "Split" : paymentMethod,
       splitBreakdown: splitPayments?.filter(p => p.amount > 0),
-    });
+    };
+    setInvoice(invoiceData);
+    // Auto-download PDF immediately (no dialog needed)
+    downloadInvoicePdf(invoiceData);
   };
 
   const onPaymentDone = () => {
     setPayOpen(false);
     setInvOpen(true);
     resetSale();
+    // Auto-print: delay to allow invoice dialog + DOM to render
+    setTimeout(() => printInvoice("pos-invoice"), 400);
   };
 
   return (
@@ -1438,13 +1504,6 @@ function POS() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setInvOpen(false)}>Close</Button>
-            <Button
-              className="gradient-primary text-primary-foreground border-0"
-              disabled={!invoice}
-              onClick={() => printInvoice("pos-invoice")}
-            >
-              <Printer className="h-4 w-4 mr-1" />Print
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

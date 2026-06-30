@@ -62,6 +62,10 @@ public class PurchaseOrder
     [Column("notes")]
     public string? Notes { get; set; }
 
+    // Links all POs created together (multi-warehouse batch)
+    [MaxLength(50), Column("batch_id")]
+    public string? BatchId { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
