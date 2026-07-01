@@ -900,7 +900,6 @@ function PurchaseOrders() {
       return matchQ && mdf && mdt;
     });
   }, [supplierTransfers, search, dateFrom, dateTo]);
-
   // Group batch POs into single display rows
   const displayRows = useMemo(() => {
     const seen = new Set<string>();

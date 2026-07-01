@@ -275,6 +275,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
         }
       } catch { /* transfer not found, fall through */ }
 
+
       setFetchError(`Order "${num}" not found. Try a warehouse request number (WR-...) or PO number.`);
     } catch {
       setFetchError("Failed to look up order.");
@@ -416,6 +417,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
                 </Select>
               </div>
             )}
+
 
             {/* ── Warehouse selection: multi-select only when > 1 original destination ── */}
             {isMultiWh ? (
