@@ -14,7 +14,8 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         [FromQuery] Guid? supplierId,
         [FromQuery] Guid? warehouseId,
         [FromQuery] string? status,
-        [FromQuery] string? paymentStatus)
+        [FromQuery] string? paymentStatus,
+        [FromQuery] string? batchId)
     {
         var query = db.PurchaseOrders
             .Include(p => p.Supplier)
@@ -27,7 +28,23 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         if (warehouseId.HasValue) query = query.Where(p => p.WarehouseId == warehouseId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(p => p.Status == status);
         if (!string.IsNullOrEmpty(paymentStatus)) query = query.Where(p => p.PaymentStatus == paymentStatus);
+        if (!string.IsNullOrEmpty(batchId)) query = query.Where(p => p.BatchId == batchId);
         return Ok(await query.OrderByDescending(p => p.CreatedAt).ToListAsync());
+    }
+
+    [HttpGet("batch/{batchId}")]
+    public async Task<IActionResult> GetByBatchId(string batchId)
+    {
+        var pos = await db.PurchaseOrders
+            .Include(p => p.Supplier)
+            .Include(p => p.Warehouse)
+            .Include(p => p.Branch)
+            .Include(p => p.Items).ThenInclude(i => i.Product)
+            .Include(p => p.Payments)
+            .Where(p => p.BatchId == batchId)
+            .OrderBy(p => p.CreatedAt)
+            .ToListAsync();
+        return Ok(pos);
     }
 
     [HttpGet("{id:guid}")]
@@ -83,6 +100,7 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
             PaymentTerms = req.PaymentTerms,
             ExpectedDeliveryDate = req.ExpectedDeliveryDate,
             Notes = req.Notes,
+            BatchId = req.BatchId,
             Status = "draft",
             PaymentStatus = "unpaid",
             TotalAmount = items.Sum(i => i.Subtotal),
@@ -256,6 +274,7 @@ public record CreatePoRequest(
     string? PaymentTerms,
     DateTime? ExpectedDeliveryDate,
     string? Notes,
+    string? BatchId,
     List<CreatePoItemRequest>? Items
 );
 public record AddPaymentRequest(

@@ -11,8 +11,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X } from "lucide-react";
-import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product } from "@/lib/api";
+import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
@@ -64,6 +65,44 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
   return <div className="space-y-1.5"><Label className="text-xs font-medium">{label}</Label>{children}</div>;
 }
 
+// ─── Multi-select ─────────────────────────────────────────────────────────────
+function MultiSelect({
+  options, value, onChange, placeholder = "Select…",
+}: {
+  options: { id: string; label: string }[];
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter(v => v !== id) : [...value, id]);
+  const label = value.length === 0 ? placeholder
+    : value.length === 1 ? (options.find(o => o.id === value[0])?.label ?? placeholder)
+    : `${value.length} selected`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
+          <span className={value.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
+          <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-2 max-h-60 overflow-y-auto">
+        {options.map(opt => (
+          <button key={opt.id} type="button" onClick={() => toggle(opt.id)}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-left">
+            <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${value.includes(opt.id) ? "bg-primary border-primary" : "border-input"}`}>
+              {value.includes(opt.id) && <Check className="h-3 w-3 text-primary-foreground" />}
+            </div>
+            <span className="font-medium truncate">{opt.label}</span>
+          </button>
+        ))}
+        {options.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">No options</p>}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ─── 5-Step Create PO Wizard ─────────────────────────────────────────────────
 
 interface POItemDraft { productId: string; productName: string; quantity: number; unitCost: number; }
@@ -98,7 +137,7 @@ function CreatePOWizard({
   const [supplierType, setSupplierType] = useState("Direct Supplier");
   const [paymentTerms, setPaymentTerms] = useState("Net 30");
   // Step 2
-  const [warehouseId, setWarehouseId] = useState("");
+  const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
   // Step 3
   const [items, setItems] = useState<POItemDraft[]>([emptyItem()]);
@@ -109,7 +148,7 @@ function CreatePOWizard({
 
   const reset = () => {
     setStep(1); setSupplierId(""); setSupplierType("Direct Supplier"); setPaymentTerms("Net 30");
-    setWarehouseId(""); setExpectedDeliveryDate(""); setItems([emptyItem()]); setNotes(""); setError("");
+    setWarehouseIds([]); setExpectedDeliveryDate(""); setItems([emptyItem()]); setNotes(""); setError("");
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -120,12 +159,13 @@ function CreatePOWizard({
     setItems(p => p.map((row, idx) => idx === i ? { ...row, [key]: val } : row));
 
   const selectedSupplier = suppliers.find(s => s.id === supplierId);
-  const selectedWarehouse = warehouses.find(w => w.id === warehouseId);
+  const selectedWarehouses = warehouses.filter(w => warehouseIds.includes(w.id));
   const total = items.reduce((s, it) => s + it.quantity * it.unitCost, 0);
+  const grandTotal = total * Math.max(warehouseIds.length, 1);
 
   const validateStep = () => {
     if (step === 1 && !supplierId) { setError("Please select a supplier."); return false; }
-    if (step === 2 && !warehouseId) { setError("Please select a delivery location."); return false; }
+    if (step === 2 && warehouseIds.length === 0) { setError("Please select at least one delivery location."); return false; }
     if (step === 3) {
       const valid = items.filter(it => it.productId && it.quantity > 0);
       if (!valid.length) { setError("Add at least one item with a product selected."); return false; }
@@ -142,19 +182,23 @@ function CreatePOWizard({
     setError("");
     try {
       const validItems = items.filter(it => it.productId && it.quantity > 0);
-      await api.createPurchaseOrder({
-        supplierId,
-        warehouseId,
-        paymentTerms: paymentTerms.toLowerCase().replace(/ /g, "_"),
-        expectedDeliveryDate: expectedDeliveryDate || undefined,
-        notes: notes || undefined,
-        orderedBy: user?.id,
-        items: validItems.map(it => ({
-          productId: it.productId,
-          orderedQuantity: it.quantity,
-          unitCost: it.unitCost,
-        })) as unknown as PurchaseOrderItem[],
-      });
+      const batchId = warehouseIds.length > 1 ? crypto.randomUUID() : undefined;
+      for (const whId of warehouseIds) {
+        await api.createPurchaseOrder({
+          supplierId,
+          warehouseId: whId,
+          paymentTerms: paymentTerms.toLowerCase().replace(/ /g, "_"),
+          expectedDeliveryDate: expectedDeliveryDate || undefined,
+          notes: notes || undefined,
+          batchId,
+          orderedBy: user?.id,
+          items: validItems.map(it => ({
+            productId: it.productId,
+            orderedQuantity: it.quantity,
+            unitCost: it.unitCost,
+          })) as unknown as PurchaseOrderItem[],
+        });
+      }
       onCreated();
       handleClose();
     } catch (e) {
@@ -222,13 +266,31 @@ function CreatePOWizard({
           {/* ── Step 2: Delivery ── */}
           {step === 2 && (
             <>
-              <FieldRow label="Delivery Location *">
-                <Select value={warehouseId} onValueChange={setWarehouseId}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select warehouse…" /></SelectTrigger>
-                  <SelectContent>
-                    {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+              <FieldRow label={`Delivery Location(s) * ${warehouseIds.length > 0 ? `— ${warehouseIds.length} selected` : ""}`}>
+                <MultiSelect
+                  options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                  value={warehouseIds}
+                  onChange={setWarehouseIds}
+                  placeholder="Select warehouse(s)…"
+                />
+                {warehouseIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {warehouseIds.map(id => {
+                      const lbl = warehouses.find(w => w.id === id)?.name ?? id;
+                      return (
+                        <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
+                          {lbl}
+                          <button type="button" onClick={() => setWarehouseIds(p => p.filter(v => v !== id))} className="hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                {warehouseIds.length > 1 && (
+                  <p className="text-xs text-primary mt-1">
+                    {warehouseIds.length} separate POs will be created — one per warehouse.
+                  </p>
+                )}
               </FieldRow>
               <FieldRow label="Expected Delivery Date (optional)">
                 <Input
@@ -286,8 +348,17 @@ function CreatePOWizard({
               <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={addItem}>
                 <Plus className="h-3.5 w-3.5" /> Add Row
               </Button>
-              <div className="text-right text-sm font-semibold pt-1 border-t border-border/40">
-                Total: <SARIcon />{fmt(total)}
+              <div className="pt-1 border-t border-border/40 space-y-1">
+                {warehouseIds.length > 1 && (
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Per warehouse</span>
+                    <span className="flex items-center gap-0.5"><SARIcon />{fmt(total)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm font-bold">
+                  <span>{warehouseIds.length > 1 ? `${warehouseIds.length} warehouses — Grand Total` : "Total"}</span>
+                  <span className={`flex items-center gap-0.5 ${warehouseIds.length > 1 ? "text-primary" : ""}`}><SARIcon />{fmt(grandTotal)}</span>
+                </div>
               </div>
               <FieldRow label="Notes (optional)">
                 <Textarea rows={2} className="resize-none text-sm" placeholder="Reason, handling notes…" value={notes} onChange={e => setNotes(e.target.value)} />
@@ -301,7 +372,6 @@ function CreatePOWizard({
               {[
                 ["Supplier",       selectedSupplier?.name ?? "—"],
                 ["Type",           supplierType],
-                ["Delivery to",    selectedWarehouse?.name ?? "—"],
                 ["ETA",            expectedDeliveryDate ? formatDate(expectedDeliveryDate) : "—"],
                 ["Payment terms",  paymentTerms],
               ].map(([k, v]) => (
@@ -310,6 +380,15 @@ function CreatePOWizard({
                   <span className="font-medium">{v}</span>
                 </div>
               ))}
+              <div className="flex justify-between border-b border-border/40 pb-2">
+                <span className="text-muted-foreground">Delivery to</span>
+                <span className="font-medium text-right max-w-[180px]">
+                  {selectedWarehouses.length === 0 ? "—"
+                    : selectedWarehouses.length === 1 ? selectedWarehouses[0].name
+                    : selectedWarehouses.map(w => w.name).join(", ")}
+                  {selectedWarehouses.length > 1 && <span className="block text-xs text-primary">{selectedWarehouses.length} POs will be created</span>}
+                </span>
+              </div>
               <div className="pt-1 space-y-1.5">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Items</p>
                 {items.filter(it => it.productId).map((it, i) => {
@@ -322,9 +401,14 @@ function CreatePOWizard({
                   );
                 })}
               </div>
-              <div className="flex justify-between font-bold text-base pt-2">
-                <span>Total</span>
-                <span><SARIcon />{fmt(total)}</span>
+              {warehouseIds.length > 1 && (
+                <div className="flex justify-between text-sm text-muted-foreground pt-2">
+                  <span>Per warehouse</span><span className="flex items-center gap-0.5"><SARIcon />{fmt(total)}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold text-base pt-1">
+                <span>{warehouseIds.length > 1 ? `Grand Total (×${warehouseIds.length})` : "Total"}</span>
+                <span className={`flex items-center gap-0.5 ${warehouseIds.length > 1 ? "text-primary" : ""}`}><SARIcon />{fmt(grandTotal)}</span>
               </div>
             </div>
           )}
@@ -343,8 +427,15 @@ function CreatePOWizard({
               </div>
               <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Supplier</span><span className="font-medium">{selectedSupplier?.name ?? "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Warehouses</span><span className="font-medium text-right">{selectedWarehouses.map(w => w.name).join(", ") || "—"}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Items</span><span className="font-medium">{items.filter(it => it.productId).length} product(s)</span></div>
-                <div className="flex justify-between border-t border-border/40 pt-2"><span className="text-muted-foreground">Order Total</span><span className="font-bold text-base"><SARIcon />{fmt(total)}</span></div>
+                {warehouseIds.length > 1 && (
+                  <div className="flex justify-between"><span className="text-muted-foreground">Per warehouse</span><span className="font-medium flex items-center gap-0.5"><SARIcon />{fmt(total)}</span></div>
+                )}
+                <div className="flex justify-between border-t border-border/40 pt-2">
+                  <span className="text-muted-foreground">{warehouseIds.length > 1 ? `Grand Total (${warehouseIds.length} POs)` : "Order Total"}</span>
+                  <span className={`font-bold text-base flex items-center gap-0.5 ${warehouseIds.length > 1 ? "text-primary" : ""}`}><SARIcon />{fmt(grandTotal)}</span>
+                </div>
               </div>
             </div>
           )}
@@ -470,8 +561,8 @@ function ReceiveSheet({ open, onClose, po, onReceived }: {
 
 // ─── View PO Sheet ────────────────────────────────────────────────────────────
 
-function ViewPOSheet({ open, onClose, po, onRefresh }: {
-  open: boolean; onClose: () => void; po: PurchaseOrder | null; onRefresh: () => void;
+function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
+  open: boolean; onClose: () => void; po: PurchaseOrder | null; batchGroup?: PurchaseOrder[]; onRefresh: () => void;
 }) {
   const { user } = useAuth();
   const [receiveOpen, setReceiveOpen] = useState(false);
@@ -505,6 +596,13 @@ function ViewPOSheet({ open, onClose, po, onRefresh }: {
   };
 
   if (!po) return null;
+
+  const isBatch = batchGroup.length > 1;
+  const batchTotal = isBatch ? batchGroup.reduce((s, p) => s + p.totalAmount, 0) : po.totalAmount;
+  const batchPaid = isBatch ? batchGroup.reduce((s, p) => s + p.paidAmount, 0) : po.paidAmount;
+  const allDestinations = isBatch
+    ? batchGroup.map(p => p.warehouse?.name ?? p.branch?.name).filter(Boolean).join(", ")
+    : (po.warehouse?.name ?? po.branch?.name ?? "—");
 
   const handleAddPayment = async () => {
     const amount = parseFloat(payAmount);
@@ -544,18 +642,34 @@ function ViewPOSheet({ open, onClose, po, onRefresh }: {
             <TabsContent value="overview" className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
-                  ["PO Number", po.poNumber], ["Created", formatDate(po.createdAt)],
-                  ["Supplier", po.supplier?.name ?? "—"], ["Supplier Code", po.supplier?.supplierCode ?? "—"],
-                  ["Destination", destName], ["Payment Terms", po.paymentTerms?.replace(/_/g, " ") ?? "—"],
-                  ["Expected Delivery", formatDate(po.expectedDeliveryDate)], ["Received Date", formatDate(po.receivedDate)],
+                  ["PO Number", isBatch ? `${po.poNumber} (+${batchGroup.length - 1} more)` : po.poNumber],
+                  ["Created", formatDate(po.createdAt)],
+                  ["Supplier", po.supplier?.name ?? "—"],
+                  ["Supplier Code", po.supplier?.supplierCode ?? "—"],
+                  ["Payment Terms", po.paymentTerms?.replace(/_/g, " ") ?? "—"],
+                  ["Expected Delivery", formatDate(po.expectedDeliveryDate)],
+                  ["Received Date", formatDate(po.receivedDate)],
                 ].map(([k, v]) => (
                   <div key={k}><p className="text-xs text-muted-foreground">{k}</p><p className="font-medium">{v}</p></div>
                 ))}
+                <div className={isBatch ? "col-span-2" : ""}>
+                  <p className="text-xs text-muted-foreground">Destination{isBatch ? "s" : ""}</p>
+                  <p className="font-medium">{allDestinations}</p>
+                  {isBatch && <p className="text-xs text-primary mt-0.5">{batchGroup.length} warehouses — batch order</p>}
+                </div>
               </div>
               <div className="rounded-lg border border-border/60 p-3 space-y-1.5">
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Amount</span><span className="font-semibold"><SARIcon />{fmt(po.totalAmount)}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Paid Amount</span><span className="font-semibold text-success"><SARIcon />{fmt(po.paidAmount)}</span></div>
-                <div className="flex justify-between text-sm border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Balance Due</span><span className="font-bold text-destructive"><SARIcon />{fmt(po.totalAmount - po.paidAmount)}</span></div>
+                {isBatch && (
+                  <div className="flex justify-between text-xs text-muted-foreground pb-1.5 border-b border-border/30">
+                    <span>Per warehouse</span><span className="flex items-center gap-0.5"><SARIcon />{fmt(po.totalAmount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{isBatch ? `Grand Total (×${batchGroup.length})` : "Total Amount"}</span>
+                  <span className={`font-semibold ${isBatch ? "text-primary" : ""}`}><SARIcon />{fmt(batchTotal)}</span>
+                </div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Paid Amount</span><span className="font-semibold text-success"><SARIcon />{fmt(batchPaid)}</span></div>
+                <div className="flex justify-between text-sm border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Balance Due</span><span className="font-bold text-destructive"><SARIcon />{fmt(batchTotal - batchPaid)}</span></div>
               </div>
               {po.notes && <div><p className="text-xs text-muted-foreground mb-1">Notes</p><p className="text-sm bg-muted/30 rounded-lg px-3 py-2">{po.notes}</p></div>}
             </TabsContent>
@@ -724,6 +838,9 @@ function ViewPOSheet({ open, onClose, po, onRefresh }: {
 function PurchaseOrders() {
   const { canCreate, canApprove, canDelete } = usePermission("Purchase Orders");
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
+  const [creditNotes, setCreditNotes] = useState<SupplierCreditNote[]>([]);
+  const [rtsTransfers, setRtsTransfers] = useState<StockTransfer[]>([]);
+  const [supplierTransfers, setSupplierTransfers] = useState<StockTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -734,12 +851,26 @@ function PurchaseOrders() {
   const [dateTo, setDateTo] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
+  const [viewPOGroup, setViewPOGroup] = useState<PurchaseOrder[]>([]);
   const [receiveTarget, setReceiveTarget] = useState<PurchaseOrder | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
-    api.getPurchaseOrders().then(setPos).finally(() => setLoading(false));
+    Promise.allSettled([
+      api.getPurchaseOrders(),
+      api.getCreditNotes(),
+      api.getStockTransfers({ transferType: "warehouse_to_supplier" }),
+      api.getStockTransfers({ transferType: "supplier_to_warehouse" }),
+    ]).then(([posRes, cnRes, rtsRes, stRes]) => {
+      if (posRes.status === "fulfilled") setPos(posRes.value);
+      if (cnRes.status === "fulfilled") setCreditNotes(cnRes.value);
+      if (rtsRes.status === "fulfilled") setRtsTransfers(rtsRes.value);
+      if (stRes.status === "fulfilled") {
+        // Only show transfers not linked to an existing PO (to avoid duplicate rows)
+        setSupplierTransfers(stRes.value.filter(t => !t.purchaseOrderId));
+      }
+    }).finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -760,10 +891,36 @@ function PurchaseOrders() {
     });
   }, [pos, search, dateFrom, dateTo]);
 
+  const filteredSupplierTransfers = useMemo(() => {
+    const q = search.toLowerCase();
+    return supplierTransfers.filter(t => {
+      const matchQ = !q || t.transferNumber.toLowerCase().includes(q) || (t.sourceSupplier?.name ?? "").toLowerCase().includes(q);
+      const mdf = !dateFrom || (!!t.createdAt && t.createdAt >= dateFrom);
+      const mdt = !dateTo || (!!t.createdAt && t.createdAt <= dateTo + "T23:59:59");
+      return matchQ && mdf && mdt;
+    });
+  }, [supplierTransfers, search, dateFrom, dateTo]);
+  // Group batch POs into single display rows
+  const displayRows = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: Array<{ key: string; group: PurchaseOrder[]; isBatch: boolean }> = [];
+    for (const po of filtered) {
+      if (po.batchId) {
+        if (!seen.has(po.batchId)) {
+          seen.add(po.batchId);
+          rows.push({ key: po.batchId, group: filtered.filter(p => p.batchId === po.batchId), isBatch: true });
+        }
+      } else {
+        rows.push({ key: po.id, group: [po], isBatch: false });
+      }
+    }
+    return rows;
+  }, [filtered]);
+
   // Metrics
   const totalPOs = pos.length;
   const outstandingPayables = pos.filter(p => p.paymentStatus !== "paid" && p.status !== "cancelled").reduce((s, p) => s + (p.totalAmount - p.paidAmount), 0);
-  const supplierCredits = pos.filter(p => p.paymentStatus === "supplier_credit").reduce((s, p) => s + p.totalAmount, 0);
+  const supplierCredits = creditNotes.filter(cn => cn.status !== "cancelled").reduce((s, cn) => s + cn.amount, 0);
   const paidThisMonth = (() => {
     const now = new Date();
     return pos.filter(p => {
@@ -772,22 +929,30 @@ function PurchaseOrders() {
     }).reduce((s, p) => s + p.paidAmount, 0);
   })();
 
-  const handleSend = async (po: PurchaseOrder) => {
-    setActionLoading(po.id + "_send");
-    try { await api.updatePoStatus(po.id, "sent"); load(); }
-    finally { setActionLoading(null); }
+  const handleSend = async (group: PurchaseOrder[]) => {
+    setActionLoading(group[0].id + "_send");
+    try {
+      for (const po of group) await api.updatePoStatus(po.id, "sent");
+      load();
+    } finally { setActionLoading(null); }
   };
 
-  const handleCancel = async (po: PurchaseOrder) => {
-    if (!confirm(`Cancel PO ${po.poNumber}?`)) return;
-    setActionLoading(po.id + "_cancel");
-    try { await api.updatePoStatus(po.id, "cancelled"); load(); }
-    finally { setActionLoading(null); }
+  const handleCancel = async (group: PurchaseOrder[]) => {
+    const msg = group.length > 1 ? `Cancel batch of ${group.length} POs?` : `Cancel PO ${group[0].poNumber}?`;
+    if (!confirm(msg)) return;
+    setActionLoading(group[0].id + "_cancel");
+    try {
+      for (const po of group) await api.updatePoStatus(po.id, "cancelled");
+      load();
+    } finally { setActionLoading(null); }
   };
 
   const refreshView = () => {
     load();
-    if (viewPO) api.getPurchaseOrder(viewPO.id).then(setViewPO).catch(() => {});
+    if (viewPO) api.getPurchaseOrder(viewPO.id).then(updated => {
+      setViewPO(updated);
+      setViewPOGroup(g => g.map(p => p.id === updated.id ? updated : p));
+    }).catch(() => {});
   };
 
   return (
@@ -854,31 +1019,41 @@ function PurchaseOrders() {
                 <tbody>
                   {loading ? (
                     <tr><td colSpan={12} className="text-center py-12"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
-                  ) : filtered.length === 0 ? (
+                  ) : displayRows.length === 0 && filteredSupplierTransfers.length === 0 ? (
                     <tr><td colSpan={12} className="text-center py-12 text-muted-foreground text-sm">No purchase orders found.</td></tr>
-                  ) : filtered.map(po => {
-                    const dest = po.warehouse?.name ?? po.branch?.name ?? "—";
+                  ) : displayRows.map(({ key, group, isBatch }) => {
+                    const po = group[0];
+                    const dest = isBatch
+                      ? group.map(p => p.warehouse?.name ?? p.branch?.name).filter(Boolean).join(", ")
+                      : (po.warehouse?.name ?? po.branch?.name ?? "—");
+                    const totalAmt = isBatch ? group.reduce((s, p) => s + p.totalAmount, 0) : po.totalAmount;
                     const supplierType = suppliers.find(s => s.id === po.supplierId)?.supplyType ?? "—";
                     const isSending = actionLoading === po.id + "_send";
                     const isCancelling = actionLoading === po.id + "_cancel";
                     return (
-                      <tr key={po.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
-                        <td className="px-3 py-3 font-mono font-bold text-xs">{po.poNumber}</td>
+                      <tr key={key} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
+                        <td className="px-3 py-3 font-mono font-bold text-xs">
+                          {po.poNumber}
+                          {isBatch && <span className="ml-1.5 text-[10px] font-semibold bg-primary/15 text-primary px-1.5 py-0.5 rounded-full">×{group.length}</span>}
+                        </td>
                         <td className="px-3 py-3 font-medium">{po.supplier?.name ?? "—"}</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground capitalize">{supplierType.replace(/_/g, " ")}</td>
                         <td className="px-3 py-3 text-xs">{dest}</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{formatDate(po.createdAt)}</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{formatDate(po.expectedDeliveryDate)}</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{(po.items ?? []).length}</td>
-                        <td className="px-3 py-3 font-semibold tabular-nums"><SARIcon />{fmt(po.totalAmount)}</td>
+                        <td className="px-3 py-3 font-semibold tabular-nums">
+                          <SARIcon />{fmt(totalAmt)}
+                          {isBatch && <span className="text-[10px] text-muted-foreground ml-1">(×{group.length})</span>}
+                        </td>
                         <td className="px-3 py-3"><PayBadge status={po.paymentStatus} /></td>
                         <td className="px-3 py-3"><StatusBadge status={po.status} /></td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">—</td>
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setViewPO(po)} title="View"><Eye className="h-3.5 w-3.5" /></Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setViewPO(po); setViewPOGroup(group); }} title="View"><Eye className="h-3.5 w-3.5" /></Button>
                             {po.status === "draft" && canApprove && (
-                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleSend(po)} disabled={isSending}>
+                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleSend(group)} disabled={isSending}>
                                 {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}Send
                               </Button>
                             )}
@@ -888,12 +1063,44 @@ function PurchaseOrders() {
                               </Button>
                             )}
                             {po.status !== "cancelled" && po.status !== "fully_received" && canDelete && (
-                              <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleCancel(po)} disabled={isCancelling}>
+                              <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleCancel(group)} disabled={isCancelling}>
                                 {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : null}Cancel
                               </Button>
                             )}
                           </div>
                         </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredSupplierTransfers.map(t => {
+                    const total = (t.items ?? []).reduce((s, i) => s + i.requestedQuantity * (i.unitCost ?? 0), 0);
+                    return (
+                      <tr key={t.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0 bg-muted/5">
+                        <td className="px-3 py-3 font-mono font-bold text-xs">
+                          {t.transferNumber}
+                          <span className="ml-1.5 text-[10px] font-semibold bg-warning/20 text-warning-foreground px-1.5 py-0.5 rounded-full">TRF</span>
+                        </td>
+                        <td className="px-3 py-3 font-medium">{t.sourceSupplier?.name ?? "—"}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">Inbound Transfer</td>
+                        <td className="px-3 py-3 text-xs">{t.destWarehouse?.name ?? "—"}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{new Date(t.createdAt).toLocaleDateString("en-SA", { year: "numeric", month: "short", day: "numeric" })}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{t.expectedDate ? new Date(t.expectedDate).toLocaleDateString("en-SA", { year: "numeric", month: "short", day: "numeric" }) : "—"}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{(t.items ?? []).length}</td>
+                        <td className="px-3 py-3 font-semibold tabular-nums">
+                          {total > 0 ? <><SARIcon />{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</> : "—"}
+                        </td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">—</td>
+                        <td className="px-3 py-3">
+                          <Badge variant="outline" className={`text-xs ${
+                            t.status === "completed" ? "bg-success/15 text-success border-success/30" :
+                            t.status === "in_transit" ? "bg-primary/15 text-primary border-primary/30" :
+                            t.status === "approved" ? "bg-success/15 text-success border-success/30" :
+                            t.status === "cancelled" || t.status === "rejected" ? "bg-destructive/15 text-destructive border-destructive/30" :
+                            "bg-muted text-muted-foreground border-border"
+                          }`}>{t.status.replace(/_/g, " ")}</Badge>
+                        </td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">—</td>
+                        <td className="px-3 py-3" />
                       </tr>
                     );
                   })}
@@ -946,28 +1153,80 @@ function PurchaseOrders() {
 
         {/* ── Return / Credit Entries tab ── */}
         <TabsContent value="returns" className="mt-3">
+          {/* Summary cards */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            {[
+              { label: "Credit Notes", val: creditNotes.filter(cn => cn.status !== "cancelled").length, sub: "total notes" },
+              { label: "Total Credit Value", val: `SAR ${supplierCredits.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, sub: "" },
+              { label: "RTS Transfers", val: rtsTransfers.filter(t => t.status === "completed").length, sub: "completed returns" },
+            ].map(({ label, val, sub }) => (
+              <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                <p className="text-lg font-bold">{val}</p>
+                {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+                <p className="text-xs font-medium text-muted-foreground mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+
+
+          {/* RTS Transfers */}
           <Card className="overflow-hidden border-border/60 shadow-card">
+            <div className="px-4 py-2.5 border-b border-border/40 bg-muted/30">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Return to Supplier (RTS) Transfers</p>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="px-3 py-3 font-semibold">Supplier</th>
-                    <th className="px-3 py-3 font-semibold">PO</th>
-                    <th className="px-3 py-3 font-semibold">Credit Amount</th>
-                    <th className="px-3 py-3 font-semibold">Status</th>
+                  <tr className="bg-muted/20 border-b border-border/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="px-3 py-2.5 font-semibold">Transfer #</th>
+                    <th className="px-3 py-2.5 font-semibold">Supplier</th>
+                    <th className="px-3 py-2.5 font-semibold">Source Warehouse(s)</th>
+                    <th className="px-3 py-2.5 font-semibold">Reason</th>
+                    <th className="px-3 py-2.5 font-semibold text-right">Credit Value</th>
+                    <th className="px-3 py-2.5 font-semibold">Status</th>
+                    <th className="px-3 py-2.5 font-semibold">Date</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {pos.filter(p => p.paymentStatus === "supplier_credit").map(po => (
-                    <tr key={po.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
-                      <td className="px-3 py-3 font-medium">{po.supplier?.name ?? "—"}</td>
-                      <td className="px-3 py-3 font-mono text-xs font-bold">{po.poNumber}</td>
-                      <td className="px-3 py-3 tabular-nums font-semibold text-primary"><SARIcon />{fmt(po.totalAmount)}</td>
-                      <td className="px-3 py-3"><PayBadge status={po.paymentStatus} /></td>
-                    </tr>
-                  ))}
-                  {pos.filter(p => p.paymentStatus === "supplier_credit").length === 0 && (
-                    <tr><td colSpan={4} className="text-center py-10 text-muted-foreground text-sm">No credit entries.</td></tr>
+                  {(() => {
+                    // Group batch RTS transfers
+                    const seen = new Set<string>();
+                    const rows: Array<{ key: string; group: StockTransfer[]; isBatch: boolean }> = [];
+                    for (const t of rtsTransfers) {
+                      if (t.batchId) {
+                        if (!seen.has(t.batchId)) { seen.add(t.batchId); rows.push({ key: t.batchId, group: rtsTransfers.filter(x => x.batchId === t.batchId), isBatch: true }); }
+                      } else { rows.push({ key: t.id, group: [t], isBatch: false }); }
+                    }
+                    return rows.map(({ key, group, isBatch }) => {
+                      const t = group[0];
+                      const creditVal = group.reduce((s, tr) => s + (tr.items ?? []).reduce((si, i) => si + (i.receivedQuantity ?? i.requestedQuantity) * (i.unitCost ?? 0), 0), 0);
+                      const warehouses = isBatch ? group.map(tr => tr.sourceWarehouse?.name).filter(Boolean).join(", ") : (t.sourceWarehouse?.name ?? "—");
+                      return (
+                        <tr key={key} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
+                          <td className="px-3 py-2.5 font-mono text-xs font-bold">
+                            {t.transferNumber}
+                            {isBatch && <span className="ml-1.5 text-[10px] font-semibold bg-primary/15 text-primary px-1.5 py-0.5 rounded-full">×{group.length}</span>}
+                          </td>
+                          <td className="px-3 py-2.5 font-medium">{t.destSupplier?.name ?? "—"}</td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground">{warehouses}</td>
+                          <td className="px-3 py-2.5">
+                            {t.returnReason ? <Badge variant="outline" className="text-xs capitalize">{t.returnReason.replace(/_/g, " ")}</Badge> : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-semibold text-primary">
+                            {creditVal > 0 ? <span className="flex items-center gap-0.5 justify-end"><SARIcon />{fmt(creditVal)}</span> : "—"}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${t.status === "completed" ? "bg-success/15 text-success" : t.status === "in_transit" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
+                              {t.status.replace(/_/g, " ")}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground">{new Date(t.createdAt).toLocaleDateString("en-SA")}</td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                  {rtsTransfers.length === 0 && (
+                    <tr><td colSpan={7} className="text-center py-8 text-muted-foreground text-sm">No return transfers yet.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -982,7 +1241,7 @@ function PurchaseOrders() {
         onCreated={load}
       />
 
-      <ViewPOSheet open={!!viewPO} onClose={() => setViewPO(null)} po={viewPO} onRefresh={refreshView} />
+      <ViewPOSheet open={!!viewPO} onClose={() => { setViewPO(null); setViewPOGroup([]); }} po={viewPO} batchGroup={viewPOGroup} onRefresh={refreshView} />
 
       <ReceiveSheet open={!!receiveTarget} onClose={() => setReceiveTarget(null)} po={receiveTarget}
         onReceived={() => { setReceiveTarget(null); load(); }} />

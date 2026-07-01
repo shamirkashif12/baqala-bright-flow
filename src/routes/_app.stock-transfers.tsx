@@ -14,7 +14,9 @@ import { Separator } from "@/components/ui/separator";
 import {
   ArrowRight, Warehouse, Building2, Truck, Package, RefreshCcw,
   CheckCircle2, Clock, Plus, Trash2, Eye, ArrowLeftRight, Loader2, X, Search,
+  ChevronDown, Check,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
   api,
@@ -118,7 +120,7 @@ interface PoItem {
 }
 
 interface FetchedPo {
-  id: string;
+  id?: string;
   poNumber: string;
   supplierId?: string;
   warehouseId?: string;
@@ -232,6 +234,43 @@ function TypeSelectorStep({
   );
 }
 
+// ─── Multi-select ────────────────────────────────────────────────────────────
+function MultiSelect({
+  options, value, onChange, placeholder = "Select…",
+}: {
+  options: { value: string; label: string }[];
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter(v => v !== id) : [...value, id]);
+  const label = value.length === 0 ? placeholder
+    : value.length === 1 ? (options.find(o => o.value === value[0])?.label ?? placeholder)
+    : `${value.length} selected`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
+          <span className={value.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
+          <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-2 max-h-60 overflow-y-auto">
+        {options.map(opt => (
+          <button key={opt.value} type="button" onClick={() => toggle(opt.value)}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-left">
+            <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${value.includes(opt.value) ? "bg-primary border-primary" : "border-input"}`}>
+              {value.includes(opt.value) && <Check className="h-3 w-3 text-primary-foreground" />}
+            </div>
+            <span className="font-medium truncate">{opt.label}</span>
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ─── Source/Dest Step ─────────────────────────────────────────────────────────
 
 function SourceDestStep({
@@ -241,6 +280,8 @@ function SourceDestStep({
   suppliers,
   form,
   onChange,
+  destIds,
+  onDestIdsChange,
 }: {
   transferType: TransferType;
   branches: Branch[];
@@ -248,6 +289,8 @@ function SourceDestStep({
   suppliers: Supplier[];
   form: CreateForm;
   onChange: (patch: Partial<CreateForm>) => void;
+  destIds: string[];
+  onDestIdsChange: (ids: string[]) => void;
 }) {
   const branchOptions = branches.map(b => ({ value: b.id, label: b.name }));
   const warehouseOptions = warehouses.map(w => ({ value: w.id, label: w.name }));
@@ -285,13 +328,43 @@ function SourceDestStep({
       {transferType === "supplier_to_warehouse" && (
         <>
           <SelectField label="Source — Supplier" value={form.sourceSupplierId} placeholder="Select supplier" options={supplierOptions} onValueChange={v => onChange({ sourceSupplierId: v })} />
-          <SelectField label="Destination — Warehouse" value={form.destWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ destWarehouseId: v })} />
+          <FieldRow label={`Destination — Warehouse(s) *${destIds.length > 0 ? ` (${destIds.length} selected)` : ""}`}>
+            <MultiSelect options={warehouseOptions} value={destIds} onChange={onDestIdsChange} placeholder="Select warehouse(s)…" />
+            {destIds.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {destIds.map(id => {
+                  const lbl = warehouseOptions.find(o => o.value === id)?.label ?? id;
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
+                      {lbl}<button type="button" onClick={() => onDestIdsChange(destIds.filter(v => v !== id))} className="hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {destIds.length > 1 && <p className="text-xs text-primary mt-0.5">{destIds.length} transfers will be created.</p>}
+          </FieldRow>
         </>
       )}
       {transferType === "warehouse_to_branch" && (
         <>
           <SelectField label="Source — Warehouse" value={form.sourceWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ sourceWarehouseId: v })} />
-          <SelectField label="Destination — Branch" value={form.destBranchId} placeholder="Select branch" options={branchOptions} onValueChange={v => onChange({ destBranchId: v })} />
+          <FieldRow label={`Destination — Branch(es) *${destIds.length > 0 ? ` (${destIds.length} selected)` : ""}`}>
+            <MultiSelect options={branchOptions} value={destIds} onChange={onDestIdsChange} placeholder="Select branch(es)…" />
+            {destIds.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {destIds.map(id => {
+                  const lbl = branchOptions.find(o => o.value === id)?.label ?? id;
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
+                      {lbl}<button type="button" onClick={() => onDestIdsChange(destIds.filter(v => v !== id))} className="hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {destIds.length > 1 && <p className="text-xs text-primary mt-0.5">{destIds.length} transfers will be created.</p>}
+          </FieldRow>
         </>
       )}
       {/* branch_to_warehouse is handled via PO lookup in step 2 */}
@@ -387,11 +460,13 @@ function ItemsStep({
   products,
   poItems,
   onChange,
+  destCount = 1,
 }: {
   items: ItemRow[];
   products: Product[];
   poItems?: PoItem[];
   onChange: (items: ItemRow[]) => void;
+  destCount?: number;
 }) {
   const addItem = () =>
     onChange([...items, { productId: "", requestedQuantity: 1, unitCost: "", expiryDate: "" }]);
@@ -515,20 +590,30 @@ function ItemsStep({
       </div>
       {items.length > 0 && (
         <div className={cn(
-          "flex items-center justify-between rounded-lg px-3 py-2.5",
+          "rounded-lg px-3 py-2.5 space-y-1.5",
           netAmount > 0 ? "bg-muted/40" : "bg-warning/10 border border-warning/20",
         )}>
-          <span className="text-xs text-muted-foreground">
-            {items.filter(i => i.productId).length} item(s) · Net Amount
-            {netAmount === 0 && (
-              <span className="ml-1.5 text-[11px] text-warning-foreground font-medium">
-                — enter unit costs to calculate
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              {items.filter(i => i.productId).length} item(s) · {destCount > 1 ? "per destination" : "Net Amount"}
+              {netAmount === 0 && (
+                <span className="ml-1.5 text-[11px] text-warning-foreground font-medium">
+                  — enter unit costs to calculate
+                </span>
+              )}
+            </span>
+            <span className={cn("text-sm font-semibold flex items-center gap-0.5", netAmount === 0 && "text-muted-foreground")}>
+              <SARIcon />{netAmount.toFixed(2)}
+            </span>
+          </div>
+          {destCount > 1 && netAmount > 0 && (
+            <div className="flex items-center justify-between border-t border-border/40 pt-1.5">
+              <span className="text-xs font-semibold text-primary">{destCount} destinations — Grand Total</span>
+              <span className="text-sm font-bold text-primary flex items-center gap-0.5">
+                <SARIcon />{(netAmount * destCount).toFixed(2)}
               </span>
-            )}
-          </span>
-          <span className={cn("text-sm font-semibold flex items-center gap-0.5", netAmount === 0 && "text-muted-foreground")}>
-            <SARIcon />{netAmount.toFixed(2)}
-          </span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -561,6 +646,9 @@ function CreateTransferSheet({
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [transferType, setTransferType] = useState<TransferType | null>(null);
   const [form, setForm] = useState<CreateForm>(emptyForm);
+  const [destIds, setDestIds] = useState<string[]>([]); // multi-destination (warehouse_to_branch, supplier_to_warehouse)
+  const [srcIds, setSrcIds] = useState<string[]>([]); // multi-source for return types (batch returns)
+  const [allSrcOptions, setAllSrcOptions] = useState<{ value: string; label: string }[]>([]); // all source options when original order was a batch
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -621,6 +709,9 @@ function CreateTransferSheet({
     setStep(1);
     setTransferType(null);
     setForm(emptyForm);
+    setDestIds([]);
+    setSrcIds([]);
+    setAllSrcOptions([]);
     setItems([]);
     setSaving(false);
     setPoNumber("");
@@ -637,6 +728,9 @@ function CreateTransferSheet({
 
   const handleTypeSelect = (t: TransferType) => {
     setTransferType(t);
+    setDestIds([]);
+    setSrcIds([]);
+    setAllSrcOptions([]);
     setPoNumber("");
     setPoError("");
     setFetchedPo(null);
@@ -658,7 +752,6 @@ function CreateTransferSheet({
         fetched = {
           id: trf.id,
           poNumber: trf.transferNumber ?? poNumber.trim(),
-          // For a return: original WH→Branch destBranch becomes source, sourceWarehouse becomes dest
           supplierId: undefined,
           warehouseId: trf.sourceWarehouseId,
           branchId: trf.destBranchId,
@@ -672,42 +765,133 @@ function CreateTransferSheet({
             unitCost: item.unitCost ?? 0,
           })),
         };
-        setForm(p => ({
-          ...p,
-          sourceBranchId: fetched.branchId ?? p.sourceBranchId,
-          destWarehouseId: fetched.warehouseId ?? p.destWarehouseId,
-        }));
+        // If original batch, find all sibling transfers → collect all dest branches (they return)
+        if (trf.batchId) {
+          const siblings = await api.getStockTransfersByBatch(trf.batchId);
+          const seen = new Set<string>();
+          const opts = siblings
+            .filter(s => s.destBranchId)
+            .map(s => ({ value: s.destBranchId!, label: s.destBranch?.name ?? s.destBranchId! }))
+            .filter(o => !seen.has(o.value) && !!seen.add(o.value));
+          setAllSrcOptions(opts);
+          setSrcIds(opts.map(o => o.value));
+          // dest warehouse is the same for all (original source)
+          setForm(p => ({ ...p, destWarehouseId: trf.sourceWarehouseId ?? p.destWarehouseId }));
+        } else {
+          setAllSrcOptions([]);
+          setSrcIds([]);
+          setForm(p => ({
+            ...p,
+            sourceBranchId: trf.destBranchId ?? p.sourceBranchId,
+            destWarehouseId: trf.sourceWarehouseId ?? p.destWarehouseId,
+          }));
+        }
       } else {
-        // RTS (warehouse_to_supplier) and supplier_to_warehouse use PO number
-        const po = await api.getPurchaseOrderByNumber(poNumber.trim());
-        fetched = {
-          id: po.id,
-          poNumber: po.poNumber,
-          supplierId: po.supplierId,
-          warehouseId: po.warehouseId,
-          branchId: po.branchId,
-          supplierName: po.supplier?.name ?? "",
-          warehouseName: po.warehouse?.name,
-          branchName: po.branch?.name,
-          items: (po.items ?? []).map(item => ({
-            productId: item.productId,
-            productName: item.product?.name ?? String(item.productId),
-            maxQty: item.orderedQuantity,
-            unitCost: item.unitCost,
-          })),
-        };
-        if (transferType === "supplier_to_warehouse") {
-          setForm(p => ({
-            ...p,
-            sourceSupplierId: po.supplierId ?? p.sourceSupplierId,
-            destWarehouseId: po.warehouseId ?? p.destWarehouseId,
-          }));
-        } else if (transferType === "warehouse_to_supplier") {
-          setForm(p => ({
-            ...p,
-            sourceWarehouseId: po.warehouseId ?? p.sourceWarehouseId,
-            destSupplierId: po.supplierId ?? p.destSupplierId,
-          }));
+        // RTS (warehouse_to_supplier) and supplier_to_warehouse use PO number.
+        // Also accept supplier_to_warehouse stock transfers (PO-xxx IDs) as valid RTS origin.
+        let po: PurchaseOrder | null = null;
+        let originTransfer: StockTransfer | null = null;
+
+        try {
+          po = await api.getPurchaseOrderByNumber(poNumber.trim());
+        } catch {
+          // Not a real PO — try as a supplier_to_warehouse stock transfer (PO-xxx style ID)
+          if (transferType === "warehouse_to_supplier") {
+            try {
+              const t = await api.getStockTransferByNumber(poNumber.trim());
+              if (t.transferType === "supplier_to_warehouse") originTransfer = t;
+            } catch { /* not found */ }
+          }
+        }
+
+        if (po) {
+          fetched = {
+            id: po.id,
+            poNumber: po.poNumber,
+            supplierId: po.supplierId,
+            warehouseId: po.warehouseId,
+            branchId: po.branchId,
+            supplierName: po.supplier?.name ?? "",
+            warehouseName: po.warehouse?.name,
+            branchName: po.branch?.name,
+            items: (po.items ?? []).map(item => ({
+              productId: item.productId,
+              productName: item.product?.name ?? String(item.productId),
+              maxQty: item.orderedQuantity,
+              unitCost: item.unitCost,
+            })),
+          };
+          if (transferType === "supplier_to_warehouse") {
+            setAllSrcOptions([]);
+            setSrcIds([]);
+            setForm(p => ({
+              ...p,
+              sourceSupplierId: po!.supplierId ?? p.sourceSupplierId,
+              destWarehouseId: po!.warehouseId ?? p.destWarehouseId,
+            }));
+          } else if (transferType === "warehouse_to_supplier") {
+            // If batch PO, find all sibling POs → collect all warehouse IDs (they are sources for RTS)
+            if (po.batchId) {
+              const siblings = await api.getPurchaseOrdersByBatch(po.batchId);
+              const seen = new Set<string>();
+              const opts = siblings
+                .filter(s => s.warehouseId)
+                .map(s => ({ value: s.warehouseId!, label: s.warehouse?.name ?? s.warehouseId! }))
+                .filter(o => !seen.has(o.value) && !!seen.add(o.value));
+              setAllSrcOptions(opts);
+              setSrcIds(opts.map(o => o.value));
+              setForm(p => ({ ...p, destSupplierId: po!.supplierId ?? p.destSupplierId }));
+            } else {
+              setAllSrcOptions([]);
+              setSrcIds([]);
+              setForm(p => ({
+                ...p,
+                sourceWarehouseId: po!.warehouseId ?? p.sourceWarehouseId,
+                destSupplierId: po!.supplierId ?? p.destSupplierId,
+              }));
+            }
+          }
+        } else if (originTransfer) {
+          // supplier_to_warehouse transfer used as RTS origin — destWarehouse becomes RTS source.
+          // Use the transfer's linked purchaseOrderId (if any) so the RTS doesn't point to a transfer UUID as a PO FK.
+          fetched = {
+            id: originTransfer.purchaseOrderId ?? undefined,
+            poNumber: originTransfer.transferNumber ?? "",
+            supplierId: originTransfer.sourceSupplierId ?? "",
+            warehouseId: originTransfer.destWarehouseId ?? "",
+            branchId: undefined,
+            supplierName: originTransfer.sourceSupplier?.name ?? "",
+            warehouseName: originTransfer.destWarehouse?.name,
+            branchName: undefined,
+            items: (originTransfer.items ?? []).map(item => ({
+              productId: item.productId,
+              productName: item.product?.name ?? String(item.productId),
+              maxQty: item.receivedQuantity ?? item.requestedQuantity,
+              unitCost: item.unitCost ?? 0,
+            })),
+          };
+          if (originTransfer.batchId) {
+            // Batch transfer — collect all sibling dest warehouses as RTS sources
+            const siblings = await api.getStockTransfersByBatch(originTransfer.batchId);
+            const seen = new Set<string>();
+            const opts = siblings
+              .filter(s => s.destWarehouseId)
+              .map(s => ({ value: s.destWarehouseId!, label: s.destWarehouse?.name ?? s.destWarehouseId! }))
+              .filter(o => !seen.has(o.value) && !!seen.add(o.value));
+            setAllSrcOptions(opts);
+            setSrcIds(opts.map(o => o.value));
+            setForm(p => ({ ...p, destSupplierId: originTransfer!.sourceSupplierId ?? p.destSupplierId }));
+          } else {
+            setAllSrcOptions([]);
+            setSrcIds([]);
+            setForm(p => ({
+              ...p,
+              sourceWarehouseId: originTransfer!.destWarehouseId ?? p.sourceWarehouseId,
+              destSupplierId: originTransfer!.sourceSupplierId ?? p.destSupplierId,
+            }));
+          }
+        } else {
+          throw new Error("not found");
         }
       }
 
@@ -737,32 +921,50 @@ function CreateTransferSheet({
   const handleCreate = async () => {
     if (!transferType) return;
     setSaving(true);
+    const isMultiDest = transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse";
+    const isMultiSrc = isReturnType(transferType) && allSrcOptions.length > 1;
+
+    // Determine what to loop over
+    let loopIds: (string | undefined)[];
+    if (isMultiDest) {
+      loopIds = destIds;
+    } else if (isMultiSrc) {
+      loopIds = srcIds.length > 0 ? srcIds : [undefined];
+    } else {
+      loopIds = [undefined];
+    }
+
+    const needsBatch = (isMultiDest && destIds.length > 1) || (isMultiSrc && srcIds.length > 1);
+    const batchId = needsBatch ? crypto.randomUUID() : undefined;
+
     try {
-      const payload: Partial<StockTransfer> = {
-        transferType,
-        status: "draft",
-        sourceBranchId: form.sourceBranchId || undefined,
-        sourceWarehouseId: form.sourceWarehouseId || undefined,
-        sourceSupplierId: form.sourceSupplierId || undefined,
-        destBranchId: form.destBranchId || undefined,
-        destWarehouseId: form.destWarehouseId || undefined,
-        destSupplierId: form.destSupplierId || undefined,
-        // Only link a PO for PO-based lookups — branch_to_warehouse links a transfer, not a PO
-        purchaseOrderId: transferType !== "branch_to_warehouse" ? fetchedPo?.id || undefined : undefined,
-        returnReason: form.returnReason || undefined,
-        expectedDate: form.expectedDate || undefined,
-        notes: form.notes || undefined,
-        createdBy: user?.id,
-        items: items
-          .filter(item => item.productId)
-          .map(item => ({
-            productId: item.productId,
-            requestedQuantity: item.requestedQuantity,
-            unitCost: item.unitCost ? Number(item.unitCost) : undefined,
-            expiryDate: item.expiryDate || undefined,
-          })) as StockTransferItem[],
-      };
-      await api.createStockTransfer(payload);
+      for (const loopId of loopIds) {
+        const payload: Partial<StockTransfer> = {
+          transferType,
+          status: "draft",
+          sourceBranchId: (transferType === "branch_to_warehouse" && isMultiSrc ? loopId : form.sourceBranchId) || undefined,
+          sourceWarehouseId: (transferType === "warehouse_to_supplier" && isMultiSrc ? loopId : form.sourceWarehouseId) || undefined,
+          sourceSupplierId: form.sourceSupplierId || undefined,
+          destBranchId: (transferType === "warehouse_to_branch" && isMultiDest ? loopId : form.destBranchId) || undefined,
+          destWarehouseId: ((transferType === "supplier_to_warehouse" && isMultiDest ? loopId : form.destWarehouseId) as string) || undefined,
+          destSupplierId: form.destSupplierId || undefined,
+          purchaseOrderId: transferType !== "branch_to_warehouse" ? fetchedPo?.id || undefined : undefined,
+          returnReason: form.returnReason || undefined,
+          expectedDate: form.expectedDate || undefined,
+          notes: form.notes || undefined,
+          batchId,
+          createdBy: user?.id,
+          items: items
+            .filter(item => item.productId)
+            .map(item => ({
+              productId: item.productId,
+              requestedQuantity: item.requestedQuantity,
+              unitCost: item.unitCost ? Number(item.unitCost) : undefined,
+              expiryDate: item.expiryDate || undefined,
+            })) as StockTransferItem[],
+        };
+        await api.createStockTransfer(payload);
+      }
       onCreated();
       handleClose();
     } catch (e) {
@@ -776,10 +978,10 @@ function CreateTransferSheet({
   const canAdvanceStep2 = (() => {
     if (!transferType) return false;
     // Return types require a fetched PO (source/dest auto-filled from it)
-    if (transferType === "branch_to_warehouse") return fetchedPo !== null;
-    if (transferType === "warehouse_to_supplier") return fetchedPo !== null;
-    if (transferType === "supplier_to_warehouse") return !!form.sourceSupplierId && !!form.destWarehouseId;
-    if (transferType === "warehouse_to_branch") return !!form.sourceWarehouseId && !!form.destBranchId;
+    if (transferType === "branch_to_warehouse") return fetchedPo !== null && (allSrcOptions.length === 0 || srcIds.length > 0);
+    if (transferType === "warehouse_to_supplier") return fetchedPo !== null && (allSrcOptions.length === 0 || srcIds.length > 0);
+    if (transferType === "supplier_to_warehouse") return !!form.sourceSupplierId && destIds.length > 0;
+    if (transferType === "warehouse_to_branch") return !!form.sourceWarehouseId && destIds.length > 0;
     if (transferType === "branch_to_branch") return !!form.sourceBranchId && !!form.destBranchId && form.sourceBranchId !== form.destBranchId;
     if (transferType === "warehouse_to_warehouse") return !!form.sourceWarehouseId && !!form.destWarehouseId && form.sourceWarehouseId !== form.destWarehouseId;
     return false;
@@ -827,6 +1029,38 @@ function CreateTransferSheet({
                     error={poError}
                     fetchedPo={fetchedPo}
                   />
+                  {fetchedPo && allSrcOptions.length > 1 && (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium">
+                        Returning from{" "}
+                        <span className="text-primary font-normal">
+                          ({srcIds.length}/{allSrcOptions.length} selected)
+                        </span>
+                      </Label>
+                      <p className="text-xs text-muted-foreground -mt-1">
+                        Original order went to {allSrcOptions.length} locations. Deselect any that are NOT returning.
+                      </p>
+                      <MultiSelect options={allSrcOptions} value={srcIds} onChange={setSrcIds} placeholder="Select returning locations…" />
+                      {srcIds.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {srcIds.map(id => {
+                            const lbl = allSrcOptions.find(o => o.value === id)?.label ?? id;
+                            return (
+                              <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
+                                {lbl}
+                                <button type="button" onClick={() => setSrcIds(prev => prev.filter(v => v !== id))} className="hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {srcIds.length < allSrcOptions.length && (
+                        <p className="text-xs text-muted-foreground">
+                          {allSrcOptions.length - srcIds.length} location{allSrcOptions.length - srcIds.length !== 1 ? "s" : ""} excluded from return
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 // Non-return transfers: manual source/dest dropdowns only
@@ -837,6 +1071,8 @@ function CreateTransferSheet({
                   suppliers={suppliers}
                   form={form}
                   onChange={patch => setForm(p => ({ ...p, ...patch }))}
+                  destIds={destIds}
+                  onDestIdsChange={setDestIds}
                 />
               )}
             </div>
@@ -849,6 +1085,11 @@ function CreateTransferSheet({
                 products={products}
                 poItems={fetchedPo?.items ?? (sourceStock !== null ? sourceStock : undefined)}
                 onChange={setItems}
+                destCount={
+                  (transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse")
+                    ? destIds.length
+                    : 1
+                }
               />
               <Separator />
               <div className="space-y-3">
@@ -912,7 +1153,11 @@ function CreateTransferSheet({
                 onClick={handleCreate}
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-                Create Transfer
+                {(transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse") && destIds.length > 1
+                  ? `Create ${destIds.length} Transfers`
+                  : (transferType === "warehouse_to_supplier" || transferType === "branch_to_warehouse") && srcIds.length > 1
+                  ? `Create ${srcIds.length} Return Transfers`
+                  : "Create Transfer"}
               </Button>
             )}
           </div>
@@ -928,10 +1173,11 @@ interface ReceiveItemRow { itemId: string; productName: string; requestedQty: nu
 
 function ReceiveItemsSheet({
   transfer,
+  transferGroup,
   open,
   onOpenChange,
   onReceived,
-}: { transfer: StockTransfer | null; open: boolean; onOpenChange: (v: boolean) => void; onReceived: () => void }) {
+}: { transfer: StockTransfer | null; transferGroup?: StockTransfer[]; open: boolean; onOpenChange: (v: boolean) => void; onReceived: () => void }) {
   const { user } = useAuth();
   const [rows, setRows] = useState<ReceiveItemRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -955,12 +1201,21 @@ function ReceiveItemsSheet({
 
   const handleSubmit = async () => {
     if (!transfer) return;
+    const targets = (transferGroup && transferGroup.length > 0) ? transferGroup : [transfer];
     setSaving(true); setError("");
     try {
-      await api.receiveStockTransfer(
-        transfer.id,
-        rows.map(r => ({ itemId: r.itemId, receivedQuantity: r.receivedQty, notes: r.notes || undefined })),
-        user?.id,
+      await Promise.all(
+        targets.map(t =>
+          api.receiveStockTransfer(
+            t.id,
+            rows.map((r, idx) => ({
+              itemId: (t.items ?? [])[idx]?.id ?? r.itemId,
+              receivedQuantity: r.receivedQty,
+              notes: r.notes || undefined,
+            })),
+            user?.id,
+          )
+        )
       );
       onReceived();
       onOpenChange(false);
@@ -978,7 +1233,13 @@ function ReceiveItemsSheet({
           <SheetTitle className="flex items-center gap-2">
             <CheckCircle2 className="h-5 w-5 text-success" /> Receive Transfer
           </SheetTitle>
-          {transfer && <p className="text-xs text-muted-foreground font-mono">{transfer.transferNumber}</p>}
+          {transfer && (
+            <p className="text-xs text-muted-foreground font-mono">
+              {transferGroup && transferGroup.length > 1
+                ? `${transfer.transferNumber} +${transferGroup.length - 1} more (batch ×${transferGroup.length})`
+                : transfer.transferNumber}
+            </p>
+          )}
         </SheetHeader>
         <div className="mt-5 space-y-4">
           <p className="text-xs text-muted-foreground">Enter the actual quantities received. Leave unchanged to confirm the approved quantity.</p>
@@ -1279,18 +1540,21 @@ function ViewTransferSheet({
 
 function RowStatusAction({
   transfer,
+  group,
   onAction,
   onReceive,
   canApprove,
 }: {
   transfer: StockTransfer;
-  onAction: (id: string, status: string) => void;
-  onReceive: (t: StockTransfer) => void;
+  group?: StockTransfer[];
+  onAction: (ids: string | string[], status: string) => void;
+  onReceive: (t: StockTransfer, g?: StockTransfer[]) => void;
   canApprove?: boolean;
 }) {
+  const ids = group && group.length > 1 ? group.map(g => g.id) : transfer.id;
   if (transfer.status === "draft") {
     return (
-      <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => onAction(transfer.id, "pending_approval")}>
+      <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => onAction(ids, "pending_approval")}>
         Submit
       </Button>
     );
@@ -1298,10 +1562,10 @@ function RowStatusAction({
   if (transfer.status === "pending_approval" && canApprove) {
     return (
       <div className="flex gap-1">
-        <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onAction(transfer.id, "approved")}>
+        <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onAction(ids, "approved")}>
           Approve
         </Button>
-        <Button size="sm" variant="outline" className="h-7 text-xs px-2 border-destructive/50 text-destructive" onClick={() => onAction(transfer.id, "rejected")}>
+        <Button size="sm" variant="outline" className="h-7 text-xs px-2 border-destructive/50 text-destructive" onClick={() => onAction(ids, "rejected")}>
           Reject
         </Button>
       </div>
@@ -1309,14 +1573,14 @@ function RowStatusAction({
   }
   if (transfer.status === "approved") {
     return (
-      <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => onAction(transfer.id, "in_transit")}>
+      <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => onAction(ids, "in_transit")}>
         <Truck className="h-3 w-3 mr-1" /> In Transit
       </Button>
     );
   }
   if (transfer.status === "in_transit") {
     return (
-      <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onReceive(transfer)}>
+      <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onReceive(transfer, group)}>
         <CheckCircle2 className="h-3 w-3 mr-1" /> Receive
       </Button>
     );
@@ -1326,17 +1590,26 @@ function RowStatusAction({
 
 // ─── Purchase Orders Tab ──────────────────────────────────────────────────────
 
-function PurchaseOrdersTab() {
+function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [supplierTransfers, setSupplierTransfers] = useState<StockTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
   useEffect(() => {
-    api.getPurchaseOrders()
-      .then(setPurchaseOrders)
-      .finally(() => setLoading(false));
-  }, []);
+    setLoading(true);
+    Promise.allSettled([
+      api.getPurchaseOrders(),
+      api.getStockTransfers({ transferType: "supplier_to_warehouse" }),
+    ]).then(([posRes, trfRes]) => {
+      if (posRes.status === "fulfilled") setPurchaseOrders(posRes.value);
+      if (trfRes.status === "fulfilled") {
+        // Only show transfers that are NOT linked to an existing PO (to avoid duplicate rows)
+        setSupplierTransfers(trfRes.value.filter(t => !t.purchaseOrderId));
+      }
+    }).finally(() => setLoading(false));
+  }, [refreshKey]);
 
   const filtered = useMemo(() => {
     const s = q.toLowerCase();
@@ -1347,7 +1620,16 @@ function PurchaseOrdersTab() {
     });
   }, [purchaseOrders, q, statusFilter]);
 
-  const PO_STATUSES = ["all", "draft", "approved", "ordered", "partial_received", "fully_received", "cancelled"];
+  const filteredTransfers = useMemo(() => {
+    const s = q.toLowerCase();
+    return supplierTransfers.filter(t => {
+      if (s && !t.transferNumber.toLowerCase().includes(s) && !(t.sourceSupplier?.name.toLowerCase().includes(s)) && !(t.destWarehouse?.name.toLowerCase().includes(s))) return false;
+      if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      return true;
+    });
+  }, [supplierTransfers, q, statusFilter]);
+
+  const PO_STATUSES = ["all", "draft", "approved", "ordered", "partial_received", "fully_received", "cancelled", "in_transit", "completed"];
 
   return (
     <div className="space-y-4">
@@ -1378,20 +1660,19 @@ function PurchaseOrdersTab() {
             <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
               <Loader2 className="h-5 w-5 animate-spin" /><span>Loading purchase orders…</span>
             </div>
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && filteredTransfers.length === 0 ? (
             <div className="py-20 text-center text-sm text-muted-foreground">
-              {purchaseOrders.length === 0 ? "No purchase orders yet. Create them from the Purchase Orders page." : "No POs match your filters."}
+              {purchaseOrders.length === 0 && supplierTransfers.length === 0 ? "No purchase orders yet. Create one from the Purchase Orders page or via Supplier → WH transfer." : "No POs match your filters."}
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border/60 bg-muted/30">
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">PO #</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">PO / Transfer #</th>
                   <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Supplier</th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Warehouse / Branch</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Warehouse</th>
                   <th className="text-center py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</th>
                   <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Payment</th>
                   <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
                   <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
                 </tr>
@@ -1401,6 +1682,7 @@ function PurchaseOrdersTab() {
                   <tr key={po.id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
                     <td className="py-3 px-4">
                       <span className="font-mono text-xs font-semibold">{po.poNumber}</span>
+                      <span className="ml-1.5 text-[10px] bg-primary/15 text-primary px-1.5 py-0.5 rounded-full font-medium">PO</span>
                     </td>
                     <td className="py-3 px-4">
                       <span className="text-sm">{po.supplier?.name ?? "—"}</span>
@@ -1417,11 +1699,6 @@ function PurchaseOrdersTab() {
                       </span>
                     </td>
                     <td className="py-3 px-4">
-                      <span className={cn("text-xs font-medium", po.paymentStatus === "paid" ? "text-success" : po.paymentStatus === "partial" ? "text-warning-foreground" : "text-destructive")}>
-                        {po.paymentStatus === "paid" ? "Paid" : po.paymentStatus === "partial" ? "Partial" : "Unpaid"}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
                       <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize", PO_STATUS_CLS[po.status] ?? "bg-muted text-muted-foreground")}>
                         {po.status.replace(/_/g, " ")}
                       </span>
@@ -1431,6 +1708,39 @@ function PurchaseOrdersTab() {
                     </td>
                   </tr>
                 ))}
+                {filteredTransfers.map(t => {
+                  const total = (t.items ?? []).reduce((s, i) => s + i.requestedQuantity * (i.unitCost ?? 0), 0);
+                  return (
+                    <tr key={t.id} className="border-b border-border/40 hover:bg-muted/20 transition-colors bg-muted/5">
+                      <td className="py-3 px-4">
+                        <span className="font-mono text-xs font-semibold">{t.transferNumber}</span>
+                        <span className="ml-1.5 text-[10px] bg-warning/20 text-warning-foreground px-1.5 py-0.5 rounded-full font-medium">TRF</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-sm">{t.sourceSupplier?.name ?? "—"}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-sm text-muted-foreground">{t.destWarehouse?.name ?? "—"}</span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="text-sm font-medium">{t.items?.length ?? 0}</span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        {total > 0
+                          ? <span className="text-sm font-semibold flex items-center gap-0.5 justify-end"><SARIcon />{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                          : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize", PO_STATUS_CLS[t.status] ?? "bg-muted text-muted-foreground")}>
+                          {t.status.replace(/_/g, " ")}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs text-muted-foreground">{new Date(t.createdAt).toLocaleDateString()}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -1459,8 +1769,10 @@ function StockTransfers() {
   const [dateTo, setDateTo] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [poRefreshKey, setPoRefreshKey] = useState(0);
   const [viewTransfer, setViewTransfer] = useState<StockTransfer | null>(null);
   const [receiveTarget, setReceiveTarget] = useState<StockTransfer | null>(null);
+  const [receiveGroup, setReceiveGroup] = useState<StockTransfer[]>([]);
 
   const load = () => {
     setLoading(true);
@@ -1475,9 +1787,12 @@ function StockTransfers() {
     api.getProducts().then(setProducts).catch(() => {});
   }, []);
 
-  const handleStatusAction = async (id: string, status: string) => {
+  const handleStatusAction = async (ids: string | string[], status: string) => {
+    const idList = Array.isArray(ids) ? ids : [ids];
     try {
-      await api.updateTransferStatus(id, status, status === "approved" ? user?.id : undefined);
+      await Promise.all(
+        idList.map(id => api.updateTransferStatus(id, status, status === "approved" ? user?.id : undefined))
+      );
       load();
     } catch (e) {
       console.error(e);
@@ -1495,6 +1810,23 @@ function StockTransfers() {
       return true;
     });
   }, [transfers, search, typeFilter, statusFilter, dateFrom, dateTo]);
+
+  // Group batch transfers into single display rows
+  const displayRows = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: Array<{ key: string; group: StockTransfer[]; isBatch: boolean }> = [];
+    for (const t of filtered) {
+      if (t.batchId) {
+        if (!seen.has(t.batchId)) {
+          seen.add(t.batchId);
+          rows.push({ key: t.batchId, group: filtered.filter(x => x.batchId === t.batchId), isBatch: true });
+        }
+      } else {
+        rows.push({ key: t.id, group: [t], isBatch: false });
+      }
+    }
+    return rows;
+  }, [filtered]);
 
   const today = todayStr();
   const totalTransfers = transfers.length;
@@ -1543,7 +1875,7 @@ function StockTransfers() {
       {typeFilter === "supplier_to_warehouse" ? (
         /* Supplier → WH chip shows Purchase Orders instead of transfer list */
         <div className="mt-4">
-          <PurchaseOrdersTab />
+          <PurchaseOrdersTab refreshKey={poRefreshKey} />
         </div>
       ) : (
         <div className="mt-4 space-y-4">
@@ -1600,7 +1932,7 @@ function StockTransfers() {
                   <Loader2 className="h-5 w-5 animate-spin" />
                   <span>Loading transfers…</span>
                 </div>
-              ) : filtered.length === 0 ? (
+              ) : displayRows.length === 0 ? (
                 <div className="py-20 text-center text-sm text-muted-foreground">
                   {transfers.length === 0 ? "No stock transfers yet. Create your first one." : "No transfers match your filters."}
                 </div>
@@ -1620,18 +1952,29 @@ function StockTransfers() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map(t => {
-                      const total = (t.items ?? []).reduce((s, i) => s + i.requestedQuantity * (i.unitCost ?? 0), 0);
+                    {displayRows.map(({ key, group, isBatch }) => {
+                      const t = group[0];
+                      const grandTotal = group.reduce((s, tr) => s + (tr.items ?? []).reduce((si, i) => si + i.requestedQuantity * (i.unitCost ?? 0), 0), 0);
+                      // For multi-dest batches, source is same; dest differs — show all dests
+                      // For multi-src batches, dest is same; source differs — show all sources
+                      const isMultiDestBatch = isBatch && group.every(tr => tr.sourceWarehouseId === t.sourceWarehouseId || tr.sourceSupplierId === t.sourceSupplierId);
+                      const sourceLabel = isBatch && !isMultiDestBatch
+                        ? group.map(tr => getSourceLabel(tr)).filter((v, i, a) => a.indexOf(v) === i).join(", ")
+                        : getSourceLabel(t);
+                      const destLabel = isBatch && isMultiDestBatch
+                        ? group.map(tr => getDestLabel(tr)).filter((v, i, a) => a.indexOf(v) === i).join(", ")
+                        : getDestLabel(t);
                       return (
-                        <tr key={t.id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
+                        <tr key={key} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
                           <td className="py-3 px-4">
                             <span className="font-mono text-xs font-semibold">{t.transferNumber}</span>
+                            {isBatch && <span className="ml-1.5 text-[10px] font-semibold bg-primary/15 text-primary px-1.5 py-0.5 rounded-full">×{group.length}</span>}
                           </td>
                           <td className="py-3 px-4">
                             <span className="text-xs text-muted-foreground">{getTypeLabel(t.transferType)}</span>
                           </td>
                           <td className="py-3 px-4">
-                            <span className="text-sm">{getSourceLabel(t)}</span>
+                            <span className="text-sm">{sourceLabel}</span>
                             {needsReturnReason(t.transferType) && t.returnReason && (
                               <Badge variant="outline" className="ml-1.5 text-[10px] capitalize">
                                 {t.returnReason.replace(/_/g, " ")}
@@ -1639,14 +1982,18 @@ function StockTransfers() {
                             )}
                           </td>
                           <td className="py-3 px-4">
-                            <span className="text-sm">{getDestLabel(t)}</span>
+                            <span className="text-sm">{destLabel}</span>
                           </td>
                           <td className="py-3 px-4 text-center">
                             <span className="text-sm font-medium">{t.items?.length ?? 0}</span>
+                            {isBatch && <span className="ml-1 text-[10px] text-muted-foreground">×{group.length}</span>}
                           </td>
                           <td className="py-3 px-4 text-right">
-                            {total > 0
-                              ? <span className="flex items-center gap-0.5 justify-end font-semibold text-sm"><SARIcon />{total.toFixed(2)}</span>
+                            {grandTotal > 0
+                              ? <span className="flex items-center gap-0.5 justify-end font-semibold text-sm">
+                                  <SARIcon />{grandTotal.toFixed(2)}
+                                  {isBatch && <span className="text-[10px] text-muted-foreground ml-1">(×{group.length})</span>}
+                                </span>
                               : <span className="text-muted-foreground">—</span>}
                           </td>
                           <td className="py-3 px-4">
@@ -1660,7 +2007,7 @@ function StockTransfers() {
                               <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setViewTransfer(t)}>
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
-                              <RowStatusAction transfer={t} onAction={handleStatusAction} onReceive={setReceiveTarget} canApprove={canApprove} />
+                              <RowStatusAction transfer={t} group={isBatch ? group : undefined} onAction={handleStatusAction} onReceive={(t, g) => { setReceiveTarget(t); setReceiveGroup(g ?? []); }} canApprove={canApprove} />
                             </div>
                           </td>
                         </tr>
@@ -1681,7 +2028,7 @@ function StockTransfers() {
         warehouses={warehouses}
         suppliers={suppliers}
         products={products}
-        onCreated={load}
+        onCreated={() => { load(); setPoRefreshKey(k => k + 1); }}
       />
 
       <ViewTransferSheet
@@ -1693,9 +2040,10 @@ function StockTransfers() {
 
       <ReceiveItemsSheet
         transfer={receiveTarget}
+        transferGroup={receiveGroup}
         open={!!receiveTarget}
-        onOpenChange={v => { if (!v) setReceiveTarget(null); }}
-        onReceived={() => { setReceiveTarget(null); load(); }}
+        onOpenChange={v => { if (!v) { setReceiveTarget(null); setReceiveGroup([]); } }}
+        onReceived={() => { setReceiveTarget(null); setReceiveGroup([]); load(); }}
       />
     </PageShell>
   );

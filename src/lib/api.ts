@@ -243,6 +243,8 @@ export const api = {
   getPurchaseOrder: (id: string) => request<PurchaseOrder>(`/api/purchase-orders/${id}`),
   getPurchaseOrderByNumber: (number: string) =>
     request<PurchaseOrder>(`/api/purchase-orders/by-number/${encodeURIComponent(number)}`),
+  getPurchaseOrdersByBatch: (batchId: string) =>
+    request<PurchaseOrder[]>(`/api/purchase-orders/batch/${encodeURIComponent(batchId)}`),
   createPurchaseOrder: (data: Partial<PurchaseOrder>) =>
     request<PurchaseOrder>("/api/purchase-orders", { method: "POST", body: JSON.stringify(data) }),
   updatePoStatus: (id: string, status: string, approvedBy?: string) =>
@@ -253,7 +255,7 @@ export const api = {
     request<SupplierPayment>(`/api/purchase-orders/${poId}/payments`, { method: "POST", body: JSON.stringify(data) }),
 
   // Stock Transfers
-  getStockTransfers: (params?: { transferType?: string; status?: string; sourceWarehouseId?: string; destWarehouseId?: string }) => {
+  getStockTransfers: (params?: { transferType?: string; status?: string; sourceWarehouseId?: string; destWarehouseId?: string; purchaseOrderId?: string; sourceSupplierId?: string }) => {
     const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
     const q = new URLSearchParams(filtered).toString();
     return request<StockTransfer[]>(`/api/stock-transfers${q ? `?${q}` : ""}`);
@@ -261,6 +263,8 @@ export const api = {
   getStockTransfer: (id: string) => request<StockTransfer>(`/api/stock-transfers/${id}`),
   getStockTransferByNumber: (number: string) =>
     request<StockTransfer>(`/api/stock-transfers/by-number/${encodeURIComponent(number)}`),
+  getStockTransfersByBatch: (batchId: string) =>
+    request<StockTransfer[]>(`/api/stock-transfers/batch/${encodeURIComponent(batchId)}`),
   createStockTransfer: (data: Partial<StockTransfer>) =>
     request<StockTransfer>("/api/stock-transfers", { method: "POST", body: JSON.stringify(data) }),
   updateTransferStatus: (id: string, status: string, approvedBy?: string) =>
@@ -388,7 +392,7 @@ export const api = {
     request<SupplierCreditNote>(`/api/supply-chain/discrepancies/${id}/raise-debit-note`, { method: "POST", body: JSON.stringify({}) }),
   raiseShortageDebitNote: (data: { poId: string; productId: string; expectedQuantity: number; receivedQuantity: number; unitCost: number }) =>
     request<{ discrepancy: StockDiscrepancy; creditNote: SupplierCreditNote }>(`/api/supply-chain/raise-shortage-debit-note`, { method: "POST", body: JSON.stringify(data) }),
-  getCreditNotes: (params?: { supplierId?: string; status?: string; creditType?: string }) => {
+  getCreditNotes: (params?: { supplierId?: string; status?: string; creditType?: string; poId?: string; transferId?: string; sourceWarehouseId?: string }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<SupplierCreditNote[]>(`/api/supply-chain/credit-notes${q ? `?${q}` : ""}`);
   },
@@ -730,7 +734,7 @@ export interface PurchaseOrder {
   warehouseId?: string; branchId?: string; orderedBy: string; approvedBy?: string;
   status: string; paymentStatus: string; paymentTerms?: string;
   totalAmount: number; paidAmount: number; taxAmount: number; discountAmount: number;
-  expectedDeliveryDate?: string; receivedDate?: string; notes?: string;
+  expectedDeliveryDate?: string; receivedDate?: string; notes?: string; batchId?: string;
   createdAt: string; updatedAt: string;
   supplier?: Supplier;
   warehouse?: { id: string; name: string; code: string };
@@ -760,7 +764,7 @@ export interface StockTransfer {
   sourceBranchId?: string; sourceWarehouseId?: string; sourceSupplierId?: string;
   destBranchId?: string; destWarehouseId?: string; destSupplierId?: string;
   purchaseOrderId?: string; createdBy: string; approvedBy?: string;
-  status: string; returnReason?: string; notes?: string;
+  status: string; returnReason?: string; notes?: string; batchId?: string;
   expectedDate?: string; completedDate?: string; createdAt: string; updatedAt: string;
   sourceBranch?: { id: string; name: string };
   sourceWarehouse?: { id: string; name: string; code: string };

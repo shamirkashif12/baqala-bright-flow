@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusBadge } from "@/components/module-placeholder";
 import { Truck, Eye, Pencil, Plus, Trash2, Package, CheckCircle, Clock, ShoppingCart } from "lucide-react";
 import { SARIcon } from "@/lib/currency";
-import { api, type Supplier, type PurchaseOrder, type SupplierCreditNote } from "@/lib/api";
+import { api, type Supplier, type PurchaseOrder, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/suppliers")({ component: Suppliers });
@@ -88,6 +88,7 @@ const PO_STATUS_CLASS: Record<string, string> = {
 function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Supplier | null; onClose: () => void; onEdit: (s: Supplier) => void }) {
   const { canEdit } = usePermission("Suppliers");
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
+  const [inboundTransfers, setInboundTransfers] = useState<StockTransfer[]>([]);
   const [creditNotes, setCreditNotes] = useState<SupplierCreditNote[]>([]);
   const [loadingPos, setLoadingPos] = useState(false);
 
@@ -97,16 +98,57 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
     Promise.allSettled([
       api.getPurchaseOrders({ supplierId: supplier.id }),
       api.getCreditNotes({ supplierId: supplier.id }),
-    ]).then(([posResult, cnsResult]) => {
+      api.getStockTransfers({ transferType: "supplier_to_warehouse", sourceSupplierId: supplier.id }),
+    ]).then(([posResult, cnsResult, trfResult]) => {
       if (posResult.status === "fulfilled") setPos(posResult.value);
       if (cnsResult.status === "fulfilled") setCreditNotes(cnsResult.value);
+      if (trfResult.status === "fulfilled") setInboundTransfers(trfResult.value);
     }).finally(() => setLoadingPos(false));
   }, [supplier?.id]);
 
-  const totalOwed = pos.reduce((s, p) => s + (p.totalAmount - p.paidAmount), 0);
+  // Group batch inbound transfers for display (same batchId = one row)
+  const inboundGroups = useMemo(() => {
+    const seen = new Set<string>();
+    const groups: Array<{ key: string; items: StockTransfer[]; isBatch: boolean }> = [];
+    for (const t of inboundTransfers) {
+      if (t.batchId) {
+        if (!seen.has(t.batchId)) {
+          seen.add(t.batchId);
+          groups.push({ key: t.batchId, items: inboundTransfers.filter(x => x.batchId === t.batchId), isBatch: true });
+        }
+      } else {
+        groups.push({ key: t.id, items: [t], isBatch: false });
+      }
+    }
+    return groups;
+  }, [inboundTransfers]);
+
+  const poTotalOwed = pos.reduce((s, p) => s + (p.totalAmount - p.paidAmount), 0);
+  // Inbound transfers that are received/completed create a payable (no payment tracking yet)
+  const inboundTotalOwed = inboundTransfers
+    .filter(t => t.status === "completed" || t.status === "partial_received" || t.status === "fully_received")
+    .reduce((s, t) => s + (t.items ?? []).reduce((si, i) => si + i.requestedQuantity * (i.unitCost ?? 0), 0), 0);
+  const totalOwed = poTotalOwed + inboundTotalOwed;
   const rtsValue = creditNotes.filter(cn => cn.status !== "cancelled").reduce((s, cn) => s + cn.amount, 0);
   const netBalance = totalOwed - rtsValue;
   const pendingPos = pos.filter(p => p.status === "draft" || p.status === "approved" || p.status === "ordered").length;
+
+  // Group batch POs into single display entries so amounts don't appear split
+  const poGroups = useMemo(() => {
+    const seen = new Set<string>();
+    const groups: Array<{ key: string; items: PurchaseOrder[]; isBatch: boolean }> = [];
+    for (const po of pos) {
+      if (po.batchId) {
+        if (!seen.has(po.batchId)) {
+          seen.add(po.batchId);
+          groups.push({ key: po.batchId, items: pos.filter(p => p.batchId === po.batchId), isBatch: true });
+        }
+      } else {
+        groups.push({ key: po.id, items: [po], isBatch: false });
+      }
+    }
+    return groups;
+  }, [pos]);
 
   return (
     <Sheet open={!!supplier} onOpenChange={v => !v && onClose()}>
@@ -134,7 +176,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
               {[
                 { label: "Total POs", value: String(pos.length), icon: ShoppingCart },
                 { label: "Pending", value: String(pendingPos), icon: Clock },
-                { label: "Net Balance", value: `SAR ${Math.abs(netBalance).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, sub: netBalance > 0 ? "Owed" : "Credit", icon: Package },
+                { label: "Net Balance", value: `SAR ${Math.abs(netBalance).toLocaleString()}`, sub: netBalance > 0 ? "Owed" : "Credit", icon: Package },
               ].map(({ label, value, sub, icon: Icon }) => (
                 <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
                   <Icon className="h-4 w-4 text-primary mx-auto mb-1" />
@@ -171,39 +213,81 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
               <TabsContent value="purchase-orders" className="mt-4">
                 {loadingPos ? (
                   <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>
-                ) : pos.length === 0 ? (
+                ) : poGroups.length === 0 && inboundGroups.length === 0 ? (
                   <div className="text-center py-8 text-sm text-muted-foreground">No purchase orders for this supplier.</div>
                 ) : (
                   <div className="space-y-2">
-                    {pos.map(po => (
-                      <div key={po.id} className="rounded-xl border border-border/40 px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="font-mono text-xs font-bold">{po.poNumber}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(po.createdAt).toLocaleDateString("en-SA")}
-                              {po.warehouse && ` · WH: ${po.warehouse.name}`}
-                              {po.branch && ` · Branch: ${po.branch.name}`}
-                            </p>
+                    {inboundGroups.map(({ key, items, isBatch }) => {
+                      const t = items[0];
+                      const groupTotal = items.reduce((s, x) => s + (x.items ?? []).reduce((si, i) => si + i.requestedQuantity * (i.unitCost ?? 0), 0), 0);
+                      const destinations = isBatch
+                        ? items.map(x => x.destWarehouse?.name).filter(Boolean).join(", ")
+                        : (t.destWarehouse?.name ? `WH: ${t.destWarehouse.name}` : "");
+                      return (
+                        <div key={key} className="rounded-xl border border-border/40 px-3 py-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-mono text-xs font-bold">
+                                {t.transferNumber}
+                                {isBatch && <span className="ml-1.5 text-[10px] bg-primary/15 text-primary px-1.5 py-0.5 rounded-full font-semibold">×{items.length}</span>}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(t.createdAt).toLocaleDateString("en-SA")}
+                                {destinations && ` · ${destinations}`}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium bg-primary/10 text-primary`}>
+                                {t.status.replace(/_/g, " ")}
+                              </span>
+                              {groupTotal > 0 && <span className="text-sm font-semibold flex items-center gap-0.5 text-primary"><SARIcon />{groupTotal.toLocaleString()}</span>}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PO_STATUS_CLASS[po.status] ?? "bg-muted text-muted-foreground"}`}>
-                              {po.status.replace(/_/g, " ")}
-                            </span>
-                            <span className="text-sm font-semibold flex items-center gap-0.5">
-                              <SARIcon />
-                              {po.totalAmount.toLocaleString()}
+                          <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
+                            <span>{t.items?.length ?? 0} item{(t.items?.length ?? 0) !== 1 ? "s" : ""}</span>
+                            <span className="text-primary">Delivery (STF)</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {poGroups.map(({ key, items, isBatch }) => {
+                      const po = items[0];
+                      const groupTotal = items.reduce((s, p) => s + p.totalAmount, 0);
+                      const groupPaid = items.reduce((s, p) => s + p.paidAmount, 0);
+                      const destinations = isBatch
+                        ? items.map(p => p.warehouse?.name ?? p.branch?.name).filter(Boolean).join(", ")
+                        : (po.warehouse?.name ? `WH: ${po.warehouse.name}` : po.branch?.name ? `Branch: ${po.branch.name}` : "");
+                      return (
+                        <div key={key} className="rounded-xl border border-border/40 px-3 py-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-mono text-xs font-bold">
+                                {po.poNumber}
+                                {isBatch && <span className="ml-1.5 text-[10px] bg-primary/15 text-primary px-1.5 py-0.5 rounded-full font-semibold">×{items.length}</span>}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(po.createdAt).toLocaleDateString("en-SA")}
+                                {destinations && ` · ${destinations}`}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PO_STATUS_CLASS[po.status] ?? "bg-muted text-muted-foreground"}`}>
+                                {po.status.replace(/_/g, " ")}
+                              </span>
+                              <span className={`text-sm font-semibold flex items-center gap-0.5 ${isBatch ? "text-primary" : ""}`}>
+                                <SARIcon />{groupTotal.toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
+                            <span>{po.items?.length ?? 0} item{(po.items?.length ?? 0) !== 1 ? "s" : ""}</span>
+                            <span className={groupPaid >= groupTotal ? "text-success" : groupPaid > 0 ? "text-warning-foreground" : "text-destructive"}>
+                              {groupPaid >= groupTotal ? "Paid" : groupPaid > 0 ? `Partial (SAR ${groupPaid.toLocaleString()} paid)` : "Unpaid"}
                             </span>
                           </div>
                         </div>
-                        <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
-                          <span>{po.items?.length ?? 0} item{(po.items?.length ?? 0) !== 1 ? "s" : ""}</span>
-                          <span className={po.paymentStatus === "paid" ? "text-success" : po.paymentStatus === "partial" ? "text-warning-foreground" : "text-destructive"}>
-                            {po.paymentStatus === "paid" ? "Paid" : po.paymentStatus === "partial" ? `Partial (SAR ${po.paidAmount.toLocaleString()})` : "Unpaid"}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </TabsContent>
@@ -216,39 +300,78 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                     {/* Summary */}
                     <div className="grid grid-cols-3 gap-2 mb-3">
                       {[
-                        { label: "Total Invoiced", val: pos.reduce((s, p) => s + p.totalAmount, 0), cls: "" },
+                        { label: "Total Invoiced", val: totalOwed + pos.reduce((s, p) => s + p.paidAmount, 0), cls: "" },
                         { label: "Paid", val: pos.reduce((s, p) => s + p.paidAmount, 0), cls: "text-success" },
                         { label: "RTS Credits", val: rtsValue, cls: "text-primary" },
                       ].map(({ label, val, cls }) => (
                         <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-2.5 text-center">
-                          <p className={`text-sm font-bold ${cls}`}>SAR {val.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                          <p className={`text-sm font-bold ${cls}`}>SAR {val.toLocaleString()}</p>
                           <p className="text-[10px] text-muted-foreground">{label}</p>
                         </div>
                       ))}
                     </div>
                     <div className={`rounded-xl border px-3 py-2 text-sm font-semibold flex justify-between ${netBalance > 0 ? "border-destructive/40 bg-destructive/5 text-destructive" : "border-success/40 bg-success/5 text-success"}`}>
                       <span>{netBalance > 0 ? "Net Amount Owed to Supplier" : "Net Credit from Supplier"}</span>
-                      <span>SAR {Math.abs(netBalance).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                      <span>SAR {Math.abs(netBalance).toLocaleString()}</span>
                     </div>
-                    {/* Goods Received — creates a payable */}
-                    {pos.filter(p => p.status === "partial_received" || p.status === "fully_received").length > 0 && (
+                    {/* Goods Received — creates a payable (PO-based) */}
+                    {(poGroups.filter(g => g.items.some(p => p.status === "partial_received" || p.status === "fully_received")).length > 0 ||
+                      inboundGroups.filter(g => g.items.some(t => t.status === "completed" || t.status === "partial_received" || t.status === "fully_received")).length > 0) && (
                       <div className="mt-3">
                         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Payables to Supplier</p>
-                        {pos.filter(p => p.status === "partial_received" || p.status === "fully_received").map(p => (
-                          <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
-                            <div>
-                              <p className="font-medium font-mono">{p.poNumber}</p>
-                              <p className="text-muted-foreground">
-                                {p.receivedDate ? new Date(p.receivedDate).toLocaleDateString("en-SA") : new Date(p.updatedAt).toLocaleDateString("en-SA")}
-                                {" · "}
-                                <span className={p.paymentStatus === "paid" ? "text-success" : p.paymentStatus === "partial" ? "text-warning-foreground" : "text-destructive"}>
-                                  {p.paymentStatus === "paid" ? "Paid" : p.paymentStatus === "partial" ? `Partial — SAR ${p.paidAmount.toLocaleString()} paid` : "Unpaid"}
-                                </span>
-                              </p>
-                            </div>
-                            <span className="font-semibold text-destructive flex items-center gap-0.5"><SARIcon />{p.totalAmount.toLocaleString()}</span>
-                          </div>
-                        ))}
+                        {/* PO-based payables */}
+                        {poGroups
+                          .filter(g => g.items.some(p => p.status === "partial_received" || p.status === "fully_received"))
+                          .map(({ key, items, isBatch }) => {
+                            const po = items[0];
+                            const groupTotal = items.reduce((s, p) => s + p.totalAmount, 0);
+                            const groupPaid = items.reduce((s, p) => s + p.paidAmount, 0);
+                            return (
+                              <div key={key} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
+                                <div>
+                                  <p className="font-medium font-mono">
+                                    {po.poNumber}
+                                    {isBatch && <span className="ml-1 text-[10px] bg-primary/15 text-primary px-1 py-0.5 rounded-full">×{items.length}</span>}
+                                  </p>
+                                  <p className="text-muted-foreground">
+                                    {po.receivedDate ? new Date(po.receivedDate).toLocaleDateString("en-SA") : new Date(po.updatedAt).toLocaleDateString("en-SA")}
+                                    {" · "}
+                                    <span className={groupPaid >= groupTotal ? "text-success" : groupPaid > 0 ? "text-warning-foreground" : "text-destructive"}>
+                                      {groupPaid >= groupTotal ? "Paid" : groupPaid > 0 ? `Partial — SAR ${groupPaid.toLocaleString()} paid` : "Unpaid"}
+                                    </span>
+                                  </p>
+                                </div>
+                                <span className="font-semibold text-destructive flex items-center gap-0.5"><SARIcon />{groupTotal.toLocaleString()}</span>
+                              </div>
+                            );
+                          })}
+                        {/* Stock-transfer-based payables (supplier_to_warehouse) */}
+                        {inboundGroups
+                          .filter(g => g.items.some(t => t.status === "completed" || t.status === "partial_received" || t.status === "fully_received"))
+                          .map(({ key, items, isBatch }) => {
+                            const t = items[0];
+                            const groupTotal = items.reduce((s, x) => s + (x.items ?? []).reduce((si, i) => si + i.requestedQuantity * (i.unitCost ?? 0), 0), 0);
+                            const destinations = isBatch
+                              ? items.map(x => x.destWarehouse?.name).filter(Boolean).join(", ")
+                              : (t.destWarehouse?.name ?? "");
+                            return (
+                              <div key={key} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
+                                <div>
+                                  <p className="font-medium font-mono">
+                                    {t.transferNumber}
+                                    {isBatch && <span className="ml-1 text-[10px] bg-primary/15 text-primary px-1 py-0.5 rounded-full">×{items.length}</span>}
+                                  </p>
+                                  <p className="text-muted-foreground">
+                                    {new Date(t.updatedAt).toLocaleDateString("en-SA")}
+                                    {destinations && ` · ${destinations}`}
+                                    {" · "}
+                                    <span className="text-warning-foreground">Delivery (STF)</span>
+                                  </p>
+                                </div>
+                                <span className="font-semibold text-destructive flex items-center gap-0.5"><SARIcon />{groupTotal.toLocaleString()}</span>
+                              </div>
+                            );
+                          })}
                       </div>
                     )}
                     {/* Payments */}
@@ -284,7 +407,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                                 </span>
                               </p>
                             </div>
-                            <span className="font-semibold text-primary flex items-center gap-0.5"><SARIcon />{cn.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            <span className="font-semibold text-primary flex items-center gap-0.5"><SARIcon />{cn.amount.toLocaleString()}</span>
                           </div>
                         ))}
                       </div>
