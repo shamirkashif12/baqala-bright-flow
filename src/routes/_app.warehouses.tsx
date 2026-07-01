@@ -23,7 +23,7 @@ import {
   api,
   type WarehouseRequest, type Warehouse as WarehouseType,
   type Branch, type Product, type Supplier, type WarehouseStock,
-  type PurchaseOrder, type StockTransfer,
+  type PurchaseOrder, type StockTransfer, type SupplierCreditNote,
 } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
@@ -191,6 +191,7 @@ function WarehouseProfileDrawer({
   const [activeTab, setActiveTab] = useState("overview");
   const [wPos, setWPos] = useState<PurchaseOrder[]>([]);
   const [rtsTransfers, setRtsTransfers] = useState<StockTransfer[]>([]);
+  const [wCreditNotes, setWCreditNotes] = useState<SupplierCreditNote[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
 
   useEffect(() => {
@@ -203,9 +204,11 @@ function WarehouseProfileDrawer({
     Promise.allSettled([
       api.getPurchaseOrders({ warehouseId: warehouse.id }),
       api.getStockTransfers({ sourceWarehouseId: warehouse.id, transferType: "warehouse_to_supplier" }),
-    ]).then(([posRes, rtsRes]) => {
+      api.getCreditNotes({ sourceWarehouseId: warehouse.id }),
+    ]).then(([posRes, rtsRes, cnRes]) => {
       if (posRes.status === "fulfilled") setWPos(posRes.value);
       if (rtsRes.status === "fulfilled") setRtsTransfers(rtsRes.value);
+      if (cnRes.status === "fulfilled") setWCreditNotes(cnRes.value);
     }).finally(() => setLoadingLedger(false));
   }, [warehouse?.id]);
 
@@ -368,12 +371,12 @@ function WarehouseProfileDrawer({
                 {loadingLedger ? (
                   <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 rounded-xl" />)}</div>
                 ) : (() => {
-                  const itemsValue = (t: StockTransfer) => (t.items ?? []).reduce((si, i) => si + (i.receivedQuantity ?? i.requestedQuantity) * (i.unitCost ?? 0), 0);
+                  const transferById = new Map(rtsTransfers.map(t => [t.id, t]));
+                  const activeCreditNotes = wCreditNotes.filter(cn => cn.status !== "cancelled");
                   const receivedPos = wPos.filter(p => p.status === "partial_received" || p.status === "fully_received");
                   const totalReceived = receivedPos.reduce((s, p) => s + p.totalAmount, 0);
                   const totalPaid = wPos.reduce((s, p) => s + p.paidAmount, 0);
-                  const completedRts = rtsTransfers.filter(t => t.status === "completed");
-                  const rtsCredits = completedRts.reduce((s, t) => s + itemsValue(t), 0);
+                  const rtsCredits = activeCreditNotes.reduce((s, cn) => s + cn.amount, 0);
                   const netBalance = totalReceived - totalPaid - rtsCredits;
                   const allPayments = wPos
                     .flatMap(p => (p.payments ?? []).map(pay => ({ ...pay, poNumber: p.poNumber })))
@@ -389,7 +392,7 @@ function WarehouseProfileDrawer({
                           { label: "RTS Credits", val: rtsCredits, cls: "text-primary" },
                         ].map(({ label, val, cls }) => (
                           <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-2.5 text-center">
-                            <p className={`text-sm font-bold ${cls}`}><SARIcon />{val.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                            <p className={`text-sm font-bold ${cls}`}><SARIcon />{val.toLocaleString()}</p>
                             <p className="text-[10px] text-muted-foreground">{label}</p>
                           </div>
                         ))}
@@ -398,7 +401,7 @@ function WarehouseProfileDrawer({
                       {netBalance !== 0 && (
                         <div className={`rounded-xl border px-3 py-2 text-sm font-semibold flex justify-between ${netBalance > 0 ? "border-destructive/40 bg-destructive/5 text-destructive" : "border-success/40 bg-success/5 text-success"}`}>
                           <span>{netBalance > 0 ? "Net Amount Owed to Suppliers" : "Net Credit from Suppliers"}</span>
-                          <span><SARIcon />{Math.abs(netBalance).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                          <span><SARIcon />{Math.abs(netBalance).toLocaleString()}</span>
                         </div>
                       )}
                       {/* Goods received (payables) */}
@@ -438,26 +441,36 @@ function WarehouseProfileDrawer({
                           ))}
                         </div>
                       )}
-                      {/* RTS returns */}
-                      {completedRts.length > 0 && (
+                      {/* Returns to Supplier (RTS) — one row per credit note, the canonical RTS record */}
+                      {wCreditNotes.length > 0 && (
                         <div className="mt-3">
                           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Returns to Supplier (RTS)</p>
-                          {completedRts.map(t => (
-                            <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
-                              <div>
-                                <p className="font-medium font-mono">{t.transferNumber}</p>
-                                <p className="text-muted-foreground">
-                                  {new Date(t.completedDate ?? t.updatedAt).toLocaleDateString("en-SA")}
-                                  {t.destSupplier?.name ? ` · ${t.destSupplier.name}` : ""}
-                                  {t.returnReason ? ` · ${t.returnReason}` : ""}
-                                </p>
+                          {wCreditNotes.map(cn => {
+                            const t = cn.transferId ? transferById.get(cn.transferId) : undefined;
+                            return (
+                              <div key={cn.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
+                                <div>
+                                  <p className="font-medium font-mono">
+                                    {t?.transferNumber ?? cn.creditNoteNumber ?? "—"}
+                                    {t?.transferNumber && cn.creditNoteNumber && (
+                                      <span className="ml-1 text-muted-foreground font-normal">({cn.creditNoteNumber})</span>
+                                    )}
+                                  </p>
+                                  <p className="text-muted-foreground">
+                                    {new Date(cn.issuedDate).toLocaleDateString("en-SA")}
+                                    {(cn.supplier?.name ?? t?.destSupplier?.name) ? ` · ${cn.supplier?.name ?? t?.destSupplier?.name}` : ""}
+                                    {t?.returnReason ? ` · ${t.returnReason}` : ""}
+                                    {" · "}
+                                    <span className={cn.status === "applied" ? "text-success" : cn.status === "cancelled" ? "text-destructive" : "text-primary"}>{cn.status}</span>
+                                  </p>
+                                </div>
+                                <span className="font-semibold text-primary flex items-center gap-0.5"><SARIcon />{cn.amount.toLocaleString()}</span>
                               </div>
-                              <span className="font-semibold text-primary flex items-center gap-0.5"><SARIcon />{itemsValue(t).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
-                      {receivedPos.length === 0 && allPayments.length === 0 && completedRts.length === 0 && (
+                      {receivedPos.length === 0 && allPayments.length === 0 && wCreditNotes.length === 0 && (
                         <p className="text-center py-6 text-sm text-muted-foreground">No ledger entries yet.</p>
                       )}
                     </div>

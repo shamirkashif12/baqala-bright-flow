@@ -176,7 +176,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
               {[
                 { label: "Total POs", value: String(pos.length), icon: ShoppingCart },
                 { label: "Pending", value: String(pendingPos), icon: Clock },
-                { label: "Net Balance", value: `SAR ${Math.abs(netBalance).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, sub: netBalance > 0 ? "Owed" : "Credit", icon: Package },
+                { label: "Net Balance", value: `SAR ${Math.abs(netBalance).toLocaleString()}`, sub: netBalance > 0 ? "Owed" : "Credit", icon: Package },
               ].map(({ label, value, sub, icon: Icon }) => (
                 <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
                   <Icon className="h-4 w-4 text-primary mx-auto mb-1" />
@@ -305,14 +305,14 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                         { label: "RTS Credits", val: rtsValue, cls: "text-primary" },
                       ].map(({ label, val, cls }) => (
                         <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-2.5 text-center">
-                          <p className={`text-sm font-bold ${cls}`}>SAR {val.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                          <p className={`text-sm font-bold ${cls}`}>SAR {val.toLocaleString()}</p>
                           <p className="text-[10px] text-muted-foreground">{label}</p>
                         </div>
                       ))}
                     </div>
                     <div className={`rounded-xl border px-3 py-2 text-sm font-semibold flex justify-between ${netBalance > 0 ? "border-destructive/40 bg-destructive/5 text-destructive" : "border-success/40 bg-success/5 text-success"}`}>
                       <span>{netBalance > 0 ? "Net Amount Owed to Supplier" : "Net Credit from Supplier"}</span>
-                      <span>SAR {Math.abs(netBalance).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                      <span>SAR {Math.abs(netBalance).toLocaleString()}</span>
                     </div>
                     {/* Goods Received — creates a payable (PO-based) */}
                     {(poGroups.filter(g => g.items.some(p => p.status === "partial_received" || p.status === "fully_received")).length > 0 ||
@@ -407,7 +407,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                                 </span>
                               </p>
                             </div>
-                            <span className="font-semibold text-primary flex items-center gap-0.5"><SARIcon />{cn.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            <span className="font-semibold text-primary flex items-center gap-0.5"><SARIcon />{cn.amount.toLocaleString()}</span>
                           </div>
                         ))}
                       </div>

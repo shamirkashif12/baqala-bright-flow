@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, Loader2, Plus, Search, ChevronDown, Check, X } from "lucide-react";
+import { RotateCcw, Loader2, Plus, Search, ChevronDown, Check, X, CheckCircle, Truck } from "lucide-react";
 import { api, type StockTransfer, type Warehouse, type Supplier, type StockTransferItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -585,9 +585,11 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
 
 // ─── Main page ─────────────────────────────────────────────────────────────────
 function SupplierReturns() {
-  const { canCreate } = usePermission("Supplier Returns");
+  const { canCreate, canApprove, canEdit, canDelete } = usePermission("Supplier Returns");
+  const { user } = useAuth();
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [rtsOpen, setRtsOpen] = useState(false);
@@ -597,6 +599,17 @@ function SupplierReturns() {
     api.getStockTransfers({ transferType: "warehouse_to_supplier" })
       .then(setTransfers)
       .finally(() => setLoading(false));
+  };
+
+  const updateStatus = async (group: StockTransfer[], newStatus: string) => {
+    const key = group[0].id + "_" + newStatus;
+    setActionLoading(key);
+    try {
+      for (const t of group) await api.updateTransferStatus(t.id, newStatus, user?.id);
+      load();
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -688,6 +701,7 @@ function SupplierReturns() {
                   <th className="px-4 py-3 font-semibold text-right">Credit Value</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
                   <th className="px-4 py-3 font-semibold">Date</th>
+                  <th className="px-4 py-3 font-semibold"></th>
                 </tr>
               </thead>
               <tbody>
@@ -731,12 +745,47 @@ function SupplierReturns() {
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {new Date(t.createdAt).toLocaleDateString("en-SA")}
                       </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          {t.status === "draft" && canApprove && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                              disabled={actionLoading === group[0].id + "_approved"}
+                              onClick={() => updateStatus(group, "approved")}>
+                              {actionLoading === group[0].id + "_approved" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                              Approve
+                            </Button>
+                          )}
+                          {t.status === "approved" && canEdit && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                              disabled={actionLoading === group[0].id + "_in_transit"}
+                              onClick={() => updateStatus(group, "in_transit")}>
+                              {actionLoading === group[0].id + "_in_transit" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}
+                              Dispatch
+                            </Button>
+                          )}
+                          {t.status === "in_transit" && canApprove && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-success border-success/40 hover:bg-success/10"
+                              disabled={actionLoading === group[0].id + "_completed"}
+                              onClick={() => updateStatus(group, "completed")}>
+                              {actionLoading === group[0].id + "_completed" ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                              Complete
+                            </Button>
+                          )}
+                          {t.status !== "completed" && t.status !== "cancelled" && canDelete && (
+                            <Button size="sm" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              disabled={actionLoading === group[0].id + "_cancelled"}
+                              onClick={() => updateStatus(group, "cancelled")}>
+                              <X className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
                 {displayRows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="text-center py-12 text-muted-foreground text-sm">
+                    <td colSpan={9} className="text-center py-12 text-muted-foreground text-sm">
                       No supplier return transfers found.
                     </td>
                   </tr>

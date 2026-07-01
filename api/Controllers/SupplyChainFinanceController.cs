@@ -126,7 +126,9 @@ public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
         [FromQuery] Guid? supplierId,
         [FromQuery] string? status,
         [FromQuery] string? creditType,
-        [FromQuery] Guid? poId)
+        [FromQuery] Guid? poId,
+        [FromQuery] Guid? transferId,
+        [FromQuery] Guid? sourceWarehouseId)
     {
         var query = db.SupplierCreditNotes
             .Include(c => c.Supplier)
@@ -135,6 +137,10 @@ public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
         if (!string.IsNullOrEmpty(status)) query = query.Where(c => c.Status == status);
         if (!string.IsNullOrEmpty(creditType)) query = query.Where(c => c.CreditType == creditType);
         if (poId.HasValue) query = query.Where(c => c.PoId == poId);
+        if (transferId.HasValue) query = query.Where(c => c.TransferId == transferId);
+        if (sourceWarehouseId.HasValue)
+            query = query.Where(c => c.TransferId.HasValue
+                && db.StockTransfers.Any(t => t.Id == c.TransferId && t.SourceWarehouseId == sourceWarehouseId));
         return Ok(await query.OrderByDescending(c => c.CreatedAt).ToListAsync());
     }
 
