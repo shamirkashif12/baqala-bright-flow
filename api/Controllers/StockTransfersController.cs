@@ -14,7 +14,10 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         [FromQuery] string? transferType,
         [FromQuery] string? status,
         [FromQuery] Guid? sourceWarehouseId,
-        [FromQuery] Guid? destWarehouseId)
+        [FromQuery] Guid? destWarehouseId,
+        [FromQuery] string? batchId,
+        [FromQuery] Guid? purchaseOrderId,
+        [FromQuery] Guid? sourceSupplierId)
     {
         var query = db.StockTransfers
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
@@ -25,7 +28,23 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);
         if (sourceWarehouseId.HasValue) query = query.Where(t => t.SourceWarehouseId == sourceWarehouseId);
         if (destWarehouseId.HasValue) query = query.Where(t => t.DestWarehouseId == destWarehouseId);
+        if (!string.IsNullOrEmpty(batchId)) query = query.Where(t => t.BatchId == batchId);
+        if (purchaseOrderId.HasValue) query = query.Where(t => t.PurchaseOrderId == purchaseOrderId);
+        if (sourceSupplierId.HasValue) query = query.Where(t => t.SourceSupplierId == sourceSupplierId);
         return Ok(await query.OrderByDescending(t => t.CreatedAt).ToListAsync());
+    }
+
+    [HttpGet("batch/{batchId}")]
+    public async Task<IActionResult> GetByBatchId(string batchId)
+    {
+        var transfers = await db.StockTransfers
+            .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
+            .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
+            .Include(t => t.Items).ThenInclude(i => i.Product)
+            .Where(t => t.BatchId == batchId)
+            .OrderBy(t => t.CreatedAt)
+            .ToListAsync();
+        return Ok(transfers);
     }
 
     [HttpGet("{id:guid}")]
@@ -66,10 +85,50 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
             CreatedAt = DateTime.UtcNow,
         }).ToList();
 
+        var transferNumber = req.TransferType == "supplier_to_warehouse"
+            ? $"PO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}"
+            : $"TRF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+
+        // Auto-create a linked PurchaseOrder for every supplier_to_warehouse transfer so both
+        // the Stock Transfers tab and the Purchase Orders tab share one source of truth.
+        Guid? linkedPoId = req.PurchaseOrderId;
+        if (req.TransferType == "supplier_to_warehouse" && linkedPoId == null && req.SourceSupplierId.HasValue)
+        {
+            var poItems = items.Select(i => new PurchaseOrderItem
+            {
+                Id = Guid.NewGuid(),
+                ProductId = i.ProductId,
+                OrderedQuantity = i.RequestedQuantity,
+                UnitCost = i.UnitCost ?? 0,
+                Subtotal = i.RequestedQuantity * (i.UnitCost ?? 0),
+                Status = "pending",
+                CreatedAt = DateTime.UtcNow,
+            }).ToList();
+
+            var po = new PurchaseOrder
+            {
+                Id = Guid.NewGuid(),
+                PoNumber = transferNumber,
+                SupplierId = req.SourceSupplierId.Value,
+                WarehouseId = req.DestWarehouseId,
+                OrderedBy = req.CreatedBy ?? Guid.Empty,
+                Status = "ordered",
+                TotalAmount = poItems.Sum(i => i.Subtotal),
+                BatchId = req.BatchId,
+                Notes = req.Notes,
+                ExpectedDeliveryDate = req.ExpectedDate,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                Items = poItems,
+            };
+            db.PurchaseOrders.Add(po);
+            linkedPoId = po.Id;
+        }
+
         var transfer = new StockTransfer
         {
             Id = transferId,
-            TransferNumber = $"TRF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+            TransferNumber = transferNumber,
             TransferType = req.TransferType,
             SourceBranchId = req.SourceBranchId,
             SourceWarehouseId = req.SourceWarehouseId,
@@ -77,11 +136,12 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
             DestBranchId = req.DestBranchId,
             DestWarehouseId = req.DestWarehouseId,
             DestSupplierId = req.DestSupplierId,
-            PurchaseOrderId = req.PurchaseOrderId,
+            PurchaseOrderId = linkedPoId,
             CreatedBy = req.CreatedBy ?? Guid.Empty,
             Status = "draft",
             ReturnReason = req.ReturnReason,
             Notes = req.Notes,
+            BatchId = req.BatchId,
             ExpectedDate = req.ExpectedDate,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -200,7 +260,8 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         }
 
         // Auto-create credit note when return-to-supplier transfer is completed
-        if (transfer.TransferType == "warehouse_to_supplier" && transfer.DestSupplierId.HasValue)
+        if (transfer.TransferType == "warehouse_to_supplier" && transfer.DestSupplierId.HasValue
+            && !await db.SupplierCreditNotes.AnyAsync(cn => cn.TransferId == transfer.Id))
         {
             // Prefer item-level unit cost; fall back to product cost price so RTS notes are never 0
             decimal creditAmount = 0;
@@ -228,6 +289,9 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
                 UpdatedAt = DateTime.UtcNow,
             });
         }
+
+        // Sync linked PO to fully_received
+        await SyncLinkedPoStatus(transfer);
 
         await db.SaveChangesAsync();
         return Ok(transfer);
@@ -279,10 +343,62 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
                     dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
                 }
             }
+
+            // Auto-create credit note for RTS when completed via status patch
+            if (transfer.TransferType == "warehouse_to_supplier" && transfer.DestSupplierId.HasValue
+                && !await db.SupplierCreditNotes.AnyAsync(cn => cn.TransferId == transfer.Id))
+            {
+                decimal creditAmount = 0;
+                foreach (var item in transfer.Items)
+                {
+                    var unitCost = (item.UnitCost ?? 0) > 0
+                        ? item.UnitCost!.Value
+                        : (await db.Products.FindAsync(item.ProductId))?.CostPrice ?? 0;
+                    creditAmount += (item.ReceivedQuantity ?? item.RequestedQuantity) * unitCost;
+                }
+                db.SupplierCreditNotes.Add(new SupplierCreditNote
+                {
+                    Id = Guid.NewGuid(),
+                    CreditNoteNumber = $"CN-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+                    SupplierId = transfer.DestSupplierId.Value,
+                    TransferId = transfer.Id,
+                    PoId = transfer.PurchaseOrderId,
+                    Amount = creditAmount,
+                    CreditType = "rts_return",
+                    Status = "confirmed",
+                    Notes = $"Auto-created from RTS transfer {transfer.TransferNumber}" + (string.IsNullOrEmpty(transfer.ReturnReason) ? "" : $". Return reason: {transfer.ReturnReason}"),
+                    IssuedDate = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+
+            // Sync linked PO to fully_received
+            await SyncLinkedPoStatus(transfer);
         }
 
         await db.SaveChangesAsync();
         return Ok(transfer);
+    }
+
+    private async Task SyncLinkedPoStatus(StockTransfer transfer)
+    {
+        if (!transfer.PurchaseOrderId.HasValue) return;
+        var po = await db.PurchaseOrders.Include(p => p.Items)
+            .FirstOrDefaultAsync(p => p.Id == transfer.PurchaseOrderId.Value);
+        if (po is null) return;
+
+        po.Status = "fully_received";
+        po.ReceivedDate = DateTime.UtcNow;
+        po.UpdatedAt = DateTime.UtcNow;
+
+        foreach (var tItem in transfer.Items)
+        {
+            var poItem = po.Items.FirstOrDefault(i => i.ProductId == tItem.ProductId);
+            if (poItem is null) continue;
+            poItem.ReceivedQuantity = tItem.ReceivedQuantity ?? tItem.RequestedQuantity;
+            poItem.Status = "received";
+        }
     }
 }
 
@@ -310,6 +426,7 @@ public record CreateTransferRequest(
     Guid? CreatedBy,
     string? ReturnReason,
     string? Notes,
+    string? BatchId,
     DateTime? ExpectedDate,
     List<CreateTransferItemRequest>? Items
 );
