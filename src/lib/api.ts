@@ -416,6 +416,18 @@ export const api = {
     request<Offer>(`/api/offers/${id}/toggle`, { method: "PATCH" }),
   deleteOffer: (id: string) =>
     request<void>(`/api/offers/${id}`, { method: "DELETE" }),
+
+  // ─── Printer (Linux CUPS) ──────────────────────────────────────────────────
+  detectPrinters: () =>
+    request<{ printers: DetectedPrinter[] }>("/api/printer/detect"),
+  getPrinterStatus: () =>
+    request<{ defaultPrinter: string | null; installed: string[] }>("/api/printer/status"),
+  activatePrinter: (data: { uri: string; name: string }) =>
+    request<{ message: string; name: string; kioskReady: boolean }>("/api/printer/activate", { method: "POST", body: JSON.stringify(data) }),
+  removePrinter: (name: string) =>
+    request<{ message: string }>(`/api/printer/${name}`, { method: "DELETE" }),
+  printReceipt: (html: string) =>
+    request<{ message: string }>("/api/printer/print-receipt", { method: "POST", body: JSON.stringify({ html }) }),
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -829,4 +841,11 @@ export interface DashboardMetrics {
   cashierPerformance: { name: string; sales: number; status: string }[];
   branchPerformance: { branch: string; orders: number; sales: number }[];
   returns: { count: number; refundedAmount: number };
+}
+
+export interface DetectedPrinter {
+  uri: string;
+  model: string;
+  type: "usb" | "network";
+  suggestedName: string;
 }

@@ -12,12 +12,12 @@ import {
   Search, ScanBarcode, Pause, RotateCcw, Printer, MessageSquare,
   Plus, Minus, Trash2, CreditCard, Banknote, Split,
   Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode, Camera, CameraOff,
-  Building2,
+  Building2, PrinterCheck, Usb, Wifi, RefreshCw, AlertCircle, Trash,
 } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule } from "@/lib/api";
+import { api, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { SARIcon } from "@/lib/currency";
 
@@ -101,24 +101,66 @@ async function downloadInvoicePdf(invoice: InvoiceSnapshot) {
   doc.save(`Invoice-${invoice.orderNumber}.pdf`);
 }
 
-// ─── Silent print (opens receipt window → auto-prints) ────────────────────────
-function printInvoice(contentId: string) {
-  const el = document.getElementById(contentId);
-  if (!el) return;
-  const win = window.open("", "_blank", "width=400,height=700");
-  if (!win) return;
-  win.document.write(`<!DOCTYPE html><html><head><title>Tax Invoice</title>
-    <style>
-      @page{margin:4mm}
-      body{font-family:monospace;font-size:12px;padding:8px;color:#000;background:#fff;max-width:320px;margin:0 auto}
-      .center{text-align:center} .bold{font-weight:bold} .row{display:flex;justify-content:space-between;margin:2px 0}
-      .dashed{border-top:1px dashed #000;margin:6px 0;padding-top:6px}
-      .discount{color:#16a34a} .total{font-weight:bold;font-size:14px}
-      img,svg{display:block;margin:8px auto}
-    </style></head><body>${el.innerHTML}</body></html>`);
-  win.document.close();
-  win.focus();
-  setTimeout(() => { win.print(); win.close(); }, 250);
+// ─── Build standalone receipt HTML (no Tailwind — safe for headless Chrome) ──
+function buildReceiptHtml(inv: {
+  orderNumber: string; createdAt: string; branchName: string;
+  vatNumber: string; sellerName: string; customerName?: string;
+  items: { name: string; qty: number; price: number }[];
+  subtotal: number; discount: number; vat: number; total: number;
+  taxLabel: string; paymentMethod?: string;
+  splitBreakdown?: { method: string; amount: number }[];
+  tobaccoExcise?: number;
+  fees?: { name: string; amount: number }[];
+}, qrSvg: string): string {
+  const fmt = (n: number) => n.toFixed(2);
+  const date = new Date(inv.createdAt).toLocaleString("en-SA", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const row = (l: string, r: string, bold = false) =>
+    `<div style="display:flex;justify-content:space-between;margin:2px 0;${bold ? "font-weight:bold;font-size:13px;" : ""}"><span>${l}</span><span>${r}</span></div>`;
+  const divider = () => `<div style="border-top:1px dashed #000;margin:6px 0"></div>`;
+  const center = (s: string, extra = "") =>
+    `<div style="text-align:center;${extra}">${s}</div>`;
+
+  const items = inv.items.map(i =>
+    row(`${i.qty} × ${i.name}`, `SAR ${fmt(i.qty * i.price)}`)
+  ).join("");
+
+  const payments = inv.splitBreakdown?.length
+    ? inv.splitBreakdown.map(p => row(p.method.charAt(0).toUpperCase() + p.method.slice(1), `SAR ${fmt(p.amount)}`)).join("")
+    : row("Payment", inv.paymentMethod ?? "Cash");
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+  @page { margin:2mm; size:80mm auto; }
+  body { font-family:'Courier New',monospace; font-size:11px; color:#000;
+         background:#fff; margin:0; padding:6px 8px; width:74mm; }
+  svg { display:block; margin:8px auto; width:90px; height:90px; }
+</style></head><body>
+${center(`<strong style="font-size:13px">${inv.sellerName || inv.branchName}</strong>`)}
+${inv.vatNumber ? center(`VAT ${inv.vatNumber}`) : ""}
+${center("Tax Invoice", "margin-bottom:4px")}
+${divider()}
+<div>Invoice No.</div>
+<div style="font-weight:bold">${inv.orderNumber}</div>
+<div>${date}</div>
+${inv.customerName ? `<div>Customer: ${inv.customerName}</div>` : ""}
+${divider()}
+${items}
+${divider()}
+${row("Subtotal", `SAR ${fmt(inv.subtotal)}`)}
+${inv.discount > 0 ? row("Discount", `-SAR ${fmt(inv.discount)}`) : ""}
+${inv.tobaccoExcise ? row("Tobacco Excise", `SAR ${fmt(inv.tobaccoExcise)}`) : ""}
+${(inv.fees ?? []).map(f => row(f.name, `SAR ${fmt(f.amount)}`)).join("")}
+${inv.vat > 0 ? row(inv.taxLabel || "VAT 15%", `SAR ${fmt(inv.vat)}`) : ""}
+${divider()}
+${row("TOTAL", `SAR ${fmt(inv.total)}`, true)}
+${payments}
+${divider()}
+${qrSvg ? `${qrSvg}${center("ZATCA Phase 2 — scan to verify", "font-size:9px;margin-top:4px")}` : ""}
+${center("Thank you!", "margin-top:8px")}
+</body></html>`;
 }
 
 export const Route = createFileRoute("/_app/pos")({ component: POS });
@@ -140,6 +182,8 @@ type InvoiceSnapshot = {
   customerName?: string;
   paymentMethod?: string;
   splitBreakdown?: Array<{ method: string; amount: number }>;
+  tobaccoExcise?: number;
+  fees?: Array<{ name: string; amount: number }>;
 };
 
 // ─── Quick Stock In Dialog ────────────────────────────────────────────────────
@@ -278,6 +322,176 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
   );
 }
 
+// ─── Printer Setup Dialog ────────────────────────────────────────────────────
+
+function PrinterSetupDialog() {
+  const [open, setOpen] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [activating, setActivating] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [detected, setDetected] = useState<DetectedPrinter[]>([]);
+  const [installed, setInstalled] = useState<string[]>([]);
+  const [defaultPrinter, setDefaultPrinter] = useState<string | null>(null);
+  const [editNames, setEditNames] = useState<Record<string, string>>({});
+
+  async function loadStatus() {
+    const s = await api.getPrinterStatus().catch(() => null);
+    if (s) { setInstalled(s.installed); setDefaultPrinter(s.defaultPrinter); }
+  }
+
+  async function handleDetect() {
+    setDetecting(true);
+    try {
+      const res = await api.detectPrinters();
+      setDetected(res.printers);
+      if (res.printers.length === 0) toast.info("No printers detected — make sure the USB cable is connected.");
+      else toast.success(`${res.printers.length} printer(s) detected`);
+    } catch { toast.error("Detection failed — is the API running?"); }
+    finally { setDetecting(false); }
+  }
+
+  async function handleActivate(p: DetectedPrinter) {
+    const name = editNames[p.uri] ?? p.suggestedName;
+    setActivating(p.uri);
+    try {
+      const res = await api.activatePrinter({ uri: p.uri, name });
+      toast.success(res.message);
+      if (res.kioskReady) toast.info("Chrome kiosk shortcut created on Desktop — use it for silent printing.");
+      await loadStatus();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to activate printer";
+      toast.error(msg);
+    } finally { setActivating(null); }
+  }
+
+  async function handleRemove(name: string) {
+    setRemoving(name);
+    try {
+      const res = await api.removePrinter(name);
+      toast.success(res.message);
+      await loadStatus();
+    } catch { toast.error("Failed to remove printer"); }
+    finally { setRemoving(null); }
+  }
+
+  function handleOpen() {
+    setOpen(true);
+    loadStatus();
+    handleDetect();
+  }
+
+  return (
+    <>
+      <Button size="sm" variant="outline" className="gap-1.5" onClick={handleOpen}>
+        <Printer className="h-4 w-4" /> Printer Setup
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Printer className="h-5 w-5 text-primary" /> Receipt Printer Setup
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            {/* Current default */}
+            <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${defaultPrinter ? "bg-green-50 text-green-700" : "bg-muted/50 text-muted-foreground"}`}>
+              {defaultPrinter
+                ? <><PrinterCheck className="h-4 w-4 flex-shrink-0" /><span>Active printer: <strong>{defaultPrinter}</strong></span></>
+                : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>No default printer set</span></>}
+            </div>
+
+            {/* Installed printers */}
+            {installed.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Installed Printers</p>
+                <div className="space-y-1.5">
+                  {installed.map(name => (
+                    <div key={name} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                      <PrinterCheck className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      <span className="flex-1 font-medium">{name}</span>
+                      {name === defaultPrinter && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">Default</span>}
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                        disabled={removing === name}
+                        onClick={() => handleRemove(name)}>
+                        {removing === name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Detected printers */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Detected Devices</p>
+                <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={handleDetect} disabled={detecting}>
+                  <RefreshCw className={`h-3 w-3 ${detecting ? "animate-spin" : ""}`} />
+                  {detecting ? "Scanning…" : "Re-scan"}
+                </Button>
+              </div>
+
+              {detecting && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground py-3">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Detecting connected printers…
+                </div>
+              )}
+
+              {!detecting && detected.length === 0 && (
+                <div className="rounded-lg border border-dashed px-4 py-4 text-center text-sm text-muted-foreground">
+                  No printers detected. Connect the USB cable and click Re-scan.
+                </div>
+              )}
+
+              {!detecting && detected.map(p => (
+                <div key={p.uri} className="rounded-lg border px-3 py-2.5 mb-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    {p.type === "usb" ? <Usb className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <Wifi className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{p.model}</p>
+                      <p className="text-xs text-muted-foreground font-mono truncate">{p.uri}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-8 text-xs flex-1"
+                      placeholder="Printer name"
+                      value={editNames[p.uri] ?? p.suggestedName}
+                      onChange={e => setEditNames(prev => ({ ...prev, [p.uri]: e.target.value }))}
+                    />
+                    <Button
+                      size="sm"
+                      className="h-8 gradient-primary text-primary-foreground border-0 gap-1 whitespace-nowrap"
+                      disabled={activating === p.uri}
+                      onClick={() => handleActivate(p)}
+                    >
+                      {activating === p.uri
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Activating…</>
+                        : <><PrinterCheck className="h-3.5 w-3.5" /> Activate</>}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Kiosk setup hint */}
+            <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5 text-xs text-blue-700 space-y-0.5">
+              <p className="font-semibold">For fully silent printing (no dialog):</p>
+              <p>After activating your printer, use the <strong>ECR-POS shortcut</strong> created on your Desktop — it opens Chrome with <code className="bg-blue-100 px-1 rounded">--kiosk-printing</code> so receipts print automatically on every payment.</p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function POS() {
   // ─── Branch from global context ───────────────────────────────────────────────
   const { selectedBranch: branch } = useBranch();
@@ -343,6 +557,7 @@ function POS() {
 
   // ─── Invoice snapshot (preserved after cart is cleared) ───────────────────────
   const [invoice, setInvoice] = useState<InvoiceSnapshot | null>(null);
+  const autoPrintRef = useRef(false);
 
   // ─── Load products, tax rules, shifts on mount ────────────────────────────────
   useEffect(() => {
@@ -692,9 +907,7 @@ function POS() {
     if (!q) return [];
     return products
       .filter((p) => {
-        // Hide products with no stock record or zero stock in the selected branch
-        const stock = stockMap.get(p.id);
-        if (stock === undefined || stock <= 0) return false;
+        if (p.status !== "active") return false;
         return (
           p.name.toLowerCase().includes(q) ||
           p.sku.toLowerCase().includes(q) ||
@@ -702,7 +915,7 @@ function POS() {
         );
       })
       .slice(0, 8);
-  }, [query, products, stockMap]);
+  }, [query, products]);
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -867,24 +1080,43 @@ function POS() {
       customerName: customer?.fullName,
       paymentMethod: splitPayments ? "Split" : paymentMethod,
       splitBreakdown: splitPayments?.filter(p => p.amount > 0),
+      tobaccoExcise: tobaccoExcise > 0 ? tobaccoExcise : undefined,
+      fees: allOrderFees.length > 0 ? allOrderFees.map(f => ({
+        name: f.ruleName,
+        amount: f.customFeeAmount > 0 ? f.customFeeAmount
+              : f.excisePercentage > 0 ? subtotal * f.excisePercentage / 100
+              : subtotal * f.vatPercentage / 100,
+      })) : undefined,
     };
     setInvoice(invoiceData);
-    // Auto-download PDF immediately (no dialog needed)
-    downloadInvoicePdf(invoiceData);
   };
 
   const onPaymentDone = () => {
+    autoPrintRef.current = true;
     setPayOpen(false);
     setInvOpen(true);
     resetSale();
-    // Auto-print: delay to allow invoice dialog + DOM to render
-    setTimeout(() => printInvoice("pos-invoice"), 400);
   };
+
+  // Auto-print receipt via backend (Chrome headless → PDF → lp).
+  useEffect(() => {
+    if (!invOpen || !invoice || !autoPrintRef.current) return;
+    autoPrintRef.current = false;
+
+    const timer = setTimeout(() => {
+      // Get the ZATCA QR SVG already rendered in the dialog
+      const qrEl = document.querySelector("#pos-invoice svg");
+      const qrSvg = qrEl ? new XMLSerializer().serializeToString(qrEl) : "";
+      api.printReceipt(buildReceiptHtml(invoice, qrSvg)).catch(() => {});
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [invOpen, invoice]);
 
   return (
     <PageShell
       title="POS Checkout"
       subtitle={`${branch?.name ?? "Loading…"} · ${activeShift ? `Cashier: ${activeShift.cashier?.fullName ?? "Active shift"}` : "No active shift"}`}
+      actions={<PrinterSetupDialog />}
     >
       <div className="grid lg:grid-cols-[1fr_420px] gap-4 -mt-2">
         {/* ─── Left: scanner + cart ─────────────────────────────────────────── */}
@@ -1520,6 +1752,18 @@ function POS() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setInvOpen(false)}>Close</Button>
+            <Button
+              className="gradient-primary text-primary-foreground border-0"
+              disabled={!invoice}
+              onClick={() => {
+                if (!invoice) return;
+                const qrEl = document.querySelector("#pos-invoice svg");
+                const qrSvg = qrEl ? new XMLSerializer().serializeToString(qrEl) : "";
+                api.printReceipt(buildReceiptHtml(invoice, qrSvg)).catch(() => {});
+              }}
+            >
+              <Printer className="h-4 w-4 mr-1" />Print
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1540,6 +1784,7 @@ function POS() {
           setStockInOpen(false);
         }}
       />
+
     </PageShell>
   );
 }
