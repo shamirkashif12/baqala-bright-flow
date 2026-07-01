@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
-  Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag,
+  Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
 } from "lucide-react";
 import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
@@ -204,6 +204,47 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [skuManual, setSkuManual] = useState(false);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupStatus, setLookupStatus] = useState<"found" | "not_found" | null>(null);
+
+  const lookupBarcode = async (barcode: string) => {
+    if (!barcode || barcode.length < 6) return;
+    setLookupLoading(true);
+    setLookupStatus(null);
+    const applyName = (raw: string) => {
+      const name = raw.trim();
+      if (!name) return false;
+      setForm(prev => ({ ...prev, name, sku: generateSKU(name) }));
+      setSkuManual(false);
+      setLookupStatus("found");
+      return true;
+    };
+    try {
+      // 1) Open Food Facts (best for food/beverage worldwide)
+      const offRes = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
+      const offData = await offRes.json();
+      if (offData.status === 1 && offData.product) {
+        const p = offData.product;
+        const name = [p.brands, p.product_name_en || p.product_name].filter(Boolean).join(" ");
+        if (applyName(name)) return;
+      }
+
+      // 2) UPC Item DB fallback (good US/international retail products)
+      const upcRes = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${barcode}`);
+      const upcData = await upcRes.json();
+      if (upcData.items && upcData.items.length > 0) {
+        const item = upcData.items[0];
+        const name = [item.brand, item.title].filter(Boolean).join(" ");
+        if (applyName(name)) return;
+      }
+
+      setLookupStatus("not_found");
+    } catch {
+      setLookupStatus("not_found");
+    } finally {
+      setLookupLoading(false);
+    }
+  };
   const [form, setForm] = useState({
     name: "", sku: "", barcode: "", categoryId: "",
     branchId: "", warehouseId: "",
@@ -284,16 +325,33 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
           </FieldRow>
           <FieldRow label="Barcode">
             <div className="flex gap-1">
-              <Input ref={barcodeRef} className={`h-9 flex-1 ${scanning ? "border-primary ring-1 ring-primary" : ""}`}
-                placeholder={scanning ? "Scan now…" : "6281007012340"}
-                value={form.barcode} onChange={e => set("barcode")(e.target.value)}
-                onBlur={() => setScanning(false)} />
+              <div className="relative flex-1">
+                <Input ref={barcodeRef}
+                  className={`h-9 pr-7 ${scanning ? "border-primary ring-1 ring-primary" : ""} ${lookupStatus === "found" ? "border-green-500" : ""}`}
+                  placeholder={scanning ? "Scan now…" : "6281007012340"}
+                  value={form.barcode}
+                  onChange={e => { set("barcode")(e.target.value); setLookupStatus(null); }}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); lookupBarcode(e.currentTarget.value); } }}
+                  onBlur={() => setScanning(false)} />
+                {lookupLoading && <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                {lookupStatus === "found" && !lookupLoading && <CheckCircle2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-500" />}
+              </div>
               <Button type="button" size="icon" variant={scanning ? "default" : "outline"}
                 className={`h-9 w-9 shrink-0 ${scanning ? "gradient-primary text-primary-foreground border-0" : ""}`}
-                onClick={() => { setScanning(true); setTimeout(() => barcodeRef.current?.focus(), 50); }}>
+                onClick={() => { setScanning(true); setLookupStatus(null); setTimeout(() => barcodeRef.current?.focus(), 50); }}>
                 <ScanLine className="h-4 w-4" />
               </Button>
             </div>
+            {lookupStatus === "found" && (
+              <p className="text-[11px] text-green-600 flex items-center gap-1 mt-1">
+                <Sparkles className="h-3 w-3" /> Product details filled from barcode database
+              </p>
+            )}
+            {lookupStatus === "not_found" && (
+              <p className="text-[11px] text-amber-600 mt-1">
+                Barcode <span className="font-mono font-semibold">{form.barcode}</span> not found in database — fill details manually
+              </p>
+            )}
           </FieldRow>
           <FieldRow label="Category *">
             <Select value={form.categoryId} onValueChange={set("categoryId")}>
