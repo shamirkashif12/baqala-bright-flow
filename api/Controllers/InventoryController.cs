@@ -124,7 +124,7 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
             Quantity = req.Quantity,
             AdjustmentType = req.AdjustmentType,
             Reason = req.Reason ?? "",
-            AdjustedBy = req.AdjustedBy ?? Guid.Empty,
+            AdjustedBy = req.AdjustedBy,
             CreatedAt = DateTime.UtcNow,
         };
 

@@ -38,7 +38,13 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
     public async Task<IActionResult> Create([FromBody] Product product)
     {
         if (await db.Products.AnyAsync(p => p.Sku == product.Sku))
-            return Conflict("SKU already exists.");
+            return Conflict(new { message = $"SKU \"{product.Sku}\" is already used by another product." });
+        if (!string.IsNullOrWhiteSpace(product.Barcode) &&
+            await db.Products.AnyAsync(p => p.Barcode == product.Barcode))
+        {
+            var existing = await db.Products.FirstAsync(p => p.Barcode == product.Barcode);
+            return Conflict(new { message = $"Barcode {product.Barcode} is already assigned to \"{existing.Name}\". Edit that product instead." });
+        }
         product.Id = Guid.NewGuid();
         product.CreatedAt = product.UpdatedAt = DateTime.UtcNow;
         db.Products.Add(product);

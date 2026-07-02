@@ -120,8 +120,8 @@ public class InventoryAdjustment
     [Column("notes")]
     public string? Notes { get; set; }
 
-    [Required, Column("adjusted_by")]
-    public Guid AdjustedBy { get; set; }
+    [Column("adjusted_by")]
+    public Guid? AdjustedBy { get; set; }
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

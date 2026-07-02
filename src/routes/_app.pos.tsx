@@ -9,12 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Search, ScanBarcode, Pause, RotateCcw, Printer, MessageSquare,
+  Search, ScanBarcode, Pause, RotateCcw, Printer,
   Plus, Minus, Trash2, CreditCard, Banknote, Split,
-  Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode, Camera, CameraOff,
+  Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode,
   Building2, PrinterCheck, Usb, Wifi, RefreshCw, AlertCircle, Trash,
 } from "lucide-react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import { api, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter } from "@/lib/api";
@@ -42,64 +41,7 @@ function buildZatcaTlv(sellerName: string, vatNumber: string, timestamp: string,
   return btoa(String.fromCharCode(...buf));
 }
 
-// ─── Auto-download PDF receipt using jsPDF ────────────────────────────────────
-async function downloadInvoicePdf(invoice: InvoiceSnapshot) {
-  const { jsPDF } = await import("jspdf");
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: [80, 210] });
-  const W = 80;
-  let y = 8;
 
-  const line = () => { doc.setLineDashPattern([0.8, 0.8], 0); doc.line(4, y, W - 4, y); y += 4; };
-  const row = (left: string, right: string, bold = false) => {
-    doc.setFont("helvetica", bold ? "bold" : "normal");
-    doc.setFontSize(bold ? 9 : 8);
-    doc.text(left, 4, y);
-    doc.text(right, W - 4, y, { align: "right" });
-    y += 4;
-  };
-  const center = (text: string, size = 8, bold = false) => {
-    doc.setFont("helvetica", bold ? "bold" : "normal");
-    doc.setFontSize(size);
-    doc.text(text, W / 2, y, { align: "center" });
-    y += size > 9 ? 5 : 4;
-  };
-
-  center(invoice.sellerName, 12, true);
-  center(`VAT: ${invoice.vatNumber}`, 7);
-  center("TAX INVOICE", 8, true);
-  center(invoice.orderNumber, 8);
-  center(new Date(invoice.createdAt).toLocaleString("en-SA"), 7);
-  if (invoice.customerName) center(`Customer: ${invoice.customerName}`, 7);
-  if (invoice.branchName) center(invoice.branchName, 7);
-  line();
-
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
-  invoice.items.forEach(item => {
-    const name = item.name.length > 30 ? item.name.substring(0, 27) + "…" : item.name;
-    doc.text(name, 4, y); y += 3.5;
-    row(`  ${item.qty} x SAR ${item.price.toFixed(2)}`, `SAR ${(item.qty * item.price).toFixed(2)}`);
-  });
-
-  line();
-  row("Subtotal:", `SAR ${invoice.subtotal.toFixed(2)}`);
-  if (invoice.discount > 0) row("Discount:", `-SAR ${invoice.discount.toFixed(2)}`);
-  row(invoice.taxLabel + ":", `SAR ${invoice.vat.toFixed(2)}`);
-  y += 1;
-  row("TOTAL:", `SAR ${invoice.total.toFixed(2)}`, true);
-  y += 1;
-
-  if (invoice.splitBreakdown?.length) {
-    row("Payment:", "Split");
-    invoice.splitBreakdown.forEach(p => row(`  ↳ ${p.method}`, `SAR ${p.amount.toFixed(2)}`));
-  } else if (invoice.paymentMethod) {
-    row("Payment:", invoice.paymentMethod);
-  }
-  y += 2;
-  center("شكراً لتسوقكم / Thank you!", 7);
-  center("ZATCA Phase 2 Compliant", 6);
-
-  doc.save(`Invoice-${invoice.orderNumber}.pdf`);
-}
 
 // ─── Build standalone receipt HTML (no Tailwind — safe for headless Chrome) ──
 function buildReceiptHtml(inv: {
@@ -331,12 +273,44 @@ function PrinterSetupDialog() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [detected, setDetected] = useState<DetectedPrinter[]>([]);
   const [installed, setInstalled] = useState<string[]>([]);
+  const [installedUris, setInstalledUris] = useState<Record<string, string>>({});
   const [defaultPrinter, setDefaultPrinter] = useState<string | null>(null);
   const [editNames, setEditNames] = useState<Record<string, string>>({});
+  const [selectedPrinter, setSelectedPrinterState] = useState<string>(
+    () => localStorage.getItem("baqala_receipt_printer") ?? ""
+  );
+  const [printJobs, setPrintJobs] = useState<string[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [clearingJobs, setClearingJobs] = useState(false);
+
+  function setSelectedPrinter(name: string) {
+    setSelectedPrinterState(name);
+    localStorage.setItem("baqala_receipt_printer", name);
+  }
+
+  async function loadPrintJobs() {
+    setLoadingJobs(true);
+    try {
+      const res = await api.getPrintJobs();
+      setPrintJobs(res.jobs);
+    } catch { setPrintJobs([]); }
+    finally { setLoadingJobs(false); }
+  }
+
+  async function handleClearQueue() {
+    setClearingJobs(true);
+    try {
+      const res = await api.cancelAllJobs();
+      toast.success(res.message);
+      setPrintJobs([]);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to clear queue");
+    } finally { setClearingJobs(false); }
+  }
 
   async function loadStatus() {
     const s = await api.getPrinterStatus().catch(() => null);
-    if (s) { setInstalled(s.installed); setDefaultPrinter(s.defaultPrinter); }
+    if (s) { setInstalled(s.installed); setDefaultPrinter(s.defaultPrinter); setInstalledUris(s.installedUris ?? {}); }
   }
 
   async function handleDetect() {
@@ -378,6 +352,7 @@ function PrinterSetupDialog() {
     setOpen(true);
     loadStatus();
     handleDetect();
+    loadPrintJobs();
   }
 
   return (
@@ -395,11 +370,11 @@ function PrinterSetupDialog() {
           </DialogHeader>
 
           <div className="space-y-4 py-1">
-            {/* Current default */}
-            <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${defaultPrinter ? "bg-green-50 text-green-700" : "bg-muted/50 text-muted-foreground"}`}>
-              {defaultPrinter
-                ? <><PrinterCheck className="h-4 w-4 flex-shrink-0" /><span>Active printer: <strong>{defaultPrinter}</strong></span></>
-                : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>No default printer set</span></>}
+            {/* Receipt printer selection */}
+            <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${selectedPrinter || defaultPrinter ? "bg-green-50 text-green-700" : "bg-muted/50 text-muted-foreground"}`}>
+              {selectedPrinter || defaultPrinter
+                ? <><PrinterCheck className="h-4 w-4 flex-shrink-0" /><span>Receipt printer: <strong>{selectedPrinter || defaultPrinter}</strong></span></>
+                : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>No printer configured — activate one below</span></>}
             </div>
 
             {/* Installed printers */}
@@ -407,18 +382,27 @@ function PrinterSetupDialog() {
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Installed Printers</p>
                 <div className="space-y-1.5">
-                  {installed.map(name => (
-                    <div key={name} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-                      <PrinterCheck className="h-4 w-4 text-green-600 flex-shrink-0" />
-                      <span className="flex-1 font-medium">{name}</span>
-                      {name === defaultPrinter && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">Default</span>}
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                        disabled={removing === name}
-                        onClick={() => handleRemove(name)}>
-                        {removing === name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
-                      </Button>
-                    </div>
-                  ))}
+                  {installed.map(name => {
+                    const isReceipt = (selectedPrinter || defaultPrinter) === name;
+                    return (
+                      <div key={name} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isReceipt ? "border-green-300 bg-green-50/60" : ""}`}>
+                        <PrinterCheck className={`h-4 w-4 flex-shrink-0 ${isReceipt ? "text-green-600" : "text-muted-foreground"}`} />
+                        <span className="flex-1 font-medium">{name}</span>
+                        {name === defaultPrinter && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">CUPS Default</span>}
+                        {isReceipt
+                          ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">Receipt Printer</span>
+                          : <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setSelectedPrinter(name)}>
+                              Use for receipts
+                            </Button>
+                        }
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                          disabled={removing === name}
+                          onClick={() => handleRemove(name)}>
+                          {removing === name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -445,41 +429,78 @@ function PrinterSetupDialog() {
                 </div>
               )}
 
-              {!detecting && detected.map(p => (
-                <div key={p.uri} className="rounded-lg border px-3 py-2.5 mb-2 space-y-2">
-                  <div className="flex items-center gap-2">
-                    {p.type === "usb" ? <Usb className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <Wifi className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{p.model}</p>
-                      <p className="text-xs text-muted-foreground font-mono truncate">{p.uri}</p>
+              {!detecting && detected.map(p => {
+                const alreadyInstalled = Object.values(installedUris).some(u => u === p.uri);
+                const installedName = alreadyInstalled
+                  ? Object.entries(installedUris).find(([, u]) => u === p.uri)?.[0]
+                  : null;
+                return (
+                  <div key={p.uri} className={`rounded-lg border px-3 py-2.5 mb-2 space-y-2 ${alreadyInstalled ? "border-green-200 bg-green-50/50" : ""}`}>
+                    <div className="flex items-center gap-2">
+                      {p.type === "usb" ? <Usb className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <Wifi className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{p.model}</p>
+                        <p className="text-xs text-muted-foreground font-mono truncate">{p.uri}</p>
+                      </div>
+                      {alreadyInstalled && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
+                          <PrinterCheck className="h-3 w-3" /> {installedName}
+                        </span>
+                      )}
                     </div>
+                    {!alreadyInstalled && (
+                      <div className="flex gap-2">
+                        <Input
+                          className="h-8 text-xs flex-1"
+                          placeholder="Printer name"
+                          value={editNames[p.uri] ?? p.suggestedName}
+                          onChange={e => setEditNames(prev => ({ ...prev, [p.uri]: e.target.value }))}
+                        />
+                        <Button
+                          size="sm"
+                          className="h-8 gradient-primary text-primary-foreground border-0 gap-1 whitespace-nowrap"
+                          disabled={activating === p.uri}
+                          onClick={() => handleActivate(p)}
+                        >
+                          {activating === p.uri
+                            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Activating…</>
+                            : <><PrinterCheck className="h-3.5 w-3.5" /> Activate</>}
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex gap-2">
-                    <Input
-                      className="h-8 text-xs flex-1"
-                      placeholder="Printer name"
-                      value={editNames[p.uri] ?? p.suggestedName}
-                      onChange={e => setEditNames(prev => ({ ...prev, [p.uri]: e.target.value }))}
-                    />
-                    <Button
-                      size="sm"
-                      className="h-8 gradient-primary text-primary-foreground border-0 gap-1 whitespace-nowrap"
-                      disabled={activating === p.uri}
-                      onClick={() => handleActivate(p)}
-                    >
-                      {activating === p.uri
-                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Activating…</>
-                        : <><PrinterCheck className="h-3.5 w-3.5" /> Activate</>}
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
-            {/* Kiosk setup hint */}
-            <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5 text-xs text-blue-700 space-y-0.5">
-              <p className="font-semibold">For fully silent printing (no dialog):</p>
-              <p>After activating your printer, use the <strong>ECR-POS shortcut</strong> created on your Desktop — it opens Chrome with <code className="bg-blue-100 px-1 rounded">--kiosk-printing</code> so receipts print automatically on every payment.</p>
+            {/* Print queue */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Print Queue</p>
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={loadPrintJobs} disabled={loadingJobs}>
+                    <RefreshCw className={`h-3 w-3 ${loadingJobs ? "animate-spin" : ""}`} />
+                    Refresh
+                  </Button>
+                  {printJobs.length > 0 && (
+                    <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={handleClearQueue} disabled={clearingJobs}>
+                      {clearingJobs ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash className="h-3 w-3" />}
+                      Clear All
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {printJobs.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-1">No pending jobs — queue is clear.</p>
+              ) : (
+                <div className="space-y-1 max-h-28 overflow-y-auto">
+                  {printJobs.map((job, i) => (
+                    <div key={i} className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-mono text-amber-800 truncate">
+                      {job}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -512,10 +533,7 @@ function POS() {
   const [showResults, setShowResults] = useState(false);
   const [flashSku, setFlashSku] = useState<string | null>(null);
   const [scanFlash, setScanFlash] = useState(false);
-  const [cameraOpen, setCameraOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const zxingRef = useRef<{ stop: () => void } | null>(null);
 
   // Refs so the global scanner listener always sees fresh values without re-registering
   const productsRef = useRef<Product[]>([]);
@@ -551,7 +569,6 @@ function POS() {
   // ─── Dialogs ──────────────────────────────────────────────────────────────────
   const [orderOpen, setOrderOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-  const [holdOpen, setHoldOpen] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
   const [stockInOpen, setStockInOpen] = useState(false);
 
@@ -670,7 +687,14 @@ function POS() {
           productsRef.current.find((x) => x.barcode === code) ??
           productsRef.current.find((x) => x.sku === code);
         if (p) {
-          const stock = stockMapRef.current.get(p.id) ?? 999;
+          if (!stockMapRef.current.has(p.id)) {
+            toast.error(`Product not available in this branch`, {
+              description: `"${p.name}" is not stocked at this branch. Switch to the correct branch or add stock here first.`,
+              duration: 4000,
+            });
+            return;
+          }
+          const stock = stockMapRef.current.get(p.id) ?? 0;
           setCart((c) => {
             const ex = c.find((i) => i.sku === p.sku);
             if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
@@ -701,52 +725,6 @@ function POS() {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, []); // stable — all mutable state accessed through refs
-
-  const stopCamera = () => {
-    zxingRef.current?.stop();
-    zxingRef.current = null;
-    setCameraOpen(false);
-  };
-
-  useEffect(() => () => { zxingRef.current?.stop(); }, []);
-
-  const startCamera = async () => {
-    setCameraOpen(true);
-    // Wait one tick for the video element to mount
-    await new Promise((r) => setTimeout(r, 80));
-    if (!videoRef.current) return;
-    try {
-      const reader = new BrowserMultiFormatReader();
-      const controls = await reader.decodeFromConstraints(
-        { video: { facingMode: "environment" } },
-        videoRef.current,
-        (result) => {
-          if (!result) return;
-          const raw = result.getText();
-          stopCamera();
-          const p =
-            productsRef.current.find((x) => x.barcode === raw) ??
-            productsRef.current.find((x) => x.sku === raw);
-          if (p) {
-            const stock = stockMapRef.current.get(p.id) ?? 999;
-            setCart((c) => {
-              const ex = c.find((i) => i.sku === p.sku);
-              if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
-              return [...c, { name: p.name, sku: p.sku, productId: p.id, qty: 1, price: p.basePrice, stock }];
-            });
-            setFlashSku(p.sku); setTimeout(() => setFlashSku(null), 600);
-            setScanFlash(true); setTimeout(() => setScanFlash(false), 800);
-          } else {
-            alert(`Barcode "${raw}" not found in products.`);
-          }
-        }
-      );
-      zxingRef.current = controls;
-    } catch {
-      alert("Camera access denied. Please allow camera permission and try again.");
-      setCameraOpen(false);
-    }
-  };
 
   // ─── Calculations ─────────────────────────────────────────────────────────────
   const subtotal = cart.reduce((s, i) => s + i.qty * i.price, 0);
@@ -888,7 +866,7 @@ function POS() {
   const remove = (sku: string) => setCart((c) => c.filter((i) => i.sku !== sku));
 
   const addToCart = (p: Product) => {
-    const stock = stockMap.get(p.id) ?? 999;
+    const stock = stockMap.get(p.id) ?? 0;
     setCart((c) => {
       const ex = c.find((i) => i.sku === p.sku);
       if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
@@ -908,6 +886,7 @@ function POS() {
     return products
       .filter((p) => {
         if (p.status !== "active") return false;
+        if (!stockMap.has(p.id)) return false; // hide products not stocked in current branch
         return (
           p.name.toLowerCase().includes(q) ||
           p.sku.toLowerCase().includes(q) ||
@@ -915,7 +894,7 @@ function POS() {
         );
       })
       .slice(0, 8);
-  }, [query, products]);
+  }, [query, products, stockMap]);
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -923,9 +902,31 @@ function POS() {
       if (!trimmed) return;
       // Exact barcode match (hardware scanner emits barcode + Enter)
       const byBarcode = products.find((p) => p.barcode === trimmed);
-      if (byBarcode) { addToCart(byBarcode); return; }
+      if (byBarcode) {
+        if (!stockMap.has(byBarcode.id)) {
+          toast.error(`Product not available in this branch`, {
+            description: `"${byBarcode.name}" is not stocked at this branch.`,
+            duration: 4000,
+          });
+          setQuery("");
+          return;
+        }
+        addToCart(byBarcode);
+        return;
+      }
       const bySku = products.find((p) => p.sku === trimmed);
-      if (bySku) { addToCart(bySku); return; }
+      if (bySku) {
+        if (!stockMap.has(bySku.id)) {
+          toast.error(`Product not available in this branch`, {
+            description: `"${bySku.name}" is not stocked at this branch.`,
+            duration: 4000,
+          });
+          setQuery("");
+          return;
+        }
+        addToCart(bySku);
+        return;
+      }
       // Only fall back to first text match if this looks like a typed search,
       // not a scanned barcode (all digits 6+ chars = scanner input, don't guess)
       const looksLikeBarcode = /^\d{6,}$/.test(trimmed);
@@ -1015,7 +1016,7 @@ function POS() {
     if (!h) return;
     setCart(h.items);
     setHolds((hs) => hs.filter((x) => x.id !== id));
-    setHoldOpen(false);
+
   };
 
   const resetSale = () => {
@@ -1098,18 +1099,19 @@ function POS() {
     resetSale();
   };
 
-  // Auto-print receipt via backend (Chrome headless → PDF → lp).
+  // Auto-print receipt via backend ESC/POS (bypasses Chrome/PDF — works on thermal printers).
   useEffect(() => {
     if (!invOpen || !invoice || !autoPrintRef.current) return;
     autoPrintRef.current = false;
 
-    const timer = setTimeout(() => {
-      // Get the ZATCA QR SVG already rendered in the dialog
-      const qrEl = document.querySelector("#pos-invoice svg");
-      const qrSvg = qrEl ? new XMLSerializer().serializeToString(qrEl) : "";
-      api.printReceipt(buildReceiptHtml(invoice, qrSvg)).catch(() => {});
-    }, 700);
-    return () => clearTimeout(timer);
+    const printId = toast.loading("Printing receipt…");
+    const printerName = localStorage.getItem("baqala_receipt_printer") || undefined;
+    api.printReceipt({ ...invoice, printerName })
+      .then((res) => toast.success(res.message, { id: printId }))
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Print failed";
+        toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
+      });
   }, [invOpen, invoice]);
 
   return (
@@ -1145,37 +1147,7 @@ function POS() {
               >
                 <ScanBarcode className="h-5 w-5" /> Scan
               </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="h-14 gap-2 border-border/70"
-                onClick={startCamera}
-                title="Scan with laptop camera"
-              >
-                <Camera className="h-5 w-5" />
-              </Button>
             </div>
-
-            {/* Camera feed overlay */}
-            {cameraOpen && (
-              <div className="mt-3 relative rounded-xl overflow-hidden border border-border/70 bg-black">
-                <video ref={videoRef} className="w-full rounded-xl" playsInline muted />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-52 h-32 border-2 border-green-400 rounded-lg opacity-70" />
-                </div>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="absolute top-2 right-2 gap-1"
-                  onClick={stopCamera}
-                >
-                  <CameraOff className="h-4 w-4" /> Stop
-                </Button>
-                <p className="absolute bottom-2 left-0 right-0 text-center text-xs text-white/80">
-                  Point barcode at the green box
-                </p>
-              </div>
-            )}
 
             {scanFlash && (
               <div className="mt-2 flex items-center gap-2 text-sm text-green-600 dark:text-green-400 px-1 font-medium animate-pulse">
@@ -1301,6 +1273,57 @@ function POS() {
               </div>
             )}
           </Card>
+
+          {/* ─── Paused Orders ────────────────────────────────────────────────── */}
+          {holds.length > 0 && (
+            <Card className="border-border/60 shadow-card overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/60 bg-muted/30">
+                <RotateCcw className="h-3.5 w-3.5 text-primary" />
+                <span className="text-sm font-semibold">Paused Orders</span>
+                <Badge className="text-[10px] px-1.5 py-0 h-5 bg-primary/10 text-primary border-primary/20 hover:bg-primary/10 ml-1">
+                  {holds.length}
+                </Badge>
+                <span className="ml-auto text-[11px] text-muted-foreground">Click to resume</span>
+              </div>
+              <div className="divide-y divide-border/40">
+                {holds.map((h) => (
+                  <div
+                    key={h.id}
+                    onClick={() => reopen(h.id)}
+                    className="group relative flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-primary/5 transition-colors"
+                  >
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary scale-y-0 group-hover:scale-y-100 transition-transform origin-top rounded-r" />
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <ShoppingCart className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-primary">{h.id}</span>
+                        <span className="text-[11px] text-muted-foreground">· {h.at}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">
+                        {h.items.slice(0, 3).map((i) => i.name).join(", ")}
+                        {h.items.length > 3 ? ` +${h.items.length - 3} more` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        <p className="text-sm font-bold tabular-nums"><SARIcon />{h.total.toFixed(2)}</p>
+                        <p className="text-[11px] text-muted-foreground">{h.items.length} item{h.items.length !== 1 ? "s" : ""}</p>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setHolds((hs) => hs.filter((x) => x.id !== h.id)); }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 text-destructive"
+                        title="Discard"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
 
         {/* ─── Right: order panel ───────────────────────────────────────────── */}
@@ -1599,20 +1622,14 @@ function POS() {
               <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={hold} disabled={cart.length === 0}>
                 <Pause className="h-3 w-3" />Hold
               </Button>
-              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1 relative" onClick={() => setHoldOpen(true)}>
+              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={hold} disabled={holds.length === 0}>
                 <RotateCcw className="h-3 w-3" />Held
                 {holds.length > 0 && (
-                  <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
+                  <span className="ml-0.5 h-4 min-w-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
                     {holds.length}
                   </span>
                 )}
               </Button>
-              {/* <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={() => setInvOpen(true)} disabled={!invoice}>
-                <Printer className="h-3 w-3" />Print
-              </Button>
-              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1">
-                <MessageSquare className="h-3 w-3" />Send
-              </Button> */}
             </div>
           </div>
           <div className="px-3 py-1.5 border-t border-success/20 bg-success/5 text-success shrink-0 flex items-center gap-2 text-xs">
@@ -1658,32 +1675,6 @@ function POS() {
         onDone={onPaymentDone}
       />
 
-      {/* ─── Held orders dialog ────────────────────────────────────────────────── */}
-      <Dialog open={holdOpen} onOpenChange={setHoldOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Held Orders ({holds.length})</DialogTitle></DialogHeader>
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {holds.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">No held orders</p>}
-            {holds.map((h) => (
-              <div key={h.id} className="p-3 rounded-xl border border-border/60 flex items-center justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm">{h.id}</p>
-                  <p className="text-xs text-muted-foreground truncate">{h.items.length} items · held at {h.at}</p>
-                </div>
-                <p className="text-sm font-bold tabular-nums"><SARIcon />{h.total.toFixed(2)}</p>
-                <div className="flex gap-1">
-                  <Button size="sm" className="gradient-primary text-primary-foreground border-0" onClick={() => reopen(h.id)}>Reopen</Button>
-                  <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setHolds((hs) => hs.filter((x) => x.id !== h.id))}>Cancel</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { resetSale(); setHoldOpen(false); }}>New Order</Button>
-            <Button variant="outline" onClick={() => setHoldOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* ─── Invoice dialog ────────────────────────────────────────────────────── */}
       <Dialog open={invOpen} onOpenChange={setInvOpen}>
@@ -1757,9 +1748,14 @@ function POS() {
               disabled={!invoice}
               onClick={() => {
                 if (!invoice) return;
-                const qrEl = document.querySelector("#pos-invoice svg");
-                const qrSvg = qrEl ? new XMLSerializer().serializeToString(qrEl) : "";
-                api.printReceipt(buildReceiptHtml(invoice, qrSvg)).catch(() => {});
+                const printerName = localStorage.getItem("baqala_receipt_printer") || undefined;
+                const printId = toast.loading("Printing receipt…");
+                api.printReceipt({ ...invoice, printerName })
+                  .then((res) => toast.success(res.message, { id: printId }))
+                  .catch((err: unknown) => {
+                    const msg = err instanceof Error ? err.message : "Print failed";
+                    toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
+                  });
               }}
             >
               <Printer className="h-4 w-4 mr-1" />Print

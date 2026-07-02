@@ -12,9 +12,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    // Strip raw HTML/JSON problem-details from user-visible messages
     let msg = text;
-    try { msg = (JSON.parse(text) as { title?: string }).title ?? text; } catch { /* not JSON */ }
+    try {
+      const parsed = JSON.parse(text) as { message?: string; title?: string };
+      msg = parsed.message ?? parsed.title ?? text;
+    } catch { /* not JSON */ }
     throw new Error(msg || res.statusText);
   }
   const contentType = res.headers.get("content-type") ?? "";
@@ -421,13 +423,26 @@ export const api = {
   detectPrinters: () =>
     request<{ printers: DetectedPrinter[] }>("/api/printer/detect"),
   getPrinterStatus: () =>
-    request<{ defaultPrinter: string | null; installed: string[] }>("/api/printer/status"),
+    request<{ defaultPrinter: string | null; installed: string[]; installedUris: Record<string, string> }>("/api/printer/status"),
   activatePrinter: (data: { uri: string; name: string }) =>
     request<{ message: string; name: string; kioskReady: boolean }>("/api/printer/activate", { method: "POST", body: JSON.stringify(data) }),
   removePrinter: (name: string) =>
     request<{ message: string }>(`/api/printer/${name}`, { method: "DELETE" }),
-  printReceipt: (html: string) =>
-    request<{ message: string }>("/api/printer/print-receipt", { method: "POST", body: JSON.stringify({ html }) }),
+  printReceipt: (invoice: {
+    orderNumber: string; createdAt: string; sellerName: string; branchName: string;
+    vatNumber?: string; customerName?: string; paymentMethod?: string;
+    items: { name: string; qty: number; price: number }[];
+    subtotal: number; discount: number; vat: number; total: number; taxLabel: string;
+    tobaccoExcise?: number;
+    fees?: { name: string; amount: number }[];
+    splitBreakdown?: { method: string; amount: number }[];
+    printerName?: string;
+  }) =>
+    request<{ message: string; jobId?: string }>("/api/printer/print-receipt", { method: "POST", body: JSON.stringify(invoice) }),
+  getPrintJobs: (printer?: string) =>
+    request<{ jobs: string[] }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`),
+  cancelAllJobs: (printer?: string) =>
+    request<{ message: string }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`, { method: "DELETE" }),
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
