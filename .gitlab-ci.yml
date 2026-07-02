@@ -1,0 +1,18 @@
+stages:
+  - pull
+
+pos-backend:
+  stage: pull
+  tags:
+    - new_mytm_dev
+  variables:
+    GIT_STRATEGY: none
+
+  script:
+    - cd /www/wwwroot/ECR/ecr-mart
+    - git pull origin main
+    - ./redeploy.sh
+    - echo "Mart ECR updated and container deployed successfully"
+
+  only:
+    - main
