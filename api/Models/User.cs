@@ -28,6 +28,9 @@ public class User
     [MaxLength(255), Column("full_name_ar")]
     public string? FullNameAr { get; set; }
 
+    [MaxLength(50), Column("phone")]
+    public string? Phone { get; set; }
+
     [Required, Column("role_id")]
     public Guid RoleId { get; set; }
 

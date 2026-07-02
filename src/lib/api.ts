@@ -48,6 +48,9 @@ export const api = {
     request<User>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteUser: (id: string) =>
     request<User>(`/api/users/${id}`, { method: "DELETE" }),
+  getUser: (id: string) => request<User>(`/api/users/${id}`),
+  updateUserProfile: (id: string, data: { fullName: string; email: string; phone?: string }) =>
+    request<User>(`/api/users/${id}/profile`, { method: "PUT", body: JSON.stringify(data) }),
 
   // Roles
   getRoles: () => request<Role[]>("/api/roles"),
@@ -225,11 +228,7 @@ export const api = {
     request<Warehouse>("/api/warehouses", { method: "POST", body: JSON.stringify(data) }),
   updateWarehouse: (id: string, data: Partial<Warehouse>) =>
     request<Warehouse>(`/api/warehouses/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  addWarehouseSupplier: (warehouseId: string, data: { supplierId: string; isPrimary: boolean; notes?: string }) =>
-    request<void>(`/api/warehouses/${warehouseId}/suppliers`, { method: "POST", body: JSON.stringify(data) }),
-  removeWarehouseSupplier: (warehouseId: string, supplierId: string) =>
-    request<void>(`/api/warehouses/${warehouseId}/suppliers/${supplierId}`, { method: "DELETE" }),
-  addWarehouseBranch: (warehouseId: string, data: { branchId: string; isPrimary: boolean }) =>
+  addWarehouseBranch: (warehouseId: string, data: { branchId: string }) =>
     request<void>(`/api/warehouses/${warehouseId}/branches`, { method: "POST", body: JSON.stringify(data) }),
   removeWarehouseBranch: (warehouseId: string, branchId: string) =>
     request<void>(`/api/warehouses/${warehouseId}/branches/${branchId}`, { method: "DELETE" }),
@@ -469,6 +468,7 @@ export interface RolePermission {
 
 export interface User {
   id: string; email: string; username: string; fullName: string; fullNameAr?: string;
+  phone?: string;
   roleId: string; roleName?: string; branchId?: string; branchName?: string;
   status: string; lastLogin?: string; createdAt: string;
 }
@@ -744,8 +744,7 @@ export interface Warehouse {
   address?: string; city?: string; capacity?: number;
   contactPerson?: string; contactNumber?: string; status: string;
   createdAt: string; updatedAt: string;
-  warehouseSuppliers?: { id: string; supplierId: string; isPrimary: boolean; notes?: string; supplier?: Supplier }[];
-  branchWarehouses?: { id: string; branchId: string; isPrimary: boolean; branch?: { id: string; name: string } }[];
+  branchWarehouses?: { id: string; branchId: string; branch?: { id: string; name: string } }[];
   stock?: WarehouseStock[];
 }
 

@@ -15,8 +15,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Eye, CheckCircle, XCircle, Truck, Info, Package, ClipboardList,
-  Warehouse, Plus, Trash2, X, Building2,
-  Pencil, Link2, MapPin, Phone, User, Boxes, ArrowLeftRight,
+  Warehouse, Plus, Trash2, X,
+  Pencil, MapPin, Phone, User, Boxes, ArrowLeftRight,
   ChevronDown, Check, Loader2, Search,
 } from "lucide-react";
 import {
@@ -212,8 +212,6 @@ function WarehouseProfileDrawer({
     }).finally(() => setLoadingLedger(false));
   }, [warehouse?.id]);
 
-  const linkedSuppliers = warehouse?.warehouseSuppliers ?? [];
-  const linkedBranches = warehouse?.branchWarehouses ?? [];
   const totalStock = stock.reduce((s, r) => s + r.quantity, 0);
   const skuCount = stock.length;
 
@@ -242,11 +240,10 @@ function WarehouseProfileDrawer({
             </SheetHeader>
 
             {/* Quick stats */}
-            <div className="grid grid-cols-3 gap-2 mt-4 mb-4">
+            <div className="grid grid-cols-2 gap-2 mt-4 mb-4">
               {[
                 { label: "SKUs", value: String(skuCount), icon: Package },
                 { label: "Total Units", value: String(Math.round(totalStock)), icon: Boxes },
-                { label: "Linked Branches", value: String(linkedBranches.length), icon: Building2 },
               ].map(({ label, value, icon: Icon }) => (
                 <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
                   <Icon className="h-4 w-4 text-primary mx-auto mb-1" />
@@ -257,11 +254,9 @@ function WarehouseProfileDrawer({
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid grid-cols-5 h-8 text-xs">
+              <TabsList className="grid grid-cols-3 h-8 text-xs">
                 <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
                 <TabsTrigger value="inventory" className="text-xs">Inventory</TabsTrigger>
-                <TabsTrigger value="suppliers" className="text-xs">Suppliers</TabsTrigger>
-                <TabsTrigger value="branches" className="text-xs">Branches</TabsTrigger>
                 <TabsTrigger value="ledger" className="text-xs">Ledger</TabsTrigger>
               </TabsList>
 
@@ -321,47 +316,6 @@ function WarehouseProfileDrawer({
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Suppliers */}
-              <TabsContent value="suppliers" className="mt-4 space-y-3">
-                {linkedSuppliers.length === 0 ? (
-                  <div className="text-center py-8 text-sm text-muted-foreground">No suppliers linked to this warehouse.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {linkedSuppliers.map(ws => (
-                      <div key={ws.id} className="flex items-center justify-between rounded-xl border border-border/40 px-3 py-2.5">
-                        <div>
-                          <p className="text-sm font-medium">{ws.supplier?.name ?? ws.supplierId}</p>
-                          <p className="text-xs text-muted-foreground">{ws.supplier?.contactNumber ?? ""}</p>
-                        </div>
-                        {ws.isPrimary && (
-                          <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">Primary</Badge>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Branches */}
-              <TabsContent value="branches" className="mt-4 space-y-3">
-                {linkedBranches.length === 0 ? (
-                  <div className="text-center py-8 text-sm text-muted-foreground">No branches linked to this warehouse.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {linkedBranches.map(bw => (
-                      <div key={bw.id} className="flex items-center justify-between rounded-xl border border-border/40 px-3 py-2.5">
-                        <div>
-                          <p className="text-sm font-medium">{bw.branch?.name ?? bw.branchId}</p>
-                        </div>
-                        {bw.isPrimary && (
-                          <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">Primary</Badge>
-                        )}
-                      </div>
-                    ))}
                   </div>
                 )}
               </TabsContent>
@@ -514,15 +468,13 @@ function WarehouseManagement() {
   const totalWH = warehouses.length;
   const activeWH = warehouses.filter(w => w.status === "active").length;
   const totalSKUs = warehouses.reduce((s, w) => s + (w.stock?.length ?? 0), 0);
-  const totalBranchLinks = warehouses.reduce((s, w) => s + (w.branchWarehouses?.length ?? 0), 0);
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <MetricCard label="Total Warehouses" value={String(totalWH)} icon={Warehouse} accent="primary" />
         <MetricCard label="Active" value={String(activeWH)} icon={CheckCircle} accent="success" />
         <MetricCard label="SKUs Managed" value={String(totalSKUs)} icon={Package} accent="default" />
-        <MetricCard label="Branch Links" value={String(totalBranchLinks)} icon={Link2} accent="warning" />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -572,17 +524,9 @@ function WarehouseManagement() {
                     {w.status}
                   </Badge>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-center border-t border-border/40 pt-3">
-                  {[
-                    { label: "SKUs", value: w.stock?.length ?? 0 },
-                    { label: "Suppliers", value: w.warehouseSuppliers?.length ?? 0 },
-                    { label: "Branches", value: w.branchWarehouses?.length ?? 0 },
-                  ].map(({ label, value }) => (
-                    <div key={label}>
-                      <p className="text-sm font-bold">{value}</p>
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                    </div>
-                  ))}
+                <div className="text-center border-t border-border/40 pt-3">
+                  <p className="text-sm font-bold">{w.stock?.length ?? 0}</p>
+                  <p className="text-xs text-muted-foreground">SKUs</p>
                 </div>
                 {(w.city || w.contactPerson) && (
                   <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground border-t border-border/30 pt-3">

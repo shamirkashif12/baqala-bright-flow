@@ -135,35 +135,8 @@ public class Warehouse
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation — NOT [JsonIgnore] so the API returns linked data
-    public ICollection<WarehouseSupplier> WarehouseSuppliers { get; set; } = [];
     public ICollection<BranchWarehouse> BranchWarehouses { get; set; } = [];
     public ICollection<WarehouseStock> Stock { get; set; } = [];
-}
-
-[Table("warehouse_suppliers")]
-public class WarehouseSupplier
-{
-    [Key, Column("id")]
-    public Guid Id { get; set; } = Guid.NewGuid();
-
-    [Required, Column("warehouse_id")]
-    public Guid WarehouseId { get; set; }
-
-    [Required, Column("supplier_id")]
-    public Guid SupplierId { get; set; }
-
-    [Column("is_primary")]
-    public bool IsPrimary { get; set; } = false;
-
-    [MaxLength(255), Column("notes")]
-    public string? Notes { get; set; }
-
-    [Column("created_at")]
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    // [JsonIgnore] on back-reference to break circular serialization cycle
-    [JsonIgnore] public Warehouse? Warehouse { get; set; }
-    public Supplier? Supplier { get; set; }
 }
 
 [Table("branch_warehouses")]
@@ -177,9 +150,6 @@ public class BranchWarehouse
 
     [Required, Column("warehouse_id")]
     public Guid WarehouseId { get; set; }
-
-    [Column("is_primary")]
-    public bool IsPrimary { get; set; } = false;
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

@@ -51,6 +51,7 @@ export interface AuthState {
   hasRole: (role: AppRole | AppRole[]) => boolean;
   canViewModule: (module: string) => boolean;
   refreshPermissions: () => Promise<void>;
+  updateLocalUser: (patch: Partial<Pick<AuthUser, "name" | "email">>) => void;
 }
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
@@ -254,6 +255,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthUser(null);
   }, []);
 
+  const updateLocalUser = useCallback((patch: Partial<Pick<AuthUser, "name" | "email">>) => {
+    setAuthUser(current => {
+      if (!current) return current;
+      const next = { ...current, ...patch };
+      if (patch.name) {
+        next.initials = patch.name
+          .split(/\s+/)
+          .map((p) => p[0])
+          .filter(Boolean)
+          .slice(0, 2)
+          .join("")
+          .toUpperCase() || "U";
+      }
+      return next;
+    });
+  }, []);
+
   const hasRole = useCallback(
     (role: AppRole | AppRole[]) => {
       if (!user) return false;
@@ -273,7 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout, loading, hasRole, canViewModule, refreshPermissions }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout, loading, hasRole, canViewModule, refreshPermissions, updateLocalUser }}>
       {children}
     </AuthContext.Provider>
   );

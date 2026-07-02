@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260702054803_RemoveWarehouseSupplierLink")]
+    partial class RemoveWarehouseSupplierLink
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -883,7 +886,7 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("id");
 
-                    b.Property<Guid?>("AdjustedBy")
+                    b.Property<Guid>("AdjustedBy")
                         .HasColumnType("char(36)")
                         .HasColumnName("adjusted_by");
 
@@ -3638,7 +3641,8 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasOne("BaqalaPOS.Api.Models.User", "AdjustedByUser")
                         .WithMany()
                         .HasForeignKey("AdjustedBy")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("BaqalaPOS.Api.Models.InventoryBatch", "Batch")
                         .WithMany()
