@@ -1,7 +1,7 @@
 stages:
   - pull
 
-pos-backend:
+mart-ecr:
   stage: pull
   tags:
     - new_mytm_dev
