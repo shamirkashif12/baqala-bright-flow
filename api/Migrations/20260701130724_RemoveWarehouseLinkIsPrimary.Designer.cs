@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260701130724_RemoveWarehouseLinkIsPrimary")]
+    partial class RemoveWarehouseLinkIsPrimary
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2976,11 +2979,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("varchar(255)")
                         .HasColumnName("password_hash");
 
-                    b.Property<string>("Phone")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("phone");
-
                     b.Property<string>("PinHash")
                         .HasMaxLength(255)
                         .HasColumnType("varchar(255)")
@@ -3266,6 +3264,39 @@ namespace BaqalaPOS.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("warehouse_stock");
+                });
+
+            modelBuilder.Entity("BaqalaPOS.Api.Models.WarehouseSupplier", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("supplier_id");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SupplierId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.ToTable("warehouse_suppliers");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ZatcaInvoice", b =>
@@ -4322,6 +4353,25 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Warehouse");
                 });
 
+            modelBuilder.Entity("BaqalaPOS.Api.Models.WarehouseSupplier", b =>
+                {
+                    b.HasOne("BaqalaPOS.Api.Models.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BaqalaPOS.Api.Models.Warehouse", "Warehouse")
+                        .WithMany("WarehouseSuppliers")
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Supplier");
+
+                    b.Navigation("Warehouse");
+                });
+
             modelBuilder.Entity("BaqalaPOS.Api.Models.ZatcaInvoice", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
@@ -4470,6 +4520,8 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("BranchWarehouses");
 
                     b.Navigation("Stock");
+
+                    b.Navigation("WarehouseSuppliers");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.WarehouseRequest", b =>

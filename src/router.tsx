@@ -13,6 +13,7 @@ const authStore: AuthState = {
   hasRole: () => false,
   canViewModule: () => true,
   refreshPermissions: async () => {},
+  updateLocalUser: () => {},
 };
 
 export const getRouter = () => {

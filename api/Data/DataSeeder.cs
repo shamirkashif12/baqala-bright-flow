@@ -395,10 +395,6 @@ public static class DataSeeder
         var brJeddah  = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-003");
         var brMadinah = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-004");
 
-        var supAlmarai = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-001");
-        var supNadec   = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-002");
-        var supSadia   = await db.Suppliers.FirstOrDefaultAsync(s => s.SupplierCode == "SUP-004");
-
         if (brOlaya is null) return;
 
         // Central Riyadh Warehouse
@@ -428,18 +424,11 @@ public static class DataSeeder
 
         // Link branches to warehouses
         var links = new List<BranchWarehouse>();
-        if (brOlaya is not null)   links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brOlaya.Id,   WarehouseId = whRiyadh.Id, IsPrimary = true,  CreatedAt = DateTime.UtcNow });
-        if (brKhobar is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brKhobar.Id,  WarehouseId = whRiyadh.Id, IsPrimary = true,  CreatedAt = DateTime.UtcNow });
-        if (brMadinah is not null) links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brMadinah.Id, WarehouseId = whRiyadh.Id, IsPrimary = false, CreatedAt = DateTime.UtcNow });
-        if (brJeddah is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brJeddah.Id,  WarehouseId = whJeddah.Id, IsPrimary = true,  CreatedAt = DateTime.UtcNow });
+        if (brOlaya is not null)   links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brOlaya.Id,   WarehouseId = whRiyadh.Id, CreatedAt = DateTime.UtcNow });
+        if (brKhobar is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brKhobar.Id,  WarehouseId = whRiyadh.Id, CreatedAt = DateTime.UtcNow });
+        if (brMadinah is not null) links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brMadinah.Id, WarehouseId = whRiyadh.Id, CreatedAt = DateTime.UtcNow });
+        if (brJeddah is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brJeddah.Id,  WarehouseId = whJeddah.Id, CreatedAt = DateTime.UtcNow });
         db.BranchWarehouses.AddRange(links);
-
-        // Supplier links
-        var supplierLinks = new List<WarehouseSupplier>();
-        if (supAlmarai is not null) supplierLinks.Add(new WarehouseSupplier { Id = Guid.NewGuid(), WarehouseId = whRiyadh.Id, SupplierId = supAlmarai.Id, IsPrimary = true,  CreatedAt = DateTime.UtcNow });
-        if (supNadec is not null)   supplierLinks.Add(new WarehouseSupplier { Id = Guid.NewGuid(), WarehouseId = whRiyadh.Id, SupplierId = supNadec.Id,   IsPrimary = false, CreatedAt = DateTime.UtcNow });
-        if (supSadia is not null)   supplierLinks.Add(new WarehouseSupplier { Id = Guid.NewGuid(), WarehouseId = whJeddah.Id, SupplierId = supSadia.Id,   IsPrimary = true,  CreatedAt = DateTime.UtcNow });
-        db.WarehouseSuppliers.AddRange(supplierLinks);
 
         // Warehouse stock
         var products = await db.Products.ToListAsync();

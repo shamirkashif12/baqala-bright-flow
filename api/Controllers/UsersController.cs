@@ -17,7 +17,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         if (!string.IsNullOrEmpty(status)) query = query.Where(u => u.Status == status);
         var users = await query.Select(u => new
         {
-            u.Id, u.Email, u.Username, u.FullName, u.FullNameAr,
+            u.Id, u.Email, u.Username, u.FullName, u.FullNameAr, u.Phone,
             u.RoleId, RoleName = u.Role.Name,
             u.BranchId, BranchName = u.Branch != null ? u.Branch.Name : null,
             u.Status, u.LastLogin, u.CreatedAt
@@ -31,7 +31,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         var user = await db.Users.Include(u => u.Role).Include(u => u.Branch)
             .Select(u => new
             {
-                u.Id, u.Email, u.Username, u.FullName, u.FullNameAr,
+                u.Id, u.Email, u.Username, u.FullName, u.FullNameAr, u.Phone,
                 u.RoleId, RoleName = u.Role.Name,
                 u.BranchId, BranchName = u.Branch != null ? u.Branch.Name : null,
                 u.Status, u.LastLogin, u.CreatedAt
@@ -83,6 +83,25 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         return Ok(new { user.Id, user.Email, user.FullName, user.Status });
     }
 
+    // Self-service profile update — unlike Update(), this never touches role, branch, or status.
+    [HttpPut("{id:guid}/profile")]
+    public async Task<IActionResult> UpdateProfile(Guid id, [FromBody] UpdateProfileRequest req)
+    {
+        var user = await db.Users.FindAsync(id);
+        if (user is null) return NotFound();
+
+        var emailNorm = req.Email.Trim().ToLower();
+        if (await db.Users.AnyAsync(u => u.Id != id && u.Email.ToLower() == emailNorm))
+            return Conflict("Email already in use.");
+
+        user.FullName = req.FullName;
+        user.Email = req.Email.Trim();
+        user.Phone = req.Phone;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(new { user.Id, user.Email, user.FullName, user.Phone });
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -107,3 +126,5 @@ public record CreateUserRequest(
 public record UpdateUserRequest(
     string? FullName, string? FullNameAr, Guid? RoleId,
     Guid? BranchId, string? Status, string? Password, string? Pin);
+
+public record UpdateProfileRequest(string FullName, string Email, string? Phone);

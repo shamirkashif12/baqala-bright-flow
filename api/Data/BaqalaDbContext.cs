@@ -44,7 +44,6 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<WarehouseRequest> WarehouseRequests { get; set; }
     public DbSet<WarehouseRequestItem> WarehouseRequestItems { get; set; }
     public DbSet<Warehouse> Warehouses { get; set; }
-    public DbSet<WarehouseSupplier> WarehouseSuppliers { get; set; }
     public DbSet<BranchWarehouse> BranchWarehouses { get; set; }
     public DbSet<WarehouseStock> WarehouseStocks { get; set; }
     public DbSet<PurchaseOrder> PurchaseOrders { get; set; }
