@@ -4,18 +4,11 @@
 
 import qz from "qz-tray";
 import { buildEscPos, type ReceiptData } from "./escpos";
-import { api } from "./api";
 
-// Signed mode — certificate from backend eliminates the "Action Required" prompt.
-qz.security.setCertificatePromise((resolve) => {
-  fetch(api.qzCertificateUrl())
-    .then(r => r.ok ? r.text() : Promise.reject(r.statusText))
-    .then(resolve)
-    .catch(() => resolve(null)); // fall back to unsigned if cert not available
-});
-qz.security.setSignaturePromise((toSign) => (resolve) => {
-  api.qzSign(toSign).then(resolve).catch(() => resolve(null));
-});
+// Anonymous mode — QZ Tray asks "Allow" once when connecting.
+// After that one click, all prints in the session are silent.
+qz.security.setCertificatePromise((resolve) => { resolve(null); });
+qz.security.setSignaturePromise(() => (resolve) => { resolve(null); });
 
 let connectPromise: Promise<void> | null = null;
 
