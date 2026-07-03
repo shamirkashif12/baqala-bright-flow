@@ -695,6 +695,48 @@ gio set ~/Desktop/"{{appName}}.desktop" metadata::trusted true 2>/dev/null || tr
 sudo mkdir -p /etc/opt/chrome/policies/managed /etc/chromium/policies/managed 2>/dev/null
 echo '{"OverrideSecurityRestrictionsOnInsecureOrigin": ["{{posUrl}}"]}' | sudo tee /etc/opt/chrome/policies/managed/mimony-pos.json /etc/chromium/policies/managed/mimony-pos.json >/dev/null 2>&1 || true
 
+# CUPS: set up thermal printer as raw queue
+echo ""
+echo "[4/4] Setting up thermal printer..."
+cat > /tmp/raw-thermal.ppd << 'RAWPPD'
+*PPD-Adobe: "4.3"
+*FormatVersion: "4.3"
+*FileVersion: "1.1"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*Manufacturer: "Generic"
+*Product: "(Raw Thermal)"
+*PSVersion: "(3010.000) 0"
+*ModelName: "Raw Thermal Queue"
+*ShortNickName: "Raw Thermal"
+*NickName: "Raw Thermal Queue"
+*CompatiblePrinters: All
+*cupsVersion: 1.4
+*cupsManualCopies: True
+*cupsFilter: "application/vnd.cups-raw 0 -"
+*ColorDevice: False
+*DefaultColorSpace: Gray
+*FileSystem: False
+*Throughput: "1"
+*LandscapeOrientation: Plus90
+*VariablePaperSize: False
+*TTRasterizer: None
+RAWPPD
+
+USB_URI=$(lpinfo -v 2>/dev/null | grep -i "usb://" | grep -iv "laser\|hp_\|laserjet" | head -1 | awk '{print $2}')
+if [ -n "$USB_URI" ]; then
+  sudo lpadmin -x POS-80C 2>/dev/null || true
+  sudo lpadmin -p POS-80C -v "$USB_URI" -P /tmp/raw-thermal.ppd -E
+  sudo cupsenable POS-80C && sudo cupsaccept POS-80C
+  grep -qxF 'text/plain	application/vnd.cups-raw	0	-' /etc/cups/mime.convs 2>/dev/null || \
+    echo 'text/plain	application/vnd.cups-raw	0	-' | sudo tee -a /etc/cups/mime.convs
+  sudo systemctl restart cups
+  echo "   Thermal printer configured: $USB_URI"
+else
+  echo "   No USB thermal printer detected — connect printer and re-run if needed."
+fi
+rm -f /tmp/raw-thermal.ppd
+
 # Add QZ Tray to autostart
 mkdir -p ~/.config/autostart
 cat > ~/.config/autostart/qz-tray.desktop << 'AUTOSTART'
