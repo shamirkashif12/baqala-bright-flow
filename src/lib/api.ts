@@ -525,6 +525,7 @@ export interface Product {
   taxPercentage: number; customFee: number; reorderLevel: number;
   status: string; weightBased: boolean; isTobacco: boolean;
   discount?: number; discountType?: "percentage" | "fixed";
+  imageUrl?: string;
   category?: { id: string; name: string; nameAr?: string };
 }
 

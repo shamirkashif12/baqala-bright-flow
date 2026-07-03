@@ -1592,8 +1592,7 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnName("discount_type");
 
                     b.Property<string>("ImageUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("varchar(500)")
+                        .HasColumnType("longtext")
                         .HasColumnName("image_url");
 
                     b.Property<bool>("IsTobacco")

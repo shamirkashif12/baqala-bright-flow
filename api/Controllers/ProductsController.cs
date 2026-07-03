@@ -71,6 +71,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         product.IsTobacco = updated.IsTobacco;
         product.Discount = updated.Discount;
         product.DiscountType = updated.DiscountType;
+        product.ImageUrl = updated.ImageUrl;
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(product);

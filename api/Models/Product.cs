@@ -97,7 +97,7 @@ public class Product
     [MaxLength(20), Column("discount_type")]
     public string? DiscountType { get; set; } // "percentage" | "fixed"
 
-    [MaxLength(500), Column("image_url")]
+    [Column("image_url")]
     public string? ImageUrl { get; set; }
 
     [Column("reorder_level")]
