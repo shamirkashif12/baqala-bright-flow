@@ -554,7 +554,7 @@ del "%TEMP%\qz-tray-setup.exe" 2>nul
 
 :: ── Create Desktop shortcut (kiosk Chrome) ────────────────────────────────
 echo [3/3] Creating POS shortcut on Desktop...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($env:PUBLIC + '\Desktop\{{appName}}.lnk'); $chromePaths = @($env:ProgramFiles + '\Google\Chrome\Application\chrome.exe',$env:ProgramFiles + '\Microsoft\Edge\Application\msedge.exe'); $browser = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($browser) { $sc.TargetPath = $browser; $sc.Arguments = '--kiosk {{posUrl}}/pos --disable-infobars --no-first-run' } else { $sc.TargetPath = 'C:\Windows\explorer.exe'; $sc.Arguments = '{{posUrl}}/pos' }; $sc.Description = '{{appName}} Checkout'; $sc.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($env:PUBLIC + '\Desktop\{{appName}}.lnk'); $chromePaths = @($env:ProgramFiles + '\Google\Chrome\Application\chrome.exe',$env:ProgramFiles + '\Microsoft\Edge\Application\msedge.exe'); $browser = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($browser) { $sc.TargetPath = $browser; $sc.Arguments = '--kiosk {{posUrl}}/pos --disable-infobars --no-first-run --unsafely-treat-insecure-origin-as-secure={{posUrl}}' } else { $sc.TargetPath = 'C:\Windows\explorer.exe'; $sc.Arguments = '{{posUrl}}/pos' }; $sc.Description = '{{appName}} Checkout'; $sc.Save()"
 
 :: ── Start QZ Tray ─────────────────────────────────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$qz = @($env:ProgramFiles + '\QZ Tray\qz-tray.exe',$env:LOCALAPPDATA + '\QZ Tray\qz-tray.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($qz) { Start-Process $qz; reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Tray' /t REG_SZ /d $qz /f | Out-Null }"
@@ -612,7 +612,7 @@ fi
 echo "[3/3] Creating POS shortcut on Desktop..."
 cat > ~/Desktop/"{{appName}}.command" << 'ENDOFSHORTCUT'
 #!/bin/bash
-open -a "Google Chrome" --args --kiosk {{posUrl}}/pos --disable-infobars --no-first-run 2>/dev/null || \
+open -a "Google Chrome" --args --kiosk {{posUrl}}/pos --disable-infobars --no-first-run --unsafely-treat-insecure-origin-as-secure={{posUrl}} 2>/dev/null || \
 open -a "Safari" {{posUrl}}/pos
 ENDOFSHORTCUT
 chmod +x ~/Desktop/"{{appName}}.command"
@@ -674,7 +674,7 @@ cat > ~/Desktop/"{{appName}}.desktop" << 'POSSHORTCUT'
 Version=1.0
 Type=Application
 Name={{appName}}
-Exec=bash -c "google-chrome --kiosk {{posUrl}}/pos --disable-infobars --no-first-run 2>/dev/null || chromium-browser --kiosk {{posUrl}}/pos 2>/dev/null || xdg-open {{posUrl}}/pos"
+Exec=bash -c "google-chrome --kiosk {{posUrl}}/pos --disable-infobars --no-first-run --unsafely-treat-insecure-origin-as-secure={{posUrl}} 2>/dev/null || chromium-browser --kiosk {{posUrl}}/pos --unsafely-treat-insecure-origin-as-secure={{posUrl}} 2>/dev/null || xdg-open {{posUrl}}/pos"
 Icon=chromium
 Terminal=false
 Categories=Office;
