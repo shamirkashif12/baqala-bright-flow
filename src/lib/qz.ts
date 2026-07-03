@@ -4,11 +4,19 @@
 
 import qz from "qz-tray";
 import { buildEscPos, type ReceiptData } from "./escpos";
+import { api } from "./api";
 
-// Anonymous mode — QZ Tray asks "Allow" once when connecting.
-// After that one click, all prints in the session are silent.
-qz.security.setCertificatePromise((resolve) => { resolve(null); });
-qz.security.setSignaturePromise(() => (resolve) => { resolve(null); });
+// Cert-signed mode. The server cert fingerprint is added to ~/.qz/allowed.dat
+// by the installer, so QZ Tray auto-allows with no dialog on every machine.
+qz.security.setCertificatePromise((resolve) => {
+  fetch(api.qzCertificateUrl())
+    .then(r => r.ok ? r.text() : Promise.reject(r.statusText))
+    .then(resolve)
+    .catch(() => resolve(null));
+});
+qz.security.setSignaturePromise((toSign) => (resolve) => {
+  api.qzSign(toSign).then(resolve).catch(() => resolve(null));
+});
 
 let connectPromise: Promise<void> | null = null;
 

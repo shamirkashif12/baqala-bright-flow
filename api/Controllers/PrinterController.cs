@@ -737,19 +737,19 @@ else
 fi
 rm -f /tmp/raw-thermal.ppd
 
-# Auto-close QZ Tray "Action Required" dialog (runs silently in background)
-sudo apt-get install -y xdotool wmctrl 2>/dev/null || true
-mkdir -p ~/.local/bin
-cat > ~/.local/bin/qz-auto-allow.sh << 'QZAUTO'
-#!/bin/bash
-# Closes the QZ Tray "Action Required" dialog automatically
-while true; do
-  wmctrl -c "Action Required" 2>/dev/null || true
-  xdotool search --name "Action Required" 2>/dev/null | xargs -r xdotool windowclose 2>/dev/null || true
-  sleep 1
-done
-QZAUTO
-chmod +x ~/.local/bin/qz-auto-allow.sh
+# Trust the POS server cert in QZ Tray — this makes QZ Tray auto-allow
+# all print requests silently (no "Action Required" dialog ever)
+mkdir -p ~/.qz
+QZ_FINGERPRINT=$(curl -sf "{{posUrl}}/api/printer/qz-fingerprint" 2>/dev/null || echo "")
+if [ -n "$QZ_FINGERPRINT" ]; then
+  # Remove old entry for this fingerprint if present, then add with true (auto-allow)
+  grep -v "^$QZ_FINGERPRINT" ~/.qz/allowed.dat 2>/dev/null > /tmp/allowed.tmp || true
+  echo -e "${QZ_FINGERPRINT}\tQZ Tray Demo Cert\tQZ Industries, LLC\t2026-07-02 14:40:36\t2046-07-02 14:40:36\ttrue" >> /tmp/allowed.tmp
+  mv /tmp/allowed.tmp ~/.qz/allowed.dat
+  echo "   QZ Tray will auto-allow this POS — no dialogs."
+else
+  echo "   Could not fetch cert fingerprint — connect manually if prompted."
+fi
 
 # Add QZ Tray and auto-allow to autostart
 mkdir -p ~/.config/autostart
@@ -941,6 +941,22 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
     }
 
     // ── QZ Tray certificate signing (eliminates "Action Required" prompt) ────
+
+    [HttpGet("qz-fingerprint")]
+    [AllowAnonymous]
+    public IActionResult QzFingerprint()
+    {
+        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            return NotFound("QZ certificate not found");
+
+        var pem = System.IO.File.ReadAllText(certPath);
+        using var cert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(pem);
+        var fp = cert.GetCertHashString(System.Security.Cryptography.HashAlgorithmName.SHA1).ToLowerInvariant();
+        return Content(fp, "text/plain");
+    }
 
     [HttpGet("qz-certificate")]
     [AllowAnonymous]
