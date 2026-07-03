@@ -1,0 +1,55 @@
+// QZ Tray integration — browser-to-USB printer bridge
+// Works on Chrome, Firefox, Safari, Edge.
+// Cashier machine needs QZ Tray installed: https://qz.io/download/
+// After install, open QZ Tray → Settings → Allow unsigned content (for dev)
+
+import qz from "qz-tray";
+import { buildEscPos, type ReceiptData } from "./escpos";
+
+// Unsigned mode — no certificate needed for internal/dev use.
+// For production with public-facing certs: replace null with your cert string.
+qz.security.setCertificatePromise((resolve) => resolve(null));
+qz.security.setSignaturePromise((_toSign) => (resolve) => resolve(null));
+
+let connectPromise: Promise<void> | null = null;
+
+export async function qzConnect(): Promise<void> {
+  if (qz.websocket.isActive()) return;
+  if (connectPromise) return connectPromise;
+  connectPromise = qz.websocket
+    .connect({ retries: 2, delay: 1 })
+    .finally(() => { connectPromise = null; });
+  return connectPromise;
+}
+
+export async function qzDisconnect(): Promise<void> {
+  if (qz.websocket.isActive()) await qz.websocket.disconnect();
+}
+
+export function qzIsConnected(): boolean {
+  return qz.websocket.isActive();
+}
+
+export async function qzListPrinters(): Promise<string[]> {
+  await qzConnect();
+  const result = await qz.printers.find();
+  return Array.isArray(result) ? result : [result as string];
+}
+
+export async function qzGetDefaultPrinter(): Promise<string> {
+  await qzConnect();
+  return qz.printers.getDefault();
+}
+
+export async function qzPrintReceipt(receipt: ReceiptData, printerName?: string): Promise<void> {
+  await qzConnect();
+  const printer = printerName || await qz.printers.getDefault();
+  if (!printer) throw new Error("No printer selected. Open Printer Setup and choose a printer.");
+  const bytes = buildEscPos(receipt);
+  const config = qz.configs.create(printer);
+  await qz.print(config, [{
+    type: "raw",
+    format: "command",
+    data: Array.from(bytes),
+  }]);
+}

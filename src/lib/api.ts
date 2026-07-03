@@ -1,4 +1,29 @@
 export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
+export const PRINTER_API_KEY = "baqala_printer_api_url";
+export const DEFAULT_PRINTER_AGENT = "http://localhost:5008";
+
+export function getPrinterBase(): string {
+  return (typeof window !== "undefined" ? localStorage.getItem(PRINTER_API_KEY) : null) ?? DEFAULT_PRINTER_AGENT;
+}
+
+async function printerRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const base = getPrinterBase();
+  const res = await fetch(`${base}${path}`, {
+    headers: { "Content-Type": "application/json", ...init?.headers },
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    let msg = text;
+    try { const p = JSON.parse(text) as { message?: string; title?: string }; msg = p.message ?? p.title ?? text; } catch { /* not JSON */ }
+    throw new Error(msg || res.statusText);
+  }
+  const ct = res.headers.get("content-type") ?? "";
+  if (!ct.includes("json")) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("baqala_token") : null;
@@ -418,15 +443,15 @@ export const api = {
   deleteOffer: (id: string) =>
     request<void>(`/api/offers/${id}`, { method: "DELETE" }),
 
-  // ─── Printer (Linux CUPS + Windows winspool) ────────────────────────────────
+  // ─── Printer (routes to local agent URL, not remote server) ─────────────────
   detectPrinters: () =>
-    request<{ printers: DetectedPrinter[] }>("/api/printer/detect"),
+    printerRequest<{ printers: DetectedPrinter[] }>("/api/printer/detect"),
   getPrinterStatus: () =>
-    request<{ defaultPrinter: string | null; installed: string[]; installedUris: Record<string, string> }>("/api/printer/status"),
+    printerRequest<{ defaultPrinter: string | null; installed: string[]; installedUris: Record<string, string> }>("/api/printer/status"),
   activatePrinter: (data: { uri: string; name: string }) =>
-    request<{ message: string; name: string; kioskReady: boolean }>("/api/printer/activate", { method: "POST", body: JSON.stringify(data) }),
+    printerRequest<{ message: string; name: string; kioskReady: boolean }>("/api/printer/activate", { method: "POST", body: JSON.stringify(data) }),
   removePrinter: (name: string) =>
-    request<{ message: string }>(`/api/printer/${name}`, { method: "DELETE" }),
+    printerRequest<{ message: string }>(`/api/printer/${name}`, { method: "DELETE" }),
   printReceipt: (invoice: {
     orderNumber: string; createdAt: string; sellerName: string; branchName: string;
     vatNumber?: string; customerName?: string; paymentMethod?: string;
@@ -437,11 +462,11 @@ export const api = {
     splitBreakdown?: { method: string; amount: number }[];
     printerName?: string;
   }) =>
-    request<{ message: string; jobId?: string }>("/api/printer/print-receipt", { method: "POST", body: JSON.stringify(invoice) }),
+    printerRequest<{ message: string; jobId?: string }>("/api/printer/print-receipt", { method: "POST", body: JSON.stringify(invoice) }),
   getPrintJobs: (printer?: string) =>
-    request<{ jobs: string[] }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`),
+    printerRequest<{ jobs: string[] }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`),
   cancelAllJobs: (printer?: string) =>
-    request<{ message: string }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`, { method: "DELETE" }),
+    printerRequest<{ message: string }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`, { method: "DELETE" }),
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
