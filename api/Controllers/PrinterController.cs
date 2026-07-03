@@ -737,18 +737,21 @@ else
 fi
 rm -f /tmp/raw-thermal.ppd
 
-# Trust the POS server cert in QZ Tray — this makes QZ Tray auto-allow
-# all print requests silently (no "Action Required" dialog ever)
-mkdir -p ~/.qz
-QZ_FINGERPRINT=$(curl -sf "{{posUrl}}/api/printer/qz-fingerprint" 2>/dev/null || echo "")
-if [ -n "$QZ_FINGERPRINT" ]; then
-  # Remove old entry for this fingerprint if present, then add with true (auto-allow)
-  grep -v "^$QZ_FINGERPRINT" ~/.qz/allowed.dat 2>/dev/null > /tmp/allowed.tmp || true
-  echo -e "${QZ_FINGERPRINT}\tQZ Tray Demo Cert\tQZ Industries, LLC\t2026-07-02 14:40:36\t2046-07-02 14:40:36\ttrue" >> /tmp/allowed.tmp
-  mv /tmp/allowed.tmp ~/.qz/allowed.dat
-  echo "   QZ Tray will auto-allow this POS — no dialogs."
+# Trust the POS server cert permanently — QZ Tray will auto-allow all
+# print requests with zero dialogs on every reboot.
+QZ_CERT=$(curl -sf "{{posUrl}}/api/printer/qz-certificate" 2>/dev/null || echo "")
+if [ -n "$QZ_CERT" ]; then
+  # Install as override cert so QZ Tray treats it as if generated here
+  echo "$QZ_CERT" | sudo tee /opt/qz-tray/override.crt >/dev/null
+  # Also write to allowed.dat so it's permanently allowed (no prompt ever)
+  QZ_FP=$(echo "$QZ_CERT" | openssl x509 -noout -fingerprint -sha1 2>/dev/null | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
+  mkdir -p ~/.qz
+  grep -v "^$QZ_FP" ~/.qz/allowed.dat 2>/dev/null > /tmp/qz_allowed.tmp || true
+  printf "%s\tQZ Tray Demo Cert\tQZ Industries, LLC\t2026-07-02 14:40:36\t2046-07-02 14:40:36\ttrue\r\n" "$QZ_FP" >> /tmp/qz_allowed.tmp
+  mv /tmp/qz_allowed.tmp ~/.qz/allowed.dat
+  echo "   QZ Tray trusted — no dialogs will appear."
 else
-  echo "   Could not fetch cert fingerprint — connect manually if prompted."
+  echo "   Could not reach POS server — connect printer manually later."
 fi
 
 # Add QZ Tray and auto-allow to autostart
