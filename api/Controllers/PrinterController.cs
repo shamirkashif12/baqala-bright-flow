@@ -737,7 +737,21 @@ else
 fi
 rm -f /tmp/raw-thermal.ppd
 
-# Add QZ Tray to autostart
+# Auto-close QZ Tray "Action Required" dialog (runs silently in background)
+sudo apt-get install -y xdotool wmctrl 2>/dev/null || true
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/qz-auto-allow.sh << 'QZAUTO'
+#!/bin/bash
+# Closes the QZ Tray "Action Required" dialog automatically
+while true; do
+  wmctrl -c "Action Required" 2>/dev/null || true
+  xdotool search --name "Action Required" 2>/dev/null | xargs -r xdotool windowclose 2>/dev/null || true
+  sleep 1
+done
+QZAUTO
+chmod +x ~/.local/bin/qz-auto-allow.sh
+
+# Add QZ Tray and auto-allow to autostart
 mkdir -p ~/.config/autostart
 cat > ~/.config/autostart/qz-tray.desktop << 'AUTOSTART'
 [Desktop Entry]
@@ -749,8 +763,19 @@ NoDisplay=false
 X-GNOME-Autostart-enabled=true
 AUTOSTART
 
-# Launch QZ Tray now
+cat > ~/.config/autostart/qz-auto-allow.desktop << AUTOSTART
+[Desktop Entry]
+Type=Application
+Name=QZ Auto-Allow
+Exec=bash $HOME/.local/bin/qz-auto-allow.sh
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+AUTOSTART
+
+# Launch QZ Tray and auto-closer now
 nohup qz-tray >/dev/null 2>&1 &
+nohup bash ~/.local/bin/qz-auto-allow.sh >/dev/null 2>&1 &
 
 echo ""
 echo " ========================================"
@@ -758,8 +783,8 @@ echo "  Done!"
 echo "  QZ Tray is running in the system tray."
 echo "  POS shortcut is on your Desktop."
 echo ""
-echo "  First time: QZ Tray shows 'Allow"
-echo "  unsigned content' -> click Allow."
+echo "  QZ Tray dialogs close automatically."
+echo "  Just open the POS and start printing."
 echo " ========================================"
 echo ""
 echo "Press Enter to close..."
