@@ -13,11 +13,13 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
+  ImageOff,
 } from "lucide-react";
 import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
+import { fileToCompressedDataUrl } from "@/lib/image";
 
 export const Route = createFileRoute("/_app/inventory")({ component: Inventory });
 
@@ -54,6 +56,58 @@ function ExpiryCell({ date }: { date?: string | null }) {
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1.5"><Label className="text-xs font-medium">{label}</Label>{children}</div>;
+}
+
+function ProductThumb({ src, className = "h-9 w-9" }: { src?: string; className?: string }) {
+  if (!src) {
+    return (
+      <div className={`${className} rounded-md border border-dashed border-border/60 bg-muted/30 overflow-hidden shrink-0 flex flex-col items-center justify-center gap-0.5 text-muted-foreground`}>
+        <ImageOff className="h-4 w-4" />
+        <span className="text-[8px] leading-none text-center px-0.5">No image</span>
+      </div>
+    );
+  }
+  return (
+    <div className={`${className} rounded-md border border-border/60 bg-muted/40 overflow-hidden shrink-0`}>
+      <img src={src} alt="" className="h-full w-full object-cover" />
+    </div>
+  );
+}
+
+function ProductImagePicker({ value, onChange }: { value: string; onChange: (dataUrl: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    setLoading(true);
+    try {
+      onChange(await fileToCompressedDataUrl(file));
+    } catch {
+      // ignore — user can retry
+    } finally {
+      setLoading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      <ProductThumb src={value} className="h-16 w-16" />
+      <div className="flex gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={() => inputRef.current?.click()} disabled={loading}>
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+          {value ? "Change photo" : "Upload photo"}
+        </Button>
+        {value && (
+          <Button type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => onChange("")}>
+            Remove
+          </Button>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
+    </div>
+  );
 }
 
 // ─── Receive Batch Dialog ─────────────────────────────────────────────────────
@@ -211,10 +265,10 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
     if (!barcode || barcode.length < 6) return;
     setLookupLoading(true);
     setLookupStatus(null);
-    const applyName = (raw: string) => {
+    const applyName = (raw: string, imageUrl?: string) => {
       const name = raw.trim();
       if (!name) return false;
-      setForm(prev => ({ ...prev, name, sku: generateSKU(name) }));
+      setForm(prev => ({ ...prev, name, sku: generateSKU(name), ...(imageUrl ? { imageUrl } : {}) }));
       setSkuManual(false);
       setLookupStatus("found");
       return true;
@@ -226,7 +280,7 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
       if (offData.status === 1 && offData.product) {
         const p = offData.product;
         const name = [p.brands, p.product_name_en || p.product_name].filter(Boolean).join(" ");
-        if (applyName(name)) return;
+        if (applyName(name, p.image_front_url || p.image_url)) return;
       }
 
       // 2) UPC Item DB fallback (good US/international retail products)
@@ -235,7 +289,7 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
       if (upcData.items && upcData.items.length > 0) {
         const item = upcData.items[0];
         const name = [item.brand, item.title].filter(Boolean).join(" ");
-        if (applyName(name)) return;
+        if (applyName(name, item.images?.[0])) return;
       }
 
       setLookupStatus("not_found");
@@ -252,13 +306,13 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
     quantity: "100", expiryDate: "",
     vatPct: "15", customFee: "0.00", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
-    discount: "",
+    discount: "", imageUrl: "",
   });
 
   const set = (k: keyof typeof form) => (v: string) => setForm(p => ({ ...p, [k]: v }));
   const reset = () => {
     setSkuManual(false);
-    setForm({ name: "", sku: "", barcode: "", categoryId: "", branchId: "", warehouseId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "" });
+    setForm({ name: "", sku: "", barcode: "", categoryId: "", branchId: "", warehouseId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
   };
 
   // Auto-generate SKU when name changes (unless user typed it manually)
@@ -273,6 +327,7 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
     if (!form.name || !form.sku || !form.sellingPrice) return setError("Name, SKU and selling price are required.");
     if (!form.categoryId) return setError("Category is required.");
     if (!form.branchId) return setError("Branch is required to create a stock entry.");
+    if (!form.imageUrl) return setError("A product photo is required.");
     setSaving(true); setError("");
     try {
       const product = await api.createProduct({
@@ -287,6 +342,7 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
         status: "active",
         weightBased: false,
         isTobacco: form.isTobacco,
+        imageUrl: form.imageUrl,
         ...(form.discount ? { discount: Number(form.discount), discountType: form.discountType } : {}),
       } as Parameters<typeof api.createProduct>[0]);
       // Create an initial stock record so the product appears in the inventory list
@@ -307,7 +363,12 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Add Product</DialogTitle></DialogHeader>
-        <div className="grid grid-cols-2 gap-3 mt-2">
+        <div className="mt-2">
+          <FieldRow label="Product Photo *">
+            <ProductImagePicker value={form.imageUrl} onChange={set("imageUrl")} />
+          </FieldRow>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
           <FieldRow label="Product Name *">
             <Input className="h-9" placeholder="Almarai Laban 1L" value={form.name} onChange={e => set("name")(e.target.value)} />
           </FieldRow>
@@ -449,7 +510,7 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
     sellingPrice: "", purchasePrice: "",
     vatPct: "15", customFee: "0.00", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
-    discount: "",
+    discount: "", imageUrl: "",
   });
 
   useEffect(() => {
@@ -467,6 +528,7 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
       isTobacco: p.isTobacco ?? false,
       discountType: (p.discountType as "percentage" | "fixed") ?? "percentage",
       discount: p.discount != null ? String(p.discount) : "",
+      imageUrl: p.imageUrl ?? "",
     });
     setError("");
   }, [item]);
@@ -488,6 +550,7 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
         isTobacco: form.isTobacco,
         discount: form.discount ? Number(form.discount) : undefined,
         discountType: form.discount ? form.discountType : undefined,
+        imageUrl: form.imageUrl || undefined,
         status: "active",
         weightBased: false,
         reorderLevel: item.reorderLevel ?? 10,
@@ -504,7 +567,12 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
     <Dialog open={!!item} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Edit Product</DialogTitle></DialogHeader>
-        <div className="grid grid-cols-2 gap-3 mt-2">
+        <div className="mt-2">
+          <FieldRow label="Product Photo">
+            <ProductImagePicker value={form.imageUrl} onChange={v => setForm(p => ({ ...p, imageUrl: v }))} />
+          </FieldRow>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
           <FieldRow label="Product Name *">
             <Input className="h-9" value={form.name} onChange={set("name")} />
           </FieldRow>
@@ -603,6 +671,19 @@ function ViewSheet({ item, suppliers, onClose }: { item: StockItem | null; suppl
           <SheetTitle>{item.product?.name ?? "—"}</SheetTitle>
           <p className="text-xs text-muted-foreground font-mono">{item.product?.sku} · {item.product?.barcode}</p>
         </SheetHeader>
+        <div className="mt-4 flex justify-center">
+          {item.product?.imageUrl ? (
+            <div className="h-28 w-28 rounded-md border border-border/60 bg-muted/40 overflow-hidden shrink-0">
+              <img src={item.product.imageUrl} alt="" className="h-full w-full object-cover" />
+            </div>
+          ) : (
+            <div className="h-28 w-28 rounded-md border border-dashed border-border/60 bg-muted/30 flex flex-col items-center justify-center gap-1.5 text-center px-2">
+              <ImageOff className="h-5 w-5 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">No image uploaded</p>
+              <p className="text-[10px] text-muted-foreground/80">Add one from Edit</p>
+            </div>
+          )}
+        </div>
         <div className="mt-5 space-y-3">
           {rows.map(([k, v]) => (
             <div key={k} className="flex justify-between border-b border-border/40 pb-2 text-sm">

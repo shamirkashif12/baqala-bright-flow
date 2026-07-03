@@ -562,6 +562,7 @@ function POS() {
   const [activeOffers, setActiveOffers] = useState<Offer[]>([]);
   const [activeDiscounts, setActiveDiscounts] = useState<Discount[]>([]);
   const [customFees, setCustomFees] = useState<TaxFeeRule[]>([]);
+  const [tobaccoFeeEnabled, setTobaccoFeeEnabled] = useState(true);
 
   // ─── Holds ────────────────────────────────────────────────────────────────────
   const [holds, setHolds] = useState<{ id: string; items: CartItem[]; total: number; at: string }[]>([]);
@@ -591,6 +592,9 @@ function POS() {
           setTaxRate(vatRule.vatPercentage / 100);
           setTaxLabel(`VAT ${vatRule.vatPercentage}%`);
         }
+
+        const tobaccoRule = taxRules.find((r) => r.ruleType === "tobacco_excise");
+        setTobaccoFeeEnabled(tobaccoRule ? tobaccoRule.status === "active" : true);
 
         const shift = shifts.find((s) => s.status === "open") ?? null;
         setActiveShift(shift);
@@ -735,7 +739,7 @@ function POS() {
   }
   const tobaccoExcise = cart.reduce((sum, ci) => {
     const prod = products.find(p => p.id === ci.productId);
-    if (!prod?.isTobacco) return sum;
+    if (!prod?.isTobacco || !tobaccoFeeEnabled) return sum;
     return sum + ci.qty * calcTobaccoFee(ci.price);
   }, 0);
   const couponDiscount = appliedCoupon

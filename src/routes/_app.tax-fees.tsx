@@ -348,7 +348,11 @@ function TaxFees() {
                   </p>
                 </div>
               </div>
-              <Switch defaultChecked={!!tobaccoRule} />
+              <Switch
+                checked={tobaccoRule?.status === "active"}
+                disabled={!tobaccoRule}
+                onCheckedChange={() => tobaccoRule && toggleStatus(tobaccoRule)}
+              />
             </div>
 
             {/* Formula card */}

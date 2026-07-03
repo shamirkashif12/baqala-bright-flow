@@ -230,16 +230,18 @@ function Terminals() {
       }),
       api.getBranches(),
       api.getUsers(),
-      api.getShifts(),  // unfiltered — feeds view-sheet sync log
+      // Cashiers only ever see their own shifts — feeds view-sheet sync log
+      api.getShifts({ cashierId: user?.role === "cashier" ? user.id : undefined }),
     ])
       .then(([t, b, u, s]) => { setTerminals(t); setBranches(b); setUsers(u); setAllShifts(s); })
       .finally(() => setLoading(false));
-  }, [br, st]);
+  }, [br, st, user]);
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     setLogsLoading(true);
     api.getShifts({
+      cashierId:  user?.role === "cashier" ? user.id : undefined,
       terminalId: slTerminal !== "all" ? slTerminal : undefined,
       status:     slStatus   !== "all" ? slStatus   : undefined,
       dateFrom:   slDateFrom || undefined,
@@ -247,7 +249,7 @@ function Terminals() {
     })
       .then(setSessionLogs)
       .finally(() => setLogsLoading(false));
-  }, [slTerminal, slStatus, slDateFrom, slDateTo]);
+  }, [slTerminal, slStatus, slDateFrom, slDateTo, user]);
 
   const cashiers = users.filter(u => u.roleName?.toLowerCase().includes("cashier"));
 

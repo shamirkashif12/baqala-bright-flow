@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import {
   Boxes, ArrowDownToLine, ArrowUpFromLine, ClipboardCheck, Truck, Undo2,
   Trash2, Plus, History, FileBarChart, ScanLine, Package, AlertTriangle,
-  TrendingUp, BarChart3, Download, CheckCircle2,
+  TrendingUp, BarChart3, Download, CheckCircle2, ImageOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -68,6 +68,7 @@ function BarcodeStockInDialog({
   onDone: () => void;
 }) {
   const { user } = useAuth();
+  const { canCreate } = usePermission("Stocks");
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
 
   const [open, setOpen] = useState(false);
@@ -162,6 +163,8 @@ function BarcodeStockInDialog({
     }
   }
 
+  if (!canCreate) return null;
+
   return (
     <>
       <Button
@@ -190,8 +193,22 @@ function BarcodeStockInDialog({
             <div className="space-y-3 py-1">
               {/* Product summary */}
               <div className="rounded-lg bg-muted/50 p-3 space-y-0.5">
-                <p className="font-semibold text-sm">{product.name}</p>
-                <p className="text-xs text-muted-foreground font-mono">{product.barcode} · SKU {product.sku}</p>
+                <div className="flex items-center gap-3 mb-1">
+                  {product.imageUrl ? (
+                    <div className="h-12 w-12 rounded-md border border-border/60 bg-background overflow-hidden shrink-0">
+                      <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className="h-12 w-12 rounded-md border border-dashed border-border/60 bg-muted/30 flex flex-col items-center justify-center gap-0.5 text-muted-foreground shrink-0">
+                      <ImageOff className="h-3.5 w-3.5" />
+                      <span className="text-[7px] leading-none">No image</span>
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm truncate">{product.name}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{product.barcode} · SKU {product.sku}</p>
+                  </div>
+                </div>
                 {currentStock !== null && (
                   <p className="text-xs text-muted-foreground">
                     Current stock: <span className="font-semibold text-foreground">{currentStock} units</span>

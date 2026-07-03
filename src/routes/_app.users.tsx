@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Mail, Phone, Pencil, ShieldCheck, Power, Plus, Search, Calendar, X } from "lucide-react";
 import { api, type User, type Branch, type Role } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
+import { useAuth } from "@/lib/auth";
+import { canManageUser } from "@/lib/role-hierarchy";
 
 export const Route = createFileRoute("/_app/users")({
   component: () => (
@@ -27,6 +29,7 @@ const emptyForm: UserForm = { fullName: "", email: "", username: "", password: "
 
 function RegisteredUsers() {
   const { canCreate, canEdit } = usePermission("Users");
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -189,7 +192,7 @@ function RegisteredUsers() {
                 <Button size="sm" variant="outline" className="h-8 px-2.5" title="Manage Permissions" onClick={() => window.location.href = "/roles"}>
                   <ShieldCheck className="h-3.5 w-3.5" />
                 </Button>
-                {canEdit && (
+                {canEdit && currentUser && canManageUser(currentUser, u.roleName, u.id) && (
                   <Button size="sm" variant="outline" className={`h-8 px-2.5 ${u.status === "active" ? "text-destructive hover:text-destructive" : "text-success hover:text-success"}`} title={u.status === "active" ? "Deactivate" : "Activate"} onClick={() => toggleStatus(u)}>
                     <Power className="h-3.5 w-3.5" />
                   </Button>
