@@ -556,6 +556,10 @@ del "%TEMP%\qz-tray-setup.exe" 2>nul
 echo [3/3] Creating POS shortcut on Desktop...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($env:PUBLIC + '\Desktop\{{appName}}.lnk'); $chromePaths = @($env:ProgramFiles + '\Google\Chrome\Application\chrome.exe',$env:ProgramFiles + '\Microsoft\Edge\Application\msedge.exe'); $browser = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($browser) { $sc.TargetPath = $browser; $sc.Arguments = '--kiosk {{posUrl}}/pos --disable-infobars --no-first-run --unsafely-treat-insecure-origin-as-secure={{posUrl}}' } else { $sc.TargetPath = 'C:\Windows\explorer.exe'; $sc.Arguments = '{{posUrl}}/pos' }; $sc.Description = '{{appName}} Checkout'; $sc.Save()"
 
+:: ── Chrome Policy: allow QZ Tray from this origin in ALL Chrome windows ────
+reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
+
 :: ── Start QZ Tray ─────────────────────────────────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$qz = @($env:ProgramFiles + '\QZ Tray\qz-tray.exe',$env:LOCALAPPDATA + '\QZ Tray\qz-tray.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($qz) { Start-Process $qz; reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Tray' /t REG_SZ /d $qz /f | Out-Null }"
 
@@ -616,6 +620,10 @@ open -a "Google Chrome" --args --kiosk {{posUrl}}/pos --disable-infobars --no-fi
 open -a "Safari" {{posUrl}}/pos
 ENDOFSHORTCUT
 chmod +x ~/Desktop/"{{appName}}.command"
+
+# Chrome Policy: allow QZ Tray from this origin in ALL Chrome windows
+sudo mkdir -p "/Library/Application Support/Google/Chrome/policies/managed" 2>/dev/null
+echo '{"OverrideSecurityRestrictionsOnInsecureOrigin": ["{{posUrl}}"]}' | sudo tee "/Library/Application Support/Google/Chrome/policies/managed/mimony-pos.json" >/dev/null 2>&1 || true
 
 # 3. Launch QZ Tray and add to login items
 open -a "QZ Tray" 2>/dev/null || true
@@ -682,6 +690,10 @@ StartupNotify=true
 POSSHORTCUT
 chmod +x ~/Desktop/"{{appName}}.desktop"
 gio set ~/Desktop/"{{appName}}.desktop" metadata::trusted true 2>/dev/null || true
+
+# Chrome Policy: allow QZ Tray from this origin in ALL Chrome windows
+sudo mkdir -p /etc/opt/chrome/policies/managed /etc/chromium/policies/managed 2>/dev/null
+echo '{"OverrideSecurityRestrictionsOnInsecureOrigin": ["{{posUrl}}"]}' | sudo tee /etc/opt/chrome/policies/managed/mimony-pos.json /etc/chromium/policies/managed/mimony-pos.json >/dev/null 2>&1 || true
 
 # Add QZ Tray to autostart
 mkdir -p ~/.config/autostart
