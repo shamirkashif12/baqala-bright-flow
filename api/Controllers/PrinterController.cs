@@ -503,4 +503,149 @@ public class PrinterController : ControllerBase
 
         return Ok(new { message = $"Printer \"{name}\" removed." });
     }
+
+    // ── GET /api/printer/qz-install-script ───────────────────────────────────
+    // Detects the browser OS from User-Agent and returns a platform-specific
+    // install script that downloads and silently installs QZ Tray.
+
+    [HttpGet("qz-install-script")]
+    public IActionResult QzInstallScript()
+    {
+        var ua = Request.Headers.UserAgent.ToString().ToLower();
+
+        if (ua.Contains("windows"))
+        {
+            var ps1 = """
+# QZ Tray Silent Installer for Windows
+# Run: Right-click → "Run with PowerShell"
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+
+Write-Host "=== QZ Tray Installer ===" -ForegroundColor Cyan
+
+# Fetch latest release version from GitHub API
+try {
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/qzind/tray/releases/latest"
+    $asset = $release.assets | Where-Object { $_.name -like "*windows*" -and $_.name -like "*.exe" } | Select-Object -First 1
+    $url = $asset.browser_download_url
+    $version = $release.tag_name
+} catch {
+    # Fallback to known stable version
+    $version = "v2.2.4"
+    $url = "https://github.com/qzind/tray/releases/download/v2.2.4/qz-tray-2.2.4-windows.exe"
+}
+
+Write-Host "Downloading QZ Tray $version..." -ForegroundColor Yellow
+$installer = "$env:TEMP\qz-tray-setup.exe"
+Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+
+Write-Host "Installing silently..." -ForegroundColor Yellow
+Start-Process -FilePath $installer -ArgumentList "/S" -Wait -NoNewWindow
+
+Write-Host "Starting QZ Tray..." -ForegroundColor Yellow
+$paths = @(
+    "$env:ProgramFiles\QZ Tray\qz-tray.exe",
+    "$env:ProgramFiles(x86)\QZ Tray\qz-tray.exe",
+    "$env:LOCALAPPDATA\QZ Tray\qz-tray.exe"
+)
+$qzExe = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($qzExe) {
+    Start-Process -FilePath $qzExe
+    Write-Host "QZ Tray is running in your system tray!" -ForegroundColor Green
+} else {
+    Write-Host "Installation complete. Please start QZ Tray from the Start Menu." -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "Next step: Go back to the browser and click 'Connect' in Printer Setup." -ForegroundColor Cyan
+Write-Host "First time: QZ Tray will ask to Allow unsigned content — click Allow." -ForegroundColor Cyan
+Read-Host "Press Enter to close"
+""";
+            return File(System.Text.Encoding.UTF8.GetBytes(ps1),
+                "application/octet-stream",
+                "install-qz-tray.ps1");
+        }
+
+        if (ua.Contains("macintosh") || ua.Contains("mac os"))
+        {
+            var sh = """
+#!/bin/bash
+# QZ Tray Silent Installer for macOS
+# Run: double-click or  bash ~/Downloads/install-qz-tray.sh
+set -e
+echo "=== QZ Tray Installer for macOS ==="
+
+echo "Fetching latest release..."
+RELEASE=$(curl -s https://api.github.com/repos/qzind/tray/releases/latest)
+URL=$(echo "$RELEASE" | grep -o '"browser_download_url": *"[^"]*mac[^"]*\.pkg"' | grep -o 'https://[^"]*' | head -1)
+
+if [ -z "$URL" ]; then
+  URL="https://github.com/qzind/tray/releases/download/v2.2.4/qz-tray-2.2.4-mac.pkg"
+fi
+
+echo "Downloading QZ Tray..."
+curl -L -o /tmp/qz-tray.pkg "$URL"
+
+echo "Installing (may ask for password)..."
+sudo installer -pkg /tmp/qz-tray.pkg -target /
+
+echo "Starting QZ Tray..."
+open -a "QZ Tray" 2>/dev/null || open /Applications/QZ\ Tray.app 2>/dev/null || true
+
+echo ""
+echo "Done! QZ Tray is running in your menu bar."
+echo "Next: Go back to the browser → Printer Setup → Connect."
+echo "First time: click Allow when QZ Tray asks about unsigned content."
+""";
+            return File(System.Text.Encoding.UTF8.GetBytes(sh),
+                "application/octet-stream",
+                "install-qz-tray.sh");
+        }
+
+        // Default: Linux
+        var linux = """
+#!/bin/bash
+# QZ Tray Silent Installer for Linux (Debian/Ubuntu/RPM)
+# Run: bash install-qz-tray.sh
+set -e
+echo "=== QZ Tray Installer for Linux ==="
+
+echo "Fetching latest release..."
+RELEASE=$(curl -s https://api.github.com/repos/qzind/tray/releases/latest)
+
+if command -v apt-get &>/dev/null; then
+    echo "Detected Debian/Ubuntu"
+    URL=$(echo "$RELEASE" | grep -o '"browser_download_url": *"[^"]*linux[^"]*amd64\.deb"' | grep -o 'https://[^"]*' | head -1)
+    if [ -z "$URL" ]; then
+        URL="https://github.com/qzind/tray/releases/download/v2.2.4/qz-tray-2.2.4-linux-amd64.deb"
+    fi
+    echo "Downloading $URL ..."
+    curl -L -o /tmp/qz-tray.deb "$URL"
+    sudo dpkg -i /tmp/qz-tray.deb || sudo apt-get install -f -y
+elif command -v rpm &>/dev/null; then
+    echo "Detected RPM-based (RHEL/CentOS/Fedora)"
+    URL=$(echo "$RELEASE" | grep -o '"browser_download_url": *"[^"]*linux[^"]*x86_64\.rpm"' | grep -o 'https://[^"]*' | head -1)
+    if [ -z "$URL" ]; then
+        URL="https://github.com/qzind/tray/releases/download/v2.2.4/qz-tray-2.2.4-linux-x86_64.rpm"
+    fi
+    echo "Downloading $URL ..."
+    curl -L -o /tmp/qz-tray.rpm "$URL"
+    sudo rpm -i /tmp/qz-tray.rpm
+else
+    echo "Unsupported distro. Please install manually from https://qz.io/download/"
+    exit 1
+fi
+
+echo "Starting QZ Tray..."
+nohup qz-tray > /dev/null 2>&1 &
+
+echo ""
+echo "Done! QZ Tray is running."
+echo "Next: Go back to the browser → Printer Setup → Connect."
+echo "First time: click Allow when QZ Tray asks about unsigned content."
+""";
+        return File(System.Text.Encoding.UTF8.GetBytes(linux),
+            "application/octet-stream",
+            "install-qz-tray.sh");
+    }
 }

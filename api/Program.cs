@@ -17,16 +17,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("FrontendPolicy", policy =>
     {
         policy
-            .SetIsOriginAllowed(origin =>
-            {
-                if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-                // Allow any localhost port in development
-                if (uri.Host == "localhost" || uri.Host == "127.0.0.1") return true;
-                // Allow local network IP
-                if (uri.Host == "192.168.6.185") return true;
-                // Allow Vercel preview deployments
-                return uri.Host.EndsWith(".vercel.app");
-            })
+            .SetIsOriginAllowed(_ => true) // Allow any origin — local print agent must accept requests from any hosted frontend
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();

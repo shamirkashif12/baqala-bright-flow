@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter } from "@/lib/api";
+import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter } from "@/lib/api";
+import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { SARIcon } from "@/lib/currency";
 
@@ -282,6 +283,55 @@ function PrinterSetupDialog() {
   const [printJobs, setPrintJobs] = useState<string[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [clearingJobs, setClearingJobs] = useState(false);
+  const [agentUrl, setAgentUrl] = useState<string>(() => getPrinterBase());
+  const [agentUrlInput, setAgentUrlInput] = useState<string>(() => getPrinterBase());
+  const [testingAgent, setTestingAgent] = useState(false);
+  const [agentOk, setAgentOk] = useState<boolean | null>(null);
+  // QZ Tray
+  const [qzConnected, setQzConnected] = useState(false);
+  const [qzPrinters, setQzPrinters] = useState<string[]>([]);
+  const [connectingQz, setConnectingQz] = useState(false);
+  const [printMode, setPrintMode] = useState<"qz" | "local">(
+    () => (localStorage.getItem("baqala_print_mode") as "qz" | "local") ?? "local"
+  );
+
+  function savePrintMode(m: "qz" | "local") {
+    setPrintMode(m);
+    localStorage.setItem("baqala_print_mode", m);
+  }
+
+  async function handleQzConnect() {
+    setConnectingQz(true);
+    try {
+      await qzConnect();
+      setQzConnected(true);
+      const printers = await qzListPrinters();
+      setQzPrinters(printers);
+      toast.success(`QZ Tray connected — ${printers.length} printer(s) found`);
+    } catch {
+      setQzConnected(false);
+      toast.error("Cannot connect to QZ Tray — is it installed and running?");
+    } finally { setConnectingQz(false); }
+  }
+
+  function saveAgentUrl(url: string) {
+    const clean = url.trim().replace(/\/$/, "");
+    localStorage.setItem(PRINTER_API_KEY, clean);
+    setAgentUrl(clean);
+    setAgentUrlInput(clean);
+    setAgentOk(null);
+  }
+
+  async function testAgentConnection(url: string) {
+    setTestingAgent(true); setAgentOk(null);
+    try {
+      const res = await fetch(`${url.trim().replace(/\/$/, "")}/api/printer/status`, { signal: AbortSignal.timeout(4000) });
+      setAgentOk(res.ok);
+      if (res.ok) toast.success("Local print agent reachable!");
+      else toast.error("Agent responded but returned an error.");
+    } catch { setAgentOk(false); toast.error("Cannot reach print agent — is it running?"); }
+    finally { setTestingAgent(false); }
+  }
 
   function setSelectedPrinter(name: string) {
     setSelectedPrinterState(name);
@@ -350,9 +400,11 @@ function PrinterSetupDialog() {
 
   function handleOpen() {
     setOpen(true);
-    loadStatus();
-    handleDetect();
     loadPrintJobs();
+    const isQz = qzIsConnected();
+    setQzConnected(isQz);
+    if (isQz) qzListPrinters().then(setQzPrinters).catch(() => {});
+    if (printMode === "local") { loadStatus(); handleDetect(); }
   }
 
   return (
@@ -369,140 +421,176 @@ function PrinterSetupDialog() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-1">
-            {/* Receipt printer selection */}
-            <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${selectedPrinter || defaultPrinter ? "bg-green-50 text-green-700" : "bg-muted/50 text-muted-foreground"}`}>
-              {selectedPrinter || defaultPrinter
-                ? <><PrinterCheck className="h-4 w-4 flex-shrink-0" /><span>Receipt printer: <strong>{selectedPrinter || defaultPrinter}</strong></span></>
-                : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>No printer configured — activate one below</span></>}
-            </div>
+          <Tabs value={printMode} onValueChange={v => { savePrintMode(v as "qz" | "local"); if (v === "local") { loadStatus(); handleDetect(); } }}>
+            <TabsList className="w-full mb-3">
+              <TabsTrigger value="qz" className="flex-1 gap-1.5">
+                <Printer className="h-3.5 w-3.5" /> QZ Tray <span className="text-[10px] bg-green-100 text-green-700 px-1 rounded">All Browsers</span>
+              </TabsTrigger>
+              <TabsTrigger value="local" className="flex-1 gap-1.5">
+                <Usb className="h-3.5 w-3.5" /> Local Agent <span className="text-[10px] bg-muted text-muted-foreground px-1 rounded">Linux/LAN</span>
+              </TabsTrigger>
+            </TabsList>
 
-            {/* Installed printers */}
-            {installed.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Installed Printers</p>
-                <div className="space-y-1.5">
-                  {installed.map(name => {
-                    const isReceipt = (selectedPrinter || defaultPrinter) === name;
-                    return (
-                      <div key={name} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isReceipt ? "border-green-300 bg-green-50/60" : ""}`}>
-                        <PrinterCheck className={`h-4 w-4 flex-shrink-0 ${isReceipt ? "text-green-600" : "text-muted-foreground"}`} />
-                        <span className="flex-1 font-medium">{name}</span>
-                        {name === defaultPrinter && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">CUPS Default</span>}
-                        {isReceipt
-                          ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">Receipt Printer</span>
-                          : <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setSelectedPrinter(name)}>
-                              Use for receipts
-                            </Button>
-                        }
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                          disabled={removing === name}
-                          onClick={() => handleRemove(name)}>
-                          {removing === name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Detected printers */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Detected Devices</p>
-                <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={handleDetect} disabled={detecting}>
-                  <RefreshCw className={`h-3 w-3 ${detecting ? "animate-spin" : ""}`} />
-                  {detecting ? "Scanning…" : "Re-scan"}
+            {/* ── QZ Tray tab ── */}
+            <TabsContent value="qz" className="space-y-3 mt-0">
+              {/* Connection status */}
+              <div className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm ${qzConnected ? "bg-green-50 border border-green-200 text-green-700" : "bg-muted/50 border text-muted-foreground"}`}>
+                {qzConnected
+                  ? <><CheckCircle2 className="h-4 w-4 flex-shrink-0" /><span>QZ Tray connected — <strong>{qzPrinters.length}</strong> printer(s) found</span></>
+                  : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>QZ Tray not connected</span></>}
+                <Button size="sm" variant="outline" className="ml-auto h-7 text-xs gap-1" onClick={handleQzConnect} disabled={connectingQz}>
+                  {connectingQz ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  {qzConnected ? "Re-scan" : "Connect"}
                 </Button>
               </div>
 
-              {detecting && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground py-3">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Detecting connected printers…
+              {/* Install instructions */}
+              {!qzConnected && (
+                <div className="rounded-lg border border-dashed px-4 py-3 space-y-2.5 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground text-sm">Setup (one-time per machine):</p>
+                  <a
+                    href={api.qzInstallScriptUrl()}
+                    download
+                    className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90 transition-colors"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Download QZ Tray Installer Script
+                  </a>
+                  <div className="space-y-1">
+                    <p><span className="font-medium text-foreground">Windows:</span> Right-click the downloaded <code className="bg-muted px-1 rounded">.ps1</code> file → <strong>Run with PowerShell</strong></p>
+                    <p><span className="font-medium text-foreground">Linux / Mac:</span> Open terminal → <code className="bg-muted px-1 rounded">bash install-qz-tray.sh</code></p>
+                  </div>
+                  <p>After install, QZ Tray runs silently in the system tray on every boot.</p>
+                  <p className="text-amber-600 font-medium">⚠ First run: QZ Tray asks to <strong>Allow unsigned content</strong> — click Allow, then click Connect above.</p>
                 </div>
               )}
 
-              {!detecting && detected.length === 0 && (
-                <div className="rounded-lg border border-dashed px-4 py-4 text-center text-sm text-muted-foreground">
-                  No printers detected. Connect the USB cable and click Re-scan.
+              {/* Printer list from QZ */}
+              {qzConnected && qzPrinters.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Available Printers</p>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {qzPrinters.map(name => {
+                      const isReceipt = selectedPrinter === name;
+                      return (
+                        <div key={name} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isReceipt ? "border-green-300 bg-green-50/60" : ""}`}>
+                          <PrinterCheck className={`h-4 w-4 flex-shrink-0 ${isReceipt ? "text-green-600" : "text-muted-foreground"}`} />
+                          <span className="flex-1 font-medium truncate">{name}</span>
+                          {isReceipt
+                            ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">Receipt Printer</span>
+                            : <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0" onClick={() => setSelectedPrinter(name)}>Use for receipts</Button>}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
-              {!detecting && detected.map(p => {
-                const alreadyInstalled = Object.values(installedUris).some(u => u === p.uri);
-                const installedName = alreadyInstalled
-                  ? Object.entries(installedUris).find(([, u]) => u === p.uri)?.[0]
-                  : null;
-                return (
-                  <div key={p.uri} className={`rounded-lg border px-3 py-2.5 mb-2 space-y-2 ${alreadyInstalled ? "border-green-200 bg-green-50/50" : ""}`}>
-                    <div className="flex items-center gap-2">
-                      {p.type === "usb" ? <Usb className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <Wifi className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{p.model}</p>
-                        <p className="text-xs text-muted-foreground font-mono truncate">{p.uri}</p>
+              {qzConnected && qzPrinters.length === 0 && (
+                <p className="text-xs text-muted-foreground px-1">No printers found. Make sure the printer driver is installed on this machine.</p>
+              )}
+            </TabsContent>
+
+            {/* ── Local Agent tab ── */}
+            <TabsContent value="local" className="space-y-3 mt-0">
+              {/* Agent URL */}
+              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Printer Agent URL</p>
+                <div className="flex gap-2">
+                  <Input className="h-8 text-xs flex-1 font-mono" placeholder={DEFAULT_PRINTER_AGENT}
+                    value={agentUrlInput}
+                    onChange={e => { setAgentUrlInput(e.target.value); setAgentOk(null); }}
+                    onBlur={() => { if (agentUrlInput !== agentUrl) saveAgentUrl(agentUrlInput); }} />
+                  <Button size="sm" className="h-8 text-xs gap-1 whitespace-nowrap" variant="outline" disabled={testingAgent}
+                    onClick={() => { saveAgentUrl(agentUrlInput); testAgentConnection(agentUrlInput); }}>
+                    {testingAgent ? <Loader2 className="h-3 w-3 animate-spin" /> : agentOk === true ? <PrinterCheck className="h-3 w-3 text-green-600" /> : agentOk === false ? <AlertCircle className="h-3 w-3 text-destructive" /> : <Wifi className="h-3 w-3" />}
+                    Test
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Start agent: <code className="bg-muted px-1 rounded text-[11px]">dotnet run --urls "http://0.0.0.0:5008"</code></p>
+              </div>
+
+              {/* Active receipt printer */}
+              <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${selectedPrinter || defaultPrinter ? "bg-green-50 text-green-700" : "bg-muted/50 text-muted-foreground"}`}>
+                {selectedPrinter || defaultPrinter
+                  ? <><PrinterCheck className="h-4 w-4 flex-shrink-0" /><span>Receipt printer: <strong>{selectedPrinter || defaultPrinter}</strong></span></>
+                  : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>No printer configured — activate one below</span></>}
+              </div>
+
+              {/* Installed printers */}
+              {installed.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Installed Printers</p>
+                  <div className="space-y-1.5">
+                    {installed.map(name => {
+                      const isReceipt = (selectedPrinter || defaultPrinter) === name;
+                      return (
+                        <div key={name} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isReceipt ? "border-green-300 bg-green-50/60" : ""}`}>
+                          <PrinterCheck className={`h-4 w-4 flex-shrink-0 ${isReceipt ? "text-green-600" : "text-muted-foreground"}`} />
+                          <span className="flex-1 font-medium">{name}</span>
+                          {name === defaultPrinter && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">CUPS Default</span>}
+                          {isReceipt
+                            ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">Receipt Printer</span>
+                            : <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setSelectedPrinter(name)}>Use for receipts</Button>}
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive" disabled={removing === name} onClick={() => handleRemove(name)}>
+                            {removing === name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Detected devices */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Detected Devices</p>
+                  <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={handleDetect} disabled={detecting}>
+                    <RefreshCw className={`h-3 w-3 ${detecting ? "animate-spin" : ""}`} />
+                    {detecting ? "Scanning…" : "Re-scan"}
+                  </Button>
+                </div>
+                {detecting && <div className="flex items-center gap-2 text-sm text-muted-foreground py-3"><Loader2 className="h-4 w-4 animate-spin" /> Detecting connected printers…</div>}
+                {!detecting && detected.length === 0 && <div className="rounded-lg border border-dashed px-4 py-4 text-center text-sm text-muted-foreground">No printers detected. Connect the USB cable and click Re-scan.</div>}
+                {!detecting && detected.map(p => {
+                  const alreadyInstalled = Object.values(installedUris).some(u => u === p.uri);
+                  const installedName = alreadyInstalled ? Object.entries(installedUris).find(([, u]) => u === p.uri)?.[0] : null;
+                  return (
+                    <div key={p.uri} className={`rounded-lg border px-3 py-2.5 mb-2 space-y-2 ${alreadyInstalled ? "border-green-200 bg-green-50/50" : ""}`}>
+                      <div className="flex items-center gap-2">
+                        {p.type === "usb" ? <Usb className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <Wifi className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
+                        <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.model}</p><p className="text-xs text-muted-foreground font-mono truncate">{p.uri}</p></div>
+                        {alreadyInstalled && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1"><PrinterCheck className="h-3 w-3" /> {installedName}</span>}
                       </div>
-                      {alreadyInstalled && (
-                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
-                          <PrinterCheck className="h-3 w-3" /> {installedName}
-                        </span>
+                      {!alreadyInstalled && (
+                        <div className="flex gap-2">
+                          <Input className="h-8 text-xs flex-1" placeholder="Printer name" value={editNames[p.uri] ?? p.suggestedName} onChange={e => setEditNames(prev => ({ ...prev, [p.uri]: e.target.value }))} />
+                          <Button size="sm" className="h-8 gradient-primary text-primary-foreground border-0 gap-1 whitespace-nowrap" disabled={activating === p.uri} onClick={() => handleActivate(p)}>
+                            {activating === p.uri ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Activating…</> : <><PrinterCheck className="h-3.5 w-3.5" /> Activate</>}
+                          </Button>
+                        </div>
                       )}
                     </div>
-                    {!alreadyInstalled && (
-                      <div className="flex gap-2">
-                        <Input
-                          className="h-8 text-xs flex-1"
-                          placeholder="Printer name"
-                          value={editNames[p.uri] ?? p.suggestedName}
-                          onChange={e => setEditNames(prev => ({ ...prev, [p.uri]: e.target.value }))}
-                        />
-                        <Button
-                          size="sm"
-                          className="h-8 gradient-primary text-primary-foreground border-0 gap-1 whitespace-nowrap"
-                          disabled={activating === p.uri}
-                          onClick={() => handleActivate(p)}
-                        >
-                          {activating === p.uri
-                            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Activating…</>
-                            : <><PrinterCheck className="h-3.5 w-3.5" /> Activate</>}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Print queue */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Print Queue</p>
-                <div className="flex gap-1">
-                  <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={loadPrintJobs} disabled={loadingJobs}>
-                    <RefreshCw className={`h-3 w-3 ${loadingJobs ? "animate-spin" : ""}`} />
-                    Refresh
-                  </Button>
-                  {printJobs.length > 0 && (
-                    <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={handleClearQueue} disabled={clearingJobs}>
-                      {clearingJobs ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash className="h-3 w-3" />}
-                      Clear All
-                    </Button>
-                  )}
-                </div>
+                  );
+                })}
               </div>
-              {printJobs.length === 0 ? (
-                <p className="text-xs text-muted-foreground px-1">No pending jobs — queue is clear.</p>
-              ) : (
-                <div className="space-y-1 max-h-28 overflow-y-auto">
-                  {printJobs.map((job, i) => (
-                    <div key={i} className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-mono text-amber-800 truncate">
-                      {job}
-                    </div>
-                  ))}
+
+              {/* Print queue */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Print Queue</p>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={loadPrintJobs} disabled={loadingJobs}><RefreshCw className={`h-3 w-3 ${loadingJobs ? "animate-spin" : ""}`} />Refresh</Button>
+                    {printJobs.length > 0 && <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={handleClearQueue} disabled={clearingJobs}>{clearingJobs ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash className="h-3 w-3" />}Clear All</Button>}
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
+                {printJobs.length === 0
+                  ? <p className="text-xs text-muted-foreground px-1">No pending jobs — queue is clear.</p>
+                  : <div className="space-y-1 max-h-28 overflow-y-auto">{printJobs.map((job, i) => <div key={i} className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-mono text-amber-800 truncate">{job}</div>)}</div>}
+              </div>
+            </TabsContent>
+          </Tabs>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Close</Button>
@@ -1103,14 +1191,20 @@ function POS() {
     resetSale();
   };
 
-  // Auto-print receipt via backend ESC/POS (bypasses Chrome/PDF — works on thermal printers).
+  // Auto-print receipt — uses QZ Tray (all browsers) or local agent depending on setting.
   useEffect(() => {
     if (!invOpen || !invoice || !autoPrintRef.current) return;
     autoPrintRef.current = false;
 
     const printId = toast.loading("Printing receipt…");
     const printerName = localStorage.getItem("baqala_receipt_printer") || undefined;
-    api.printReceipt({ ...invoice, printerName })
+    const mode = localStorage.getItem("baqala_print_mode") ?? "local";
+
+    const doPrint = mode === "qz"
+      ? qzPrintReceipt(invoice, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` }))
+      : api.printReceipt({ ...invoice, printerName });
+
+    doPrint
       .then((res) => toast.success(res.message, { id: printId }))
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : "Print failed";
@@ -1753,8 +1847,12 @@ function POS() {
               onClick={() => {
                 if (!invoice) return;
                 const printerName = localStorage.getItem("baqala_receipt_printer") || undefined;
+                const mode = localStorage.getItem("baqala_print_mode") ?? "local";
                 const printId = toast.loading("Printing receipt…");
-                api.printReceipt({ ...invoice, printerName })
+                const doPrint = mode === "qz"
+                  ? qzPrintReceipt(invoice, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` }))
+                  : api.printReceipt({ ...invoice, printerName });
+                doPrint
                   .then((res) => toast.success(res.message, { id: printId }))
                   .catch((err: unknown) => {
                     const msg = err instanceof Error ? err.message : "Print failed";
