@@ -418,7 +418,7 @@ export const api = {
   deleteOffer: (id: string) =>
     request<void>(`/api/offers/${id}`, { method: "DELETE" }),
 
-  // ─── Printer (Linux CUPS) ──────────────────────────────────────────────────
+  // ─── Printer (Linux CUPS + Windows winspool) ────────────────────────────────
   detectPrinters: () =>
     request<{ printers: DetectedPrinter[] }>("/api/printer/detect"),
   getPrinterStatus: () =>

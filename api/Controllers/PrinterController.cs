@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
@@ -35,6 +36,22 @@ public class PrinterController : ControllerBase
     [HttpGet("detect")]
     public async Task<IActionResult> Detect()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows has no CUPS-style "raw unconfigured USB device" listing — a thermal
+            // printer needs its driver installed via Windows first. Surface installed
+            // printers here so the same setup UI can pick one and set it as default.
+            var installedPrinters = await WindowsPrinting.ListPrintersAsync();
+            var winPrinters = installedPrinters.Select(p => new
+            {
+                uri = p.PortName,
+                model = p.Name,
+                type = p.PortName.StartsWith("USB", StringComparison.OrdinalIgnoreCase) ? "usb" : "network",
+                suggestedName = p.Name,
+            }).ToList();
+            return Ok(new { printers = winPrinters });
+        }
+
         var (stdout, _, _) = await Run("lpinfo", "-v");
 
         var printers = stdout
@@ -83,6 +100,17 @@ public class PrinterController : ControllerBase
     [HttpGet("status")]
     public async Task<IActionResult> Status()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            var winPrinters = await WindowsPrinting.ListPrintersAsync();
+            return Ok(new
+            {
+                defaultPrinter = winPrinters.FirstOrDefault(p => p.IsDefault)?.Name,
+                installed = winPrinters.Select(p => p.Name).ToList(),
+                installedUris = winPrinters.ToDictionary(p => p.Name, p => p.PortName),
+            });
+        }
+
         // Default printer
         var (defOut, _, _) = await Run("lpstat", "-d");
         var defaultPrinter = defOut.Contains("system default destination:")
@@ -118,6 +146,25 @@ public class PrinterController : ControllerBase
     [HttpPost("activate")]
     public async Task<IActionResult> Activate([FromBody] ActivateRequest req)
     {
+        if (OperatingSystem.IsWindows())
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                return BadRequest(new { message = "Invalid printer name." });
+
+            var (ok, msg) = await WindowsPrinting.SetDefaultPrinterAsync(req.Name.Trim());
+            if (!ok)
+                return BadRequest(new { message = $"Failed to activate printer: {msg}" });
+
+            await WindowsPrinting.CreateKioskShortcutAsync();
+
+            return Ok(new
+            {
+                message    = $"Printer \"{req.Name}\" activated and set as default.",
+                name       = req.Name.Trim(),
+                kioskReady = true,
+            });
+        }
+
         if (!IsSafe(req.Uri) || !IsSafe(req.Name))
             return BadRequest(new { message = "Invalid printer URI or name." });
 
@@ -207,6 +254,25 @@ public class PrinterController : ControllerBase
     [HttpPost("print-receipt")]
     public async Task<IActionResult> PrintReceipt([FromBody] PrintReceiptRequest r)
     {
+        // Build ESC/POS byte stream
+        var esc = BuildEscPos(r);
+
+        if (OperatingSystem.IsWindows())
+        {
+            var winTarget = !string.IsNullOrWhiteSpace(r.PrinterName)
+                ? r.PrinterName.Trim()
+                : await WindowsPrinting.GetDefaultPrinterNameAsync();
+
+            if (string.IsNullOrWhiteSpace(winTarget))
+                return BadRequest(new { message = "No printer configured. Open Printer Setup and activate a printer first." });
+
+            var (ok, msg) = WindowsPrinting.PrintRaw(winTarget, esc, $"Receipt {r.OrderNumber}");
+            if (!ok)
+                return BadRequest(new { message = $"Print failed on '{winTarget}': {msg}" });
+
+            return Ok(new { message = $"Receipt sent to {winTarget}." });
+        }
+
         // Resolve printer
         string? targetPrinter = null;
         if (!string.IsNullOrWhiteSpace(r.PrinterName) && IsSafe(r.PrinterName))
@@ -221,8 +287,6 @@ public class PrinterController : ControllerBase
         if (string.IsNullOrWhiteSpace(targetPrinter))
             return BadRequest(new { message = "No printer configured. Open Printer Setup and activate a printer first." });
 
-        // Build ESC/POS byte stream
-        var esc = BuildEscPos(r);
         var binFile = Path.Combine(Path.GetTempPath(), $"receipt_{Guid.NewGuid():N}.bin");
         await System.IO.File.WriteAllBytesAsync(binFile, esc);
 
@@ -381,6 +445,9 @@ public class PrinterController : ControllerBase
     [HttpGet("jobs")]
     public async Task<IActionResult> Jobs([FromQuery] string? printer = null)
     {
+        if (OperatingSystem.IsWindows())
+            return Ok(new { jobs = await WindowsPrinting.GetJobsAsync(printer) });
+
         var args = printer != null && IsSafe(printer) ? $"-o -P {printer}" : "-o";
         var (stdout, _, _) = await Run("lpstat", args);
 
@@ -398,6 +465,13 @@ public class PrinterController : ControllerBase
     [HttpDelete("jobs")]
     public async Task<IActionResult> CancelAllJobs([FromQuery] string? printer = null)
     {
+        if (OperatingSystem.IsWindows())
+        {
+            var (ok, msg) = await WindowsPrinting.CancelJobsAsync(printer);
+            if (!ok) return BadRequest(new { message = $"Could not clear queue: {msg}" });
+            return Ok(new { message = "Print queue cleared." });
+        }
+
         // cancel -a [-x] cancels all jobs; -x also removes the job data
         var args = printer != null && IsSafe(printer) ? $"-a -x -u all -P {printer}" : "-a -x";
         var (_, err, exit) = await Run("cancel", args);
@@ -413,6 +487,13 @@ public class PrinterController : ControllerBase
     [HttpDelete("{name}")]
     public async Task<IActionResult> Remove(string name)
     {
+        if (OperatingSystem.IsWindows())
+        {
+            var (winOk, winMsg) = await WindowsPrinting.RemovePrinterAsync(name);
+            if (!winOk) return BadRequest(new { message = $"Failed to remove printer: {winMsg}" });
+            return Ok(new { message = $"Printer \"{name}\" removed." });
+        }
+
         if (!IsSafe(name))
             return BadRequest(new { message = "Invalid printer name." });
 
