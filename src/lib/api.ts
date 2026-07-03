@@ -467,6 +467,8 @@ export const api = {
     printerRequest<{ jobs: string[] }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`),
   cancelAllJobs: (printer?: string) =>
     printerRequest<{ message: string }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`, { method: "DELETE" }),
+  // Returns the direct URL to download the OS-specific QZ Tray install script
+  qzInstallScriptUrl: () => `${BASE}/api/printer/qz-install-script`,
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────

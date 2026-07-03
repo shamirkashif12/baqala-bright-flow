@@ -446,12 +446,22 @@ function PrinterSetupDialog() {
 
               {/* Install instructions */}
               {!qzConnected && (
-                <div className="rounded-lg border border-dashed px-4 py-3 space-y-1.5 text-xs text-muted-foreground">
-                  <p className="font-medium text-foreground">Setup (one-time per machine):</p>
-                  <p>1. Download &amp; install QZ Tray from <strong>qz.io/download</strong></p>
-                  <p>2. Launch QZ Tray — it appears in the system tray</p>
-                  <p>3. Click <strong>Connect</strong> above</p>
-                  <p className="text-amber-600">⚠ First time: QZ Tray will ask to allow unsigned content — click <strong>Allow</strong></p>
+                <div className="rounded-lg border border-dashed px-4 py-3 space-y-2.5 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground text-sm">Setup (one-time per machine):</p>
+                  <a
+                    href={api.qzInstallScriptUrl()}
+                    download
+                    className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90 transition-colors"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Download QZ Tray Installer Script
+                  </a>
+                  <div className="space-y-1">
+                    <p><span className="font-medium text-foreground">Windows:</span> Right-click the downloaded <code className="bg-muted px-1 rounded">.ps1</code> file → <strong>Run with PowerShell</strong></p>
+                    <p><span className="font-medium text-foreground">Linux / Mac:</span> Open terminal → <code className="bg-muted px-1 rounded">bash install-qz-tray.sh</code></p>
+                  </div>
+                  <p>After install, QZ Tray runs silently in the system tray on every boot.</p>
+                  <p className="text-amber-600 font-medium">⚠ First run: QZ Tray asks to <strong>Allow unsigned content</strong> — click Allow, then click Connect above.</p>
                 </div>
               )}
 
