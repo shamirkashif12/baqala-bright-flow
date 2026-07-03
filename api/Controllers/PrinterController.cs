@@ -1,4 +1,5 @@
 using BaqalaPOS.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
@@ -7,7 +8,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PrinterController : ControllerBase
+public class PrinterController(IConfiguration config) : ControllerBase
 {
     // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -504,6 +505,217 @@ public class PrinterController : ControllerBase
         return Ok(new { message = $"Printer \"{name}\" removed." });
     }
 
+    // ── GET /api/printer/setup-installer ─────────────────────────────────────
+    // Returns a platform-specific one-click installer:
+    //   Windows → .bat  (double-click, auto-elevates UAC, installs silently)
+    //   Linux   → .deb  (double-click → Software Center → Install)
+    //   macOS   → .command (double-click runs in Terminal automatically)
+
+    [HttpGet("setup-installer")]
+    public async Task<IActionResult> SetupInstaller()
+    {
+        var posUrl = config["PosUrl"] ?? $"{Request.Scheme}://{Request.Host}";
+        var ua     = Request.Headers.UserAgent.ToString().ToLower();
+        var appName = "MiMony POS";
+
+        // ── Windows ──────────────────────────────────────────────────────────
+        // Note: $$ prefix means only {{expr}} interpolates; bare $, {, } are all literal.
+        if (ua.Contains("windows"))
+        {
+            var bat = $$"""
+@echo off
+setlocal EnableDelayedExpansion
+title {{appName}} Setup
+
+:: ── Auto-elevate to Administrator ─────────────────────────────────────────
+>nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
+if '%errorlevel%' NEQ '0' (
+    echo Set UAC = CreateObject^("Shell.Application"^) > "%TEMP%\elevate.vbs"
+    echo UAC.ShellExecute "%~s0", "", "", "runas", 1 >> "%TEMP%\elevate.vbs"
+    "%TEMP%\elevate.vbs"
+    del "%TEMP%\elevate.vbs"
+    exit /B
+)
+
+echo.
+echo  ========================================
+echo   {{appName}} - One-Click Setup
+echo  ========================================
+echo.
+
+:: ── Download and install QZ Tray ──────────────────────────────────────────
+echo [1/3] Downloading QZ Tray...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; try { $r = Invoke-RestMethod 'https://api.github.com/repos/qzind/tray/releases/latest'; $a = $r.assets | Where-Object { $_.name -like '*.exe' -and $_.name -notlike '*arm64*' } | Select-Object -First 1; $url = $a.browser_download_url } catch { $url = 'https://github.com/qzind/tray/releases/download/v2.2.6/qz-tray-2.2.6-x86_64.exe' }; Invoke-WebRequest -Uri $url -OutFile $env:TEMP\qz-tray-setup.exe -UseBasicParsing"
+
+echo [2/3] Installing QZ Tray silently...
+"%TEMP%\qz-tray-setup.exe" /S
+timeout /t 8 /nobreak >nul
+del "%TEMP%\qz-tray-setup.exe" 2>nul
+
+:: ── Create Desktop shortcut (kiosk Chrome) ────────────────────────────────
+echo [3/3] Creating POS shortcut on Desktop...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($env:PUBLIC + '\Desktop\{{appName}}.lnk'); $chromePaths = @($env:ProgramFiles + '\Google\Chrome\Application\chrome.exe',$env:ProgramFiles + '\Microsoft\Edge\Application\msedge.exe'); $browser = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($browser) { $sc.TargetPath = $browser; $sc.Arguments = '--kiosk {{posUrl}}/pos --disable-infobars --no-first-run' } else { $sc.TargetPath = 'C:\Windows\explorer.exe'; $sc.Arguments = '{{posUrl}}/pos' }; $sc.Description = '{{appName}} Checkout'; $sc.Save()"
+
+:: ── Start QZ Tray ─────────────────────────────────────────────────────────
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$qz = @($env:ProgramFiles + '\QZ Tray\qz-tray.exe',$env:LOCALAPPDATA + '\QZ Tray\qz-tray.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($qz) { Start-Process $qz; reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Tray' /t REG_SZ /d $qz /f | Out-Null }"
+
+echo.
+echo  ========================================
+echo   Setup complete!
+echo.
+echo   QZ Tray is running in the system tray.
+echo   POS shortcut added to Desktop.
+echo.
+echo   First time only: when QZ Tray shows
+echo   a security prompt, click ALLOW.
+echo  ========================================
+echo.
+pause
+""";
+            return File(System.Text.Encoding.UTF8.GetBytes(bat),
+                "application/octet-stream", "MiMony-POS-Setup.bat");
+        }
+
+        // ── macOS ─────────────────────────────────────────────────────────────
+        if (ua.Contains("macintosh") || ua.Contains("mac os"))
+        {
+            var cmd = $$"""
+#!/bin/bash
+# Double-click to run — opens Terminal automatically
+clear
+echo " ========================================"
+echo "  {{appName}} - One-Click Setup"
+echo " ========================================"
+echo ""
+
+# 1. Install QZ Tray
+if ! [ -d "/Applications/QZ Tray.app" ]; then
+  echo "[1/3] Downloading QZ Tray..."
+  RELEASE=$(curl -s https://api.github.com/repos/qzind/tray/releases/latest 2>/dev/null)
+  ARCH=$(uname -m)
+  if [ "$ARCH" = "arm64" ]; then
+    URL=$(echo "$RELEASE" | grep -o '"browser_download_url":"[^"]*arm64\.pkg"' | grep -o 'https://[^"]*' | head -1)
+    [ -z "$URL" ] && URL="https://github.com/qzind/tray/releases/download/v2.2.6/qz-tray-2.2.6-arm64.pkg"
+  else
+    URL=$(echo "$RELEASE" | grep -o '"browser_download_url":"[^"]*x86_64\.pkg"' | grep -o 'https://[^"]*' | head -1)
+    [ -z "$URL" ] && URL="https://github.com/qzind/tray/releases/download/v2.2.6/qz-tray-2.2.6-x86_64.pkg"
+  fi
+  curl -L --progress-bar -o /tmp/qz-tray.pkg "$URL"
+  echo "[2/3] Installing QZ Tray (may ask for password)..."
+  sudo installer -pkg /tmp/qz-tray.pkg -target / && rm /tmp/qz-tray.pkg
+else
+  echo "[1/3] QZ Tray already installed — skipping."
+  echo "[2/3] Skipped."
+fi
+
+# 2. Desktop shortcut (URL baked in by server at download time)
+echo "[3/3] Creating POS shortcut on Desktop..."
+cat > ~/Desktop/"{{appName}}.command" << 'ENDOFSHORTCUT'
+#!/bin/bash
+open -a "Google Chrome" --args --kiosk {{posUrl}}/pos --disable-infobars --no-first-run 2>/dev/null || \
+open -a "Safari" {{posUrl}}/pos
+ENDOFSHORTCUT
+chmod +x ~/Desktop/"{{appName}}.command"
+
+# 3. Launch QZ Tray and add to login items
+open -a "QZ Tray" 2>/dev/null || true
+osascript -e 'tell application "System Events" to make new login item at end with properties {path:"/Applications/QZ Tray.app", hidden:true}' 2>/dev/null || true
+
+echo ""
+echo " ========================================"
+echo "  Setup complete!"
+echo ""
+echo "  QZ Tray is running in the menu bar."
+echo "  POS shortcut added to Desktop."
+echo ""
+echo "  First time: QZ Tray may ask to Allow"
+echo "  unsigned content — click Allow."
+echo " ========================================"
+""";
+            return File(System.Text.Encoding.UTF8.GetBytes(cmd),
+                "application/octet-stream", "MiMony-POS-Setup.command");
+        }
+
+        // ── Linux → .desktop launcher ─────────────────────────────────────────
+        // Avoids App Center entirely. User double-clicks → "Allow Launching" →
+        // terminal opens → script runs (sudo dpkg prompts password in terminal).
+        // The bash script is base64-embedded so no quoting issues in Exec line.
+        var bashScript = $$"""
+#!/bin/bash
+clear
+echo " ========================================"
+echo "  {{appName}} - One-Click Setup"
+echo " ========================================"
+echo ""
+
+echo "[1/3] Downloading QZ Tray..."
+ARCH=$(uname -m)
+RELEASE=$(curl -sf https://api.github.com/repos/qzind/tray/releases/latest 2>/dev/null || echo "")
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+  URL=$(echo "$RELEASE" | grep -o '"browser_download_url":"[^"]*arm64\.run"' | grep -o 'https://[^"]*' | head -1)
+  [ -z "$URL" ] && URL="https://github.com/qzind/tray/releases/download/v2.2.6/qz-tray-2.2.6-arm64.run"
+else
+  URL=$(echo "$RELEASE" | grep -o '"browser_download_url":"[^"]*x86_64\.run"' | grep -o 'https://[^"]*' | head -1)
+  [ -z "$URL" ] && URL="https://github.com/qzind/tray/releases/download/v2.2.6/qz-tray-2.2.6-x86_64.run"
+fi
+curl -L --progress-bar -o /tmp/qz-tray-setup.run "$URL"
+
+echo ""
+echo "[2/3] Installing QZ Tray (enter your password when asked)..."
+chmod +x /tmp/qz-tray-setup.run
+sudo /tmp/qz-tray-setup.run --accept --quiet
+rm -f /tmp/qz-tray-setup.run
+
+echo ""
+echo "[3/3] Creating POS shortcut on Desktop..."
+mkdir -p ~/Desktop
+cat > ~/Desktop/"{{appName}}.desktop" << 'POSSHORTCUT'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name={{appName}}
+Exec=bash -c "google-chrome --kiosk {{posUrl}}/pos --disable-infobars --no-first-run 2>/dev/null || chromium-browser --kiosk {{posUrl}}/pos 2>/dev/null || xdg-open {{posUrl}}/pos"
+Icon=chromium
+Terminal=false
+Categories=Office;
+StartupNotify=true
+POSSHORTCUT
+chmod +x ~/Desktop/"{{appName}}.desktop"
+gio set ~/Desktop/"{{appName}}.desktop" metadata::trusted true 2>/dev/null || true
+
+# Add QZ Tray to autostart
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/qz-tray.desktop << 'AUTOSTART'
+[Desktop Entry]
+Type=Application
+Name=QZ Tray
+Exec=qz-tray
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+AUTOSTART
+
+# Launch QZ Tray now
+nohup qz-tray >/dev/null 2>&1 &
+
+echo ""
+echo " ========================================"
+echo "  Done!"
+echo "  QZ Tray is running in the system tray."
+echo "  POS shortcut is on your Desktop."
+echo ""
+echo "  First time: QZ Tray shows 'Allow"
+echo "  unsigned content' -> click Allow."
+echo " ========================================"
+echo ""
+echo "Press Enter to close..."
+read
+""";
+        // Serve as plain .sh — IT opens terminal and runs: bash ~/Downloads/MiMony-POS-Setup.sh
+        return File(System.Text.Encoding.UTF8.GetBytes(bashScript),
+            "application/x-sh", "MiMony-POS-Setup.sh");
+    }
+
     // ── GET /api/printer/qz-install-script ───────────────────────────────────
     // Detects the browser OS from User-Agent and returns a platform-specific
     // install script that downloads and silently installs QZ Tray.
@@ -648,4 +860,44 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
             "application/octet-stream",
             "install-qz-tray.sh");
     }
+
+    // ── QZ Tray certificate signing (eliminates "Action Required" prompt) ────
+
+    [HttpGet("qz-certificate")]
+    [AllowAnonymous]
+    public IActionResult QzCertificate()
+    {
+        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            return NotFound("QZ certificate not found");
+        var pem = System.IO.File.ReadAllText(certPath);
+        return Content(pem, "text/plain");
+    }
+
+    [HttpPost("qz-sign")]
+    [AllowAnonymous]
+    public IActionResult QzSign([FromBody] QzSignRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.ToSign))
+            return BadRequest("toSign is required");
+
+        var keyPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "private.pem");
+        if (!System.IO.File.Exists(keyPath))
+            keyPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "private.pem");
+        if (!System.IO.File.Exists(keyPath))
+            return NotFound("QZ private key not found");
+
+        var pem = System.IO.File.ReadAllText(keyPath);
+        var key = System.Security.Cryptography.RSA.Create();
+        key.ImportFromPem(pem);
+
+        var data = System.Text.Encoding.UTF8.GetBytes(req.ToSign);
+        var sig  = key.SignData(data, System.Security.Cryptography.HashAlgorithmName.SHA1,
+                                System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        return Content(Convert.ToBase64String(sig), "text/plain");
+    }
 }
+
+public record QzSignRequest(string ToSign);

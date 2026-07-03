@@ -1,15 +1,21 @@
 // QZ Tray integration — browser-to-USB printer bridge
 // Works on Chrome, Firefox, Safari, Edge.
 // Cashier machine needs QZ Tray installed: https://qz.io/download/
-// After install, open QZ Tray → Settings → Allow unsigned content (for dev)
 
 import qz from "qz-tray";
 import { buildEscPos, type ReceiptData } from "./escpos";
+import { api } from "./api";
 
-// Unsigned mode — no certificate needed for internal/dev use.
-// For production with public-facing certs: replace null with your cert string.
-qz.security.setCertificatePromise((resolve) => resolve(null));
-qz.security.setSignaturePromise((_toSign) => (resolve) => resolve(null));
+// Signed mode — certificate from backend eliminates the "Action Required" prompt.
+qz.security.setCertificatePromise((resolve) => {
+  fetch(api.qzCertificateUrl())
+    .then(r => r.ok ? r.text() : Promise.reject(r.statusText))
+    .then(resolve)
+    .catch(() => resolve(null)); // fall back to unsigned if cert not available
+});
+qz.security.setSignaturePromise((toSign) => (resolve) => {
+  api.qzSign(toSign).then(resolve).catch(() => resolve(null));
+});
 
 let connectPromise: Promise<void> | null = null;
 
@@ -46,10 +52,13 @@ export async function qzPrintReceipt(receipt: ReceiptData, printerName?: string)
   const printer = printerName || await qz.printers.getDefault();
   if (!printer) throw new Error("No printer selected. Open Printer Setup and choose a printer.");
   const bytes = buildEscPos(receipt);
-  const config = qz.configs.create(printer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const base64 = btoa(binary);
+  const config = qz.configs.create(printer, { raw: true });
   await qz.print(config, [{
     type: "raw",
-    format: "command",
-    data: Array.from(bytes),
+    format: "base64",
+    data: base64,
   }]);
 }

@@ -469,6 +469,15 @@ export const api = {
     printerRequest<{ message: string }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`, { method: "DELETE" }),
   // Returns the direct URL to download the OS-specific QZ Tray install script
   qzInstallScriptUrl: () => `${BASE}/api/printer/qz-install-script`,
+  // Returns the direct URL to download the one-click POS Setup installer (OS-specific)
+  setupInstallerUrl: () => `${BASE}/api/printer/setup-installer`,
+  qzCertificateUrl: () => `${BASE}/api/printer/qz-certificate`,
+  qzSign: (toSign: string) =>
+    fetch(`${BASE}/api/printer/qz-sign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toSign }),
+    }).then(r => r.text()),
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────

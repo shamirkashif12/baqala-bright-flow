@@ -447,21 +447,32 @@ function PrinterSetupDialog() {
               {/* Install instructions */}
               {!qzConnected && (
                 <div className="rounded-lg border border-dashed px-4 py-3 space-y-2.5 text-xs text-muted-foreground">
-                  <p className="font-medium text-foreground text-sm">Setup (one-time per machine):</p>
+                  <p className="font-medium text-foreground text-sm">Setup (one-time per machine, run as IT/Admin):</p>
+
+                  {/* ── One-click installer (recommended) ── */}
                   <a
-                    href={api.qzInstallScriptUrl()}
+                    href={api.setupInstallerUrl()}
                     download
                     className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90 transition-colors"
                   >
                     <Printer className="h-4 w-4" />
-                    Download QZ Tray Installer Script
+                    Download POS Setup Installer
                   </a>
                   <div className="space-y-1">
-                    <p><span className="font-medium text-foreground">Windows:</span> Right-click the downloaded <code className="bg-muted px-1 rounded">.ps1</code> file → <strong>Run with PowerShell</strong></p>
-                    <p><span className="font-medium text-foreground">Linux / Mac:</span> Open terminal → <code className="bg-muted px-1 rounded">bash install-qz-tray.sh</code></p>
+                    <p><span className="font-medium text-foreground">Windows:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.bat</code> → Accept UAC prompt</p>
+                    <p><span className="font-medium text-foreground">macOS:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.command</code></p>
+                    <p><span className="font-medium text-foreground">Linux:</span> Open Terminal → paste this command:</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <code className="flex-1 bg-muted px-2 py-1 rounded text-[10px] break-all select-all">bash ~/Downloads/MiMony-POS-Setup.sh</code>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded px-2 py-1 bg-muted hover:bg-muted/70 text-xs"
+                        onClick={() => navigator.clipboard.writeText("bash ~/Downloads/MiMony-POS-Setup.sh")}
+                      >Copy</button>
+                    </div>
                   </div>
-                  <p>After install, QZ Tray runs silently in the system tray on every boot.</p>
-                  <p className="text-amber-600 font-medium">⚠ First run: QZ Tray asks to <strong>Allow unsigned content</strong> — click Allow, then click Connect above.</p>
+                  <p>Installs QZ Tray silently + creates a POS shortcut on the Desktop. QZ Tray starts automatically on every boot.</p>
+                  <p className="text-amber-600 font-medium">⚠ First run: QZ Tray shows an <strong>Allow unsigned content</strong> prompt — click Allow, then click Connect above.</p>
                 </div>
               )}
 
