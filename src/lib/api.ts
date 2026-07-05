@@ -51,6 +51,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("baqala_token") : null;
+  const res = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    let msg = text;
+    try {
+      const parsed = JSON.parse(text) as { message?: string; title?: string };
+      msg = parsed.message ?? parsed.title ?? text;
+    } catch { /* not JSON */ }
+    throw new Error(msg || res.statusText);
+  }
+  return res.blob();
+}
+
+function toQuery(params?: Record<string, string | number | boolean | undefined>): string {
+  const q = new URLSearchParams(
+    Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v !== undefined && v !== "")) as Record<string, string>
+  ).toString();
+  return q ? `?${q}` : "";
+}
+
 export const api = {
   // Branches
   getBranches: (status?: string) =>
@@ -372,6 +396,37 @@ export const api = {
     ).toString();
     return request<DashboardMetrics>(`/api/dashboard${q ? `?${q}` : ""}`);
   },
+
+  // Reports
+  getDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string }) =>
+    request<DailySalesReport>(`/api/reports/daily-sales${toQuery(params)}`),
+  exportDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/daily-sales/export${toQuery(params)}`),
+
+  getMonthlySalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; comparePrevious?: boolean }) =>
+    request<MonthlySalesReport>(`/api/reports/monthly-sales${toQuery(params)}`),
+  exportMonthlySalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; comparePrevious?: boolean; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/monthly-sales/export${toQuery(params)}`),
+
+  getCashierSalesReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; terminalId?: string }) =>
+    request<CashierSalesReport>(`/api/reports/cashier-sales${toQuery(params)}`),
+  exportCashierSalesReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; terminalId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/cashier-sales/export${toQuery(params)}`),
+
+  getPaymentMethodsReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string }) =>
+    request<PaymentMethodsReport>(`/api/reports/payment-methods${toQuery(params)}`),
+  exportPaymentMethodsReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/payment-methods/export${toQuery(params)}`),
+
+  getLowStockReport: (params?: { branchId?: string; categoryId?: string; onlyLowStock?: boolean }) =>
+    request<LowStockReport>(`/api/reports/low-stock${toQuery(params)}`),
+  exportLowStockReport: (params?: { branchId?: string; categoryId?: string; onlyLowStock?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/low-stock/export${toQuery(params)}`),
+
+  getInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string }) =>
+    request<InventorySnapshotReport>(`/api/reports/inventory-snapshot${toQuery(params)}`),
+  exportInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/inventory-snapshot/export${toQuery(params)}`),
 
   // Compliance rules
   getComplianceRules: (params?: { ruleType?: string }) => {
@@ -883,6 +938,72 @@ export interface DashboardMetrics {
   cashierPerformance: { name: string; sales: number; status: string }[];
   branchPerformance: { branch: string; orders: number; sales: number }[];
   returns: { count: number; refundedAmount: number };
+}
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+
+export type ReportExportFormat = "csv" | "pdf";
+
+export interface DailySalesHour {
+  hour: number; transactions: number; grossSales: number; discounts: number; returns: number;
+  netSales: number; vat: number; cash: number; card: number; wallet: number; avgBasket: number;
+}
+export interface DailySalesReport {
+  kpis: { grossSales: number; netSales: number; transactions: number; avgBasket: number; vatCollected: number; returnsRefunds: number };
+  hourly: DailySalesHour[];
+  paymentSplit: { method: string; amount: number }[];
+}
+
+export interface MonthlyDayRow {
+  date: string; transactions: number; grossSales: number; discounts: number; returns: number;
+  netSales: number; vat: number; cogs: number; grossProfit: number; marginPct: number | null;
+  avgBasket: number; previousPeriodSales: number | null; growthPct: number | null;
+}
+export interface MonthlySalesReport {
+  kpis: { netSales: number; grossProfit: number; marginPct: number | null; transactions: number; returnValue: number; discountValue: number };
+  daily: MonthlyDayRow[];
+}
+
+export interface CashierSalesRow {
+  cashierId: string; cashierName: string; branch: string; shiftId: string;
+  shiftStart: string; shiftEnd?: string; terminal: string; transactions: number;
+  grossSales: number; discounts: number; returns: number; voids: number; netSales: number;
+  cashExpected: number; cashCounted?: number; variance?: number;
+}
+export interface CashierSalesReport {
+  kpis: { topCashier?: string; totalSales: number; cashVariance: number; returnCount: number; voidCount: number };
+  rows: CashierSalesRow[];
+}
+
+export interface PaymentMethodRow {
+  method: string; branch: string; transactions: number; grossAmount: number;
+  netSettled: number; pendingAmount: number; status: string;
+}
+export interface PaymentMethodsReport {
+  kpis: { cashCollected: number; cardSettled: number; walletAmount: number; pendingAmount: number; refundValue: number; paymentFees: number };
+  rows: PaymentMethodRow[];
+  refunds: { method: string; amount: number }[];
+}
+
+export interface LowStockRow {
+  sku: string; productName: string; category: string; branch: string; availableQty: number;
+  reorderLevel: number; recommendedReorderQty: number; preferredSupplier?: string;
+  lastSoldDate?: string; urgency: "critical" | "low" | "ok"; estimatedReorderValue: number;
+}
+export interface LowStockReport {
+  kpis: { lowStockSkus: number; criticalSkus: number; outOfStockSkus: number; estimatedReorderValue: number; affectedBranches: number; suppliersToContact: number };
+  rows: LowStockRow[];
+}
+
+export interface InventorySnapshotRow {
+  sku: string; productName: string; category: string; branch: string;
+  onHandQty: number; reservedQty: number; availableQty: number; reorderLevel: number;
+  costPrice: number; stockCostValue: number; retailValue: number;
+  lastMovementDate: string; stockStatus: "negative" | "out of stock" | "low" | "in stock";
+}
+export interface InventorySnapshotReport {
+  kpis: { totalStockValue: number; skuCount: number; availableQty: number; reservedQty: number; outOfStockSkus: number; negativeStockExceptions: number };
+  rows: InventorySnapshotRow[];
 }
 
 export interface DetectedPrinter {
