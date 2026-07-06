@@ -162,8 +162,14 @@ function AdminHome() {
 
       {/* Live metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Live Sales" value={<><SARIcon />{Math.round(salesValue).toLocaleString()}</>} delta="+18%" trend="up" hint="today" icon={TrendingUp} accent="primary" />
-        <MetricCard label="Orders Today" value={ordersValue.toLocaleString()} delta="+12%" trend="up" hint="total" icon={ReceiptText} />
+        <MetricCard label="Live Sales" value={<><SARIcon />{Math.round(salesValue).toLocaleString()}</>}
+          delta={dashboard ? `${dashboard.sales.totalTodayDeltaPct > 0 ? "+" : ""}${dashboard.sales.totalTodayDeltaPct}%` : undefined}
+          trend={dashboard ? (dashboard.sales.totalTodayDeltaPct >= 0 ? "up" : "down") : undefined}
+          hint="today" icon={TrendingUp} accent="primary" />
+        <MetricCard label="Orders Today" value={ordersValue.toLocaleString()}
+          delta={dashboard ? `${dashboard.orders.deliveredDeltaPct > 0 ? "+" : ""}${dashboard.orders.deliveredDeltaPct}%` : undefined}
+          trend={dashboard ? (dashboard.orders.deliveredDeltaPct >= 0 ? "up" : "down") : undefined}
+          hint="total" icon={ReceiptText} />
         <MetricCard label="API Throughput" value={`${Math.round(apiRps)} rps`} delta="healthy" trend="flat" icon={Activity} accent="success" />
         <MetricCard label="Platform Uptime" value={`${uptime.toFixed(2)}%`} delta="30d" trend="up" icon={ShieldCheck} accent="success" />
       </div>

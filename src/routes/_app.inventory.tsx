@@ -20,6 +20,7 @@ import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { fileToCompressedDataUrl } from "@/lib/image";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/inventory")({ component: Inventory });
 
@@ -112,30 +113,31 @@ function ProductImagePicker({ value, onChange }: { value: string; onChange: (dat
 
 // ─── Receive Batch Dialog ─────────────────────────────────────────────────────
 
-function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppliers, onDone }: {
+function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppliers, onDone, lockedBranchId }: {
   open: boolean; onClose: () => void;
   stock: StockItem[]; branches: Branch[]; warehouses: Warehouse[]; suppliers: Supplier[];
-  onDone: () => void;
+  onDone: () => void; lockedBranchId: string | null;
 }) {
   const [form, setForm] = useState({
     batchNumber: "", supplierId: "", productId: "", quantity: "",
     expiryDate: "", purchaseCost: "", vatPct: "15", customFee: "0.00",
-    destType: "branch" as "branch" | "warehouse", branchId: "", warehouseId: "", notes: "",
+    destType: "branch" as "branch" | "warehouse", branchId: lockedBranchId ?? "", warehouseId: "", notes: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const set = (k: keyof typeof form) => (v: string) => setForm(p => ({ ...p, [k]: v }));
 
-  const reset = () => setForm({ batchNumber: "", supplierId: "", productId: "", quantity: "", expiryDate: "", purchaseCost: "", vatPct: "15", customFee: "0.00", destType: "branch", branchId: "", warehouseId: "", notes: "" });
+  const reset = () => setForm({ batchNumber: "", supplierId: "", productId: "", quantity: "", expiryDate: "", purchaseCost: "", vatPct: "15", customFee: "0.00", destType: "branch", branchId: lockedBranchId ?? "", warehouseId: "", notes: "" });
 
   const handleSubmit = async () => {
     if (!form.productId || !form.quantity) return setError("Product and quantity are required.");
     const destBranchId = form.destType === "branch" ? form.branchId : "";
     if (!destBranchId && form.destType === "branch") return setError("Please select a branch.");
     if (!form.warehouseId && form.destType === "warehouse") return setError("Please select a warehouse.");
+    if (lockedBranchId && form.destType === "branch" && destBranchId !== lockedBranchId) return setError("You can only receive stock into your own branch.");
     // For warehouse batches, find the branch that owns that warehouse
-    const branchId = destBranchId || (branches[0]?.id ?? "");
+    const branchId = destBranchId || lockedBranchId || (branches[0]?.id ?? "");
     setSaving(true); setError("");
     try {
       await api.receiveBatch({
@@ -148,6 +150,7 @@ function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppli
         batchNumber: form.batchNumber || undefined,
         notes: form.notes || undefined,
       } as Parameters<typeof api.receiveBatch>[0]);
+      toast.success("Batch received successfully");
       reset(); onDone(); onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed."); }
     finally { setSaving(false); }
@@ -211,9 +214,9 @@ function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppli
                   ))}
                 </div>
                 {form.destType === "branch" ? (
-                  <Select value={form.branchId} onValueChange={set("branchId")}>
+                  <Select value={form.branchId} onValueChange={set("branchId")} disabled={!!lockedBranchId}>
                     <SelectTrigger className="h-9 col-span-2"><SelectValue placeholder="Select branch" /></SelectTrigger>
-                    <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+                    <SelectContent>{(lockedBranchId ? branches.filter(b => b.id === lockedBranchId) : branches).map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
                   </Select>
                 ) : (
                   <Select value={form.warehouseId} onValueChange={set("warehouseId")}>
@@ -248,15 +251,16 @@ function generateSKU(name: string): string {
   return parts.length ? `${parts.join("-")}-${suffix}` : `SKU-${suffix}`;
 }
 
-function AddProductDialog({ open, onClose, categories, branches, warehouses, onDone }: {
+function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   open: boolean; onClose: () => void;
-  categories: Category[]; branches: Branch[]; warehouses: Warehouse[];
+  categories: Category[]; branches: Branch[];
   onDone: () => void;
 }) {
   const barcodeRef = useRef<HTMLInputElement>(null);
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(false);
   const [skuManual, setSkuManual] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupStatus, setLookupStatus] = useState<"found" | "not_found" | null>(null);
@@ -301,7 +305,7 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
   };
   const [form, setForm] = useState({
     name: "", sku: "", barcode: "", categoryId: "",
-    branchId: "", warehouseId: "",
+    branchId: "",
     purchasePrice: "", sellingPrice: "",
     quantity: "100", expiryDate: "",
     vatPct: "15", customFee: "0.00", isTobacco: false,
@@ -309,11 +313,22 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
     discount: "", imageUrl: "",
   });
 
-  const set = (k: keyof typeof form) => (v: string) => setForm(p => ({ ...p, [k]: v }));
+  const set = (k: keyof typeof form) => (v: string) => { setForm(p => ({ ...p, [k]: v })); setError(""); };
   const reset = () => {
     setSkuManual(false);
-    setForm({ name: "", sku: "", barcode: "", categoryId: "", branchId: "", warehouseId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
+    setSubmitted(false);
+    setForm({ name: "", sku: "", barcode: "", categoryId: "", branchId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
   };
+
+  const missingFields = [
+    !form.imageUrl && "Product Photo",
+    !form.name && "Product Name",
+    !form.sku && "SKU",
+    !form.categoryId && "Category",
+    !form.branchId && "Branch",
+    !form.sellingPrice && "Selling Price",
+  ].filter((x): x is string => !!x);
+  const fieldError = (field: string) => (submitted && missingFields.includes(field) ? "border-destructive/60 ring-1 ring-destructive/30" : "");
 
   // Auto-generate SKU when name changes (unless user typed it manually)
   useEffect(() => {
@@ -324,10 +339,10 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
   }, [form.name]);
 
   const handleSave = async () => {
-    if (!form.name || !form.sku || !form.sellingPrice) return setError("Name, SKU and selling price are required.");
-    if (!form.categoryId) return setError("Category is required.");
-    if (!form.branchId) return setError("Branch is required to create a stock entry.");
-    if (!form.imageUrl) return setError("A product photo is required.");
+    setSubmitted(true);
+    if (missingFields.length > 0) {
+      return setError(`${missingFields.join(", ")} ${missingFields.length > 1 ? "are" : "is"} required.`);
+    }
     setSaving(true); setError("");
     try {
       const product = await api.createProduct({
@@ -354,6 +369,7 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
         expiryDate: form.expiryDate || undefined,
         batchNumber: `INIT-${product.id.slice(0, 6).toUpperCase()}`,
       } as Parameters<typeof api.receiveBatch>[0]);
+      toast.success("Product created successfully");
       reset(); onDone(); onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed."); }
     finally { setSaving(false); }
@@ -370,11 +386,11 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
         </div>
         <div className="grid grid-cols-2 gap-3 mt-3">
           <FieldRow label="Product Name *">
-            <Input className="h-9" placeholder="Almarai Laban 1L" value={form.name} onChange={e => set("name")(e.target.value)} />
+            <Input className={`h-9 ${fieldError("Product Name")}`} placeholder="Almarai Laban 1L" value={form.name} onChange={e => set("name")(e.target.value)} />
           </FieldRow>
           <FieldRow label="SKU *">
             <div className="relative">
-              <Input className="h-9 pr-16" placeholder="ALM-LB-1L" value={form.sku}
+              <Input className={`h-9 pr-16 ${fieldError("SKU")}`} placeholder="ALM-LB-1L" value={form.sku}
                 onChange={e => { setSkuManual(true); set("sku")(e.target.value); }} />
               {skuManual && (
                 <button type="button" onClick={() => { setSkuManual(false); setForm(p => ({ ...p, sku: generateSKU(p.name) })); }}
@@ -416,7 +432,7 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
           </FieldRow>
           <FieldRow label="Category *">
             <Select value={form.categoryId} onValueChange={set("categoryId")}>
-              <SelectTrigger className={`h-9 ${!form.categoryId ? "border-destructive/50" : ""}`}>
+              <SelectTrigger className={`h-9 ${fieldError("Category")}`}>
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>{categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
@@ -424,21 +440,15 @@ function AddProductDialog({ open, onClose, categories, branches, warehouses, onD
           </FieldRow>
           <FieldRow label="Branch *">
             <Select value={form.branchId} onValueChange={set("branchId")}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+              <SelectTrigger className={`h-9 ${fieldError("Branch")}`}><SelectValue placeholder="Select branch" /></SelectTrigger>
               <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-            </Select>
-          </FieldRow>
-          <FieldRow label="Warehouse">
-            <Select value={form.warehouseId} onValueChange={set("warehouseId")}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
-              <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
             </Select>
           </FieldRow>
           <FieldRow label="Purchase Price">
             <Input type="number" step="0.01" className="h-9" placeholder="4.20" value={form.purchasePrice} onChange={e => set("purchasePrice")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Selling Price *">
-            <Input type="number" step="0.01" className="h-9" placeholder="6.50" value={form.sellingPrice} onChange={e => set("sellingPrice")(e.target.value)} />
+            <Input type="number" step="0.01" className={`h-9 ${fieldError("Selling Price")}`} placeholder="6.50" value={form.sellingPrice} onChange={e => set("sellingPrice")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Quantity">
             <Input type="number" className="h-9" placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
@@ -653,7 +663,6 @@ function ViewSheet({ item, suppliers, onClose }: { item: StockItem | null; suppl
   const rows: [string, React.ReactNode][] = [
     ["Category",       item.product?.category?.name ?? "—"],
     ["Branch",         item.branch?.name ?? "—"],
-    ["Warehouse",      item.warehouseName ?? "—"],
     ["Quantity",       String(item.quantity)],
     ["Stock status",   item.quantity === 0 ? "Out of stock" : item.quantity <= item.reorderLevel ? "Low" : "In stock"],
     ["Expiry",         item.expiryDate ? new Date(item.expiryDate).toISOString().split("T")[0] : "—"],
@@ -771,7 +780,6 @@ function AdjustDialog({ item, onClose, onDone }: { item: StockItem | null; onClo
 
 type StockItem = InventoryStock & {
   branchName?: string;
-  warehouseName?: string;
   supplierId?: string;
   expiryDate?: string;
 };
@@ -780,14 +788,13 @@ type StockItem = InventoryStock & {
 
 function exportCSV(data: StockItem[]) {
   const rows: string[][] = [
-    ["Product", "SKU", "Barcode", "Category", "Branch", "Warehouse", "Qty", "Reorder Level", "Stock Status", "Expiry Date", "Cost Price (SAR)", "Selling Price (SAR)", "VAT %", "Custom Fee (SAR)"],
+    ["Product", "SKU", "Barcode", "Category", "Branch", "Qty", "Reorder Level", "Stock Status", "Expiry Date", "Cost Price (SAR)", "Selling Price (SAR)", "VAT %", "Custom Fee (SAR)"],
     ...data.map(s => [
       s.product?.name ?? "",
       s.product?.sku ?? "",
       s.product?.barcode ?? "",
       s.product?.category?.name ?? "",
       s.branch?.name ?? "",
-      s.warehouseName ?? "",
       String(s.quantity),
       String(s.reorderLevel),
       s.quantity === 0 ? "Out of Stock" : s.quantity <= s.reorderLevel ? "Low" : "In Stock",
@@ -834,18 +841,7 @@ function Inventory() {
     setLoading(true);
     Promise.all([api.getStock({ branchId: lockedBranchId ?? undefined }), api.getCategories(), api.getBranches(), api.getWarehouses()])
       .then(([s, c, b, w]) => {
-        // Build warehouse map: branchId -> warehouse name (primary or first)
-        const whMap = new Map<string, string>();
-        (w as Warehouse[]).forEach(wh => {
-          (wh.branchWarehouses ?? []).forEach(bw => {
-            if (!whMap.has(bw.branchId)) whMap.set(bw.branchId, wh.name);
-          });
-        });
-        const enriched = (s as StockItem[]).map(item => ({
-          ...item,
-          warehouseName: whMap.get(item.branchId) ?? undefined,
-        }));
-        setStock(enriched);
+        setStock(s as StockItem[]);
         setCategories(c);
         setBranches(b);
         setWarehouses(w);
@@ -893,7 +889,9 @@ function Inventory() {
   // Metrics
   const totalSKUs = stock.length;
   const lowStockItems = stock.filter(s => s.quantity > 0 && s.quantity <= s.reorderLevel);
-  const criticalCount = stock.filter(s => s.quantity === 0 || s.quantity <= s.reorderLevel * 0.5).length;
+  // "Critical" = out of stock — matches the Dashboard's outOfStockCount so the
+  // same word doesn't mean different thresholds on different screens.
+  const criticalCount = stock.filter(s => s.quantity === 0).length;
   const expiringSoon = stock.filter(s => { const d = daysLeft(s.expiryDate); return d !== null && d >= 0 && d <= 7; });
   const outOfStock = stock.filter(s => s.quantity === 0);
   const fastMoving = stock.filter(s => s.quantity >= s.reorderLevel * 3);
@@ -947,7 +945,6 @@ function Inventory() {
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total SKUs</p>
               <p className="text-3xl font-black mt-1">{totalSKUs.toLocaleString()}</p>
-              <p className="text-xs text-success mt-1">↗ +34 this week</p>
             </div>
             <div className="h-12 w-12 rounded-xl gradient-primary flex items-center justify-center"><Boxes className="h-6 w-6 text-primary-foreground" /></div>
           </div>
@@ -1047,7 +1044,7 @@ function Inventory() {
                 <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Product</th>
                   <th className="px-3 py-3 font-semibold">Category</th>
-                  <th className="px-3 py-3 font-semibold">Branch / WH</th>
+                  <th className="px-3 py-3 font-semibold">Branch</th>
                   <th className="px-3 py-3 font-semibold">Qty</th>
                   <th className="px-3 py-3 font-semibold">Stock</th>
                   <th className="px-3 py-3 font-semibold">Expiry</th>
@@ -1064,10 +1061,7 @@ function Inventory() {
                       <p className="text-xs text-muted-foreground font-mono">{s.product?.sku} · {s.product?.barcode}</p>
                     </td>
                     <td className="px-3 py-3 text-xs">{s.product?.category?.name ?? "—"}</td>
-                    <td className="px-3 py-3 text-xs">
-                      <p>{s.branch?.name ?? "—"}</p>
-                      {s.warehouseName && <p className="text-muted-foreground">{s.warehouseName}</p>}
-                    </td>
+                    <td className="px-3 py-3 text-xs">{s.branch?.name ?? "—"}</td>
                     <td className="px-3 py-3 font-bold tabular-nums">{s.quantity}</td>
                     <td className="px-3 py-3"><StockBadge qty={s.quantity} reorder={s.reorderLevel} /></td>
                     <td className="px-3 py-3"><ExpiryCell date={s.expiryDate} /></td>
@@ -1097,8 +1091,8 @@ function Inventory() {
         </Card>
       )}
 
-      <ReceiveBatchDialog open={batchOpen} onClose={() => setBatchOpen(false)} stock={stock} branches={branches} warehouses={warehouses} suppliers={suppliers} onDone={load} />
-      <AddProductDialog open={addOpen} onClose={() => setAddOpen(false)} categories={categories} branches={branches} warehouses={warehouses} onDone={load} />
+      <ReceiveBatchDialog open={batchOpen} onClose={() => setBatchOpen(false)} stock={stock} branches={branches} warehouses={warehouses} suppliers={suppliers} onDone={load} lockedBranchId={lockedBranchId} />
+      <AddProductDialog open={addOpen} onClose={() => setAddOpen(false)} categories={categories} branches={branches} onDone={load} />
       <EditProductDialog item={editItem} onClose={() => setEditItem(null)} categories={categories} onDone={load} />
       <ViewSheet item={viewItem} suppliers={suppliers} onClose={() => setViewItem(null)} />
       <AdjustDialog item={adjustItem} onClose={() => setAdjustItem(null)} onDone={load} />

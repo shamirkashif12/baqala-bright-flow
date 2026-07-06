@@ -76,6 +76,29 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
             .Where(o => o.CreatedAt >= rangeStart && o.CreatedAt < rangeEnd && o.PaymentStatus == "paid")
             .SumAsync(o => o.TotalAmount);
 
+        // ─── Same window, one period earlier — for real trend badges ───────
+        // (e.g. "today" compares to yesterday, "week" compares to the prior week).
+        var duration = rangeEnd - rangeStart;
+        var prevRangeStart = rangeStart - duration;
+        var prevRangeEnd = rangeStart;
+
+        var prevOrdersByStatus = await ordersQ
+            .Where(o => o.CreatedAt >= prevRangeStart && o.CreatedAt < prevRangeEnd)
+            .GroupBy(o => o.OrderStatus)
+            .Select(g => new { status = g.Key, count = g.Count() })
+            .ToListAsync();
+        var prevStatusMap = prevOrdersByStatus.ToDictionary(x => x.status, x => x.count);
+
+        var prevTotalSales = await ordersQ
+            .Where(o => o.CreatedAt >= prevRangeStart && o.CreatedAt < prevRangeEnd && o.PaymentStatus == "paid")
+            .SumAsync(o => o.TotalAmount);
+
+        static decimal DeltaPct(decimal current, decimal previous)
+        {
+            if (previous == 0) return current > 0 ? 100 : 0;
+            return Math.Round((current - previous) / previous * 100, 1);
+        }
+
         // ─── Payment method breakdown (in period) ──────────────────────────
         var paymentMix = await paymentsQ
             .Where(p => p.CreatedAt >= rangeStart && p.CreatedAt < rangeEnd && p.Status == "completed")
@@ -92,8 +115,13 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
         }).ToList();
 
         // ─── Active shifts & cashier count ─────────────────────────────────
-        var activeShifts  = await shiftsQ.CountAsync(s => s.Status == "open");
-        var totalCashiers = await usersQ.CountAsync(u => u.Status == "active");
+        // activeShifts is constrained to the same population as totalCashiers
+        // (active Cashier-role users) so the "X / Y" ratio can never show X > Y —
+        // a shift left open by someone since deactivated or reassigned off the
+        // Cashier role no longer counts as an "active cashier".
+        var activeShifts  = await shiftsQ.CountAsync(s =>
+            s.Status == "open" && s.Cashier!.Status == "active" && s.Cashier.Role!.Name == "Cashier");
+        var totalCashiers = await usersQ.CountAsync(u => u.Status == "active" && u.Role!.Name == "Cashier");
 
         // ─── Terminals ─────────────────────────────────────────────────────
         var totalTerminals  = await terminalsQ.CountAsync();
@@ -174,9 +202,13 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
                 readyToDeliver  = statusMap.GetValueOrDefault("ready_to_deliver", 0),
                 delivered       = statusMap.GetValueOrDefault("delivered", 0),
                 cancelled       = statusMap.GetValueOrDefault("cancelled", 0),
-                totalToday      = statusMap.Values.Sum()
+                totalToday      = statusMap.Values.Sum(),
+                pendingDeltaPct        = DeltaPct(statusMap.GetValueOrDefault("pending", 0), prevStatusMap.GetValueOrDefault("pending", 0)),
+                processingDeltaPct     = DeltaPct(statusMap.GetValueOrDefault("processing", 0), prevStatusMap.GetValueOrDefault("processing", 0)),
+                readyToDeliverDeltaPct = DeltaPct(statusMap.GetValueOrDefault("ready_to_deliver", 0), prevStatusMap.GetValueOrDefault("ready_to_deliver", 0)),
+                deliveredDeltaPct      = DeltaPct(statusMap.GetValueOrDefault("delivered", 0), prevStatusMap.GetValueOrDefault("delivered", 0)),
             },
-            sales = new { totalToday = totalSalesToday, paymentBreakdown },
+            sales = new { totalToday = totalSalesToday, totalTodayDeltaPct = DeltaPct(totalSalesToday, prevTotalSales), paymentBreakdown },
             shifts    = new { active = activeShifts, totalCashiers },
             terminals = new { active = activeTerminals, total = totalTerminals },
             inventory = new { lowStockCount, outOfStockCount, lowStockItems, expiringCount, expiringItems },

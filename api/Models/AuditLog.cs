@@ -30,6 +30,12 @@ public class AuditLog
     [MaxLength(50), Column("ip_address")]
     public string? IpAddress { get; set; }
 
+    // info | warning | critical — explicit severity set by the caller, so it
+    // reflects the actual event data (e.g. variance size) rather than being
+    // guessed from the action string on read.
+    [MaxLength(20), Column("severity")]
+    public string Severity { get; set; } = "info";
+
     [Column("branch_id")]
     public Guid? BranchId { get; set; }
 

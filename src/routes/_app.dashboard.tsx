@@ -47,10 +47,16 @@ function shiftDuration(openedAt: string): string {
 
 const ALL_CARD_IDS = [
   "pending_orders", "processing_orders", "ready_to_deliver", "delivered_orders",
-  "todays_sales", "todays_delivery", "active_cashiers", "active_terminals",
+  "todays_sales", "active_cashiers", "active_terminals",
   "low_stock", "near_expiry",
 ];
 
+// Trend badges show a REAL % change vs the equivalent prior period (computed
+// server-side in DashboardController.GetMetrics), not a fabricated number.
+// Cards for live snapshots (open shifts right now, terminal status, current
+// stock levels) intentionally have no `change` — there's no historical
+// snapshot series to compare those against, so no badge is more honest than
+// inventing one.
 function buildCards(data: DashboardMetrics): StatCardDef[] {
   const offlineTerminals = data.terminals.total - data.terminals.active;
   return [
@@ -58,46 +64,44 @@ function buildCards(data: DashboardMetrics): StatCardDef[] {
       id: "pending_orders",
       label: "Pending Orders", value: String(data.orders.pending),
       desc: "Orders awaiting confirmation",
-      icon: Clock3, href: "/orders", action: "View orders", accent: "warning", change: 8,
+      icon: Clock3, href: "/orders", action: "View orders", accent: "warning",
+      change: data.orders.pendingDeltaPct,
     },
     {
       id: "processing_orders",
       label: "Processing Orders", value: String(data.orders.processing),
       desc: "Currently being prepared",
-      icon: ShoppingBag, href: "/orders", action: "Manage", accent: "primary", change: 3,
+      icon: ShoppingBag, href: "/orders", action: "Manage", accent: "primary",
+      change: data.orders.processingDeltaPct,
     },
     {
       id: "ready_to_deliver",
       label: "Ready to Deliver", value: String(data.orders.readyToDeliver),
       desc: "Packed & waiting for pickup",
-      icon: PackageCheck, href: "/orders", action: "Dispatch", accent: "primary", change: -2,
+      icon: PackageCheck, href: "/orders", action: "Dispatch", accent: "primary",
+      change: data.orders.readyToDeliverDeltaPct,
     },
     {
       id: "delivered_orders",
       label: "Delivered Orders", value: String(data.orders.delivered),
       desc: "Completed deliveries today",
-      icon: Truck, href: "/orders", action: "History", accent: "success", change: 14,
+      icon: Truck, href: "/orders", action: "History", accent: "success",
+      change: data.orders.deliveredDeltaPct,
     },
     {
       id: "todays_sales",
       label: "Today's Sales",
       value: fmtSAR(data.sales.totalToday),
       desc: `Gross sales across ${data.branchPerformance?.length ?? 1} branches`,
-      icon: Wallet, href: "/sales", action: "Sales report", accent: "primary", change: 18,
-    },
-    {
-      id: "todays_delivery",
-      label: "Today's Delivery",
-      value: fmtSAR(data.sales.totalToday * 0.187),
-      desc: "Delivery revenue collected",
-      icon: Truck, href: "/orders", action: "Open", accent: "success", change: 22,
+      icon: Wallet, href: "/sales", action: "Sales report", accent: "primary",
+      change: data.sales.totalTodayDeltaPct,
     },
     {
       id: "active_cashiers",
       label: "Active Cashiers",
       value: `${data.shifts.active} / ${data.shifts.totalCashiers}`,
       desc: "Checked-in this shift",
-      icon: Users, href: "/cashier-shift", action: "Shifts", accent: "primary", change: 1,
+      icon: Users, href: "/cashier-shift", action: "Shifts", accent: "primary",
     },
     {
       id: "active_terminals",
@@ -117,7 +121,7 @@ function buildCards(data: DashboardMetrics): StatCardDef[] {
       id: "near_expiry",
       label: "Close to Expiry", value: String(data.inventory.expiringCount),
       desc: "Expiring in next 7 days",
-      icon: CalendarClock, href: "/batches", action: "Review", accent: "warning", change: 5,
+      icon: CalendarClock, href: "/batches", action: "Review", accent: "warning",
     },
   ];
 }

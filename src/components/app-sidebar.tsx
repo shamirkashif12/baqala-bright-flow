@@ -55,6 +55,10 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useAuth, ROLE_LABELS, type AppRole } from "@/lib/auth";
 import { BaqalaLogo } from "./baqala-logo";
 import { useI18n } from "@/lib/i18n";
@@ -264,13 +268,28 @@ export function AppSidebar() {
             )}
           </button>
           {!collapsed && (
-            <button
-              onClick={handleLogout}
-              title="Logout"
-              className="shrink-0 p-1.5 rounded-lg hover:bg-sidebar-accent transition-colors"
-            >
-              <LogOut className="h-4 w-4 text-sidebar-foreground/60" />
-            </button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <button
+                  title="Logout"
+                  className="shrink-0 p-1.5 rounded-lg hover:bg-sidebar-accent transition-colors"
+                >
+                  <LogOut className="h-4 w-4 text-sidebar-foreground/60" />
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Log out?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    You'll be signed out of this device. Any unsaved work in progress may be lost.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleLogout}>Log out</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </div>
       </SidebarFooter>

@@ -60,6 +60,33 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService) : 
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Order order)
     {
+        // An order with a total but no line items is unauditable and fails ZATCA
+        // itemised-invoice requirements — reject at the source rather than persist it.
+        if (order.Items.Count == 0)
+            return BadRequest(new { message = "An order must have at least one line item." });
+
+        // Block sale of expired items: if a product's only tracked batches at this
+        // branch are expired, it cannot be sold — mirrors the "Block sale of expired
+        // items" Rules Engine rule, enforced here since checkout must not rely solely
+        // on client-side checks.
+        foreach (var item in order.Items)
+        {
+            var hasAnyBatches = await db.InventoryBatches
+                .AnyAsync(b => b.ProductId == item.ProductId && b.BranchId == order.BranchId);
+            if (!hasAnyBatches) continue;
+
+            var hasSellableStock = await db.InventoryBatches.AnyAsync(b =>
+                b.ProductId == item.ProductId && b.BranchId == order.BranchId &&
+                b.RemainingQuantity > 0 && b.Status != "expired" &&
+                (b.ExpiryDate == null || b.ExpiryDate.Value.Date >= DateTime.UtcNow.Date));
+
+            if (!hasSellableStock)
+            {
+                var product = await db.Products.FindAsync(item.ProductId);
+                return BadRequest(new { message = $"Cannot sell '{product?.Name ?? "item"}' — all available stock for this product is expired." });
+            }
+        }
+
         order.Id = Guid.NewGuid();
         order.OrderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
         order.CreatedAt = order.UpdatedAt = DateTime.UtcNow;

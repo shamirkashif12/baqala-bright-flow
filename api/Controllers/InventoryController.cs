@@ -9,6 +9,15 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class InventoryController(BaqalaDbContext db) : ControllerBase
 {
+    // Branch-scoped roles (anything but tenant_admin) may only see/write their own branch's
+    // batches — mirrors the scoping the frontend already applies to the plain stock list.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     [HttpGet("stock")]
     public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock, [FromQuery] Guid? categoryId)
     {
@@ -33,6 +42,9 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
     [HttpGet("batches")]
     public async Task<IActionResult> GetBatches([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+
         var query = db.InventoryBatches
             .Include(b => b.Product)
             .Include(b => b.Supplier)
@@ -45,6 +57,9 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
     [HttpGet("batches/expiring")]
     public async Task<IActionResult> GetExpiringBatches([FromQuery] Guid? branchId, [FromQuery] int daysAhead = 30)
     {
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+
         var cutoff = DateTime.UtcNow.AddDays(daysAhead);
         var query = db.InventoryBatches
             .Include(b => b.Product)
@@ -57,6 +72,15 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
     [HttpPost("batches")]
     public async Task<IActionResult> ReceiveBatch([FromBody] ReceiveBatchRequest req)
     {
+        if (req.Quantity <= 0)
+            return BadRequest(new { message = "Received quantity must be greater than zero." });
+        if (req.ExpiryDate.HasValue && req.ExpiryDate.Value.Date < DateTime.UtcNow.Date)
+            return BadRequest(new { message = "Expiry date cannot be in the past." });
+
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && callerBranchId != req.BranchId)
+            return Forbid();
+
         var batchId = Guid.NewGuid();
         var batch = new InventoryBatch
         {

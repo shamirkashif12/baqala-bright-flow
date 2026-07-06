@@ -44,6 +44,15 @@ public class Discount
     [Column("end_date")]
     public DateTime? EndDate { get; set; }
 
+    // Eligibility gate — customer-tier/loyalty discounts must not auto-apply to
+    // anonymous walk-ins. When true, a customer must be selected at checkout.
+    [Column("requires_customer")]
+    public bool RequiresCustomer { get; set; } = false;
+
+    // Minimum customer.Tier required (standard | silver | gold | platinum), or null for none.
+    [MaxLength(20), Column("min_customer_tier")]
+    public string? MinCustomerTier { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

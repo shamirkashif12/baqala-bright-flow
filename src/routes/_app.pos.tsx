@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter } from "@/lib/api";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
+import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 
 // ─── ZATCA Phase 2 TLV QR encoder ────────────────────────────────────────────
@@ -615,10 +616,12 @@ function PrinterSetupDialog() {
 function POS() {
   // ─── Branch from global context ───────────────────────────────────────────────
   const { selectedBranch: branch } = useBranch();
+  const { user } = useAuth();
 
   // ─── Data ─────────────────────────────────────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([]);
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
+  const [expiredProductIds, setExpiredProductIds] = useState<Set<string>>(new Set());
   const [taxRate, setTaxRate] = useState(0.15);
   const [taxLabel, setTaxLabel] = useState("VAT 15%");
   const [vatNumber, setVatNumber] = useState("300123456700003");
@@ -637,6 +640,7 @@ function POS() {
   // Refs so the global scanner listener always sees fresh values without re-registering
   const productsRef = useRef<Product[]>([]);
   const stockMapRef = useRef<Map<string, number>>(new Map());
+  const expiredProductIdsRef = useRef<Set<string>>(new Set());
   const scanBuf = useRef("");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastKeyAt = useRef(0);
@@ -695,7 +699,7 @@ function POS() {
         const tobaccoRule = taxRules.find((r) => r.ruleType === "tobacco_excise");
         setTobaccoFeeEnabled(tobaccoRule ? tobaccoRule.status === "active" : true);
 
-        const shift = shifts.find((s) => s.status === "open") ?? null;
+        const shift = shifts.find((s) => s.status === "open" && s.cashierId === user?.id) ?? null;
         setActiveShift(shift);
       })
       .finally(() => {
@@ -708,7 +712,7 @@ function POS() {
     api.getTaxRules().then(rules =>
       setCustomFees(rules.filter(r => r.ruleType === "custom_fee" && r.status === "active"))
     ).catch(() => {});
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-only load; user.id is stable per session
 
   // ─── Branch change: clear & reload; remount: restore saved cart ──────────────
   useEffect(() => {
@@ -746,9 +750,19 @@ function POS() {
       })
       .catch(() => {});
 
+    // Block sale of expired items — mirrors the "Block sale of expired items" rule.
+    api.getBatches({ branchId: branch.id, status: "expired" })
+      .then((batches) => setExpiredProductIds(new Set(batches.map((b) => b.productId))))
+      .catch(() => {});
+
+    // Unscoped by branch — a cashier can only ever hold one open shift at a
+    // time (enforced in ShiftsController.OpenShift), so scoping this lookup to
+    // the currently-selected branch only breaks it if their branch assignment
+    // changed after they checked in, leaving the shift itself pointed at the
+    // old branch.
     api.getActiveShifts()
       .then((shifts) => {
-        const shift = shifts.find((s) => s.status === "open") ?? null;
+        const shift = shifts.find((s) => s.status === "open" && s.cashierId === user?.id) ?? null;
         setActiveShift(shift);
       })
       .catch(() => {});
@@ -771,6 +785,7 @@ function POS() {
   // Keep refs fresh so the scanner listener never has stale closures
   useEffect(() => { productsRef.current = products; }, [products]);
   useEffect(() => { stockMapRef.current = stockMap; }, [stockMap]);
+  useEffect(() => { expiredProductIdsRef.current = expiredProductIds; }, [expiredProductIds]);
 
   // Global USB barcode scanner listener (works anywhere on the page)
   useEffect(() => {
@@ -793,6 +808,13 @@ function POS() {
           if (!stockMapRef.current.has(p.id)) {
             toast.error(`Product not available in this branch`, {
               description: `"${p.name}" is not stocked at this branch. Switch to the correct branch or add stock here first.`,
+              duration: 4000,
+            });
+            return;
+          }
+          if (expiredProductIdsRef.current.has(p.id)) {
+            toast.error(`Cannot sell expired item`, {
+              description: `"${p.name}" has an expired batch and is blocked from sale.`,
               duration: 4000,
             });
             return;
@@ -831,6 +853,7 @@ function POS() {
 
   // ─── Calculations ─────────────────────────────────────────────────────────────
   const subtotal = cart.reduce((s, i) => s + i.qty * i.price, 0);
+  const cartUnitCount = cart.reduce((s, i) => s + i.qty, 0);
 
   // KSA tobacco excise: min 25 SAR OR 100% of base price, whichever is higher
   function calcTobaccoFee(base: number): number {
@@ -858,6 +881,14 @@ function POS() {
     const now = new Date();
     if (d.startDate && new Date(d.startDate) > now) return sum;
     if (d.endDate && new Date(d.endDate) < now) return sum;
+    // Loyalty/senior-style discounts require an actual eligible customer —
+    // never auto-apply to an anonymous walk-in.
+    if (d.requiresCustomer && !customer) return sum;
+    if (d.minCustomerTier) {
+      const tierRank: Record<string, number> = { standard: 0, silver: 1, gold: 2, platinum: 3 };
+      const customerRank = customer ? tierRank[customer.tier ?? "standard"] ?? 0 : -1;
+      if (customerRank < (tierRank[d.minCustomerTier] ?? 0)) return sum;
+    }
     if (d.appliesTo === "all") {
       return sum + (d.discountType === "percentage"
         ? subtotal * (d.value / 100)
@@ -969,6 +1000,13 @@ function POS() {
   const remove = (sku: string) => setCart((c) => c.filter((i) => i.sku !== sku));
 
   const addToCart = (p: Product) => {
+    if (expiredProductIds.has(p.id)) {
+      toast.error(`Cannot sell expired item`, {
+        description: `"${p.name}" has an expired batch and is blocked from sale.`,
+        duration: 4000,
+      });
+      return;
+    }
     const stock = stockMap.get(p.id) ?? 0;
     setCart((c) => {
       const ex = c.find((i) => i.sku === p.sku);
@@ -1141,6 +1179,11 @@ function POS() {
   ) => {
     if (!branch) throw new Error("No branch configured");
     if (!cart.length) throw new Error("Cart is empty");
+    // A shift's cash drawer is a Cashier-only concept — only cashiers need one
+    // open to sell. Admins/managers covering a register aren't reconciling a
+    // till, so they can ring up a sale without checking in first.
+    if (user?.role === "cashier" && !activeShift)
+      throw new Error("No active shift found for you at this terminal. Please check in first.");
 
     const payments = splitPayments
       ? splitPayments
@@ -1152,7 +1195,7 @@ function POS() {
       source: "pos",
       branchId: branch.id,
       customerId: customer?.id,
-      cashierId: activeShift?.cashierId,
+      cashierId: activeShift?.cashierId ?? user?.id,
       subtotal,
       discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal,
       taxAmount: vatAmount + customFeeTotal,
@@ -1281,12 +1324,14 @@ function POS() {
                 {matches.map((p) => {
                   const stock = stockMap.get(p.id);
                   const outOfStock = stock !== undefined && stock <= 0;
+                  const expired = expiredProductIds.has(p.id);
+                  const blocked = outOfStock || expired;
                   return (
                     <button
                       key={p.sku}
                       type="button"
-                      onMouseDown={(e) => { e.preventDefault(); if (!outOfStock) addToCart(p); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${outOfStock ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/60"}`}
+                      onMouseDown={(e) => { e.preventDefault(); if (!blocked) addToCart(p); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${blocked ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/60"}`}
                     >
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate">{p.name}</p>
@@ -1294,7 +1339,12 @@ function POS() {
                           SKU {p.sku}{p.barcode ? ` · ${p.barcode}` : ""}
                         </p>
                       </div>
-                      {stock !== undefined && (
+                      {expired && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
+                          Expired
+                        </span>
+                      )}
+                      {!expired && stock !== undefined && (
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${outOfStock ? "bg-destructive/15 text-destructive" : stock <= 5 ? "bg-warning/20 text-warning-foreground" : "bg-success/15 text-success"}`}>
                           <Package className="h-2.5 w-2.5 inline mr-0.5" />{stock}
                         </span>
@@ -1441,7 +1491,7 @@ function POS() {
             <div>
               <h3 className="font-semibold">New Order</h3>
               <p className="text-xs text-muted-foreground">
-                {cart.length} items · {customer ? customer.fullName : "Walk-in"} · {branch?.name ?? "—"}
+                {cartUnitCount} unit{cartUnitCount !== 1 ? "s" : ""} · {customer ? customer.fullName : "Walk-in"} · {branch?.name ?? "—"}
               </p>
             </div>
             <div className="flex gap-1">
@@ -1923,6 +1973,7 @@ function PaymentDialog({
   const [tab, setTab] = useState("cash");
   const [received, setReceived] = useState(total.toFixed(2));
   const [status, setStatus] = useState<"idle" | "waiting" | "success" | "failed">("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Split payment inputs (cash + card only)
   const [splitCash, setSplitCash] = useState("0.00");
@@ -1937,6 +1988,7 @@ function PaymentDialog({
     if (open) {
       setReceived("");
       setStatus("idle");
+      setErrorMsg(null);
       setSplitCash(total.toFixed(2));
       setSplitCard("0.00");
     }
@@ -1956,7 +2008,8 @@ function PaymentDialog({
       }
       setStatus("success");
       setTimeout(onDone, 800);
-    } catch {
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Payment failed. Please try again.");
       setStatus("failed");
     }
   };
@@ -2044,7 +2097,7 @@ function PaymentDialog({
         </Tabs>
 
         {status === "failed" && (
-          <p className="text-sm text-destructive text-center">Payment failed. Please try again.</p>
+          <p className="text-sm text-destructive text-center">{errorMsg ?? "Payment failed. Please try again."}</p>
         )}
 
         <DialogFooter>

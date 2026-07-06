@@ -1,6 +1,9 @@
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -44,6 +47,33 @@ builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
+// ─── JWT authentication ──────────────────────────────────────────────────────
+// Populates HttpContext.User from the same bearer token AuthController.GenerateJwt
+// issues, so controllers can read the caller's role/branchId claims. No [Authorize]
+// attributes are added anywhere — this only makes claims available, it does not
+// restrict access, so existing (currently anonymous) request flows keep working.
+var jwtSection = builder.Configuration.GetSection("Jwt");
+var jwtKey = jwtSection["Key"] ?? "dev-only-insecure-fallback-key-do-not-use-in-production-32b";
+var jwtIssuer = jwtSection["Issuer"];
+var jwtAudience = jwtSection["Audience"];
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = !string.IsNullOrEmpty(jwtIssuer),
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = !string.IsNullOrEmpty(jwtAudience),
+            ValidAudience = jwtAudience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(2),
+        };
+    });
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
 
 // ─── Auto-migrate on startup (development only) ───────────────────────────────
@@ -68,6 +98,12 @@ if (app.Environment.IsDevelopment())
     await RenamePermissionModules(db);
     await DataSeeder.EnsurePermissionsAsync(db);
     await DataSeeder.PatchPermissionsAsync(db);
+    await DataSeeder.PatchMarketingPermissionsAsync(db);
+    await DataSeeder.PatchDiscountEligibilityAsync(db);
+    await DataSeeder.PatchWarehouseRegionsAsync(db);
+    await DataSeeder.PatchRemoveTestBranchesAsync(db);
+    await DataSeeder.PatchRemoveNonCashierShiftsAsync(db);
+    await DataSeeder.PatchRemoveEmptyOrdersAsync(db);
     app.MapOpenApi();
 }
 
@@ -110,7 +146,16 @@ static async Task RenamePermissionModules(BaqalaDbContext db)
     if (changed) await db.SaveChangesAsync();
 }
 
+// ─── HTTPS enforcement (non-dev only — local dev cert makes this redirect-loop
+// prone against the http:// fallback the frontend uses when VITE_API_URL isn't set) ──
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+
 app.UseCors("FrontendPolicy");
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 

@@ -85,7 +85,13 @@ function EntriesTab() {
     return matchQ && mdf && mdt;
   });
 
-  const openAdd = () => { setEditExpense(null); setForm(emptyForm); setSheetOpen(true); };
+  const openAdd = () => {
+    setEditExpense(null);
+    // Branch Managers (and anyone else scoped to a single branch) can only ever
+    // record an expense against their own branch — never pick another one.
+    setForm({ ...emptyForm, branchId: lockedBranchId ?? "" });
+    setSheetOpen(true);
+  };
   const openEdit = (e: Expense) => {
     setEditExpense(e);
     setForm({
@@ -281,12 +287,16 @@ function EntriesTab() {
               </Select>
             </FieldRow>
             <FieldRow label="Branch *">
-              <Select value={form.branchId} onValueChange={setS("branchId")}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
-                <SelectContent>
-                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {lockedBranchId ? (
+                <Input className="h-9 bg-muted" value={user?.branch ?? "My Branch"} disabled />
+              ) : (
+                <Select value={form.branchId} onValueChange={setS("branchId")}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+                  <SelectContent>
+                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
             </FieldRow>
             <FieldRow label="Payment Method">
               <Select value={form.paymentMethod} onValueChange={setS("paymentMethod")}>
