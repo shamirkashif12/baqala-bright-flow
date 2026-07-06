@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -28,6 +29,7 @@ public class DevicesController(BaqalaDbContext db) : ControllerBase
         return device is null ? NotFound() : Ok(device);
     }
 
+    [RequirePermission("Devices", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Device device)
     {
@@ -38,6 +40,7 @@ public class DevicesController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = device.Id }, device);
     }
 
+    [RequirePermission("Devices", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Device updated)
     {
@@ -53,6 +56,7 @@ public class DevicesController(BaqalaDbContext db) : ControllerBase
         return Ok(device);
     }
 
+    [RequirePermission("Devices", PermAction.Edit)]
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] DeviceStatusRequest req)
     {

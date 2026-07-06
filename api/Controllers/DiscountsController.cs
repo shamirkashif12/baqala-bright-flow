@@ -44,6 +44,8 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
             IsActive = req.IsActive ?? true,
             StartDate = req.StartDate,
             EndDate = req.EndDate,
+            RequiresCustomer = req.RequiresCustomer ?? false,
+            MinCustomerTier = req.MinCustomerTier,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -68,6 +70,8 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
         d.IsActive = req.IsActive ?? d.IsActive;
         d.StartDate = req.StartDate;
         d.EndDate = req.EndDate;
+        d.RequiresCustomer = req.RequiresCustomer ?? d.RequiresCustomer;
+        d.MinCustomerTier = req.MinCustomerTier;
         d.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(d);
@@ -106,5 +110,7 @@ public record DiscountRequest(
     decimal Value,
     bool? IsActive,
     DateTime? StartDate,
-    DateTime? EndDate
+    DateTime? EndDate,
+    bool? RequiresCustomer,
+    string? MinCustomerTier
 );

@@ -51,6 +51,10 @@ function Shift() {
 
   useEffect(() => { refetch(); }, [refetch]);
 
+  const approveVariance = (id: string) => {
+    api.approveVariance(id).then(refetch).catch(() => {});
+  };
+
   const activeShifts = shifts.filter(s => s.status === "open");
   // Cashier sees only their own active shift in the banner; managers see all
   const bannerShifts = isCashier
@@ -76,7 +80,7 @@ function Shift() {
                   <p className="text-xs text-muted-foreground">
                     {s.terminal?.terminalCode ?? "—"} · {new Date(s.openedAt).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })} · {elapsed(s.openedAt)}
                   </p>
-                  <p className="text-xs text-muted-foreground tabular-nums">Cash: {fmt(s.openingAmount + s.cashSales)}</p>
+                  <p className="text-xs text-muted-foreground tabular-nums">Cash Sales: {fmt(s.cashSales)}</p>
                 </div>
               </div>
               <Button
@@ -120,7 +124,7 @@ function Shift() {
             <RefreshCw className="h-3.5 w-3.5" />Refresh
           </Button>
           <CheckInDialog onSuccess={refetch} currentUser={user} />
-          <CheckOutDialog onSuccess={refetch} activeShifts={bannerShifts} preSelected={null} onClose={() => {}} />
+          <CheckOutDialog onSuccess={refetch} activeShifts={bannerShifts} preSelected={null} onClose={() => {}} currentUser={user} />
         </div>
       </div>
 
@@ -160,6 +164,7 @@ function Shift() {
                 {shifts.map(s => {
                   const isOpen = s.status === "open";
                   const varVal = s.variance ?? 0;
+                  const flagged = !isOpen && s.requiresApproval;
                   return (
                     <tr key={s.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
                       <td className="px-4 py-3 font-medium">{s.cashier?.fullName ?? s.cashierId.slice(0, 8)}</td>
@@ -169,7 +174,7 @@ function Shift() {
                       <td className="px-4 py-3 tabular-nums">{s.cardSales.toFixed(2)}</td>
                       <td className="px-4 py-3 tabular-nums">{s.digitalSales.toFixed(2)}</td>
                       <td className="px-4 py-3 tabular-nums font-semibold">{s.totalSales.toFixed(2)}</td>
-                      <td className={`px-4 py-3 tabular-nums font-semibold ${varVal < 0 ? "text-destructive" : varVal > 0 ? "text-success" : ""}`}>
+                      <td className={`px-4 py-3 tabular-nums font-semibold ${flagged ? "text-destructive" : varVal === 0 ? "text-success" : ""}`}>
                         {s.variance != null ? (varVal > 0 ? `+${varVal.toFixed(2)}` : varVal.toFixed(2)) : "—"}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -179,6 +184,10 @@ function Shift() {
                         {isOpen ? (
                           <Badge className="bg-success/15 text-success border-success/30 gap-1 text-[11px]">
                             <CheckCircle2 className="h-3 w-3" />Open
+                          </Badge>
+                        ) : flagged ? (
+                          <Badge className="bg-destructive/15 text-destructive border-destructive/30 gap-1 text-[11px]">
+                            <XCircle className="h-3 w-3" />Needs Review
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="text-muted-foreground gap-1 text-[11px]">
@@ -195,6 +204,15 @@ function Shift() {
                             onClick={() => setCheckoutShift(s)}
                           >
                             <LogOut className="h-3 w-3" />Check Out
+                          </Button>
+                        ) : flagged && !isCashier ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1 h-7 text-xs"
+                            onClick={() => approveVariance(s.id)}
+                          >
+                            <CheckCircle2 className="h-3 w-3" />Approve
                           </Button>
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
@@ -223,6 +241,7 @@ function Shift() {
           activeShifts={bannerShifts}
           preSelected={checkoutShift.id}
           onClose={() => setCheckoutShift(null)}
+          currentUser={user}
           autoOpen
         />
       )}
@@ -245,6 +264,7 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
   const [openingAmount, setOpeningAmount] = useState("500");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [occupiedTerminalIds, setOccupiedTerminalIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!open) return;
@@ -256,7 +276,8 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
     } else {
       Promise.all([api.getUsers(), api.getBranches(), api.getTerminals()])
         .then(([u, b, t]) => {
-          setUsers(u.filter(u => u.status === "active"));
+          // Only Cashier-role accounts can hold a shift — no other role appears here.
+          setUsers(u.filter(u => u.status === "active" && u.roleName === "Cashier"));
           setBranches(b.filter(b => b.status === "active"));
           setTerminals(t);
         })
@@ -264,13 +285,22 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
     }
   }, [open, isCashierUser, currentUser?.branchId]);
 
-  const branchTerminals = terminals.filter(t => t.branchId === branchId);
+  // A terminal already bound to an open shift can't be picked by another cashier.
+  useEffect(() => {
+    if (!open || !branchId) { setOccupiedTerminalIds(new Set()); return; }
+    api.getActiveShifts(branchId)
+      .then(shifts => setOccupiedTerminalIds(new Set(shifts.map(s => s.terminalId).filter((id): id is string => !!id))))
+      .catch(() => {});
+  }, [open, branchId]);
+
+  const branchTerminals = terminals.filter(t => t.branchId === branchId && !occupiedTerminalIds.has(t.id));
 
   const handleSubmit = async () => {
     if (!cashierId || !branchId) { setError("Cashier and branch are required."); return; }
+    if (!terminalId) { setError("Terminal is required — pick the till you're checking into."); return; }
     setSubmitting(true); setError(null);
     try {
-      await api.openShift({ cashierId, branchId, terminalId: terminalId || undefined, openingAmount: parseFloat(openingAmount) || 0 });
+      await api.openShift({ cashierId, branchId, terminalId, openingAmount: parseFloat(openingAmount) || 0 });
       setOpen(false);
       if (!isCashierUser) { setCashierId(""); setBranchId(""); }
       setTerminalId(""); setOpeningAmount("500");
@@ -314,9 +344,9 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
               )}
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Terminal (optional)</Label>
+              <Label className="text-xs">Terminal *</Label>
               <Select value={terminalId} onValueChange={setTerminalId} disabled={!branchId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectTrigger className="h-9"><SelectValue placeholder={branchTerminals.length === 0 ? "No free terminals" : "Select"} /></SelectTrigger>
                 <SelectContent>{branchTerminals.map(t => <SelectItem key={t.id} value={t.id}>{t.terminalCode} — {t.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
@@ -339,19 +369,25 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
 }
 
 // ─── Check Out dialog ─────────────────────────────────────────────────────────
+// Live client-side preview only — the server re-checks against the live
+// Rules Engine "Cash variance > SAR 200" threshold and is authoritative.
+const VARIANCE_REVIEW_THRESHOLD = 200;
+
 function CheckOutDialog({
-  onSuccess, activeShifts, preSelected, onClose, autoOpen = false,
+  onSuccess, activeShifts, preSelected, onClose, currentUser, autoOpen = false,
 }: {
   onSuccess: () => void;
   activeShifts: CashierShift[];
   preSelected: string | null;
   onClose: () => void;
+  currentUser: AuthUser | null;
   autoOpen?: boolean;
 }) {
   const [open, setOpen] = useState(autoOpen);
   const [shiftId, setShiftId] = useState(preSelected ?? "");
   const [closingAmount, setClosingAmount] = useState("");
   const [notes, setNotes] = useState("");
+  const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -363,15 +399,17 @@ function CheckOutDialog({
   const selectedShift = activeShifts.find(s => s.id === shiftId);
   const expected = selectedShift ? selectedShift.openingAmount + selectedShift.cashSales : 0;
   const variance = closingAmount ? parseFloat(closingAmount) - expected : null;
+  const isManagerOverride = !!selectedShift && !!currentUser && selectedShift.cashierId !== currentUser.id;
 
   const handleClose = () => { setOpen(false); onClose(); };
 
   const handleSubmit = async () => {
     if (!shiftId || !closingAmount) { setError("Select a shift and enter closing amount."); return; }
+    if (isManagerOverride && !reason.trim()) { setError("A reason is required to close another cashier's shift."); return; }
     setSubmitting(true); setError(null);
     try {
-      await api.closeShift(shiftId, { closingAmount: parseFloat(closingAmount), notes: notes || undefined });
-      setShiftId(""); setClosingAmount(""); setNotes("");
+      await api.closeShift(shiftId, { closingAmount: parseFloat(closingAmount), notes: notes || undefined, reason: reason || undefined });
+      setShiftId(""); setClosingAmount(""); setNotes(""); setReason("");
       setOpen(false);
       onSuccess();
     } catch (e: unknown) {
@@ -393,7 +431,8 @@ function CheckOutDialog({
             activeShifts={activeShifts} shiftId={shiftId} setShiftId={setShiftId}
             selectedShift={selectedShift} expected={expected} variance={variance}
             closingAmount={closingAmount} setClosingAmount={setClosingAmount}
-            notes={notes} setNotes={setNotes} error={error}
+            notes={notes} setNotes={setNotes} reason={reason} setReason={setReason}
+            isManagerOverride={isManagerOverride} error={error}
             submitting={submitting} onClose={handleClose} onSubmit={handleSubmit}
           />
         </DialogContent>
@@ -408,7 +447,8 @@ function CheckOutDialog({
           activeShifts={activeShifts} shiftId={shiftId} setShiftId={setShiftId}
           selectedShift={selectedShift} expected={expected} variance={variance}
           closingAmount={closingAmount} setClosingAmount={setClosingAmount}
-          notes={notes} setNotes={setNotes} error={error}
+          notes={notes} setNotes={setNotes} reason={reason} setReason={setReason}
+          isManagerOverride={isManagerOverride} error={error}
           submitting={submitting} onClose={handleClose} onSubmit={handleSubmit}
         />
       </DialogContent>
@@ -418,8 +458,8 @@ function CheckOutDialog({
 
 function CheckOutForm({
   activeShifts, shiftId, setShiftId, selectedShift, expected, variance,
-  closingAmount, setClosingAmount, notes, setNotes, error,
-  submitting, onClose, onSubmit,
+  closingAmount, setClosingAmount, notes, setNotes, reason, setReason,
+  isManagerOverride, error, submitting, onClose, onSubmit,
 }: {
   activeShifts: CashierShift[];
   shiftId: string; setShiftId: (v: string) => void;
@@ -428,11 +468,14 @@ function CheckOutForm({
   variance: number | null;
   closingAmount: string; setClosingAmount: (v: string) => void;
   notes: string; setNotes: (v: string) => void;
+  reason: string; setReason: (v: string) => void;
+  isManagerOverride: boolean;
   error: string | null;
   submitting: boolean;
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const flagged = variance !== null && Math.abs(variance) > VARIANCE_REVIEW_THRESHOLD;
   return (
     <>
       <DialogHeader><DialogTitle>Cashier Check-Out</DialogTitle></DialogHeader>
@@ -470,10 +513,22 @@ function CheckOutForm({
 
         {variance !== null && (
           <Info
-            label="Cash Variance"
+            label={flagged ? "Cash Variance — exceeds review threshold" : "Cash Variance"}
             value={variance === 0 ? "0.00 — Perfect" : `${variance > 0 ? "+" : ""}${fmt(variance)}`}
-            tone={variance < 0 ? "destructive" : variance > 0 ? "success" : "primary"}
+            tone={flagged ? "destructive" : variance === 0 ? "success" : "primary"}
           />
+        )}
+        {flagged && (
+          <p className="text-xs text-destructive font-medium">
+            This variance exceeds SAR {VARIANCE_REVIEW_THRESHOLD} and will be flagged for manager review before it can be cleared.
+          </p>
+        )}
+
+        {isManagerOverride && (
+          <div className="space-y-1">
+            <Label className="text-xs">Reason for closing on this cashier's behalf *</Label>
+            <Textarea placeholder="e.g. cashier left sick, end-of-day handover…" rows={2} value={reason} onChange={e => setReason(e.target.value)} />
+          </div>
         )}
 
         <div className="space-y-1">

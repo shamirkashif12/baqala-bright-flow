@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -69,6 +70,7 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         return t is null ? NotFound() : Ok(t);
     }
 
+    [RequirePermission("Stock Transfers", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateTransferRequest req)
     {
@@ -153,12 +155,29 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
     }
 
     // Receive a transfer with per-line actual quantities, then mark completed and move stock
+    [RequirePermission("Stock Transfers", PermAction.Approve)]
     [HttpPost("{id:guid}/receive")]
     public async Task<IActionResult> ReceiveTransfer(Guid id, [FromBody] ReceiveTransferRequest req)
     {
         var transfer = await db.StockTransfers.Include(t => t.Items).FirstOrDefaultAsync(t => t.Id == id);
         if (transfer is null) return NotFound();
         if (transfer.Status != "in_transit") return BadRequest("Transfer must be in_transit to receive.");
+
+        // Same stock-write guard as InventoryController.ReceiveBatch/PurchaseOrdersController.Receive
+        // — this endpoint creates InventoryBatch rows for branch destinations, so the received
+        // quantity and any tracked expiry need the same validation as the other entry points.
+        // Unlike those two, 0 is a legitimate value here (the frontend lets a receiver record a
+        // fully lost/undelivered line item with a discrepancy note) — only negative is invalid.
+        foreach (var recv in req.Items ?? [])
+        {
+            if (recv.ReceivedQuantity < 0)
+                return BadRequest(new { message = $"Received quantity for transfer item {recv.ItemId} cannot be negative." });
+
+            var itemForCheck = transfer.Items.FirstOrDefault(i => i.Id == recv.ItemId);
+            if (itemForCheck?.ExpiryDate is { } expiry && expiry.Date < DateTime.UtcNow.Date
+                && string.IsNullOrWhiteSpace(recv.DamagedOrReturnReason))
+                return BadRequest(new { message = $"Expiry date for transfer item {recv.ItemId} cannot be in the past — provide a damagedOrReturnReason to log it as damaged/return stock instead of resalable inventory." });
+        }
 
         // Update per-item received quantities
         foreach (var recv in req.Items ?? [])
@@ -173,6 +192,8 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         transfer.CompletedDate = DateTime.UtcNow;
         transfer.UpdatedAt = DateTime.UtcNow;
         if (req.ApprovedBy.HasValue) transfer.ApprovedBy = req.ApprovedBy;
+
+        var reasonsByItemId = (req.Items ?? []).ToDictionary(r => r.ItemId, r => r.DamagedOrReturnReason);
 
         foreach (var item in transfer.Items)
         {
@@ -211,7 +232,9 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
                     ExpiryDate = item.ExpiryDate,
                     ReceivedDate = DateTime.UtcNow,
                     Status = "active",
-                    Notes = $"Received via transfer {transfer.TransferNumber}",
+                    Notes = reasonsByItemId.TryGetValue(item.Id, out var reason) && !string.IsNullOrWhiteSpace(reason)
+                        ? $"Received via transfer {transfer.TransferNumber} [Damaged/Return: {reason}]"
+                        : $"Received via transfer {transfer.TransferNumber}",
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                 });
@@ -297,6 +320,7 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         return Ok(transfer);
     }
 
+    [RequirePermission("Stock Transfers", PermAction.Approve)]
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateTransferStatusRequest req)
     {
@@ -403,7 +427,7 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
 }
 
 public record UpdateTransferStatusRequest(string Status, Guid? ApprovedBy);
-public record ReceiveTransferItemRequest(Guid ItemId, decimal ReceivedQuantity, string? Notes);
+public record ReceiveTransferItemRequest(Guid ItemId, decimal ReceivedQuantity, string? Notes, string? DamagedOrReturnReason = null);
 public record ReceiveTransferRequest(List<ReceiveTransferItemRequest>? Items, Guid? ApprovedBy);
 
 public record CreateTransferItemRequest(

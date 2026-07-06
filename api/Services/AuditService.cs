@@ -11,7 +11,8 @@ public interface IAuditService
         Guid? entityId = null,
         Guid? userId = null,
         Guid? branchId = null,
-        string? details = null);
+        string? details = null,
+        string severity = "info");
 }
 
 public class AuditService(BaqalaDbContext db) : IAuditService
@@ -22,7 +23,8 @@ public class AuditService(BaqalaDbContext db) : IAuditService
         Guid? entityId = null,
         Guid? userId = null,
         Guid? branchId = null,
-        string? details = null)
+        string? details = null,
+        string severity = "info")
     {
         db.AuditLogs.Add(new AuditLog
         {
@@ -33,6 +35,7 @@ public class AuditService(BaqalaDbContext db) : IAuditService
             UserId = userId,
             BranchId = branchId,
             NewValues = details,
+            Severity = severity,
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();

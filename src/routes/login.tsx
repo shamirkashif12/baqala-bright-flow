@@ -23,7 +23,7 @@ function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/dashboard";
@@ -48,6 +48,8 @@ function Login() {
       window.location.replace(safeRedirect);
     } catch (err: any) {
       setError(err?.message || "Sign in failed. Try again.");
+      setPassword("");
+      setShowPassword(false);
     } finally {
       setLoading(false);
     }
@@ -118,7 +120,7 @@ function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="mt-1.5 h-11"
-                  placeholder="owner@baqala-faisal.sa"
+                  placeholder="name@example.com"
                   autoComplete="email"
                   disabled={loading}
                 />

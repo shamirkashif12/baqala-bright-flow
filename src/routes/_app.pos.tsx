@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter } from "@/lib/api";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
+import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 
 // ─── ZATCA Phase 2 TLV QR encoder ────────────────────────────────────────────
@@ -159,19 +160,40 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
 
   const currentStock = selected ? (stockMap.get(selected.id) ?? 0) : 0;
 
+  // Hardware barcode scanners emit the code + Enter — match by barcode only here,
+  // never by name/SKU, so a scan can't accidentally land on the wrong product.
+  // Typed searches (no Enter) still loosely match name/SKU/barcode via `results` above.
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const byBarcode = products.find(p => p.barcode === trimmed);
+    if (byBarcode) {
+      setSelected(byBarcode);
+      setQuery(byBarcode.name);
+    }
+  };
+
   const handleConfirm = async () => {
     if (!selected) return;
     setError("");
     setSaving(true);
     try {
-      try {
-        // Try standard adjustment first (works if stock record already exists)
-        await api.adjustInventory({ productId: selected.id, branchId, quantity: qty, adjustmentType: "receive", reason: "Quick stock-in from POS" });
-      } catch {
-        // No stock record yet — create one via receiveBatch
-        await api.receiveBatch({ productId: selected.id, branchId, quantity: qty, remainingQuantity: qty, receivedDate: new Date().toISOString(), status: "active" });
+      if (currentStock > 0) {
+        // Genuine restock: physically receive the extra stock before adding to cart.
+        try {
+          await api.adjustInventory({ productId: selected.id, branchId, quantity: qty, adjustmentType: "receive", reason: "Quick stock-in from POS" });
+        } catch {
+          await api.receiveBatch({ productId: selected.id, branchId, quantity: qty, remainingQuantity: qty, receivedDate: new Date().toISOString(), status: "active" });
+        }
+        onStockAdded(selected, currentStock + qty);
+      } else {
+        // Never stocked at this branch — sell it directly instead of pre-receiving
+        // exactly what's about to be sold (which would just cancel back to zero).
+        // The sale itself records the shortfall as negative on-hand stock, visible
+        // for reconciliation the next time this product is actually received.
+        onStockAdded(selected, 0);
       }
-      onStockAdded(selected, currentStock + qty);
     } catch (e: any) {
       setError(e.message ?? "Failed to add stock.");
     } finally { setSaving(false); }
@@ -190,6 +212,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
                 placeholder="Search product name, SKU or barcode…" className="pl-9 h-9" />
               {results.length > 0 && (
                 <div className="absolute z-10 top-full mt-1 w-full bg-background border rounded-lg shadow-lg overflow-hidden">
@@ -228,7 +251,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
             </div>
           )}
 
-          {selected && (
+          {selected && currentStock > 0 && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Quantity to Add</p>
               <div className="flex items-center gap-3">
@@ -249,6 +272,16 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
             </div>
           )}
 
+          {selected && currentStock <= 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5">
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                This item has no stock on record at this branch. Selling it now will record on-hand
+                stock as <span className="font-semibold">-1</span> until it's actually received —
+                no stock will be added here.
+              </p>
+            </div>
+          )}
+
           {error && <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 rounded px-3 py-2">{error}</p>}
         </div>
 
@@ -257,7 +290,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
           <Button className="gradient-primary text-primary-foreground border-0 gap-1.5"
             onClick={handleConfirm} disabled={!selected || saving}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
-            Add to Stock & Cart
+            {currentStock > 0 ? "Add to Stock & Cart" : "Sell Anyway & Add to Cart"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -447,21 +480,32 @@ function PrinterSetupDialog() {
               {/* Install instructions */}
               {!qzConnected && (
                 <div className="rounded-lg border border-dashed px-4 py-3 space-y-2.5 text-xs text-muted-foreground">
-                  <p className="font-medium text-foreground text-sm">Setup (one-time per machine):</p>
+                  <p className="font-medium text-foreground text-sm">Setup (one-time per machine, run as IT/Admin):</p>
+
+                  {/* ── One-click installer (recommended) ── */}
                   <a
-                    href={api.qzInstallScriptUrl()}
+                    href={api.setupInstallerUrl()}
                     download
                     className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90 transition-colors"
                   >
                     <Printer className="h-4 w-4" />
-                    Download QZ Tray Installer Script
+                    Download POS Setup Installer
                   </a>
                   <div className="space-y-1">
-                    <p><span className="font-medium text-foreground">Windows:</span> Right-click the downloaded <code className="bg-muted px-1 rounded">.ps1</code> file → <strong>Run with PowerShell</strong></p>
-                    <p><span className="font-medium text-foreground">Linux / Mac:</span> Open terminal → <code className="bg-muted px-1 rounded">bash install-qz-tray.sh</code></p>
+                    <p><span className="font-medium text-foreground">Windows:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.bat</code> → Accept UAC prompt</p>
+                    <p><span className="font-medium text-foreground">macOS:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.command</code></p>
+                    <p><span className="font-medium text-foreground">Linux:</span> Open Terminal → paste this command:</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <code className="flex-1 bg-muted px-2 py-1 rounded text-[10px] break-all select-all">bash ~/Downloads/MiMony-POS-Setup.sh</code>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded px-2 py-1 bg-muted hover:bg-muted/70 text-xs"
+                        onClick={() => navigator.clipboard.writeText("bash ~/Downloads/MiMony-POS-Setup.sh")}
+                      >Copy</button>
+                    </div>
                   </div>
-                  <p>After install, QZ Tray runs silently in the system tray on every boot.</p>
-                  <p className="text-amber-600 font-medium">⚠ First run: QZ Tray asks to <strong>Allow unsigned content</strong> — click Allow, then click Connect above.</p>
+                  <p>Installs QZ Tray silently + creates a POS shortcut on the Desktop. QZ Tray starts automatically on every boot.</p>
+                  <p className="text-amber-600 font-medium">⚠ First run: QZ Tray shows an <strong>Allow unsigned content</strong> prompt — click Allow, then click Connect above.</p>
                 </div>
               )}
 
@@ -604,10 +648,12 @@ function PrinterSetupDialog() {
 function POS() {
   // ─── Branch from global context ───────────────────────────────────────────────
   const { selectedBranch: branch } = useBranch();
+  const { user } = useAuth();
 
   // ─── Data ─────────────────────────────────────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([]);
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
+  const [expiredProductIds, setExpiredProductIds] = useState<Set<string>>(new Set());
   const [taxRate, setTaxRate] = useState(0.15);
   const [taxLabel, setTaxLabel] = useState("VAT 15%");
   const [vatNumber, setVatNumber] = useState("300123456700003");
@@ -626,6 +672,7 @@ function POS() {
   // Refs so the global scanner listener always sees fresh values without re-registering
   const productsRef = useRef<Product[]>([]);
   const stockMapRef = useRef<Map<string, number>>(new Map());
+  const expiredProductIdsRef = useRef<Set<string>>(new Set());
   const scanBuf = useRef("");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastKeyAt = useRef(0);
@@ -684,7 +731,7 @@ function POS() {
         const tobaccoRule = taxRules.find((r) => r.ruleType === "tobacco_excise");
         setTobaccoFeeEnabled(tobaccoRule ? tobaccoRule.status === "active" : true);
 
-        const shift = shifts.find((s) => s.status === "open") ?? null;
+        const shift = shifts.find((s) => s.status === "open" && s.cashierId === user?.id) ?? null;
         setActiveShift(shift);
       })
       .finally(() => {
@@ -697,7 +744,7 @@ function POS() {
     api.getTaxRules().then(rules =>
       setCustomFees(rules.filter(r => r.ruleType === "custom_fee" && r.status === "active"))
     ).catch(() => {});
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-only load; user.id is stable per session
 
   // ─── Branch change: clear & reload; remount: restore saved cart ──────────────
   useEffect(() => {
@@ -735,9 +782,19 @@ function POS() {
       })
       .catch(() => {});
 
+    // Block sale of expired items — mirrors the "Block sale of expired items" rule.
+    api.getBatches({ branchId: branch.id, status: "expired" })
+      .then((batches) => setExpiredProductIds(new Set(batches.map((b) => b.productId))))
+      .catch(() => {});
+
+    // Unscoped by branch — a cashier can only ever hold one open shift at a
+    // time (enforced in ShiftsController.OpenShift), so scoping this lookup to
+    // the currently-selected branch only breaks it if their branch assignment
+    // changed after they checked in, leaving the shift itself pointed at the
+    // old branch.
     api.getActiveShifts()
       .then((shifts) => {
-        const shift = shifts.find((s) => s.status === "open") ?? null;
+        const shift = shifts.find((s) => s.status === "open" && s.cashierId === user?.id) ?? null;
         setActiveShift(shift);
       })
       .catch(() => {});
@@ -760,6 +817,7 @@ function POS() {
   // Keep refs fresh so the scanner listener never has stale closures
   useEffect(() => { productsRef.current = products; }, [products]);
   useEffect(() => { stockMapRef.current = stockMap; }, [stockMap]);
+  useEffect(() => { expiredProductIdsRef.current = expiredProductIds; }, [expiredProductIds]);
 
   // Global USB barcode scanner listener (works anywhere on the page)
   useEffect(() => {
@@ -786,12 +844,29 @@ function POS() {
             });
             return;
           }
+          if (expiredProductIdsRef.current.has(p.id)) {
+            toast.error(`Cannot sell expired item`, {
+              description: `"${p.name}" has an expired batch and is blocked from sale.`,
+              duration: 4000,
+            });
+            return;
+          }
           const stock = stockMapRef.current.get(p.id) ?? 0;
+          let blockedByStock = false;
           setCart((c) => {
             const ex = c.find((i) => i.sku === p.sku);
+            const nextQty = (ex?.qty ?? 0) + 1;
+            if (nextQty > stock) { blockedByStock = true; return c; }
             if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
             return [...c, { name: p.name, sku: p.sku, productId: p.id, qty: 1, price: p.basePrice, stock }];
           });
+          if (blockedByStock) {
+            toast.error(stock > 0 ? `Only ${stock} in stock` : `Out of stock`, {
+              description: `"${p.name}" has ${stock} unit(s) available at this branch.`,
+              duration: 4000,
+            });
+            return;
+          }
           setFlashSku(p.sku);
           setTimeout(() => setFlashSku(null), 600);
           setScanFlash(true);
@@ -820,6 +895,7 @@ function POS() {
 
   // ─── Calculations ─────────────────────────────────────────────────────────────
   const subtotal = cart.reduce((s, i) => s + i.qty * i.price, 0);
+  const cartUnitCount = cart.reduce((s, i) => s + i.qty, 0);
 
   // KSA tobacco excise: min 25 SAR OR 100% of base price, whichever is higher
   function calcTobaccoFee(base: number): number {
@@ -847,6 +923,14 @@ function POS() {
     const now = new Date();
     if (d.startDate && new Date(d.startDate) > now) return sum;
     if (d.endDate && new Date(d.endDate) < now) return sum;
+    // Loyalty/senior-style discounts require an actual eligible customer —
+    // never auto-apply to an anonymous walk-in.
+    if (d.requiresCustomer && !customer) return sum;
+    if (d.minCustomerTier) {
+      const tierRank: Record<string, number> = { standard: 0, silver: 1, gold: 2, platinum: 3 };
+      const customerRank = customer ? tierRank[customer.tier ?? "standard"] ?? 0 : -1;
+      if (customerRank < (tierRank[d.minCustomerTier] ?? 0)) return sum;
+    }
     if (d.appliesTo === "all") {
       return sum + (d.discountType === "percentage"
         ? subtotal * (d.value / 100)
@@ -952,13 +1036,43 @@ function POS() {
   const total = Math.max(0, taxable) + vatAmount + customFeeTotal;
 
   // ─── Cart ops ─────────────────────────────────────────────────────────────────
-  const updateQty = (sku: string, d: number) =>
-    setCart((c) => c.map((i) => (i.sku === sku ? { ...i, qty: Math.max(1, i.qty + d) } : i)));
+  const updateQty = (sku: string, d: number) => {
+    let blockedByStock = false;
+    setCart((c) => c.map((i) => {
+      if (i.sku !== sku) return i;
+      const next = Math.max(1, i.qty + d);
+      if (next > i.stock) { blockedByStock = true; return i; }
+      return { ...i, qty: next };
+    }));
+    if (blockedByStock) {
+      const item = cart.find((i) => i.sku === sku);
+      toast.error(`Only ${item?.stock ?? 0} in stock`, {
+        description: `"${item?.name ?? "This item"}" has no more available stock at this branch.`,
+        duration: 4000,
+      });
+    }
+  };
 
   const remove = (sku: string) => setCart((c) => c.filter((i) => i.sku !== sku));
 
   const addToCart = (p: Product) => {
+    if (expiredProductIds.has(p.id)) {
+      toast.error(`Cannot sell expired item`, {
+        description: `"${p.name}" has an expired batch and is blocked from sale.`,
+        duration: 4000,
+      });
+      return;
+    }
     const stock = stockMap.get(p.id) ?? 0;
+    const existing = cart.find((i) => i.sku === p.sku);
+    const nextQty = (existing?.qty ?? 0) + 1;
+    if (nextQty > stock) {
+      toast.error(stock > 0 ? `Only ${stock} in stock` : `Out of stock`, {
+        description: `"${p.name}" has ${stock} unit(s) available at this branch.`,
+        duration: 4000,
+      });
+      return;
+    }
     setCart((c) => {
       const ex = c.find((i) => i.sku === p.sku);
       if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
@@ -1130,6 +1244,11 @@ function POS() {
   ) => {
     if (!branch) throw new Error("No branch configured");
     if (!cart.length) throw new Error("Cart is empty");
+    // A shift's cash drawer is a Cashier-only concept — only cashiers need one
+    // open to sell. Admins/managers covering a register aren't reconciling a
+    // till, so they can ring up a sale without checking in first.
+    if (user?.role === "cashier" && !activeShift)
+      throw new Error("No active shift found for you at this terminal. Please check in first.");
 
     const payments = splitPayments
       ? splitPayments
@@ -1141,7 +1260,7 @@ function POS() {
       source: "pos",
       branchId: branch.id,
       customerId: customer?.id,
-      cashierId: activeShift?.cashierId,
+      cashierId: activeShift?.cashierId ?? user?.id,
       subtotal,
       discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal,
       taxAmount: vatAmount + customFeeTotal,
@@ -1218,7 +1337,10 @@ function POS() {
       subtitle={`${branch?.name ?? "Loading…"} · ${activeShift ? `Cashier: ${activeShift.cashier?.fullName ?? "Active shift"}` : "No active shift"}`}
       actions={<PrinterSetupDialog />}
     >
-      <div className="grid lg:grid-cols-[1fr_420px] gap-4 -mt-2">
+      {/* Two-column split starts at md (tablet) so the order panel + Charge button stay
+          reachable without scrolling past the whole cart on tablet-sized POS hardware —
+          previously this only kicked in at lg (1024px), leaving tablets stacked. */}
+      <div className="grid md:grid-cols-[1fr_320px] lg:grid-cols-[1fr_420px] gap-4 -mt-2">
         {/* ─── Left: scanner + cart ─────────────────────────────────────────── */}
         <div className="space-y-4">
           {/* Search / Barcode */}
@@ -1270,12 +1392,14 @@ function POS() {
                 {matches.map((p) => {
                   const stock = stockMap.get(p.id);
                   const outOfStock = stock !== undefined && stock <= 0;
+                  const expired = expiredProductIds.has(p.id);
+                  const blocked = outOfStock || expired;
                   return (
                     <button
                       key={p.sku}
                       type="button"
-                      onMouseDown={(e) => { e.preventDefault(); if (!outOfStock) addToCart(p); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${outOfStock ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/60"}`}
+                      onMouseDown={(e) => { e.preventDefault(); if (!blocked) addToCart(p); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${blocked ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/60"}`}
                     >
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate">{p.name}</p>
@@ -1283,7 +1407,12 @@ function POS() {
                           SKU {p.sku}{p.barcode ? ` · ${p.barcode}` : ""}
                         </p>
                       </div>
-                      {stock !== undefined && (
+                      {expired && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
+                          Expired
+                        </span>
+                      )}
+                      {!expired && stock !== undefined && (
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${outOfStock ? "bg-destructive/15 text-destructive" : stock <= 5 ? "bg-warning/20 text-warning-foreground" : "bg-success/15 text-success"}`}>
                           <Package className="h-2.5 w-2.5 inline mr-0.5" />{stock}
                         </span>
@@ -1354,8 +1483,8 @@ function POS() {
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => updateQty(item.sku, 1)}
-                        disabled={item.stock > 0 && item.qty >= item.stock}
-                        title={item.stock > 0 && item.qty >= item.stock ? `Only ${item.stock} in stock` : undefined}
+                        disabled={item.qty >= item.stock}
+                        title={item.qty >= item.stock ? `Only ${item.stock} in stock` : undefined}
                       >
                         <Plus className="h-3 w-3" />
                       </Button>
@@ -1425,12 +1554,12 @@ function POS() {
         </div>
 
         {/* ─── Right: order panel ───────────────────────────────────────────── */}
-        <Card className="border-border/60 shadow-elegant flex flex-col lg:h-[calc(100vh-100px)] lg:sticky lg:top-20 overflow-hidden">
+        <Card className="border-border/60 shadow-elegant flex flex-col md:h-[calc(100vh-100px)] md:sticky md:top-20 overflow-hidden">
           <div className="p-4 border-b border-border/60 flex items-center justify-between">
             <div>
               <h3 className="font-semibold">New Order</h3>
               <p className="text-xs text-muted-foreground">
-                {cart.length} items · {customer ? customer.fullName : "Walk-in"} · {branch?.name ?? "—"}
+                {cartUnitCount} unit{cartUnitCount !== 1 ? "s" : ""} · {customer ? customer.fullName : "Walk-in"} · {branch?.name ?? "—"}
               </p>
             </div>
             <div className="flex gap-1">
@@ -1873,10 +2002,13 @@ function POS() {
         stockMap={stockMap}
         branchId={branch?.id ?? ""}
         onStockAdded={(product, newStock) => {
+          // Not capped at newStock here — when currentStock was 0, QuickStockInDialog
+          // intentionally didn't receive any stock and expects this add-to-cart to proceed
+          // anyway, so the sale below records the shortfall as negative on-hand stock.
           setStockMap(prev => { const next = new Map(prev); next.set(product.id, newStock); return next; });
           setCart(c => {
             const ex = c.find(i => i.sku === product.sku);
-            if (ex) return c.map(i => i.sku === product.sku ? { ...i, qty: i.qty + 1 } : i);
+            if (ex) return c.map(i => i.sku === product.sku ? { ...i, qty: i.qty + 1, stock: newStock } : i);
             return [...c, { name: product.name, sku: product.sku, productId: product.id, qty: 1, price: product.basePrice, stock: newStock }];
           });
           setStockInOpen(false);
@@ -1912,6 +2044,7 @@ function PaymentDialog({
   const [tab, setTab] = useState("cash");
   const [received, setReceived] = useState(total.toFixed(2));
   const [status, setStatus] = useState<"idle" | "waiting" | "success" | "failed">("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Split payment inputs (cash + card only)
   const [splitCash, setSplitCash] = useState("0.00");
@@ -1926,6 +2059,7 @@ function PaymentDialog({
     if (open) {
       setReceived("");
       setStatus("idle");
+      setErrorMsg(null);
       setSplitCash(total.toFixed(2));
       setSplitCard("0.00");
     }
@@ -1945,7 +2079,8 @@ function PaymentDialog({
       }
       setStatus("success");
       setTimeout(onDone, 800);
-    } catch {
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Payment failed. Please try again.");
       setStatus("failed");
     }
   };
@@ -2033,7 +2168,7 @@ function PaymentDialog({
         </Tabs>
 
         {status === "failed" && (
-          <p className="text-sm text-destructive text-center">Payment failed. Please try again.</p>
+          <p className="text-sm text-destructive text-center">{errorMsg ?? "Payment failed. Please try again."}</p>
         )}
 
         <DialogFooter>

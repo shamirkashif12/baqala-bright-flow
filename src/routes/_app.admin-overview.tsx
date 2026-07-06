@@ -234,7 +234,8 @@ function AdminOverview() {
                   <tbody>
                     {branchSummaries.map(({ branch, skus, value, oos, low, exp, linked }) => {
                       const healthy = oos === 0 && low === 0 && exp === 0;
-                      const critical = oos > 0 || exp > 0;
+                      // "Critical" = out of stock, matching the Dashboard/Inventory definition.
+                      const critical = oos > 0;
                       return (
                         <tr key={branch.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
                           <td className="px-4 py-3">

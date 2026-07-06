@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using BaqalaPOS.Api.Services;
@@ -25,6 +26,7 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
         return branch is null ? NotFound() : Ok(branch);
     }
 
+    [RequirePermission("Branches", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Branch branch)
     {
@@ -53,6 +55,7 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
         return CreatedAtAction(nameof(GetById), new { id = branch.Id }, branch);
     }
 
+    [RequirePermission("Branches", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Branch updated)
     {
@@ -79,6 +82,7 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
         return Ok(branch);
     }
 
+    [RequirePermission("Branches", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

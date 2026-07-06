@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -35,6 +36,7 @@ public class RolesController(BaqalaDbContext db) : ControllerBase
         return Ok(role);
     }
 
+    [RequirePermission("Roles", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Role role)
     {
@@ -47,6 +49,7 @@ public class RolesController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = role.Id }, role);
     }
 
+    [RequirePermission("Roles", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Role updated)
     {
@@ -73,6 +76,7 @@ public class RolesController(BaqalaDbContext db) : ControllerBase
         return Ok(refreshed);
     }
 
+    [RequirePermission("Roles", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

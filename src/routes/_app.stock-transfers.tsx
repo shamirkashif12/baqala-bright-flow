@@ -523,6 +523,7 @@ function ItemsStep({
         {items.map((item, i) => {
           const maxQty = poItems?.find(x => x.productId === item.productId)?.maxQty;
           const qtyExceeded = maxQty !== undefined && item.requestedQuantity > maxQty;
+          const qtyInvalid = item.requestedQuantity < 1;
           return (
             <Card key={i} className="border-border/60">
               <CardContent className="p-3 space-y-2">
@@ -548,12 +549,15 @@ function ItemsStep({
                       type="number"
                       min={1}
                       max={maxQty}
-                      className={cn("h-8 text-xs", qtyExceeded && "border-destructive ring-1 ring-destructive")}
+                      className={cn("h-8 text-xs", (qtyExceeded || qtyInvalid) && "border-destructive ring-1 ring-destructive")}
                       value={item.requestedQuantity}
                       onChange={e => updateItem(i, { requestedQuantity: Number(e.target.value) })}
                     />
                     {qtyExceeded && (
                       <p className="text-[10px] text-destructive leading-tight">Exceeds PO qty ({maxQty})</p>
+                    )}
+                    {!qtyExceeded && qtyInvalid && (
+                      <p className="text-[10px] text-destructive leading-tight">Quantity must be at least 1</p>
                     )}
                   </div>
                   <button
@@ -991,6 +995,7 @@ function CreateTransferSheet({
     const pi = fetchedPo.items.find(x => x.productId === item.productId);
     return pi !== undefined && item.requestedQuantity > pi.maxQty;
   });
+  const hasInvalidQty = items.some(item => item.productId && item.requestedQuantity < 1);
 
   const stepTitle = step === 1 ? "Step 1: Transfer Type" : step === 2 ? "Step 2: Source & Destination" : "Step 3: Items & Details";
 
@@ -1149,7 +1154,7 @@ function CreateTransferSheet({
             {step === 3 && (
               <Button
                 className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
-                disabled={saving || items.filter(i => i.productId).length === 0 || hasQtyError}
+                disabled={saving || items.filter(i => i.productId).length === 0 || hasQtyError || hasInvalidQty}
                 onClick={handleCreate}
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}

@@ -52,6 +52,25 @@ public class CashierShift
     [Column("notes")]
     public string? Notes { get; set; }
 
+    // True when |Variance| exceeded the "Cash variance > SAR 200" Rules Engine
+    // threshold at close and a manager has not yet reviewed it.
+    [Column("requires_approval")]
+    public bool RequiresApproval { get; set; } = false;
+
+    [Column("approved_by")]
+    public Guid? ApprovedBy { get; set; }
+
+    [Column("approved_at")]
+    public DateTime? ApprovedAt { get; set; }
+
+    // Who actually performed the close action — differs from CashierId when a
+    // manager closes another cashier's shift on their behalf.
+    [Column("closed_by")]
+    public Guid? ClosedBy { get; set; }
+
+    [Column("close_reason")]
+    public string? CloseReason { get; set; }
+
     // Navigation
     public User? Cashier { get; set; }
     public Terminal? Terminal { get; set; }

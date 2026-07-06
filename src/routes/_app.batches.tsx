@@ -13,6 +13,7 @@ import { CalendarClock, PackageCheck, Ban, ShieldAlert, Plus, Download, X } from
 import { toast } from "sonner";
 import { api, type InventoryBatch, type Branch, type Product, type Supplier } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app/batches")({ component: Batches });
 
@@ -64,14 +65,14 @@ function exportCSV(data: InventoryBatch[]) {
 
 // ─── Receive Batch Dialog ─────────────────────────────────────────────────────
 
-function ReceiveBatchDialog({ branches, products, suppliers, onDone }: {
-  branches: Branch[]; products: Product[]; suppliers: Supplier[]; onDone: () => void;
+function ReceiveBatchDialog({ branches, products, suppliers, onDone, lockedBranchId }: {
+  branches: Branch[]; products: Product[]; suppliers: Supplier[]; onDone: () => void; lockedBranchId: string | null;
 }) {
   const { canCreate } = usePermission("Batches");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    productId: "", branchId: "", supplierId: "",
+    productId: "", branchId: lockedBranchId ?? "", supplierId: "",
     quantity: "", purchaseCost: "", expiryDate: "",
     batchNumber: "", notes: "",
   });
@@ -79,7 +80,7 @@ function ReceiveBatchDialog({ branches, products, suppliers, onDone }: {
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
   function reset() {
-    setForm({ productId: "", branchId: "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "" });
+    setForm({ productId: "", branchId: lockedBranchId ?? "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "" });
   }
 
   async function handleSave() {
@@ -134,10 +135,10 @@ function ReceiveBatchDialog({ branches, products, suppliers, onDone }: {
             </div>
             <div>
               <Label>Branch *</Label>
-              <Select value={form.branchId} onValueChange={v => set("branchId", v)}>
+              <Select value={form.branchId} onValueChange={v => set("branchId", v)} disabled={!!lockedBranchId}>
                 <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                 <SelectContent>
-                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  {(lockedBranchId ? branches.filter(b => b.id === lockedBranchId) : branches).map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -184,13 +185,15 @@ function ReceiveBatchDialog({ branches, products, suppliers, onDone }: {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function Batches() {
+  const { user } = useAuth();
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
@@ -199,7 +202,7 @@ function Batches() {
     setLoading(true);
     try {
       const data = await api.getBatches({
-        branchId: branchFilter !== "all" ? branchFilter : undefined,
+        branchId: lockedBranchId ?? (branchFilter !== "all" ? branchFilter : undefined),
         status: statusFilter !== "all" ? statusFilter : undefined,
       });
       setBatches(data ?? []);
@@ -215,6 +218,11 @@ function Batches() {
     api.getSuppliers().then(setSuppliers).catch(() => {});
   }, []);
 
+  // Branch-scoped roles can't be switched away from their own branch
+  useEffect(() => {
+    if (lockedBranchId) setBranchFilter(lockedBranchId);
+  }, [lockedBranchId]);
+
   // Re-fetch batches from BE whenever a filter changes
   useEffect(() => {
     loadBatches();
@@ -227,7 +235,7 @@ function Batches() {
   const q = search.toLowerCase();
   const filtered = batches.filter(b => {
     const mq = !q || b.product?.name?.toLowerCase().includes(q) || b.product?.sku?.toLowerCase().includes(q) || b.batchNumber.toLowerCase().includes(q);
-    const mbr = branchFilter === "all" || b.branchId === branchFilter;
+    const mbr = lockedBranchId ? b.branchId === lockedBranchId : (branchFilter === "all" || b.branchId === branchFilter);
     const ms = statusFilter === "all" || b.status === statusFilter;
     const mef = !expiryFrom || (!!b.expiryDate && b.expiryDate >= expiryFrom);
     const met = !expiryTo || (!!b.expiryDate && b.expiryDate <= expiryTo + "T23:59:59");
@@ -249,13 +257,15 @@ function Batches() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Input placeholder="Search batch / lot / product…" className="h-9 bg-card" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <Select value={branchFilter} onValueChange={setBranchFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {!lockedBranchId && (
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Statuses" /></SelectTrigger>
           <SelectContent>
@@ -279,7 +289,7 @@ function Batches() {
         <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => exportCSV(filtered)} disabled={filtered.length === 0}>
           <Download className="h-4 w-4" /> Export ({filtered.length})
         </Button>
-        <ReceiveBatchDialog branches={branches} products={products} suppliers={suppliers} onDone={loadBatches} />
+        <ReceiveBatchDialog branches={branches} products={products} suppliers={suppliers} onDone={loadBatches} lockedBranchId={lockedBranchId} />
       </div>
 
       {/* Table */}

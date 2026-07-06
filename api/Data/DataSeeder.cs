@@ -387,6 +387,39 @@ public static class DataSeeder
         await db.SaveChangesAsync();
     }
 
+    // Al Khobar (Eastern Province) must not be linked to the Riyadh warehouse —
+    // that's the seed data behind a Khobar product silently showing a Riyadh
+    // warehouse. Creates a dedicated Eastern Province warehouse on already-seeded
+    // databases and re-links Al Khobar to it.
+    public static async Task PatchWarehouseRegionsAsync(BaqalaDbContext db)
+    {
+        var whRiyadh = await db.Warehouses.FirstOrDefaultAsync(w => w.Code == "WH-RYD-001");
+        var brKhobar = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-002");
+        if (whRiyadh is null || brKhobar is null) return;
+
+        var mislink = await db.BranchWarehouses
+            .FirstOrDefaultAsync(bw => bw.BranchId == brKhobar.Id && bw.WarehouseId == whRiyadh.Id);
+        if (mislink is null) return; // already fixed, or never seeded
+
+        var whEastern = await db.Warehouses.FirstOrDefaultAsync(w => w.Code == "WH-DMM-001");
+        if (whEastern is null)
+        {
+            whEastern = new Warehouse
+            {
+                Id = Guid.NewGuid(), Code = "WH-DMM-001", Name = "Eastern Province Warehouse",
+                NameAr = "مستودع المنطقة الشرقية",
+                Address = "2nd Industrial City, Dammam", City = "Dammam",
+                Capacity = 2500, ContactPerson = "Faisal Al Otaibi",
+                ContactNumber = "+966552002020", Status = "active",
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+            };
+            db.Warehouses.Add(whEastern);
+        }
+
+        mislink.WarehouseId = whEastern.Id;
+        await db.SaveChangesAsync();
+    }
+
     // ─── Backfill: Warehouses ────────────────────────────────────────────────
     private static async Task SeedWarehousesAsync(BaqalaDbContext db)
     {
@@ -419,13 +452,25 @@ public static class DataSeeder
             CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
         };
 
-        db.Warehouses.AddRange(whRiyadh, whJeddah);
+        // Eastern Province Warehouse — serves Al Khobar; a Khobar product must
+        // not be defaulted into the Riyadh warehouse's region.
+        var whEastern = new Warehouse
+        {
+            Id = Guid.NewGuid(), Code = "WH-DMM-001", Name = "Eastern Province Warehouse",
+            NameAr = "مستودع المنطقة الشرقية",
+            Address = "2nd Industrial City, Dammam", City = "Dammam",
+            Capacity = 2500, ContactPerson = "Faisal Al Otaibi",
+            ContactNumber = "+966552002020", Status = "active",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+        };
+
+        db.Warehouses.AddRange(whRiyadh, whJeddah, whEastern);
         await db.SaveChangesAsync();
 
-        // Link branches to warehouses
+        // Link branches to warehouses — each branch to its own region
         var links = new List<BranchWarehouse>();
         if (brOlaya is not null)   links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brOlaya.Id,   WarehouseId = whRiyadh.Id, CreatedAt = DateTime.UtcNow });
-        if (brKhobar is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brKhobar.Id,  WarehouseId = whRiyadh.Id, CreatedAt = DateTime.UtcNow });
+        if (brKhobar is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brKhobar.Id,  WarehouseId = whEastern.Id, CreatedAt = DateTime.UtcNow });
         if (brMadinah is not null) links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brMadinah.Id, WarehouseId = whRiyadh.Id, CreatedAt = DateTime.UtcNow });
         if (brJeddah is not null)  links.Add(new BranchWarehouse { Id = Guid.NewGuid(), BranchId = brJeddah.Id,  WarehouseId = whJeddah.Id, CreatedAt = DateTime.UtcNow });
         db.BranchWarehouses.AddRange(links);
@@ -440,6 +485,10 @@ public static class DataSeeder
         foreach (var prod in products.Skip(4).Take(6))
         {
             whStocks.Add(new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = whJeddah.Id, ProductId = prod.Id, Quantity = 300, ReorderLevel = 30, LastUpdated = DateTime.UtcNow, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        }
+        foreach (var prod in products.Skip(2).Take(5))
+        {
+            whStocks.Add(new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = whEastern.Id, ProductId = prod.Id, Quantity = 250, ReorderLevel = 25, LastUpdated = DateTime.UtcNow, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
         }
         db.WarehouseStocks.AddRange(whStocks);
         await db.SaveChangesAsync();
@@ -1093,19 +1142,61 @@ public static class DataSeeder
 
         if (roleIds.Count == 0) return;
 
-        var patches = await db.RolePermissions
-            .Where(p => roleIds.Contains(p.RoleId) &&
-                        p.Module == "Warehouses" &&
-                        p.CanCreate)
-            .ToListAsync();
-
-        foreach (var p in patches)
+        // Loop per role id — see PatchMarketingPermissionsAsync for why
+        // roleIds.Contains(p.RoleId) is unsafe on this MySQL EF provider.
+        var changed = false;
+        foreach (var roleId in roleIds)
         {
-            p.CanCreate = false;
-            p.CanApprove = false;
+            var patches = await db.RolePermissions
+                .Where(p => p.RoleId == roleId && p.Module == "Warehouses" && p.CanCreate)
+                .ToListAsync();
+
+            foreach (var p in patches)
+            {
+                p.CanCreate = false;
+                p.CanApprove = false;
+                changed = true;
+            }
         }
 
-        if (patches.Count > 0)
+        if (changed)
+            await db.SaveChangesAsync();
+    }
+
+    // Marketing ("Auditor" post-rename) must not retain Rules Engine, Accounting &
+    // Finance, or Returns visibility from earlier seeder versions — those modules
+    // let a marketing user read/alter approval, discount and tax rules.
+    public static async Task PatchMarketingPermissionsAsync(BaqalaDbContext db)
+    {
+        var roleIds = await db.Roles
+            .Where(r => r.Name == "Auditor" || r.Name == "Marketing User")
+            .Select(r => r.Id)
+            .ToListAsync();
+
+        if (roleIds.Count == 0) return;
+
+        // Loop per role id rather than roleIds.Contains(p.RoleId) — the MySQL EF
+        // provider in use here fails to assign a type mapping to a List<Guid>
+        // parameter in a Contains() translation.
+        var changed = false;
+        foreach (var roleId in roleIds)
+        {
+            var patches = await db.RolePermissions
+                .Where(p => p.RoleId == roleId &&
+                            (p.Module == "Rules Engine" || p.Module == "Accounting & Finance" || p.Module == "Returns"))
+                .ToListAsync();
+
+            foreach (var p in patches)
+            {
+                if (p.CanView || p.CanCreate || p.CanEdit || p.CanDelete || p.CanApprove || p.CanExport)
+                {
+                    p.CanView = p.CanCreate = p.CanEdit = p.CanDelete = p.CanApprove = p.CanExport = false;
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed)
             await db.SaveChangesAsync();
     }
 
@@ -1343,7 +1434,9 @@ public static class DataSeeder
                 P(r, "Orders",              true,  false, false, false, false, true),
                 P(r, "Coupons",             true,  true,  true,  false, false, true),
                 P(r, "Customers",           true,  true,  true,  false, false, true),
-                P(r, "Returns",             true,  false, false, false, false, true),
+                // Marketing is scoped to rewards/campaigns/referrals only (BRD §4)
+                // — no Returns, Finance or Rules Engine visibility.
+                P(r, "Returns",             false, false, false, false, false, false),
                 P(r, "Inventory",           true,  false, false, false, false, true),
                 P(r, "Stocks",              true,  false, false, false, false, true),
                 P(r, "Batches",             false, false, false, false, false, false),
@@ -1352,7 +1445,7 @@ public static class DataSeeder
                 P(r, "Suppliers",           false, false, false, false, false, false),
                 P(r, "Purchase Orders",     false, false, false, false, false, false),
                 P(r, "Supplier Returns",    false, false, false, false, false, false),
-                P(r, "Accounting & Finance",true,  false, false, false, false, true),
+                P(r, "Accounting & Finance",false, false, false, false, false, false),
                 P(r, "Tax & Fees",          false, false, false, false, false, false),
                 P(r, "Sales",               true,  false, false, false, false, true),
                 P(r, "Control Tower",       false, false, false, false, false, false),
@@ -1364,7 +1457,7 @@ public static class DataSeeder
                 P(r, "Roles",               false, false, false, false, false, false),
                 P(r, "Compliance",          false, false, false, false, false, false),
                 P(r, "Audit Logs",          false, false, false, false, false, false),
-                P(r, "Rules Engine",        true,  false, false, false, false, false),
+                P(r, "Rules Engine",        false, false, false, false, false, false),
                 P(r, "Settings",            false, false, false, false, false, false),
             },
             "Picker" => new[]
@@ -1441,11 +1534,183 @@ public static class DataSeeder
     private static async Task SeedDiscountsAsync(BaqalaDbContext db)
     {
         db.Discounts.AddRange(
-            new Discount { Id = Guid.NewGuid(), Name = "Senior Citizen 5%",     AppliesTo = "all",    DiscountType = "percentage", Value = 5,  IsActive = true,  CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new Discount { Id = Guid.NewGuid(), Name = "Loyalty Tier Gold 10%", AppliesTo = "all",    DiscountType = "percentage", Value = 10, IsActive = true,  CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new Discount { Id = Guid.NewGuid(), Name = "Senior Citizen 5%",     AppliesTo = "all",    DiscountType = "percentage", Value = 5,  IsActive = true,  RequiresCustomer = true, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new Discount { Id = Guid.NewGuid(), Name = "Loyalty Tier Gold 10%", AppliesTo = "all",    DiscountType = "percentage", Value = 10, IsActive = true,  RequiresCustomer = true, MinCustomerTier = "gold", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
             new Discount { Id = Guid.NewGuid(), Name = "Eid Week-end 15%",      AppliesTo = "all",    DiscountType = "percentage", Value = 15, IsActive = false, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
         );
         await db.SaveChangesAsync();
+    }
+
+    // ─── Patch: gate loyalty/senior discounts behind an actual customer, so they
+    // stop auto-applying to anonymous walk-ins on already-seeded databases ──────
+    public static async Task PatchDiscountEligibilityAsync(BaqalaDbContext db)
+    {
+        var patches = await db.Discounts
+            .Where(d => (d.Name.Contains("Senior Citizen") || d.Name.Contains("Loyalty Tier")) && !d.RequiresCustomer)
+            .ToListAsync();
+
+        foreach (var d in patches)
+        {
+            d.RequiresCustomer = true;
+            if (d.Name.Contains("Gold") && d.MinCustomerTier is null) d.MinCustomerTier = "gold";
+        }
+
+        if (patches.Count > 0)
+            await db.SaveChangesAsync();
+    }
+
+    // Removes unprofessional/placeholder branches (e.g. a tester quickly typed
+    // "Branch" or "Branch TEST" while exploring the Add Branch flow) — not
+    // something the seeder ever creates, just startup cleanup for whatever junk
+    // ended up in a given database. Cleans up the small amount of test data
+    // (stock/batches/audit logs) those branches accumulated so the hard delete
+    // actually succeeds, instead of leaving them soft-disabled and still visible.
+    public static async Task PatchRemoveTestBranchesAsync(BaqalaDbContext db)
+    {
+        // Explicit equality ORs, not junkNames.Contains(b.Name) — this MySQL EF
+        // provider fails to assign a type mapping to an array/list parameter
+        // used inside a Contains() translation.
+        var junkBranches = await db.Branches
+            .Where(b => b.Name == "Branch" || b.Name == "Branch TEST")
+            .ToListAsync();
+
+        foreach (var branch in junkBranches)
+        {
+            var id = branch.Id;
+
+            // Loop-per-id instead of list.Contains(...) in the EF query — this
+            // MySQL provider fails to type-map a List<Guid> used inside Contains().
+            var orderIds = await db.Orders.Where(o => o.BranchId == id).Select(o => o.Id).ToListAsync();
+            foreach (var orderId in orderIds)
+            {
+                db.OrderItems.RemoveRange(db.OrderItems.Where(i => i.OrderId == orderId));
+                db.OrderPayments.RemoveRange(db.OrderPayments.Where(p => p.OrderId == orderId));
+            }
+            if (orderIds.Count > 0) await db.SaveChangesAsync();
+            db.Orders.RemoveRange(db.Orders.Where(o => o.BranchId == id));
+
+            var shiftIds = await db.CashierShifts.Where(s => s.BranchId == id).Select(s => s.Id).ToListAsync();
+            foreach (var shiftId in shiftIds)
+                db.ShiftCashMovements.RemoveRange(db.ShiftCashMovements.Where(m => m.ShiftId == shiftId));
+            if (shiftIds.Count > 0) await db.SaveChangesAsync();
+            db.CashierShifts.RemoveRange(db.CashierShifts.Where(s => s.BranchId == id));
+
+            var transferIds = await db.StockTransfers
+                .Where(t => t.SourceBranchId == id || t.DestBranchId == id)
+                .Select(t => t.Id).ToListAsync();
+            foreach (var transferId in transferIds)
+                db.StockTransferItems.RemoveRange(db.StockTransferItems.Where(i => i.TransferId == transferId));
+            if (transferIds.Count > 0) await db.SaveChangesAsync();
+            db.StockTransfers.RemoveRange(db.StockTransfers.Where(t => t.SourceBranchId == id || t.DestBranchId == id));
+
+            db.Users.RemoveRange(db.Users.Where(u => u.BranchId == id));
+            db.Terminals.RemoveRange(db.Terminals.Where(t => t.BranchId == id));
+            db.Devices.RemoveRange(db.Devices.Where(d => d.BranchId == id));
+            db.InventoryStocks.RemoveRange(db.InventoryStocks.Where(s => s.BranchId == id));
+            db.InventoryBatches.RemoveRange(db.InventoryBatches.Where(b2 => b2.BranchId == id));
+            db.InventoryAdjustments.RemoveRange(db.InventoryAdjustments.Where(a => a.BranchId == id));
+            db.BranchWarehouses.RemoveRange(db.BranchWarehouses.Where(bw => bw.BranchId == id));
+            db.Expenses.RemoveRange(db.Expenses.Where(e => e.BranchId == id));
+            db.Discounts.RemoveRange(db.Discounts.Where(d => d.BranchId == id));
+            db.TaxFeeRules.RemoveRange(db.TaxFeeRules.Where(t => t.BranchId == id));
+            db.RulesEngine.RemoveRange(db.RulesEngine.Where(r => r.BranchId == id));
+            db.ZatcaSettings.RemoveRange(db.ZatcaSettings.Where(z => z.BranchId == id));
+            db.ZatcaInvoices.RemoveRange(db.ZatcaInvoices.Where(z => z.BranchId == id));
+            db.CustomerReturns.RemoveRange(db.CustomerReturns.Where(r => r.BranchId == id));
+            db.PurchaseOrders.RemoveRange(db.PurchaseOrders.Where(p => p.BranchId == id));
+            db.LoyaltyTransactions.RemoveRange(db.LoyaltyTransactions.Where(l => l.BranchId == id));
+            db.PosSettings.RemoveRange(db.PosSettings.Where(p => p.BranchId == id));
+            db.ProductPriceLists.RemoveRange(db.ProductPriceLists.Where(p => p.BranchId == id));
+            db.StaffAttendances.RemoveRange(db.StaffAttendances.Where(a => a.BranchId == id));
+            db.TenantSettings.RemoveRange(db.TenantSettings.Where(t => t.BranchId == id));
+            db.AuditLogs.RemoveRange(db.AuditLogs.Where(a => a.BranchId == id));
+            await db.SaveChangesAsync();
+
+            // Not test junk — just clear the dangling preference on real customers.
+            var customersWithPref = await db.Customers.Where(c => c.PreferredBranchId == id).ToListAsync();
+            foreach (var c in customersWithPref) c.PreferredBranchId = null;
+            if (customersWithPref.Count > 0) await db.SaveChangesAsync();
+
+            try
+            {
+                db.Branches.Remove(branch);
+                await db.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // Something else still references it that we didn't account for —
+                // leave it disabled rather than crash startup.
+                db.Entry(branch).State = EntityState.Unchanged;
+            }
+        }
+    }
+
+    // Only Cashier-role accounts are allowed to hold a shift. Earlier seed/test
+    // data left cashier_shifts rows open under a Supervisor and an Inventory
+    // Staff account — clear those out so the dashboard's "Active Cashiers"
+    // count and the Cashier Shift screen only ever reflect real cashiers.
+    public static async Task PatchRemoveNonCashierShiftsAsync(BaqalaDbContext db)
+    {
+        var shiftIds = await db.CashierShifts
+            .Where(s => s.Cashier!.Role!.Name != "Cashier")
+            .Select(s => s.Id)
+            .ToListAsync();
+        if (shiftIds.Count == 0) return;
+
+        foreach (var shiftId in shiftIds)
+            db.ShiftCashMovements.RemoveRange(db.ShiftCashMovements.Where(m => m.ShiftId == shiftId));
+        await db.SaveChangesAsync();
+
+        foreach (var shiftId in shiftIds)
+            db.CashierShifts.RemoveRange(db.CashierShifts.Where(s => s.Id == shiftId));
+        await db.SaveChangesAsync();
+    }
+
+    // Earlier dummy/test data seeded orders with no line items at all — not a
+    // real defect (the persistence/read path is correct for orders that do
+    // have items), just junk rows that shouldn't show up in Orders/Dashboard counts.
+    public static async Task PatchRemoveEmptyOrdersAsync(BaqalaDbContext db)
+    {
+        var emptyOrderIds = await db.Orders
+            .Where(o => !o.Items.Any())
+            .Select(o => o.Id)
+            .ToListAsync();
+        if (emptyOrderIds.Count == 0) return;
+
+        foreach (var orderId in emptyOrderIds)
+            db.OrderPayments.RemoveRange(db.OrderPayments.Where(p => p.OrderId == orderId));
+        await db.SaveChangesAsync();
+
+        foreach (var orderId in emptyOrderIds)
+            db.Orders.RemoveRange(db.Orders.Where(o => o.Id == orderId));
+        await db.SaveChangesAsync();
+    }
+
+    // Artifacts left behind by the BUG-C1 (negative-quantity/expired batch) and general
+    // QA pass — a product created purely to exercise validation and a deliberately-bad
+    // batch used as evidence. Safe to purge now that the findings are documented.
+    public static async Task PatchRemoveQaTestDataAsync(BaqalaDbContext db)
+    {
+        var badBatchIds = await db.InventoryBatches
+            .Where(b => b.BatchNumber == "QA-BATCH-NEG")
+            .Select(b => b.Id)
+            .ToListAsync();
+        if (badBatchIds.Count > 0)
+        {
+            db.InventoryBatches.RemoveRange(db.InventoryBatches.Where(b => badBatchIds.Contains(b.Id)));
+            await db.SaveChangesAsync();
+        }
+
+        var qaProduct = await db.Products.FirstOrDefaultAsync(p => p.Sku == "QA-TEST-001");
+        if (qaProduct is not null)
+        {
+            var productId = qaProduct.Id;
+            db.InventoryBatches.RemoveRange(db.InventoryBatches.Where(b => b.ProductId == productId));
+            db.InventoryStocks.RemoveRange(db.InventoryStocks.Where(s => s.ProductId == productId));
+            await db.SaveChangesAsync();
+            db.Products.RemoveRange(db.Products.Where(p => p.Id == productId));
+            await db.SaveChangesAsync();
+        }
     }
 
     // ─── Backfill: Offers ────────────────────────────────────────────────────
