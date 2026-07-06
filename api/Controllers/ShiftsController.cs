@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using BaqalaPOS.Api.Services;
@@ -184,6 +185,7 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit) : Control
     }
 
     // Manager sign-off on a shift flagged for a cash-variance review.
+    [RequirePermission("Cashier Shifts", PermAction.Approve)]
     [HttpPost("{id:guid}/approve-variance")]
     public async Task<IActionResult> ApproveVariance(Guid id)
     {

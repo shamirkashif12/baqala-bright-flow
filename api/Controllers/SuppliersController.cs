@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,7 @@ public class SuppliersController(BaqalaDbContext db) : ControllerBase
         return supplier is null ? NotFound() : Ok(supplier);
     }
 
+    [RequirePermission("Suppliers", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Supplier supplier)
     {
@@ -46,6 +48,7 @@ public class SuppliersController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = supplier.Id }, supplier);
     }
 
+    [RequirePermission("Suppliers", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Supplier updated)
     {
@@ -65,6 +68,7 @@ public class SuppliersController(BaqalaDbContext db) : ControllerBase
         return Ok(supplier);
     }
 
+    [RequirePermission("Suppliers", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

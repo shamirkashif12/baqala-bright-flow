@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -21,6 +22,12 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
     [HttpGet("stock")]
     public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock, [FromQuery] Guid? categoryId)
     {
+        // Branch-scoped roles may only see their own branch's stock — this was previously
+        // enforced only in the React component (locking the branch dropdown), so a direct
+        // API call could read any branch's stock. Mirrors GetBatches/GetExpiringBatches below.
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+
         var query = db.InventoryStocks
             .Include(i => i.Product).ThenInclude(p => p!.Category)
             .Include(i => i.Branch)
@@ -69,13 +76,19 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
         return Ok(await query.OrderBy(b => b.ExpiryDate).ToListAsync());
     }
 
+    [RequirePermission("Batches", PermAction.Create)]
     [HttpPost("batches")]
     public async Task<IActionResult> ReceiveBatch([FromBody] ReceiveBatchRequest req)
     {
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Received quantity must be greater than zero." });
-        if (req.ExpiryDate.HasValue && req.ExpiryDate.Value.Date < DateTime.UtcNow.Date)
-            return BadRequest(new { message = "Expiry date cannot be in the past." });
+        // A past expiry is rejected outright unless the caller documents why (a damaged
+        // shipment or a supplier return being logged for write-off, not for resale). The
+        // resulting batch's past ExpiryDate still keeps it out of the sellable-stock check
+        // in OrdersController.Create, so an override never makes an expired item sellable.
+        if (req.ExpiryDate.HasValue && req.ExpiryDate.Value.Date < DateTime.UtcNow.Date
+            && string.IsNullOrWhiteSpace(req.DamagedOrReturnReason))
+            return BadRequest(new { message = "Expiry date cannot be in the past — provide a damagedOrReturnReason to log it as damaged/return stock instead of resalable inventory." });
 
         var (role, callerBranchId) = GetCallerContext();
         if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && callerBranchId != req.BranchId)
@@ -94,7 +107,9 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
             PurchaseCost = req.PurchaseCost,
             ExpiryDate = req.ExpiryDate,
             ReceivedDate = DateTime.UtcNow,
-            Notes = req.Notes,
+            Notes = !string.IsNullOrWhiteSpace(req.DamagedOrReturnReason)
+                ? $"[Damaged/Return: {req.DamagedOrReturnReason}] {req.Notes}".TrimEnd()
+                : req.Notes,
             Status = "active",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -133,9 +148,16 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
         return Ok(await query.OrderByDescending(a => a.CreatedAt).ToListAsync());
     }
 
+    [RequirePermission("Stocks", PermAction.Create)]
     [HttpPost("adjustments")]
     public async Task<IActionResult> Adjust([FromBody] AdjustRequest req)
     {
+        // Same stock-write guard as ReceiveBatch: this endpoint had no quantity validation at
+        // all, so a zero/negative value here was a second, unguarded route to the BUG-C1 class
+        // of defect (corrupt on-hand quantity), separate from the Receive Batch form.
+        if (req.Quantity <= 0)
+            return BadRequest(new { message = "Adjustment quantity must be greater than zero." });
+
         var stock = await db.InventoryStocks
             .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
         if (stock is null) return NotFound("Stock record not found.");
@@ -155,7 +177,9 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
         if (req.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in")
             stock.Quantity += req.Quantity;
         else
-            stock.Quantity -= req.Quantity;
+            // Clamp at zero rather than letting a removal push stock negative — same
+            // convention OrdersController.Create already uses when a sale reduces stock.
+            stock.Quantity = Math.Max(0, stock.Quantity - req.Quantity);
         stock.LastUpdated = DateTime.UtcNow;
 
         db.InventoryAdjustments.Add(adjustment);
@@ -182,5 +206,6 @@ public record ReceiveBatchRequest(
     DateTime? ExpiryDate,
     string? BatchNumber,
     string? Notes,
-    int? ReorderLevel
+    int? ReorderLevel,
+    string? DamagedOrReturnReason = null
 );

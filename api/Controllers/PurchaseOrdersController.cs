@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -73,6 +74,7 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         return po is null ? NotFound() : Ok(po);
     }
 
+    [RequirePermission("Purchase Orders", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreatePoRequest req)
     {
@@ -113,6 +115,7 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = po.Id }, po);
     }
 
+    [RequirePermission("Purchase Orders", PermAction.Approve)]
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdatePoStatusRequest req)
     {
@@ -126,6 +129,7 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
     }
 
     // Receive stock against PO — updates item received quantities + creates InventoryBatch + updates stock
+    [RequirePermission("Purchase Orders", PermAction.Edit)]
     [HttpPost("{id:guid}/receive")]
     public async Task<IActionResult> Receive(Guid id, [FromBody] List<ReceiveItemRequest> items)
     {
@@ -134,6 +138,21 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
             .FirstOrDefaultAsync(p => p.Id == id);
         if (po is null) return NotFound();
         if (po.Status == "cancelled") return BadRequest("PO is cancelled.");
+
+        // Same stock-write guard as InventoryController.ReceiveBatch — receiving against a PO
+        // is a second, previously-unvalidated route to write InventoryBatch rows, so it needs
+        // the same quantity/expiry checks rather than trusting the receive payload as-is.
+        foreach (var recv in items)
+        {
+            if (recv.Quantity <= 0)
+                return BadRequest(new { message = $"Received quantity for product {recv.ProductId} must be greater than zero." });
+
+            var poItemForCheck = po.Items.FirstOrDefault(i => i.ProductId == recv.ProductId);
+            var effectiveExpiry = recv.ExpiryDate ?? poItemForCheck?.ExpiryDate;
+            if (effectiveExpiry.HasValue && effectiveExpiry.Value.Date < DateTime.UtcNow.Date
+                && string.IsNullOrWhiteSpace(recv.DamagedOrReturnReason))
+                return BadRequest(new { message = $"Expiry date for product {recv.ProductId} cannot be in the past — provide a damagedOrReturnReason to log it as damaged/return stock instead of resalable inventory." });
+        }
 
         foreach (var recv in items)
         {
@@ -159,7 +178,9 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
                 ExpiryDate = recv.ExpiryDate ?? item.ExpiryDate,
                 ReceivedDate = DateTime.UtcNow,
                 Status = "active",
-                Notes = $"Received via PO {po.PoNumber}",
+                Notes = !string.IsNullOrWhiteSpace(recv.DamagedOrReturnReason)
+                    ? $"Received via PO {po.PoNumber} [Damaged/Return: {recv.DamagedOrReturnReason}]"
+                    : $"Received via PO {po.PoNumber}",
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
@@ -235,6 +256,7 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         return Ok(po);
     }
 
+    [RequirePermission("Purchase Orders", PermAction.Edit)]
     [HttpPost("{id:guid}/payments")]
     public async Task<IActionResult> AddPayment(Guid id, [FromBody] AddPaymentRequest req)
     {
@@ -264,7 +286,7 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
 }
 
 public record UpdatePoStatusRequest(string Status, Guid? ApprovedBy);
-public record ReceiveItemRequest(Guid ProductId, decimal Quantity, DateTime? ExpiryDate, string? BatchNumber);
+public record ReceiveItemRequest(Guid ProductId, decimal Quantity, DateTime? ExpiryDate, string? BatchNumber, string? DamagedOrReturnReason = null);
 public record CreatePoItemRequest(Guid ProductId, decimal OrderedQuantity, decimal UnitCost);
 public record CreatePoRequest(
     Guid SupplierId,

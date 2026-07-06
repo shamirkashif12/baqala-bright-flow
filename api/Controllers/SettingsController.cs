@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using BaqalaPOS.Api.Services;
@@ -17,6 +18,7 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
         return settings is null ? NotFound() : Ok(settings);
     }
 
+    [RequirePermission("Settings", PermAction.Edit)]
     [HttpPut("pos/{branchId:guid}")]
     public async Task<IActionResult> UpsertPosSettings(Guid branchId, [FromBody] PosSettings updated)
     {
@@ -85,6 +87,7 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
         return Ok(dict);
     }
 
+    [RequirePermission("Settings", PermAction.Edit)]
     [HttpPut("tenant/{branchId:guid}")]
     public async Task<IActionResult> UpsertTenantSettings(Guid branchId, [FromBody] Dictionary<string, string?> settings)
     {

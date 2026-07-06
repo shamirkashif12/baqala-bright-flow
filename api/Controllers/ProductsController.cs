@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -34,6 +35,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         return product is null ? NotFound() : Ok(product);
     }
 
+    [RequirePermission("Inventory", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Product product)
     {
@@ -52,6 +54,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = product.Id }, product);
     }
 
+    [RequirePermission("Inventory", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Product updated)
     {
@@ -77,6 +80,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         return Ok(product);
     }
 
+    [RequirePermission("Inventory", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -95,6 +99,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         return Ok(await db.Categories.Where(c => c.IsActive).OrderBy(c => c.SortOrder).ToListAsync());
     }
 
+    [RequirePermission("Inventory", PermAction.Create)]
     [HttpPost("/api/categories")]
     public async Task<IActionResult> CreateCategory([FromBody] Category category)
     {
@@ -105,6 +110,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         return Created($"/api/categories/{category.Id}", category);
     }
 
+    [RequirePermission("Inventory", PermAction.Edit)]
     [HttpPut("/api/categories/{id:guid}")]
     public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] Category updated)
     {
@@ -119,6 +125,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         return Ok(category);
     }
 
+    [RequirePermission("Inventory", PermAction.Delete)]
     [HttpDelete("/api/categories/{id:guid}")]
     public async Task<IActionResult> DeleteCategory(Guid id)
     {

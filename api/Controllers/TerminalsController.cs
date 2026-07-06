@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,7 @@ public class TerminalsController(BaqalaDbContext db) : ControllerBase
         return terminal is null ? NotFound() : Ok(terminal);
     }
 
+    [RequirePermission("Terminals", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Terminal terminal)
     {
@@ -35,6 +37,7 @@ public class TerminalsController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = terminal.Id }, terminal);
     }
 
+    [RequirePermission("Terminals", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Terminal updated)
     {
@@ -49,6 +52,7 @@ public class TerminalsController(BaqalaDbContext db) : ControllerBase
         return Ok(terminal);
     }
 
+    [RequirePermission("Terminals", PermAction.Edit)]
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateStatusRequest req)
     {

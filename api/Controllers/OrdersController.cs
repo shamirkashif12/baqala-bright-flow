@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using BaqalaPOS.Api.Services;
@@ -87,6 +88,27 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService) : 
             }
         }
 
+        // Terminal binding: derive the shift/terminal from the cashier's actual open shift
+        // server-side rather than trusting client input (which never sent these at all) —
+        // otherwise a sale has no verifiable link back to the terminal/shift that rang it up.
+        if (order.CashierId.HasValue)
+        {
+            var activeShift = await db.CashierShifts
+                .FirstOrDefaultAsync(s => s.CashierId == order.CashierId && s.Status == "open");
+            if (activeShift is not null)
+            {
+                order.ShiftId = activeShift.Id;
+                order.TerminalId = activeShift.TerminalId;
+            }
+            else
+            {
+                var cashierUser = await db.Users.Include(u => u.Role)
+                    .FirstOrDefaultAsync(u => u.Id == order.CashierId);
+                if (cashierUser?.Role?.Name == "Cashier")
+                    return BadRequest(new { message = "No active shift found for this cashier — check in before processing sales." });
+            }
+        }
+
         order.Id = Guid.NewGuid();
         order.OrderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
         order.CreatedAt = order.UpdatedAt = DateTime.UtcNow;
@@ -95,18 +117,36 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService) : 
         db.Orders.Add(order);
 
         // ── Reduce inventory stock for each item ───────────────────────────────
+        // A sale is never blocked here (the sellable-stock/expiry check above already gated
+        // that); instead the on-hand count is allowed to go negative when a sale outpaces what
+        // was actually received. Clamping to 0 (the old behaviour) or silently doing nothing
+        // when no stock row exists at all hid the shortfall — the next stock-in (Receive Batch/
+        // PO receive) needs to see the true negative balance to reconcile against it.
         foreach (var item in order.Items)
         {
-            // Prefer exact branch match; fall back to any stock record for the product
+            // Branch-exact match only — the previous fallback to "any stock record for this
+            // product" silently adjusted a DIFFERENT branch's stock row whenever the selling
+            // branch had none, corrupting that other branch's inventory on every such sale.
             var stock = await db.InventoryStocks
-                            .FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == order.BranchId)
-                        ?? await db.InventoryStocks
-                            .FirstOrDefaultAsync(s => s.ProductId == item.ProductId);
+                .FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == order.BranchId);
             if (stock != null)
             {
-                stock.Quantity = Math.Max(0, stock.Quantity - item.Quantity);
+                stock.Quantity -= item.Quantity;
                 stock.LastUpdated = DateTime.UtcNow;
                 stock.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                db.InventoryStocks.Add(new InventoryStock
+                {
+                    Id = Guid.NewGuid(),
+                    ProductId = item.ProductId,
+                    BranchId = order.BranchId,
+                    Quantity = -item.Quantity,
+                    LastUpdated = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
             }
         }
 
@@ -166,6 +206,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService) : 
         return CreatedAtAction(nameof(GetById), new { id = order.Id }, order);
     }
 
+    [RequirePermission("Orders", PermAction.Edit)]
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateStatusRequest req)
     {

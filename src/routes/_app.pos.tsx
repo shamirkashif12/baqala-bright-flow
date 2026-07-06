@@ -160,19 +160,40 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
 
   const currentStock = selected ? (stockMap.get(selected.id) ?? 0) : 0;
 
+  // Hardware barcode scanners emit the code + Enter — match by barcode only here,
+  // never by name/SKU, so a scan can't accidentally land on the wrong product.
+  // Typed searches (no Enter) still loosely match name/SKU/barcode via `results` above.
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const byBarcode = products.find(p => p.barcode === trimmed);
+    if (byBarcode) {
+      setSelected(byBarcode);
+      setQuery(byBarcode.name);
+    }
+  };
+
   const handleConfirm = async () => {
     if (!selected) return;
     setError("");
     setSaving(true);
     try {
-      try {
-        // Try standard adjustment first (works if stock record already exists)
-        await api.adjustInventory({ productId: selected.id, branchId, quantity: qty, adjustmentType: "receive", reason: "Quick stock-in from POS" });
-      } catch {
-        // No stock record yet — create one via receiveBatch
-        await api.receiveBatch({ productId: selected.id, branchId, quantity: qty, remainingQuantity: qty, receivedDate: new Date().toISOString(), status: "active" });
+      if (currentStock > 0) {
+        // Genuine restock: physically receive the extra stock before adding to cart.
+        try {
+          await api.adjustInventory({ productId: selected.id, branchId, quantity: qty, adjustmentType: "receive", reason: "Quick stock-in from POS" });
+        } catch {
+          await api.receiveBatch({ productId: selected.id, branchId, quantity: qty, remainingQuantity: qty, receivedDate: new Date().toISOString(), status: "active" });
+        }
+        onStockAdded(selected, currentStock + qty);
+      } else {
+        // Never stocked at this branch — sell it directly instead of pre-receiving
+        // exactly what's about to be sold (which would just cancel back to zero).
+        // The sale itself records the shortfall as negative on-hand stock, visible
+        // for reconciliation the next time this product is actually received.
+        onStockAdded(selected, 0);
       }
-      onStockAdded(selected, currentStock + qty);
     } catch (e: any) {
       setError(e.message ?? "Failed to add stock.");
     } finally { setSaving(false); }
@@ -191,6 +212,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
                 placeholder="Search product name, SKU or barcode…" className="pl-9 h-9" />
               {results.length > 0 && (
                 <div className="absolute z-10 top-full mt-1 w-full bg-background border rounded-lg shadow-lg overflow-hidden">
@@ -229,7 +251,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
             </div>
           )}
 
-          {selected && (
+          {selected && currentStock > 0 && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Quantity to Add</p>
               <div className="flex items-center gap-3">
@@ -250,6 +272,16 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
             </div>
           )}
 
+          {selected && currentStock <= 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5">
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                This item has no stock on record at this branch. Selling it now will record on-hand
+                stock as <span className="font-semibold">-1</span> until it's actually received —
+                no stock will be added here.
+              </p>
+            </div>
+          )}
+
           {error && <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 rounded px-3 py-2">{error}</p>}
         </div>
 
@@ -258,7 +290,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
           <Button className="gradient-primary text-primary-foreground border-0 gap-1.5"
             onClick={handleConfirm} disabled={!selected || saving}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
-            Add to Stock & Cart
+            {currentStock > 0 ? "Add to Stock & Cart" : "Sell Anyway & Add to Cart"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -820,11 +852,21 @@ function POS() {
             return;
           }
           const stock = stockMapRef.current.get(p.id) ?? 0;
+          let blockedByStock = false;
           setCart((c) => {
             const ex = c.find((i) => i.sku === p.sku);
+            const nextQty = (ex?.qty ?? 0) + 1;
+            if (nextQty > stock) { blockedByStock = true; return c; }
             if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
             return [...c, { name: p.name, sku: p.sku, productId: p.id, qty: 1, price: p.basePrice, stock }];
           });
+          if (blockedByStock) {
+            toast.error(stock > 0 ? `Only ${stock} in stock` : `Out of stock`, {
+              description: `"${p.name}" has ${stock} unit(s) available at this branch.`,
+              duration: 4000,
+            });
+            return;
+          }
           setFlashSku(p.sku);
           setTimeout(() => setFlashSku(null), 600);
           setScanFlash(true);
@@ -994,8 +1036,22 @@ function POS() {
   const total = Math.max(0, taxable) + vatAmount + customFeeTotal;
 
   // ─── Cart ops ─────────────────────────────────────────────────────────────────
-  const updateQty = (sku: string, d: number) =>
-    setCart((c) => c.map((i) => (i.sku === sku ? { ...i, qty: Math.max(1, i.qty + d) } : i)));
+  const updateQty = (sku: string, d: number) => {
+    let blockedByStock = false;
+    setCart((c) => c.map((i) => {
+      if (i.sku !== sku) return i;
+      const next = Math.max(1, i.qty + d);
+      if (next > i.stock) { blockedByStock = true; return i; }
+      return { ...i, qty: next };
+    }));
+    if (blockedByStock) {
+      const item = cart.find((i) => i.sku === sku);
+      toast.error(`Only ${item?.stock ?? 0} in stock`, {
+        description: `"${item?.name ?? "This item"}" has no more available stock at this branch.`,
+        duration: 4000,
+      });
+    }
+  };
 
   const remove = (sku: string) => setCart((c) => c.filter((i) => i.sku !== sku));
 
@@ -1008,6 +1064,15 @@ function POS() {
       return;
     }
     const stock = stockMap.get(p.id) ?? 0;
+    const existing = cart.find((i) => i.sku === p.sku);
+    const nextQty = (existing?.qty ?? 0) + 1;
+    if (nextQty > stock) {
+      toast.error(stock > 0 ? `Only ${stock} in stock` : `Out of stock`, {
+        description: `"${p.name}" has ${stock} unit(s) available at this branch.`,
+        duration: 4000,
+      });
+      return;
+    }
     setCart((c) => {
       const ex = c.find((i) => i.sku === p.sku);
       if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
@@ -1272,7 +1337,10 @@ function POS() {
       subtitle={`${branch?.name ?? "Loading…"} · ${activeShift ? `Cashier: ${activeShift.cashier?.fullName ?? "Active shift"}` : "No active shift"}`}
       actions={<PrinterSetupDialog />}
     >
-      <div className="grid lg:grid-cols-[1fr_420px] gap-4 -mt-2">
+      {/* Two-column split starts at md (tablet) so the order panel + Charge button stay
+          reachable without scrolling past the whole cart on tablet-sized POS hardware —
+          previously this only kicked in at lg (1024px), leaving tablets stacked. */}
+      <div className="grid md:grid-cols-[1fr_320px] lg:grid-cols-[1fr_420px] gap-4 -mt-2">
         {/* ─── Left: scanner + cart ─────────────────────────────────────────── */}
         <div className="space-y-4">
           {/* Search / Barcode */}
@@ -1415,8 +1483,8 @@ function POS() {
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => updateQty(item.sku, 1)}
-                        disabled={item.stock > 0 && item.qty >= item.stock}
-                        title={item.stock > 0 && item.qty >= item.stock ? `Only ${item.stock} in stock` : undefined}
+                        disabled={item.qty >= item.stock}
+                        title={item.qty >= item.stock ? `Only ${item.stock} in stock` : undefined}
                       >
                         <Plus className="h-3 w-3" />
                       </Button>
@@ -1486,7 +1554,7 @@ function POS() {
         </div>
 
         {/* ─── Right: order panel ───────────────────────────────────────────── */}
-        <Card className="border-border/60 shadow-elegant flex flex-col lg:h-[calc(100vh-100px)] lg:sticky lg:top-20 overflow-hidden">
+        <Card className="border-border/60 shadow-elegant flex flex-col md:h-[calc(100vh-100px)] md:sticky md:top-20 overflow-hidden">
           <div className="p-4 border-b border-border/60 flex items-center justify-between">
             <div>
               <h3 className="font-semibold">New Order</h3>
@@ -1934,10 +2002,13 @@ function POS() {
         stockMap={stockMap}
         branchId={branch?.id ?? ""}
         onStockAdded={(product, newStock) => {
+          // Not capped at newStock here — when currentStock was 0, QuickStockInDialog
+          // intentionally didn't receive any stock and expects this add-to-cart to proceed
+          // anyway, so the sale below records the shortfall as negative on-hand stock.
           setStockMap(prev => { const next = new Map(prev); next.set(product.id, newStock); return next; });
           setCart(c => {
             const ex = c.find(i => i.sku === product.sku);
-            if (ex) return c.map(i => i.sku === product.sku ? { ...i, qty: i.qty + 1 } : i);
+            if (ex) return c.map(i => i.sku === product.sku ? { ...i, qty: i.qty + 1, stock: newStock } : i);
             return [...c, { name: product.name, sku: product.sku, productId: product.id, qty: 1, price: product.basePrice, stock: newStock }];
           });
           setStockInOpen(false);

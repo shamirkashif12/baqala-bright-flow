@@ -49,9 +49,9 @@ builder.Services.AddOpenApi();
 
 // ─── JWT authentication ──────────────────────────────────────────────────────
 // Populates HttpContext.User from the same bearer token AuthController.GenerateJwt
-// issues, so controllers can read the caller's role/branchId claims. No [Authorize]
-// attributes are added anywhere — this only makes claims available, it does not
-// restrict access, so existing (currently anonymous) request flows keep working.
+// issues, so controllers can read the caller's role/branchId claims. A global
+// fallback policy (below) requires a valid token on every endpoint except those
+// explicitly marked [AllowAnonymous] (currently only /api/auth/login).
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSection["Key"] ?? "dev-only-insecure-fallback-key-do-not-use-in-production-32b";
 var jwtIssuer = jwtSection["Issuer"];
@@ -72,7 +72,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.FromMinutes(2),
         };
     });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // Every endpoint requires a valid bearer token unless marked [AllowAnonymous].
+    // Per-module/action permission checks are layered on top via [RequirePermission]
+    // on individual write endpoints (api/Authorization/RequirePermissionAttribute.cs).
+    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
 
 var app = builder.Build();
 
@@ -104,6 +112,7 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchRemoveTestBranchesAsync(db);
     await DataSeeder.PatchRemoveNonCashierShiftsAsync(db);
     await DataSeeder.PatchRemoveEmptyOrdersAsync(db);
+    await DataSeeder.PatchRemoveQaTestDataAsync(db);
     app.MapOpenApi();
 }
 

@@ -1686,6 +1686,33 @@ public static class DataSeeder
         await db.SaveChangesAsync();
     }
 
+    // Artifacts left behind by the BUG-C1 (negative-quantity/expired batch) and general
+    // QA pass — a product created purely to exercise validation and a deliberately-bad
+    // batch used as evidence. Safe to purge now that the findings are documented.
+    public static async Task PatchRemoveQaTestDataAsync(BaqalaDbContext db)
+    {
+        var badBatchIds = await db.InventoryBatches
+            .Where(b => b.BatchNumber == "QA-BATCH-NEG")
+            .Select(b => b.Id)
+            .ToListAsync();
+        if (badBatchIds.Count > 0)
+        {
+            db.InventoryBatches.RemoveRange(db.InventoryBatches.Where(b => badBatchIds.Contains(b.Id)));
+            await db.SaveChangesAsync();
+        }
+
+        var qaProduct = await db.Products.FirstOrDefaultAsync(p => p.Sku == "QA-TEST-001");
+        if (qaProduct is not null)
+        {
+            var productId = qaProduct.Id;
+            db.InventoryBatches.RemoveRange(db.InventoryBatches.Where(b => b.ProductId == productId));
+            db.InventoryStocks.RemoveRange(db.InventoryStocks.Where(s => s.ProductId == productId));
+            await db.SaveChangesAsync();
+            db.Products.RemoveRange(db.Products.Where(p => p.Id == productId));
+            await db.SaveChangesAsync();
+        }
+    }
+
     // ─── Backfill: Offers ────────────────────────────────────────────────────
     private static async Task SeedOffersAsync(BaqalaDbContext db)
     {

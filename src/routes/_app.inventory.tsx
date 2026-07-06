@@ -317,6 +317,9 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   const reset = () => {
     setSkuManual(false);
     setSubmitted(false);
+    setError("");
+    setLookupStatus(null);
+    setLookupLoading(false);
     setForm({ name: "", sku: "", barcode: "", categoryId: "", branchId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
   };
 
@@ -376,7 +379,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   };
 
   return (
-    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+    <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose(); } }}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Add Product</DialogTitle></DialogHeader>
         <div className="mt-2">

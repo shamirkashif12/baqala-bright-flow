@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -9,6 +10,12 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class UsersController(BaqalaDbContext db) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                       ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private string? CallerRole() => User.FindFirst("role")?.Value;
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
@@ -40,6 +47,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         return user is null ? NotFound() : Ok(user);
     }
 
+    [RequirePermission("Users", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateUserRequest req)
     {
@@ -66,6 +74,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = user.Id }, new { user.Id, user.Email, user.FullName });
     }
 
+    [RequirePermission("Users", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUserRequest req)
     {
@@ -87,6 +96,11 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
     [HttpPut("{id:guid}/profile")]
     public async Task<IActionResult> UpdateProfile(Guid id, [FromBody] UpdateProfileRequest req)
     {
+        // Self-service — anyone can update their own profile regardless of the Users
+        // module permission, but never someone else's (previously unchecked: any
+        // authenticated caller could edit any other user's profile via this endpoint).
+        if (CallerRole() != "tenant_admin" && CallerId() != id) return Forbid();
+
         var user = await db.Users.FindAsync(id);
         if (user is null) return NotFound();
 
@@ -102,6 +116,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         return Ok(new { user.Id, user.Email, user.FullName, user.Phone });
     }
 
+    [RequirePermission("Users", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
