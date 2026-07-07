@@ -37,8 +37,20 @@ public class Role
     [JsonIgnore] public ICollection<User> Users { get; set; } = [];
 }
 
+// Shared by RolePermission and UserPermission so RequirePermissionAttribute can resolve
+// "whichever one applies" without caring which table it came from.
+public interface IPermissionFlags
+{
+    bool CanView { get; }
+    bool CanCreate { get; }
+    bool CanEdit { get; }
+    bool CanDelete { get; }
+    bool CanApprove { get; }
+    bool CanExport { get; }
+}
+
 [Table("role_permissions")]
-public class RolePermission
+public class RolePermission : IPermissionFlags
 {
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();

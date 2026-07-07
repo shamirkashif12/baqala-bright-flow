@@ -10,6 +10,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<Role> Roles { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
     public DbSet<User> Users { get; set; }
+    public DbSet<UserPermission> UserPermissions { get; set; }
 
     // Customers & Loyalty
     public DbSet<Customer> Customers { get; set; }
