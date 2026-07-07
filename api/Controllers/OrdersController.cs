@@ -58,6 +58,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return order is null ? NotFound() : Ok(order);
     }
 
+    [RequirePermission("POS", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Order order)
     {
@@ -264,6 +265,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return Ok(order);
     }
 
+    [RequirePermission("POS", PermAction.Create)]
     [HttpPost("{id:guid}/payments")]
     public async Task<IActionResult> AddPayment(Guid id, [FromBody] OrderPayment payment)
     {

@@ -63,7 +63,10 @@ builder.Services.AddOpenApi();
 // fallback policy (below) requires a valid token on every endpoint except those
 // explicitly marked [AllowAnonymous] (currently only /api/auth/login).
 var jwtSection = builder.Configuration.GetSection("Jwt");
-var jwtKey = jwtSection["Key"] ?? "dev-only-insecure-fallback-key-do-not-use-in-production-32b";
+var jwtKey = jwtSection["Key"]
+    ?? (builder.Environment.IsDevelopment()
+        ? "dev-only-insecure-fallback-key-do-not-use-in-production-32b"
+        : throw new InvalidOperationException("Jwt:Key must be configured outside Development."));
 var jwtIssuer = jwtSection["Issuer"];
 var jwtAudience = jwtSection["Audience"];
 

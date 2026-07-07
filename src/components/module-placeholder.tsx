@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Plus, Filter, Download, type LucideIcon } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Search, Plus, Filter, Download, ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type Column = { key: string; label: string; className?: string; render?: (row: any) => React.ReactNode };
@@ -35,6 +37,51 @@ export function DataTable({ columns, rows }: { columns: Column[]; rows: any[] })
         </table>
       </div>
     </Card>
+  );
+}
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 500];
+
+/** DataTable with client-side pagination (25/50/100/500, default 25) — used by report detail pages
+ * per the Reports FRD's pagination rule. Kept separate from DataTable so unrelated list pages that
+ * already render DataTable directly keep showing their full row set unchanged. */
+export function PaginatedDataTable({ columns, rows }: { columns: Column[]; rows: any[] }) {
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
+  const [page, setPage] = useState(0);
+
+  useEffect(() => setPage(0), [rows]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, totalPages - 1);
+  const start = currentPage * pageSize;
+  const pageRows = rows.slice(start, start + pageSize);
+
+  return (
+    <div className="space-y-3">
+      <DataTable columns={columns} rows={pageRows} />
+      {rows.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Rows per page</span>
+            <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(0); }}>
+              <SelectTrigger className="h-8 w-20"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span>{start + 1}–{Math.min(rows.length, start + pageSize)} of {rows.length}</span>
+            <Button variant="outline" size="icon" className="h-8 w-8" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="icon" className="h-8 w-8" disabled={currentPage >= totalPages - 1} onClick={() => setPage(currentPage + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

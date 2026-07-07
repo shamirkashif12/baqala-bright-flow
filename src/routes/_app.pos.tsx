@@ -21,6 +21,7 @@ import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt } from "@/lib/
 import { useBranch } from "@/lib/branch-context";
 import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
+import { ModuleGate } from "@/components/role-gate";
 
 // ─── ZATCA Phase 2 TLV QR encoder ────────────────────────────────────────────
 // Encodes seller name, VAT number, timestamp, total, VAT amount per ZATCA spec.
@@ -46,7 +47,13 @@ function buildZatcaTlv(sellerName: string, vatNumber: string, timestamp: string,
 
 
 
-export const Route = createFileRoute("/_app/pos")({ component: POS });
+export const Route = createFileRoute("/_app/pos")({
+  component: () => (
+    <ModuleGate module="POS">
+      <POS />
+    </ModuleGate>
+  ),
+});
 
 type CartItem = { name: string; sku: string; productId: string; qty: number; price: number; stock: number };
 

@@ -1,6 +1,8 @@
 using BaqalaPOS.Api.Data;
+using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace BaqalaPOS.Api.Authorization;
 
@@ -31,7 +33,15 @@ public class RequirePermissionAttribute(string module, PermAction action) : Attr
         }
 
         var db = context.HttpContext.RequestServices.GetRequiredService<BaqalaDbContext>();
-        var perm = await db.RolePermissions.AsNoTracking()
+
+        // Per-user override takes precedence over the role default for the same module.
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
+        IPermissionFlags? perm = Guid.TryParse(userIdClaim, out var userId)
+            ? await db.UserPermissions.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UserId == userId && p.Module == module)
+            : null;
+
+        perm ??= await db.RolePermissions.AsNoTracking()
             .FirstOrDefaultAsync(p => p.RoleId == roleId && p.Module == module);
 
         var allowed = perm is not null && action switch

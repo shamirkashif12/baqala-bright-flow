@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Lock, Plus, Shield, UserCog, Trash2, Loader2, Users, ShieldCheck } from "lucide-react";
-import { api, type Role, type RolePermission, type User } from "@/lib/api";
+import { api, type Role, type RolePermission, type User, type UserPermissionOverride } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/roles")({
   component: () => (
@@ -295,26 +295,10 @@ function buildPermRows(perms: RolePermission[]): PermRow[] {
   });
 }
 
-// ── localStorage helpers for per-user permission overrides ────────────────────
-const USER_PERM_KEY = (uid: string) => `baqala_user_perms_${uid}`;
-
-function loadUserOverrides(uid: string, rolePerms: PermRow[]): PermRow[] {
-  try {
-    const raw = localStorage.getItem(USER_PERM_KEY(uid));
-    if (!raw) return rolePerms;
-    const overrides = JSON.parse(raw) as Record<string, Partial<PermRow>>;
-    return rolePerms.map(p => ({ ...p, ...(overrides[p.module] ?? {}) }));
-  } catch { return rolePerms; }
-}
-
-function saveUserOverrides(uid: string, perms: PermRow[]) {
-  const map: Record<string, Partial<PermRow>> = {};
-  for (const p of perms) map[p.module] = p;
-  localStorage.setItem(USER_PERM_KEY(uid), JSON.stringify(map));
-}
-
-function hasUserOverride(uid: string): boolean {
-  return !!localStorage.getItem(USER_PERM_KEY(uid));
+// ── Per-user permission override helper — server-persisted (api/Controllers/UsersController.cs) ──
+function mergeOverrides(rolePerms: PermRow[], overrides: UserPermissionOverride[]): PermRow[] {
+  const map = new Map(overrides.map(o => [o.module, o]));
+  return rolePerms.map(p => ({ ...p, ...(map.get(p.module) ?? {}) }));
 }
 
 // ── Permission matrix (shared by role defaults + user override dialog) ─────────
@@ -346,21 +330,42 @@ function PermMatrix({ perms, onChange }: { perms: PermRow[]; onChange: (mod: str
 }
 
 // ── Per-user permission override dialog ───────────────────────────────────────
-function UserPermDialog({ user, rolePerms, onClose }: { user: User; rolePerms: PermRow[]; onClose: () => void }) {
-  const [perms, setPerms] = useState<PermRow[]>(() => loadUserOverrides(user.id, rolePerms));
+function UserPermDialog({ user, rolePerms, onClose, onSaved }: { user: User; rolePerms: PermRow[]; onClose: () => void; onSaved: () => void }) {
+  const [perms, setPerms] = useState<PermRow[]>(rolePerms);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getUserPermissions(user.id)
+      .then(overrides => { if (!cancelled) setPerms(mergeOverrides(rolePerms, overrides)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [user.id]); // eslint-disable-line
 
   const toggle = (mod: string, flag: PermFlag, val: boolean) =>
     setPerms(prev => prev.map(p => p.module === mod ? { ...p, [flag]: val } : p));
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaving(true);
-    saveUserOverrides(user.id, perms);
-    setSaving(false);
-    onClose();
+    try {
+      await api.updateUserPermissions(user.id, perms);
+      onSaved();
+      onClose();
+    } catch (e) { console.error("Save permissions failed", e); }
+    finally { setSaving(false); }
   };
 
-  const handleReset = () => setPerms(rolePerms);
+  const handleReset = async () => {
+    setResetting(true);
+    try {
+      await api.resetUserPermissions(user.id);
+      setPerms(rolePerms);
+      onSaved();
+    } catch (e) { console.error("Reset permissions failed", e); }
+    finally { setResetting(false); }
+  };
 
   const initials = (name: string) => name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
 
@@ -379,13 +384,22 @@ function UserPermDialog({ user, rolePerms, onClose }: { user: User; rolePerms: P
         </div>
       </DialogHeader>
       <p className="text-xs text-muted-foreground px-1 -mt-1">
-        These override the role defaults for this user only. Saved to the browser — affects their sidebar on next login.
+        These override the role defaults for this user only, and are enforced by the server —
+        takes effect on their next request, no re-login required.
       </p>
-      <PermMatrix perms={perms} onChange={toggle} />
+      {loading ? (
+        <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
+      ) : (
+        <PermMatrix perms={perms} onChange={toggle} />
+      )}
       <DialogFooter className="gap-2 mt-2">
-        <Button variant="outline" size="sm" onClick={handleReset}>Reset to Role Defaults</Button>
+        <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting || loading}>
+          {resetting && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+          Reset to Role Defaults
+        </Button>
         <Button variant="outline" onClick={onClose}>Cancel</Button>
-        <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
+        <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving || loading}>
+          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
           {saving ? "Saving…" : "Save Permissions"}
         </Button>
       </DialogFooter>
@@ -514,6 +528,11 @@ function Roles() {
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {active.isSystem ? "System role — permissions editable, name protected" : "Custom role"}
                       </p>
+                      {active.name === "Admin" && (
+                        <p className="text-xs text-amber-600 mt-1">
+                          Reference only — the Admin role always has full access regardless of the matrix below, so no one can be locked out of Roles &amp; Users management.
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <Button size="sm" className="gradient-primary text-primary-foreground border-0 h-8" onClick={handleSave} disabled={saving || !dirty}>
@@ -546,7 +565,7 @@ function Roles() {
                   ) : (
                     <div className="space-y-2">
                       <p className="text-xs text-muted-foreground mb-3">
-                        Individual overrides are stored in-browser and layered on top of the role defaults. Users without overrides inherit the role permissions above.
+                        Individual overrides are enforced by the server and layered on top of the role defaults. Users without overrides inherit the role permissions above.
                       </p>
                       {roleMembers.map(u => (
                         <div key={u.id} className="flex items-center gap-3 p-3 rounded-lg border border-border/60 hover:bg-muted/30 transition-colors">
@@ -557,7 +576,7 @@ function Roles() {
                             <p className="text-sm font-medium truncate">{u.fullName}</p>
                             <p className="text-xs text-muted-foreground truncate">{u.email} · {u.branchName ?? "All branches"}</p>
                           </div>
-                          {hasUserOverride(u.id) && (
+                          {u.hasCustomPermissions && (
                             <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50 shrink-0">Custom</Badge>
                           )}
                           <Dialog>
@@ -567,7 +586,7 @@ function Roles() {
                               </Button>
                             </DialogTrigger>
                             {permUser?.id === u.id && (
-                              <UserPermDialog user={u} rolePerms={localPerms} onClose={() => setPermUser(null)} />
+                              <UserPermDialog user={u} rolePerms={localPerms} onClose={() => setPermUser(null)} onSaved={loadAll} />
                             )}
                           </Dialog>
                         </div>

@@ -109,6 +109,36 @@ export const dict: Dict = {
     en: "VAT, custom fees, tobacco excise — by branch, cashier, product and date",
     ar: "ضريبة القيمة المضافة والرسوم وضريبة التبغ — حسب الفرع والكاشير والمنتج والتاريخ",
   },
+
+  // Reports module
+  "Operational, financial and compliance reports": { en: "Operational, financial and compliance reports", ar: "تقارير تشغيلية ومالية وتقارير امتثال" },
+  "Export CSV": { en: "Export CSV", ar: "تصدير CSV" },
+  "Back to Reports": { en: "Back to Reports", ar: "العودة إلى التقارير" },
+  "Daily Sales": { en: "Daily Sales", ar: "المبيعات اليومية" },
+  "Hour-by-hour sales, payment split and VAT for a single business day": {
+    en: "Hour-by-hour sales, payment split and VAT for a single business day",
+    ar: "المبيعات وتوزيع الدفع وضريبة القيمة المضافة بالساعة ليوم عمل واحد",
+  },
+  "Monthly Sales": { en: "Monthly Sales", ar: "المبيعات الشهرية" },
+  "Sales trend and profit margin breakdown across a date range": {
+    en: "Sales trend and profit margin breakdown across a date range",
+    ar: "اتجاه المبيعات وتفصيل هامش الربح خلال فترة زمنية",
+  },
+  "Cashier Sales": { en: "Cashier Sales", ar: "مبيعات الكاشير" },
+  "Cashier-level shift performance, cash variance and productivity": {
+    en: "Cashier-level shift performance, cash variance and productivity",
+    ar: "أداء الكاشير خلال الوردية وفروقات النقدية والإنتاجية",
+  },
+  "Payment Methods": { en: "Payment Methods", ar: "طرق الدفع" },
+  "Settlement values and transaction split by cash, card and wallet": {
+    en: "Settlement values and transaction split by cash, card and wallet",
+    ar: "قيم التسوية وتوزيع المعاملات حسب النقد والبطاقة والمحفظة",
+  },
+  "Low Stock Report": { en: "Low Stock Report", ar: "تقرير المخزون المنخفض" },
+  "Items below reorder thresholds — toggle to view the full inventory snapshot": {
+    en: "Items below reorder thresholds — toggle to view the full inventory snapshot",
+    ar: "الأصناف الأقل من حد إعادة الطلب — بدّل لعرض لقطة المخزون الكاملة",
+  },
 };
 
 type Ctx = {
