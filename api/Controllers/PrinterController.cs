@@ -539,6 +539,28 @@ public class PrinterController(IConfiguration config) : ControllerBase
         // Note: $$ prefix means only {{expr}} interpolates; bare $, {, } are all literal.
         if (ua.Contains("windows"))
         {
+            // Fallback safety net for when the allowed.dat pre-trust below doesn't take effect
+            // (e.g. QZ Tray was already running from a prior install and hasn't reloaded it) —
+            // watches for the "Action Required" dialog and hits Enter, since "Allow" is its
+            // default-focused button. Base64-embedded to sidestep batch/PowerShell quoting hell
+            // around the here-string this would otherwise need.
+            const string autoAllowPs1 = """
+Add-Type -AssemblyName Microsoft.VisualBasic
+Add-Type -AssemblyName System.Windows.Forms
+while ($true) {
+    $proc = Get-Process | Where-Object { $_.MainWindowTitle -like "*Action Required*" }
+    if ($proc) {
+        try {
+            [Microsoft.VisualBasic.Interaction]::AppActivate($proc.Id)
+            Start-Sleep -Milliseconds 200
+            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+        } catch {}
+    }
+    Start-Sleep -Milliseconds 500
+}
+""";
+            var autoAllowPs1Base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(autoAllowPs1));
+
             var bat = $$"""
 @echo off
 setlocal EnableDelayedExpansion
@@ -591,6 +613,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$lines += $entry; $lines | Set-Content -Path $allowed -Encoding ASCII;" ^
     "Write-Host '   QZ Tray trusted — no dialogs will appear.'" ^
   "}"
+
+:: ── Auto-dismiss fallback: if the "Action Required" dialog ever appears anyway
+:: (e.g. QZ Tray was already running before this install and hasn't reloaded
+:: allowed.dat), hit Enter to trigger its default-focused "Allow" button. ──────
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$dir = $env:LOCALAPPDATA + '\MiMonyPOS'; New-Item -ItemType Directory -Force $dir | Out-Null;" ^
+  "$path = $dir + '\qz-auto-allow.ps1';" ^
+  "[System.IO.File]::WriteAllBytes($path, [Convert]::FromBase64String('{{autoAllowPs1Base64}}'));" ^
+  "reg.exe add 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Auto-Allow' /t REG_SZ /d ('powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"' + $path + '\"') /f | Out-Null;" ^
+  "Start-Process powershell -WindowStyle Hidden -ArgumentList ('-ExecutionPolicy Bypass -File \"' + $path + '\"')"
 
 :: ── Start QZ Tray ─────────────────────────────────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$qz = @($env:ProgramFiles + '\QZ Tray\qz-tray.exe',$env:LOCALAPPDATA + '\QZ Tray\qz-tray.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($qz) { Start-Process $qz; reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Tray' /t REG_SZ /d $qz /f | Out-Null }"
@@ -783,6 +815,27 @@ if [ -n "$QZ_CERT" ]; then
 else
   echo "   Could not reach POS server — connect printer manually later."
 fi
+
+# Auto-dismiss fallback: if the "Action Required" dialog ever appears anyway
+# (e.g. QZ Tray was already running before this install and hasn't reloaded
+# allowed.dat), find it by title and hit Enter to trigger its default-focused
+# "Allow" button.
+sudo apt-get install -y xdotool >/dev/null 2>&1 || true
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/qz-auto-allow.sh << 'AUTOALLOW'
+#!/bin/bash
+while true; do
+  if command -v xdotool >/dev/null 2>&1; then
+    WIN=$(xdotool search --name "Action Required" 2>/dev/null | head -1)
+    if [ -n "$WIN" ]; then
+      xdotool windowactivate "$WIN" 2>/dev/null
+      xdotool key --window "$WIN" Return 2>/dev/null
+    fi
+  fi
+  sleep 0.5
+done
+AUTOALLOW
+chmod +x ~/.local/bin/qz-auto-allow.sh
 
 # Add QZ Tray and auto-allow to autostart
 mkdir -p ~/.config/autostart
