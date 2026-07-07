@@ -39,6 +39,9 @@ api/obj/
 api/appsettings.Development.json
 api/appsettings.json
 
+# ZATCA Data Protection key ring — decrypts stored CSID secrets/private keys, never commit
+api/zatca-keys/
+
 # Editor
 .vscode/*
 !.vscode/extensions.json

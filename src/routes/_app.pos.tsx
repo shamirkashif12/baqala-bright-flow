@@ -127,6 +127,9 @@ type InvoiceSnapshot = {
   splitBreakdown?: Array<{ method: string; amount: number }>;
   tobaccoExcise?: number;
   fees?: Array<{ name: string; amount: number }>;
+  // Real ZATCA-signed QR (base64 TLV) returned by checkout when Phase 2 is onboarded for the
+  // branch. Falls back to a locally-built Phase-1-style QR when absent.
+  zatcaQrCode?: string;
 };
 
 // ─── Quick Stock In Dialog ────────────────────────────────────────────────────
@@ -1191,6 +1194,7 @@ function POS() {
               : f.excisePercentage > 0 ? subtotal * f.excisePercentage / 100
               : subtotal * f.vatPercentage / 100,
       })) : undefined,
+      zatcaQrCode: order.zatcaQrCode,
     };
     setInvoice(invoiceData);
   };
@@ -1790,7 +1794,7 @@ function POS() {
         <DialogContent>
           <DialogHeader><DialogTitle>Tax Invoice</DialogTitle></DialogHeader>
           {invoice ? (() => {
-            const zatcaQr = buildZatcaTlv(
+            const zatcaQr = invoice.zatcaQrCode ?? buildZatcaTlv(
               invoice.sellerName,
               invoice.vatNumber,
               invoice.createdAt,
@@ -1816,10 +1820,7 @@ function POS() {
                   ))}
                 </div>
                 <div className="border-t border-dashed border-border pt-2 space-y-0.5">
-                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{invoice.subtotal.toFixed(2)}</span></div>
-                  {invoice.discount > 0 && (
-                    <div className="flex justify-between text-success"><span>Discount</span><span className="tabular-nums">−{invoice.discount.toFixed(2)}</span></div>
-                  )}
+                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{(invoice.subtotal - invoice.discount).toFixed(2)}</span></div>
                   <div className="flex justify-between"><span>{invoice.taxLabel}</span><span className="tabular-nums">{invoice.vat.toFixed(2)}</span></div>
                   <div className="flex justify-between font-bold text-sm pt-1">
                     <span>Total</span>

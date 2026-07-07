@@ -249,7 +249,11 @@ public class PrinterController(IConfiguration config) : ControllerBase
         double? TobaccoExcise,
         List<FeeItem>? Fees,
         List<SplitPayment>? SplitBreakdown,
-        string? PrinterName = null
+        string? PrinterName = null,
+        // The real ZATCA Phase 2 QR (base64 TLV, 9 tags incl. hash/signature/cert) from the
+        // signed ZatcaInvoice. When absent (Phase 2 not onboarded, or submission failed), falls
+        // back to a locally-built Phase-1-style 5-tag QR below.
+        string? ZatcaQrCode = null
     );
 
     [HttpPost("print-receipt")]
@@ -358,9 +362,7 @@ public class PrinterController(IConfiguration config) : ControllerBase
         Divider();
 
         // ── Totals ──────────────────────────────────────────────────────────
-        Row("Subtotal", $"SAR {Fmt(r.Subtotal)}");
-        if (r.Discount > 0)
-            Row("Discount", $"-SAR {Fmt(r.Discount)}");
+        Row("Subtotal", $"SAR {Fmt(r.Subtotal - r.Discount)}");
         if (r.TobaccoExcise > 0)
             Row("Tobacco Excise", $"SAR {Fmt(r.TobaccoExcise!.Value)}");
         foreach (var fee in r.Fees ?? [])
@@ -393,31 +395,40 @@ public class PrinterController(IConfiguration config) : ControllerBase
         Lf();
 
         // ── ZATCA QR Code ────────────────────────────────────────────────────
-        // Build TLV payload (ZATCA Phase 2 — 5 required tags)
-        var sellerName  = (r.SellerName ?? r.BranchName ?? "Store").Trim();
-        var vatNum      = r.VatNumber ?? "";
-        var timestamp   = dt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
-        var totalStr    = Fmt(r.Total);
-        var vatStr      = Fmt(r.Vat);
-
-        byte[] TlvField(byte tag, string value)
+        // Prefer the real, cryptographically-signed QR from the submitted ZatcaInvoice. Only
+        // fall back to a locally-built Phase-1-style 5-tag QR when it's unavailable.
+        string qrData;
+        if (!string.IsNullOrEmpty(r.ZatcaQrCode))
         {
-            var v   = System.Text.Encoding.UTF8.GetBytes(value);
-            var tlv = new byte[2 + v.Length];
-            tlv[0]  = tag;
-            tlv[1]  = (byte)v.Length;
-            Array.Copy(v, 0, tlv, 2, v.Length);
-            return tlv;
+            qrData = r.ZatcaQrCode;
         }
+        else
+        {
+            var sellerName  = (r.SellerName ?? r.BranchName ?? "Store").Trim();
+            var vatNum      = r.VatNumber ?? "";
+            var timestamp   = dt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
+            var totalStr    = Fmt(r.Total);
+            var vatStr      = Fmt(r.Vat);
 
-        var tlvBytes = new List<byte>();
-        tlvBytes.AddRange(TlvField(1, sellerName));
-        tlvBytes.AddRange(TlvField(2, vatNum));
-        tlvBytes.AddRange(TlvField(3, timestamp));
-        tlvBytes.AddRange(TlvField(4, totalStr));
-        tlvBytes.AddRange(TlvField(5, vatStr));
+            byte[] TlvField(byte tag, string value)
+            {
+                var v   = System.Text.Encoding.UTF8.GetBytes(value);
+                var tlv = new byte[2 + v.Length];
+                tlv[0]  = tag;
+                tlv[1]  = (byte)v.Length;
+                Array.Copy(v, 0, tlv, 2, v.Length);
+                return tlv;
+            }
 
-        var qrData  = Convert.ToBase64String(tlvBytes.ToArray());
+            var tlvBytes = new List<byte>();
+            tlvBytes.AddRange(TlvField(1, sellerName));
+            tlvBytes.AddRange(TlvField(2, vatNum));
+            tlvBytes.AddRange(TlvField(3, timestamp));
+            tlvBytes.AddRange(TlvField(4, totalStr));
+            tlvBytes.AddRange(TlvField(5, vatStr));
+
+            qrData = Convert.ToBase64String(tlvBytes.ToArray());
+        }
         var qrBytes = System.Text.Encoding.UTF8.GetBytes(qrData);
 
         // ESC/POS QR code commands (GS ( k)
@@ -560,6 +571,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObj
 reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
 
+:: ── Trust POS cert in QZ Tray — eliminates all "Action Required" dialogs ──
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$cert = try { (Invoke-WebRequest '{{posUrl}}/api/printer/qz-certificate' -UseBasicParsing).Content } catch { '' };" ^
+  "if ($cert) {" ^
+    "$qzDir = @($env:ProgramFiles + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1;" ^
+    "if ($qzDir) { $cert | Set-Content -Path ($qzDir + '\override.crt') -Encoding ASCII };" ^
+    "$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower();" ^
+    "$allowedDir = $env:APPDATA + '\qz'; New-Item -ItemType Directory -Force $allowedDir | Out-Null;" ^
+    "$entry = $fp + \"`tQZ Tray Demo Cert`tQZ Industries, LLC`t2026-07-02 14:40:36`t2046-07-02 14:40:36`ttrue\"; " ^
+    "$allowed = $allowedDir + '\allowed.dat';" ^
+    "$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() };" ^
+    "$lines += $entry; $lines | Set-Content -Path $allowed -Encoding ASCII;" ^
+    "Write-Host '   QZ Tray trusted — no dialogs will appear.'" ^
+  "}"
+
 :: ── Start QZ Tray ─────────────────────────────────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$qz = @($env:ProgramFiles + '\QZ Tray\qz-tray.exe',$env:LOCALAPPDATA + '\QZ Tray\qz-tray.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($qz) { Start-Process $qz; reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Tray' /t REG_SZ /d $qz /f | Out-Null }"
 
@@ -568,10 +594,8 @@ echo  ========================================
 echo   Setup complete!
 echo.
 echo   QZ Tray is running in the system tray.
-echo   POS shortcut added to Desktop.
-echo.
-echo   First time only: when QZ Tray shows
-echo   a security prompt, click ALLOW.
+echo   POS shortcut is on the Desktop.
+echo   No security dialogs will appear.
 echo  ========================================
 echo.
 pause

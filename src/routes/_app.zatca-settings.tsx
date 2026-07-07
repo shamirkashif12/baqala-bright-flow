@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { RoleGate } from "@/components/role-gate";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -13,12 +13,15 @@ import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import {
   ShieldCheck, FileText, Building2, Receipt, RefreshCw, CheckCircle2,
-  AlertTriangle, Activity, QrCode, FileWarning,
+  AlertTriangle, Activity, QrCode, FileWarning, Loader2, KeyRound,
 } from "lucide-react";
 import { FilterBar } from "@/components/filter-bar";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { api, type ZatcaSettings } from "@/lib/api";
+import { useBranch } from "@/lib/branch-context";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/zatca-settings")({
   component: () => (
@@ -42,8 +45,113 @@ const errorLogs = [
   { id: "ERR-439", invoice: "INV-20260601-3331", code: "VR-118", reason: "Invalid invoice timestamp format", branch: "Jeddah", time: "Yesterday", status: "retry required" },
 ];
 
+function onboardingLabel(status?: string) {
+  switch (status) {
+    case "csr_generated": return "CSR generated";
+    case "compliance_csid_obtained": return "Compliance CSID";
+    case "production_ready": return "Production ready";
+    default: return "Not started";
+  }
+}
+
+const defaultZatca: ZatcaSettings = {
+  branchId: "", vatRegistrationNumber: "", sellerName: "",
+  streetName: "", buildingNumber: "", citySubdivisionName: "", postalZone: "",
+  phase2Enabled: false, environment: "sandbox", onboardingStatus: "not_started",
+};
+
 function ZatcaSettings() {
-  const [enabled, setEnabled] = useState(true);
+  const { selectedBranch } = useBranch();
+  const [zatca, setZatca] = useState<ZatcaSettings>(defaultZatca);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const enabled = zatca.phase2Enabled;
+
+  const [otp, setOtp] = useState("");
+  const [csr, setCsr] = useState<string | null>(null);
+  const [csrBusy, setCsrBusy] = useState(false);
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [prodBusy, setProdBusy] = useState(false);
+  const [complianceTests, setComplianceTests] = useState<{ documentType: string; passed: boolean; apiStatus?: string }[]>([]);
+
+  function loadSettings() {
+    if (!selectedBranch?.id) return;
+    setLoading(true);
+    api.getZatcaSettings(selectedBranch.id)
+      .then((data) => setZatca({ ...defaultZatca, ...data }))
+      .catch(() => setZatca({ ...defaultZatca, branchId: selectedBranch.id }))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(loadSettings, [selectedBranch?.id]);
+
+  async function saveZatca() {
+    if (!selectedBranch?.id) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateZatcaSettings(selectedBranch.id, zatca);
+      setZatca(updated);
+      toast.success("ZATCA settings saved");
+    } catch {
+      toast.error("Failed to save ZATCA settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleGenerateCsr() {
+    if (!selectedBranch?.id) return;
+    setCsrBusy(true);
+    try {
+      const result = await api.generateZatcaCsr(selectedBranch.id);
+      setCsr(result.csr);
+      toast.success("CSR generated — paste it into the ZATCA Fatoora portal to get an OTP");
+      loadSettings();
+    } catch {
+      toast.error("Failed to generate CSR");
+    } finally {
+      setCsrBusy(false);
+    }
+  }
+
+  async function handleComplianceCsid() {
+    if (!selectedBranch?.id || !otp) return;
+    setOtpBusy(true);
+    try {
+      const result = await api.getZatcaComplianceCsid(selectedBranch.id, otp);
+      if (result.success) {
+        toast.success("Compliance CSID obtained");
+        setOtp("");
+        loadSettings();
+      } else {
+        toast.error(result.error ?? "Failed to obtain compliance CSID");
+      }
+    } catch {
+      toast.error("Failed to obtain compliance CSID");
+    } finally {
+      setOtpBusy(false);
+    }
+  }
+
+  async function handleProductionCsid() {
+    if (!selectedBranch?.id) return;
+    setProdBusy(true);
+    try {
+      const result = await api.getZatcaProductionCsid(selectedBranch.id);
+      setComplianceTests(result.complianceTests ?? []);
+      if (result.success) {
+        toast.success("Production CSID obtained — ZATCA onboarding complete");
+        loadSettings();
+      } else {
+        toast.error(result.error ?? "Compliance tests failed — see results below");
+      }
+    } catch {
+      toast.error("Failed to run onboarding to production");
+    } finally {
+      setProdBusy(false);
+    }
+  }
+
   return (
     <PageShell
       title="ZATCA Phase 2 — Billing & Orders"
@@ -52,9 +160,9 @@ function ZatcaSettings() {
       {/* Health row */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Phase 2 Status" value={enabled ? "Enabled" : "Disabled"} icon={ShieldCheck} accent={enabled ? "success" : "warning"} />
-        <MetricCard label="Integration Health" value="98.4%" icon={Activity} accent="success" delta="last 24h" />
-        <MetricCard label="Offline Queue" value="6" icon={RefreshCw} accent="warning" />
-        <MetricCard label="Failed Invoices" value="3" icon={FileWarning} accent="destructive" />
+        <MetricCard label="Onboarding" value={onboardingLabel(zatca.onboardingStatus)} icon={KeyRound} accent={zatca.onboardingStatus === "production_ready" ? "success" : "warning"} />
+        <MetricCard label="Environment" value={zatca.environment === "production" ? "Production" : "Sandbox"} icon={Activity} accent={zatca.environment === "production" ? "success" : "warning"} />
+        <MetricCard label="EGS Serial" value={zatca.egsSerial ? "Assigned" : "Not generated"} icon={QrCode} accent={zatca.egsSerial ? "success" : "warning"} />
       </div>
 
       <Tabs defaultValue="company">
@@ -74,41 +182,123 @@ function ZatcaSettings() {
               <div className="flex items-center gap-4 min-w-0">
                 <div className="h-12 w-12 rounded-xl bg-success/15 text-success flex items-center justify-center shrink-0"><ShieldCheck className="h-6 w-6" /></div>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold truncate">ZATCA Phase 2 — Integration Phase</h3><Badge className="bg-success text-success-foreground border-0">Live · Connected</Badge></div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-semibold truncate">ZATCA Phase 2 — {selectedBranch?.name ?? "Select a branch"}</h3>
+                    <Badge className={zatca.onboardingStatus === "production_ready" ? "bg-success text-success-foreground border-0" : "bg-warning text-warning-foreground border-0"}>
+                      {onboardingLabel(zatca.onboardingStatus)}
+                    </Badge>
+                  </div>
                   <p className="text-sm text-muted-foreground">Applied automatically on every billing & order issued from POS / MPOS / Web</p>
                 </div>
               </div>
-              <Switch checked={enabled} onCheckedChange={setEnabled} />
+              <Switch checked={enabled} onCheckedChange={v => setZatca(p => ({ ...p, phase2Enabled: v }))} />
             </div>
           </Card>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card className="p-5 space-y-3">
-              <h4 className="font-semibold text-sm">Company information</h4>
-              <div className="space-y-1"><Label className="text-xs">English company name</Label><Input className="h-9" defaultValue="Baqala Mart Trading Co." /></div>
-              <div className="space-y-1"><Label className="text-xs">Arabic company name</Label><Input className="h-9" dir="rtl" defaultValue="شركة بقالة مارت للتجارة" /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">VAT Number</Label><Input className="h-9" defaultValue="300012345600003" /></div>
-                <div className="space-y-1"><Label className="text-xs">CR Number</Label><Input className="h-9" defaultValue="1010123456" /></div>
+
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading ZATCA settings…</div>
+          ) : !selectedBranch ? (
+            <p className="text-sm text-muted-foreground">Select a branch to configure ZATCA.</p>
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card className="p-5 space-y-3">
+                  <h4 className="font-semibold text-sm">Company information</h4>
+                  <div className="space-y-1"><Label className="text-xs">Seller name (as registered with ZATCA)</Label>
+                    <Input className="h-9" value={zatca.sellerName ?? ""} onChange={e => setZatca(p => ({ ...p, sellerName: e.target.value }))} placeholder={selectedBranch.name} /></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1"><Label className="text-xs">VAT Number</Label>
+                      <Input className="h-9" value={zatca.vatRegistrationNumber ?? ""} onChange={e => setZatca(p => ({ ...p, vatRegistrationNumber: e.target.value }))} placeholder="300012345600003" /></div>
+                    <div className="space-y-1"><Label className="text-xs">CR Number (branch)</Label>
+                      <Input className="h-9" value={selectedBranch.commercialRegistration ?? ""} disabled title="Edit on the Branches page" /></div>
+                  </div>
+                  <div className="space-y-1"><Label className="text-xs">Environment</Label>
+                    <select value={zatca.environment} onChange={e => setZatca(p => ({ ...p, environment: e.target.value }))}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+                      <option value="sandbox">Sandbox (developer portal)</option>
+                      <option value="simulation">Simulation</option>
+                      <option value="production">Production</option>
+                    </select></div>
+                  <div className="flex justify-end">
+                    <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={saveZatca} disabled={saving}>
+                      {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save company info"}
+                    </Button>
+                  </div>
+                </Card>
+                <Card className="p-5 space-y-3">
+                  <h4 className="font-semibold text-sm">Registered address</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1"><Label className="text-xs">Street name</Label>
+                      <Input className="h-9" value={zatca.streetName ?? ""} onChange={e => setZatca(p => ({ ...p, streetName: e.target.value }))} /></div>
+                    <div className="space-y-1"><Label className="text-xs">Building number</Label>
+                      <Input className="h-9" value={zatca.buildingNumber ?? ""} onChange={e => setZatca(p => ({ ...p, buildingNumber: e.target.value }))} /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1"><Label className="text-xs">City subdivision (district)</Label>
+                      <Input className="h-9" value={zatca.citySubdivisionName ?? ""} onChange={e => setZatca(p => ({ ...p, citySubdivisionName: e.target.value }))} /></div>
+                    <div className="space-y-1"><Label className="text-xs">Postal zone</Label>
+                      <Input className="h-9" value={zatca.postalZone ?? ""} onChange={e => setZatca(p => ({ ...p, postalZone: e.target.value }))} /></div>
+                  </div>
+                  <div className="space-y-1"><Label className="text-xs">City</Label>
+                    <Input className="h-9" value={selectedBranch.city ?? ""} disabled title="Edit on the Branches page" /></div>
+                  <div className="flex justify-end">
+                    <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={saveZatca} disabled={saving}>
+                      {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save address"}
+                    </Button>
+                  </div>
+                </Card>
               </div>
-              <div className="space-y-1"><Label className="text-xs">Registered address</Label><Input className="h-9" defaultValue="King Fahd Road, Olaya, Riyadh" /></div>
-            </Card>
-            <Card className="p-5 space-y-3">
-              <h4 className="font-semibold text-sm">Branch VAT configuration</h4>
-              <DataTable
-                columns={[
-                  { key: "b", label: "Branch", render: r => <span className="font-semibold">{r.b}</span> },
-                  { key: "vat", label: "VAT no.", render: r => <span className="font-mono text-xs">{r.vat}</span> },
-                  { key: "s", label: "Status", render: r => <StatusBadge status={r.s} /> },
-                ]}
-                rows={[
-                  { b: "Olaya — Riyadh", vat: "300012345600003", s: "active" },
-                  { b: "Khobar — Eastern", vat: "300012345600011", s: "active" },
-                  { b: "Jeddah — Western", vat: "300012345600028", s: "active" },
-                  { b: "Madinah — Western", vat: "300012345600035", s: "pending" },
-                ]}
-              />
-            </Card>
-          </div>
+
+              <Card className="p-5 space-y-4">
+                <div className="flex items-center gap-2"><KeyRound className="h-4 w-4" /><h4 className="font-semibold text-sm">ZATCA onboarding</h4></div>
+                <p className="text-xs text-muted-foreground">Complete these three steps once per branch to start submitting real invoices to ZATCA.</p>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-border/60 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between"><span className="text-sm font-medium">1. Generate CSR</span>{zatca.hasCsr && <CheckCircle2 className="h-4 w-4 text-success" />}</div>
+                    <p className="text-xs text-muted-foreground">Creates a signing key and certificate request for this branch.</p>
+                    <Button size="sm" variant="outline" className="w-full" onClick={handleGenerateCsr} disabled={csrBusy}>
+                      {csrBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : zatca.hasCsr ? "Regenerate CSR" : "Generate CSR"}
+                    </Button>
+                    {csr && (
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Paste this CSR into the ZATCA Fatoora portal to get an OTP</Label>
+                        <textarea readOnly value={csr} className="w-full h-20 text-[10px] font-mono rounded-md border border-input p-2 bg-muted/40" onFocus={e => e.target.select()} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between"><span className="text-sm font-medium">2. Compliance CSID</span>{zatca.hasComplianceCsid && <CheckCircle2 className="h-4 w-4 text-success" />}</div>
+                    <p className="text-xs text-muted-foreground">Enter the OTP ZATCA gave you for the CSR above.</p>
+                    <Input className="h-9" placeholder="OTP from Fatoora portal" value={otp} onChange={e => setOtp(e.target.value)} disabled={!zatca.hasCsr} />
+                    <Button size="sm" variant="outline" className="w-full" onClick={handleComplianceCsid} disabled={otpBusy || !otp || !zatca.hasCsr}>
+                      {otpBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Get Compliance CSID"}
+                    </Button>
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between"><span className="text-sm font-medium">3. Go to Production</span>{zatca.hasProductionCsid && <CheckCircle2 className="h-4 w-4 text-success" />}</div>
+                    <p className="text-xs text-muted-foreground">Runs the 6 required compliance checks, then requests the Production CSID.</p>
+                    <Button size="sm" variant="outline" className="w-full" onClick={handleProductionCsid} disabled={prodBusy || !zatca.hasComplianceCsid}>
+                      {prodBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Run Compliance Tests & Get Production CSID"}
+                    </Button>
+                  </div>
+                </div>
+
+                {complianceTests.length > 0 && (
+                  <DataTable
+                    columns={[
+                      { key: "documentType", label: "Document" },
+                      { key: "apiStatus", label: "ZATCA status", render: r => <span className="font-mono text-xs">{r.apiStatus ?? "—"}</span> },
+                      { key: "passed", label: "Result", render: r => <StatusBadge status={r.passed ? "passed" : "failed"} /> },
+                    ]}
+                    rows={complianceTests}
+                  />
+                )}
+              </Card>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="invoice" className="mt-4 space-y-3">

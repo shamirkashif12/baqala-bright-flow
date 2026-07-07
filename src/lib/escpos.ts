@@ -17,6 +17,9 @@ export interface ReceiptData {
   tobaccoExcise?: number;
   fees?: { name: string; amount: number }[];
   splitBreakdown?: { method: string; amount: number }[];
+  // Real ZATCA-signed QR (base64 TLV, 9 tags) from the submitted ZatcaInvoice, when available.
+  // Falls back to a locally-built Phase-1-style 5-tag QR otherwise.
+  zatcaQrCode?: string;
 }
 
 const WIDTH = 48;
@@ -83,8 +86,7 @@ export function buildEscPos(r: ReceiptData): Uint8Array {
   div();
 
   // Totals
-  row("Subtotal", `SAR ${fmt(r.subtotal)}`);
-  if (r.discount > 0) row("Discount", `-SAR ${fmt(r.discount)}`);
+  row("Subtotal", `SAR ${fmt(r.subtotal - r.discount)}`);
   if (r.tobaccoExcise && r.tobaccoExcise > 0) row("Tobacco Excise", `SAR ${fmt(r.tobaccoExcise)}`);
   for (const fee of r.fees ?? []) row(fee.name, `SAR ${fmt(fee.amount)}`);
   if (r.vat > 0) row(r.taxLabel ?? "VAT 15%", `SAR ${fmt(r.vat)}`);
@@ -110,7 +112,7 @@ export function buildEscPos(r: ReceiptData): Uint8Array {
   lf();
 
   // ZATCA TLV QR code
-  const tlv = buildZatcaTlv(
+  const tlv = r.zatcaQrCode ?? buildZatcaTlv(
     (r.sellerName ?? r.branchName ?? "Store").trim(),
     r.vatNumber ?? "",
     dt,

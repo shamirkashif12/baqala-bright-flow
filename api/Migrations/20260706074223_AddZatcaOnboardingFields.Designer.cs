@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260706074223_AddZatcaOnboardingFields")]
+    partial class AddZatcaOnboardingFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3278,35 +3281,10 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("branch_id");
 
-                    b.Property<string>("BuyerBuildingNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("buyer_building_number");
-
-                    b.Property<string>("BuyerCityName")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("buyer_city_name");
-
-                    b.Property<string>("BuyerCitySubdivisionName")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("buyer_city_subdivision_name");
-
                     b.Property<string>("BuyerName")
                         .HasMaxLength(255)
                         .HasColumnType("varchar(255)")
                         .HasColumnName("buyer_name");
-
-                    b.Property<string>("BuyerPostalZone")
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("buyer_postal_zone");
-
-                    b.Property<string>("BuyerStreetName")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("buyer_street_name");
 
                     b.Property<string>("BuyerVatNumber")
                         .HasMaxLength(20)
