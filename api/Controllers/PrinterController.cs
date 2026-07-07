@@ -535,6 +535,16 @@ public class PrinterController(IConfiguration config) : ControllerBase
         var ua     = Request.Headers.UserAgent.ToString().ToLower();
         var appName = "MiMony POS";
 
+        // Embed the cert directly in the installer so cert trust works with zero
+        // network dependency — no need to hit /api/printer/qz-certificate at install time.
+        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
+        var embeddedCert = System.IO.File.Exists(certPath)
+            ? (await System.IO.File.ReadAllTextAsync(certPath)).Trim()
+            : "";
+        var embeddedCertBase64 = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(embeddedCert));
+
         // ── Windows ──────────────────────────────────────────────────────────
         // Note: $$ prefix means only {{expr}} interpolates; bare $, {, } are all literal.
         if (ua.Contains("windows"))
@@ -601,18 +611,16 @@ reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnIns
 
 :: ── Trust POS cert in QZ Tray — eliminates all "Action Required" dialogs ──
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$cert = try { (Invoke-WebRequest '{{posUrl}}/api/printer/qz-certificate' -UseBasicParsing).Content } catch { '' };" ^
-  "if ($cert) {" ^
-    "$qzDir = @($env:ProgramFiles + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1;" ^
-    "if ($qzDir) { $cert | Set-Content -Path ($qzDir + '\override.crt') -Encoding ASCII };" ^
-    "$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower();" ^
-    "$allowedDir = $env:APPDATA + '\qz'; New-Item -ItemType Directory -Force $allowedDir | Out-Null;" ^
-    "$entry = $fp + \"`tQZ Tray Demo Cert`tQZ Industries, LLC`t2026-07-02 14:40:36`t2046-07-02 14:40:36`ttrue\"; " ^
-    "$allowed = $allowedDir + '\allowed.dat';" ^
-    "$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() };" ^
-    "$lines += $entry; $lines | Set-Content -Path $allowed -Encoding ASCII;" ^
-    "Write-Host '   QZ Tray trusted — no dialogs will appear.'" ^
-  "}"
+  "$cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{embeddedCertBase64}}'));" ^
+  "$qzDir = @($env:ProgramFiles + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1;" ^
+  "if ($qzDir) { $cert | Set-Content -Path ($qzDir + '\override.crt') -Encoding ASCII };" ^
+  "$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower();" ^
+  "$allowedDir = $env:APPDATA + '\qz'; New-Item -ItemType Directory -Force $allowedDir | Out-Null;" ^
+  "$entry = $fp + \"`tQZ Tray Demo Cert`tQZ Industries, LLC`t2026-07-02 14:40:36`t2046-07-02 14:40:36`ttrue\";" ^
+  "$allowed = $allowedDir + '\allowed.dat';" ^
+  "$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() };" ^
+  "$lines += $entry; $lines | Set-Content -Path $allowed -Encoding ASCII;" ^
+  "Write-Host '   QZ Tray trusted — no dialogs will appear.'"
 
 :: ── Auto-dismiss fallback: if the "Action Required" dialog ever appears anyway
 :: (e.g. QZ Tray was already running before this install and hasn't reloaded
@@ -800,8 +808,9 @@ fi
 rm -f /tmp/raw-thermal.ppd
 
 # Trust the POS server cert permanently — QZ Tray will auto-allow all
-# print requests with zero dialogs on every reboot.
-QZ_CERT=$(curl -sf "{{posUrl}}/api/printer/qz-certificate" 2>/dev/null || echo "")
+# print requests with zero dialogs on every reboot. Cert is embedded so
+# no network request is needed.
+QZ_CERT=$(echo "{{embeddedCertBase64}}" | base64 -d 2>/dev/null || echo "")
 if [ -n "$QZ_CERT" ]; then
   # Install as override cert so QZ Tray treats it as if generated here
   echo "$QZ_CERT" | sudo tee /opt/qz-tray/override.crt >/dev/null
@@ -813,7 +822,7 @@ if [ -n "$QZ_CERT" ]; then
   mv /tmp/qz_allowed.tmp ~/.qz/allowed.dat
   echo "   QZ Tray trusted — no dialogs will appear."
 else
-  echo "   Could not reach POS server — connect printer manually later."
+  echo "   Could not embed cert — connect printer manually later."
 fi
 
 # Auto-dismiss fallback: if the "Action Required" dialog ever appears anyway
