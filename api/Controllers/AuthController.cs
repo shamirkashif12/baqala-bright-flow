@@ -11,7 +11,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController(BaqalaDbContext db, IConfiguration config) : ControllerBase
+public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvironment env) : ControllerBase
 {
     [AllowAnonymous]
     [HttpPost("login")]
@@ -58,9 +58,11 @@ public class AuthController(BaqalaDbContext db, IConfiguration config) : Control
     private string GenerateJwt(BaqalaPOS.Api.Models.User user, string appRole)
     {
         var jwtConfig = config.GetSection("Jwt");
-        var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(jwtConfig["Key"]
-                ?? throw new InvalidOperationException("JWT Key not configured.")));
+        var jwtKey = jwtConfig["Key"]
+            ?? (env.IsDevelopment()
+                ? "dev-only-insecure-fallback-key-do-not-use-in-production-32b"
+                : throw new InvalidOperationException("Jwt:Key must be configured outside Development."));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new[]

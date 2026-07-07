@@ -27,7 +27,8 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
             u.Id, u.Email, u.Username, u.FullName, u.FullNameAr, u.Phone,
             u.RoleId, RoleName = u.Role.Name,
             u.BranchId, BranchName = u.Branch != null ? u.Branch.Name : null,
-            u.Status, u.LastLogin, u.CreatedAt
+            u.Status, u.LastLogin, u.CreatedAt,
+            HasCustomPermissions = db.UserPermissions.Any(p => p.UserId == u.Id)
         }).ToListAsync();
         return Ok(users);
     }
@@ -41,10 +42,59 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
                 u.Id, u.Email, u.Username, u.FullName, u.FullNameAr, u.Phone,
                 u.RoleId, RoleName = u.Role.Name,
                 u.BranchId, BranchName = u.Branch != null ? u.Branch.Name : null,
-                u.Status, u.LastLogin, u.CreatedAt
+                u.Status, u.LastLogin, u.CreatedAt,
+                HasCustomPermissions = db.UserPermissions.Any(p => p.UserId == u.Id)
             })
             .FirstOrDefaultAsync(u => u.Id == id);
         return user is null ? NotFound() : Ok(user);
+    }
+
+    // Any signed-in user may read their OWN overrides (needed to build their permission
+    // map on login); viewing someone else's requires Users-edit, same as changing them.
+    [HttpGet("{id:guid}/permissions")]
+    public async Task<IActionResult> GetPermissions(Guid id)
+    {
+        if (CallerId() != id && CallerRole() != "tenant_admin" && !await CallerCanEditUsersAsync())
+            return Forbid();
+
+        var perms = await db.UserPermissions.AsNoTracking()
+            .Where(p => p.UserId == id)
+            .Select(p => new { p.Module, p.CanView, p.CanCreate, p.CanEdit, p.CanDelete, p.CanApprove, p.CanExport })
+            .ToListAsync();
+        return Ok(perms);
+    }
+
+    private async Task<bool> CallerCanEditUsersAsync()
+    {
+        if (!Guid.TryParse(User.FindFirst("roleId")?.Value, out var roleId)) return false;
+        var perm = await db.RolePermissions.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.RoleId == roleId && p.Module == "Users");
+        return perm?.CanEdit == true;
+    }
+
+    [RequirePermission("Users", PermAction.Edit)]
+    [HttpPut("{id:guid}/permissions")]
+    public async Task<IActionResult> UpdatePermissions(Guid id, [FromBody] List<UserPermission> permissions)
+    {
+        if (!await db.Users.AnyAsync(u => u.Id == id)) return NotFound();
+
+        var existing = db.UserPermissions.Where(p => p.UserId == id);
+        db.UserPermissions.RemoveRange(existing);
+        foreach (var p in permissions) { p.Id = Guid.NewGuid(); p.UserId = id; }
+        db.UserPermissions.AddRange(permissions);
+        await db.SaveChangesAsync();
+
+        return Ok(permissions);
+    }
+
+    [RequirePermission("Users", PermAction.Edit)]
+    [HttpDelete("{id:guid}/permissions")]
+    public async Task<IActionResult> ResetPermissions(Guid id)
+    {
+        var existing = db.UserPermissions.Where(p => p.UserId == id);
+        db.UserPermissions.RemoveRange(existing);
+        await db.SaveChangesAsync();
+        return NoContent();
     }
 
     [RequirePermission("Users", PermAction.Create)]

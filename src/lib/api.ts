@@ -100,6 +100,12 @@ export const api = {
   getUser: (id: string) => request<User>(`/api/users/${id}`),
   updateUserProfile: (id: string, data: { fullName: string; email: string; phone?: string }) =>
     request<User>(`/api/users/${id}/profile`, { method: "PUT", body: JSON.stringify(data) }),
+  getUserPermissions: (id: string) =>
+    request<UserPermissionOverride[]>(`/api/users/${id}/permissions`),
+  updateUserPermissions: (id: string, permissions: UserPermissionOverride[]) =>
+    request<UserPermissionOverride[]>(`/api/users/${id}/permissions`, { method: "PUT", body: JSON.stringify(permissions) }),
+  resetUserPermissions: (id: string) =>
+    request<void>(`/api/users/${id}/permissions`, { method: "DELETE" }),
 
   // Roles
   getRoles: () => request<Role[]>("/api/roles"),
@@ -652,6 +658,13 @@ export interface User {
   phone?: string;
   roleId: string; roleName?: string; branchId?: string; branchName?: string;
   status: string; lastLogin?: string; createdAt: string;
+  hasCustomPermissions?: boolean;
+}
+
+export interface UserPermissionOverride {
+  module: string;
+  canView: boolean; canCreate: boolean; canEdit: boolean;
+  canDelete: boolean; canApprove: boolean; canExport: boolean;
 }
 
 export interface CreateUserPayload {

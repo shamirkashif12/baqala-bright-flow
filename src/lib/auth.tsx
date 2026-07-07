@@ -1,4 +1,5 @@
 import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from "react";
+import { api } from "@/lib/api";
 
 export type AppRole =
   | "tenant_admin"
@@ -129,8 +130,7 @@ function buildUser(claims: JwtClaims): AuthUser {
   };
 }
 
-// Fetches role permissions then overlays any user-specific overrides from localStorage.
-// localStorage key: baqala_user_perms_{userId} → Record<module, RolePermFlags>
+// Fetches role permissions then overlays any user-specific overrides from the server.
 async function fetchPermissions(roleId: string, userId?: string): Promise<Record<string, RolePermFlags>> {
   if (!roleId) return {};
   try {
@@ -143,19 +143,17 @@ async function fetchPermissions(roleId: string, userId?: string): Promise<Record
       permissions?: Array<{ module: string } & RolePermFlags>;
     };
     const map: Record<string, RolePermFlags> = {};
-    const empty: RolePermFlags = { canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canExport: false };
     for (const p of role.permissions ?? []) {
       map[p.module] = { canView: p.canView ?? false, canCreate: p.canCreate ?? false, canEdit: p.canEdit ?? false, canDelete: p.canDelete ?? false, canApprove: p.canApprove ?? false, canExport: p.canExport ?? false };
     }
-    // Overlay user-specific permission overrides stored in localStorage
-    if (userId && typeof window !== "undefined") {
-      const raw = localStorage.getItem(`baqala_user_perms_${userId}`);
-      if (raw) {
-        const overrides = JSON.parse(raw) as Record<string, Partial<RolePermFlags>>;
-        for (const [mod, flags] of Object.entries(overrides)) {
-          map[mod] = { ...(map[mod] ?? empty), ...flags };
+    // Overlay this user's server-side permission overrides, if any
+    if (userId) {
+      try {
+        const overrides = await api.getUserPermissions(userId);
+        for (const o of overrides) {
+          map[o.module] = { canView: o.canView, canCreate: o.canCreate, canEdit: o.canEdit, canDelete: o.canDelete, canApprove: o.canApprove, canExport: o.canExport };
         }
-      }
+      } catch { /* no overrides reachable — fall back to role defaults */ }
     }
     return map;
   } catch {
@@ -248,6 +246,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  // Also poll periodically — a POS terminal tab often stays focused for a whole shift,
+  // so visibilitychange alone would never re-check permissions during that session.
+  useEffect(() => {
+    const PERMISSIONS_POLL_MS = 60_000;
+    const interval = setInterval(() => {
+      setAuthUser(current => {
+        if (!current) return current;
+        fetchPermissions(current.roleId, current.id).then(perms => {
+          setAuthUser(u => u ? { ...u, permissions: perms } : null);
+        });
+        return current;
+      });
+    }, PERMISSIONS_POLL_MS);
+    return () => clearInterval(interval);
   }, []);
 
   const logout = useCallback(() => {
