@@ -632,6 +632,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "reg.exe add 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Auto-Allow' /t REG_SZ /d ('powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"' + $path + '\"') /f | Out-Null;" ^
   "Start-Process powershell -WindowStyle Hidden -ArgumentList ('-ExecutionPolicy Bypass -File \"' + $path + '\"')"
 
+:: ── Auto-install USB receipt printer ──────────────────────────────────────
+echo Installing receipt printer...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "pnputil /scan-devices 2>$null | Out-Null; Start-Sleep -Seconds 3;" ^
+  "$port = (Get-PrinterPort | Where-Object { $_.Name -match '^USB\d+$' } | Sort-Object Name | Select-Object -First 1).Name;" ^
+  "if (-not $port) { Add-PrinterPort -Name 'USB001' -ErrorAction SilentlyContinue; $port = 'USB001' };" ^
+  "$name = 'Receipt Printer';" ^
+  "if (-not (Get-Printer -Name $name -ErrorAction SilentlyContinue)) {" ^
+    "Add-Printer -Name $name -DriverName 'Generic / Text Only' -PortName $port -ErrorAction SilentlyContinue;" ^
+    "Write-Host ('   Receipt printer added on port ' + $port + ' — visible in QZ Tray.');" ^
+  "} else { Write-Host '   Receipt printer already installed.' }"
+
 :: ── Start QZ Tray ─────────────────────────────────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$qz = @($env:ProgramFiles + '\QZ Tray\qz-tray.exe',$env:LOCALAPPDATA + '\QZ Tray\qz-tray.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($qz) { Start-Process $qz; reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Tray' /t REG_SZ /d $qz /f | Out-Null }"
 
