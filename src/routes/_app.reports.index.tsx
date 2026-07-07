@@ -39,29 +39,44 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/daily-sales", exportFile: () => api.exportDailySalesReport({ date: todayStr(), exportedBy }) },
     { code: "monthly-sales", name: "Monthly Sales", desc: "Trend with profit margin breakdown", icon: TrendingUp, color: "primary",
       href: "/reports/monthly-sales", exportFile: () => api.exportMonthlySalesReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
-    { code: "branch-sales", name: "Branch Sales", desc: "Compare performance across branches", icon: Building2, color: "primary" },
-    { code: "terminal", name: "Terminal", desc: "Per-terminal breakdown and uptime", icon: ShoppingCart, color: "primary" },
+    { code: "branch-sales", name: "Branch Sales", desc: "Compare performance across branches", icon: Building2, color: "primary",
+      href: "/reports/branch-sales", exportFile: () => api.exportBranchSalesReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "terminal", name: "Terminal", desc: "Per-terminal breakdown and uptime", icon: ShoppingCart, color: "primary",
+      href: "/reports/terminal", exportFile: () => api.exportTerminalReport({ from: todayStr(), to: todayStr(), exportedBy }) },
     { code: "cashier-sales", name: "Cashier Sales", desc: "Cashier-level shift performance", icon: TrendingUp, color: "primary",
       href: "/reports/cashier-sales", exportFile: () => api.exportCashierSalesReport({ from: todayStr(), to: todayStr(), exportedBy }) },
-    { code: "product-sales", name: "Product Sales", desc: "Top SKUs, dead stock, velocity", icon: Tag, color: "warning" },
-    { code: "category-performance", name: "Category Performance", desc: "Margin & velocity by category", icon: Tag, color: "warning" },
-    { code: "supplier-performance", name: "Supplier Performance", desc: "Lead time, fill rate, dues", icon: Truck, color: "warning" },
+    { code: "product-sales", name: "Product Sales", desc: "Top SKUs, dead stock, velocity", icon: Tag, color: "warning",
+      href: "/reports/product-sales", exportFile: () => api.exportProductSalesReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "category-performance", name: "Category Performance", desc: "Margin & velocity by category", icon: Tag, color: "warning",
+      href: "/reports/category-performance", exportFile: () => api.exportCategoryPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "supplier-performance", name: "Supplier Performance", desc: "Lead time, fill rate, dues", icon: Truck, color: "warning",
+      href: "/reports/supplier-performance", exportFile: () => api.exportSupplierPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch", icon: Boxes, color: "warning",
       href: "/reports/inventory-snapshot", exportFile: () => api.exportInventorySnapshotReport({ exportedBy }) },
     { code: "low-stock", name: "Low Stock Report", desc: "Items below reorder thresholds", icon: AlertTriangle, color: "destructive",
       href: "/reports/low-stock", exportFile: () => api.exportLowStockReport({ onlyLowStock: true, exportedBy }) },
-    { code: "waste-spoilage", name: "Waste / Spoilage Report", desc: "Expired & damaged write-offs", icon: Ban, color: "destructive" },
-    { code: "returns-refunds", name: "Return / Refund Report", desc: "Returns by branch / cashier", icon: RotateCcw, color: "destructive" },
-    { code: "attendance-shift", name: "Attendance / Shift Report", desc: "Staff attendance and cashier shifts", icon: Clock, color: "primary" },
-    { code: "audit-trail", name: "Audit Trail Report", desc: "Critical events across system", icon: ClipboardList, color: "primary" },
-    { code: "discounts", name: "Discount Report", desc: "Discounts applied across periods", icon: Percent, color: "warning" },
+    { code: "waste-spoilage", name: "Waste / Spoilage Report", desc: "Expired & damaged write-offs", icon: Ban, color: "destructive",
+      href: "/reports/waste-spoilage", exportFile: () => api.exportWasteSpoilageReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "returns-refunds", name: "Return / Refund Report", desc: "Returns by branch / cashier", icon: RotateCcw, color: "destructive",
+      href: "/reports/returns-refunds", exportFile: () => api.exportReturnsRefundsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "attendance-shift", name: "Attendance / Shift Report", desc: "Staff attendance and cashier shifts", icon: Clock, color: "primary",
+      href: "/reports/attendance-shift", exportFile: () => api.exportAttendanceShiftReport({ from: todayStr(), to: todayStr(), exportedBy }) },
+    { code: "audit-trail", name: "Audit Trail Report", desc: "Critical events across system", icon: ClipboardList, color: "primary",
+      href: "/reports/audit-trail", exportFile: () => api.exportAuditTrailReport({ exportedBy }) },
+    { code: "discounts", name: "Discount Report", desc: "Discounts applied across periods", icon: Percent, color: "warning",
+      href: "/reports/discounts", exportFile: () => api.exportDiscountsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "payment-methods", name: "Payment Methods", desc: "Cash / Card / STC Pay split", icon: CreditCard, color: "primary",
       href: "/reports/payment-methods", exportFile: () => api.exportPaymentMethodsReport({ from: todayStr(), to: todayStr(), exportedBy }) },
-    { code: "vat-zatca", name: "VAT / ZATCA Report", desc: "Tax filing-ready VAT summary", icon: ShieldCheck, color: "success" },
-    { code: "tax", name: "Tax Report", desc: "Tax breakdown by branch and cashier", icon: Coins, color: "success" },
-    { code: "fees", name: "Fee Report", desc: "Custom fees collected & detail", icon: DollarSign, color: "success" },
-    { code: "tobacco-excise", name: "Tobacco Excise Report", desc: "Excise tax on tobacco products", icon: Cigarette, color: "warning" },
-    { code: "profit-margin", name: "Profit Margin", desc: "Gross & net margin by product", icon: DollarSign, color: "success" },
+    { code: "vat-zatca", name: "VAT / ZATCA Report", desc: "Tax filing-ready VAT summary", icon: ShieldCheck, color: "success",
+      href: "/reports/vat-zatca", exportFile: () => api.exportVatZatcaReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "tax", name: "Tax Report", desc: "Tax breakdown by branch and cashier", icon: Coins, color: "success",
+      href: "/reports/tax", exportFile: () => api.exportTaxReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "fees", name: "Fee Report", desc: "Custom fees collected & detail", icon: DollarSign, color: "success",
+      href: "/reports/fees", exportFile: () => api.exportFeeReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "tobacco-excise", name: "Tobacco Excise Report", desc: "Excise tax on tobacco products", icon: Cigarette, color: "warning",
+      href: "/reports/tobacco-excise", exportFile: () => api.exportTobaccoExciseReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "profit-margin", name: "Profit Margin", desc: "Gross & net margin by product", icon: DollarSign, color: "success",
+      href: "/reports/profit-margin", exportFile: () => api.exportProfitMarginReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
   ];
 }
 
@@ -136,7 +151,7 @@ function Reports() {
       </div>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <FileBarChart className="h-3.5 w-3.5" />
-        6 of 21 reports are live — the rest are planned for a future release.
+        All 21 reports are live.
       </div>
     </PageShell>
   );

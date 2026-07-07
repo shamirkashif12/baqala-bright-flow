@@ -442,6 +442,81 @@ export const api = {
   exportInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/inventory-snapshot/export${toQuery(params)}`),
 
+  getBranchSalesReport: (params?: { from?: string; to?: string; city?: string }) =>
+    request<BranchSalesReport>(`/api/reports/branch-sales${toQuery(params)}`),
+  exportBranchSalesReport: (params?: { from?: string; to?: string; city?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/branch-sales/export${toQuery(params)}`),
+
+  getTerminalReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; status?: string }) =>
+    request<TerminalReport>(`/api/reports/terminal${toQuery(params)}`),
+  exportTerminalReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; status?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/terminal/export${toQuery(params)}`),
+
+  getProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; search?: string }) =>
+    request<ProductSalesReport>(`/api/reports/product-sales${toQuery(params)}`),
+  exportProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; search?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/product-sales/export${toQuery(params)}`),
+
+  getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string }) =>
+    request<CategoryPerformanceReport>(`/api/reports/category-performance${toQuery(params)}`),
+  exportCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/category-performance/export${toQuery(params)}`),
+
+  getSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string }) =>
+    request<SupplierPerformanceReport>(`/api/reports/supplier-performance${toQuery(params)}`),
+  exportSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/supplier-performance/export${toQuery(params)}`),
+
+  getWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string }) =>
+    request<WasteSpoilageReport>(`/api/reports/waste-spoilage${toQuery(params)}`),
+  exportWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; exportedBy?: string; includeCost?: boolean; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/waste-spoilage/export${toQuery(params)}`),
+
+  getReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string }) =>
+    request<ReturnsRefundsReport>(`/api/reports/returns-refunds${toQuery(params)}`),
+  exportReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/returns-refunds/export${toQuery(params)}`),
+
+  getAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string }) =>
+    request<AttendanceShiftReport>(`/api/reports/attendance-shift${toQuery(params)}`),
+  exportAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/attendance-shift/export${toQuery(params)}`),
+
+  getAuditTrailReport: (params?: { from?: string; to?: string; userId?: string; module?: string; severity?: string; branchId?: string }) =>
+    request<AuditTrailReport>(`/api/reports/audit-trail${toQuery(params)}`),
+  exportAuditTrailReport: (params?: { from?: string; to?: string; userId?: string; module?: string; severity?: string; branchId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/audit-trail/export${toQuery(params)}`),
+
+  getDiscountsReport: (params?: { from?: string; to?: string; branchId?: string; discountType?: string }) =>
+    request<DiscountsReport>(`/api/reports/discounts${toQuery(params)}`),
+  exportDiscountsReport: (params?: { from?: string; to?: string; branchId?: string; discountType?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/discounts/export${toQuery(params)}`),
+
+  getVatZatcaReport: (params?: { from?: string; to?: string; branchId?: string; zatcaStatus?: string; invoiceType?: string }) =>
+    request<VatZatcaReport>(`/api/reports/vat-zatca${toQuery(params)}`),
+  exportVatZatcaReport: (params?: { from?: string; to?: string; branchId?: string; zatcaStatus?: string; invoiceType?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/vat-zatca/export${toQuery(params)}`),
+
+  getTaxReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string }) =>
+    request<TaxReport>(`/api/reports/tax${toQuery(params)}`),
+  exportTaxReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/tax/export${toQuery(params)}`),
+
+  getFeeReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string }) =>
+    request<FeeReport>(`/api/reports/fees${toQuery(params)}`),
+  exportFeeReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/fees/export${toQuery(params)}`),
+
+  getTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string }) =>
+    request<TobaccoExciseReport>(`/api/reports/tobacco-excise${toQuery(params)}`),
+  exportTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/tobacco-excise/export${toQuery(params)}`),
+
+  getProfitMarginReport: (params?: { from?: string; to?: string; branchId?: string; groupBy?: "product" | "category" | "branch" }) =>
+    request<ProfitMarginReport>(`/api/reports/profit-margin${toQuery(params)}`),
+  exportProfitMarginReport: (params?: { from?: string; to?: string; branchId?: string; groupBy?: "product" | "category" | "branch"; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/profit-margin/export${toQuery(params)}`),
+
   // Compliance rules
   getComplianceRules: (params?: { ruleType?: string }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
@@ -1043,6 +1118,147 @@ export interface InventorySnapshotRow {
 export interface InventorySnapshotReport {
   kpis: { totalStockValue: number; skuCount: number; availableQty: number; reservedQty: number; outOfStockSkus: number; negativeStockExceptions: number };
   rows: InventorySnapshotRow[];
+}
+
+export interface BranchSalesRow {
+  branchCode: string; branchName: string; city: string; openTerminals: number; transactions: number;
+  grossSales: number; discounts: number; returns: number; netSales: number; vat: number; avgBasket: number;
+  grossProfit: number; marginPct: number | null; rank: number;
+}
+export interface BranchSalesReport {
+  kpis: { topBranch?: string; lowestBranch?: string; totalNetSales: number; averageBranchSales: number; totalReturns: number; overallMarginPct: number | null };
+  rows: BranchSalesRow[];
+}
+
+export interface TerminalReportRow {
+  terminalId: string; terminalName: string; branch: string; status: string; assignedCashier: string;
+  transactions: number; netSales: number; refunds: number; uptimePct: number; lastSyncTime?: string;
+}
+export interface TerminalReport {
+  kpis: { activeTerminals: number; offlineTerminals: number; terminalSales: number; avgUptimePct: number };
+  rows: TerminalReportRow[];
+}
+
+export interface ProductSalesRow {
+  sku: string; barcode: string; productName: string; category: string; brand: string; unitsSold: number;
+  netSales: number; discounts: number; returnsQty: number; returnRatePct: number; cogs: number;
+  grossProfit: number; marginPct: number | null; currentStock: number;
+}
+export interface ProductSalesReport {
+  kpis: { topSku?: string; unitsSold: number; netSales: number; grossMarginPct: number | null; deadStockCount: number; returnRatePct: number };
+  rows: ProductSalesRow[];
+}
+
+export interface CategoryPerformanceRow {
+  categoryId: string; categoryName: string; parentCategory: string; skuCount: number; unitsSold: number;
+  grossSales: number; discounts: number; returns: number; netSales: number; salesContributionPct: number;
+  cogs: number; grossProfit: number; marginPct: number | null;
+}
+export interface CategoryPerformanceReport {
+  kpis: { topCategory?: string; totalCategoriesSold: number; categoryDiscountValue: number };
+  rows: CategoryPerformanceRow[];
+}
+
+export interface SupplierPerformanceRow {
+  supplierId: string; supplierName: string; poCount: number; orderedQty: number; receivedQty: number;
+  fillRatePct: number; averageLeadTimeDays: number; lateDeliveries: number; purchaseValue: number;
+  outstandingDues: number; supplierReturnsQty: number; rtsValue: number; lastPoDate: string;
+}
+export interface SupplierPerformanceReport {
+  kpis: { bestFillRatePct: number; averageLeadTimeDays: number; totalPurchaseValue: number; outstandingDues: number; rtsValue: number };
+  rows: SupplierPerformanceRow[];
+}
+
+export interface WasteSpoilageRow {
+  wasteId: string; dateTime: string; sku: string; productName: string; category: string; branch: string;
+  qty: number; reason: string; costValue: number; notes?: string;
+}
+export interface WasteSpoilageReport {
+  kpis: { totalWriteOffValue: number; expiredItems: number; damagedItems: number; topWasteCategory?: string; wastePctOfSales: number };
+  rows: WasteSpoilageRow[];
+}
+
+export interface ReturnRefundRow {
+  returnId: string; originalOrderId: string; dateTime: string; branch: string; cashier: string; customer: string;
+  returnType: string; reason: string; refundMethod: string; refundAmount: number; vatReversal: number; status: string;
+}
+export interface ReturnsRefundsReport {
+  kpis: { returnCount: number; refundValue: number; vatReversed: number; topReturnReason?: string; highestReturnBranch?: string; refundsPending: number };
+  rows: ReturnRefundRow[];
+}
+
+export interface AttendanceShiftRow {
+  staffId: string; staffName: string; role: string; branch: string; shiftId: string; terminal: string;
+  checkInTime?: string; shiftOpenTime: string; shiftCloseTime?: string; hoursWorked: number; openingFloat: number;
+  expectedCash: number; countedCash?: number; variance?: number; status: string;
+}
+export interface AttendanceShiftReport {
+  kpis: { openShifts: number; closedShifts: number; cashVariance: number; totalStaffHours: number; missingClosures: number };
+  rows: AttendanceShiftRow[];
+}
+
+export interface AuditTrailRow {
+  eventId: string; timestamp: string; severity: string; module: string; action: string; entityId: string;
+  user: string; role: string; branch: string; ipAddress: string; beforeValue?: string; afterValue?: string;
+}
+export interface AuditTrailReport {
+  kpis: { criticalEvents: number; failedLogins: number; overrideCount: number; configurationChanges: number; exportsGenerated: number };
+  rows: AuditTrailRow[];
+}
+
+export interface DiscountRow {
+  transactionId: string; invoiceNo: string; dateTime: string; branch: string; cashier: string; customerType: string;
+  discountType: string; couponCode?: string; discountPct: number; discountAmount: number; netSalesAfterDiscount: number;
+}
+export interface DiscountsReport {
+  kpis: { totalDiscountValue: number; manualDiscountValue: number; couponUsage: number; discountPctOfSales: number };
+  rows: DiscountRow[];
+}
+
+export interface VatZatcaRow {
+  invoiceNo: string; issueDateTime: string; branch: string; invoiceType: string; customerVatNo?: string;
+  taxableAmount: number; vatAmount: number; totalWithVat: number; zatcaStatus: string;
+}
+export interface VatZatcaReport {
+  kpis: { taxableSales: number; vatCollected: number; vatReversed: number; zatcaSuccess: number; zatcaPending: number; zatcaErrors: number };
+  rows: VatZatcaRow[];
+}
+
+export interface TaxReportRow {
+  branch: string; cashier: string; taxCode: string; taxType: string; taxRate: number; taxableAmount: number;
+  taxAmount: number; zeroRatedAmount: number; exemptAmount: number; taxReversed: number; netTaxAmount: number; transactions: number;
+}
+export interface TaxReport {
+  kpis: { totalTaxableAmount: number; vatAmount: number; zeroRatedSales: number; netTaxPayable: number };
+  rows: TaxReportRow[];
+}
+
+export interface FeeRow {
+  feeId: string; feeType: string; transactionId: string; invoiceNo: string; dateTime: string; branch: string;
+  cashier: string; customerType: string; feeAmount: number; netFee: number;
+}
+export interface FeeReport {
+  kpis: { totalFeesCollected: number; transactionsWithFees: number; averageFeePerTransaction: number };
+  rows: FeeRow[];
+}
+
+export interface TobaccoExciseRow {
+  sku: string; barcode: string; productName: string; brand: string; category: string; branch: string;
+  unitsSold: number; taxablePrice: number; exciseRate: number; exciseAmount: number; vatAmount: number;
+  returnsQty: number; exciseReversal: number; netExcise: number; complianceStatus: string;
+}
+export interface TobaccoExciseReport {
+  kpis: { exciseSalesValue: number; exciseTaxAmount: number; tobaccoUnitsSold: number; exciseRefunds: number; topTobaccoSku?: string; complianceExceptions: number };
+  rows: TobaccoExciseRow[];
+}
+
+export interface ProfitMarginRow {
+  groupKey: string; groupName: string; branch: string; unitsSold: number; netSales: number; cogs: number;
+  grossProfit: number; marginPct: number | null; discountValue: number; returnImpact: number; netProfit: number; netMarginPct: number | null;
+}
+export interface ProfitMarginReport {
+  kpis: { grossProfit: number; grossMarginPct: number | null; netMarginPct: number | null; lowMarginSkus: number; discountImpact: number; returnImpact: number };
+  rows: ProfitMarginRow[];
 }
 
 export interface DetectedPrinter {
