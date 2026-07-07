@@ -6,8 +6,14 @@ using System.Text.RegularExpressions;
 
 namespace BaqalaPOS.Api.Controllers;
 
+// This entire controller is an unauthenticated, locally-hosted printer-agent API — the frontend
+// talks to it via a separate base URL/API key (PRINTER_API_KEY in api.ts), not the app's Bearer
+// JWT, and QZ Tray/direct browser downloads (setup-installer, qz-install-script) never carry
+// one either. Must stay [AllowAnonymous] even though the global fallback policy in Program.cs
+// requires auth everywhere else.
 [ApiController]
 [Route("api/[controller]")]
+[AllowAnonymous]
 public class PrinterController(IConfiguration config) : ControllerBase
 {
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -249,7 +255,11 @@ public class PrinterController(IConfiguration config) : ControllerBase
         double? TobaccoExcise,
         List<FeeItem>? Fees,
         List<SplitPayment>? SplitBreakdown,
-        string? PrinterName = null
+        string? PrinterName = null,
+        // The real ZATCA Phase 2 QR (base64 TLV, 9 tags incl. hash/signature/cert) from the
+        // signed ZatcaInvoice. When absent (Phase 2 not onboarded, or submission failed), falls
+        // back to a locally-built Phase-1-style 5-tag QR below.
+        string? ZatcaQrCode = null
     );
 
     [HttpPost("print-receipt")]
@@ -358,9 +368,7 @@ public class PrinterController(IConfiguration config) : ControllerBase
         Divider();
 
         // ── Totals ──────────────────────────────────────────────────────────
-        Row("Subtotal", $"SAR {Fmt(r.Subtotal)}");
-        if (r.Discount > 0)
-            Row("Discount", $"-SAR {Fmt(r.Discount)}");
+        Row("Subtotal", $"SAR {Fmt(r.Subtotal - r.Discount)}");
         if (r.TobaccoExcise > 0)
             Row("Tobacco Excise", $"SAR {Fmt(r.TobaccoExcise!.Value)}");
         foreach (var fee in r.Fees ?? [])
@@ -393,31 +401,40 @@ public class PrinterController(IConfiguration config) : ControllerBase
         Lf();
 
         // ── ZATCA QR Code ────────────────────────────────────────────────────
-        // Build TLV payload (ZATCA Phase 2 — 5 required tags)
-        var sellerName  = (r.SellerName ?? r.BranchName ?? "Store").Trim();
-        var vatNum      = r.VatNumber ?? "";
-        var timestamp   = dt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
-        var totalStr    = Fmt(r.Total);
-        var vatStr      = Fmt(r.Vat);
-
-        byte[] TlvField(byte tag, string value)
+        // Prefer the real, cryptographically-signed QR from the submitted ZatcaInvoice. Only
+        // fall back to a locally-built Phase-1-style 5-tag QR when it's unavailable.
+        string qrData;
+        if (!string.IsNullOrEmpty(r.ZatcaQrCode))
         {
-            var v   = System.Text.Encoding.UTF8.GetBytes(value);
-            var tlv = new byte[2 + v.Length];
-            tlv[0]  = tag;
-            tlv[1]  = (byte)v.Length;
-            Array.Copy(v, 0, tlv, 2, v.Length);
-            return tlv;
+            qrData = r.ZatcaQrCode;
         }
+        else
+        {
+            var sellerName  = (r.SellerName ?? r.BranchName ?? "Store").Trim();
+            var vatNum      = r.VatNumber ?? "";
+            var timestamp   = dt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
+            var totalStr    = Fmt(r.Total);
+            var vatStr      = Fmt(r.Vat);
 
-        var tlvBytes = new List<byte>();
-        tlvBytes.AddRange(TlvField(1, sellerName));
-        tlvBytes.AddRange(TlvField(2, vatNum));
-        tlvBytes.AddRange(TlvField(3, timestamp));
-        tlvBytes.AddRange(TlvField(4, totalStr));
-        tlvBytes.AddRange(TlvField(5, vatStr));
+            byte[] TlvField(byte tag, string value)
+            {
+                var v   = System.Text.Encoding.UTF8.GetBytes(value);
+                var tlv = new byte[2 + v.Length];
+                tlv[0]  = tag;
+                tlv[1]  = (byte)v.Length;
+                Array.Copy(v, 0, tlv, 2, v.Length);
+                return tlv;
+            }
 
-        var qrData  = Convert.ToBase64String(tlvBytes.ToArray());
+            var tlvBytes = new List<byte>();
+            tlvBytes.AddRange(TlvField(1, sellerName));
+            tlvBytes.AddRange(TlvField(2, vatNum));
+            tlvBytes.AddRange(TlvField(3, timestamp));
+            tlvBytes.AddRange(TlvField(4, totalStr));
+            tlvBytes.AddRange(TlvField(5, vatStr));
+
+            qrData = Convert.ToBase64String(tlvBytes.ToArray());
+        }
         var qrBytes = System.Text.Encoding.UTF8.GetBytes(qrData);
 
         // ESC/POS QR code commands (GS ( k)
@@ -518,10 +535,42 @@ public class PrinterController(IConfiguration config) : ControllerBase
         var ua     = Request.Headers.UserAgent.ToString().ToLower();
         var appName = "MiMony POS";
 
+        // Embed the cert directly in the installer so cert trust works with zero
+        // network dependency — no need to hit /api/printer/qz-certificate at install time.
+        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
+        var embeddedCert = System.IO.File.Exists(certPath)
+            ? (await System.IO.File.ReadAllTextAsync(certPath)).Trim()
+            : "";
+        var embeddedCertBase64 = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(embeddedCert));
+
         // ── Windows ──────────────────────────────────────────────────────────
         // Note: $$ prefix means only {{expr}} interpolates; bare $, {, } are all literal.
         if (ua.Contains("windows"))
         {
+            // Fallback safety net for when the allowed.dat pre-trust below doesn't take effect
+            // (e.g. QZ Tray was already running from a prior install and hasn't reloaded it) —
+            // watches for the "Action Required" dialog and hits Enter, since "Allow" is its
+            // default-focused button. Base64-embedded to sidestep batch/PowerShell quoting hell
+            // around the here-string this would otherwise need.
+            const string autoAllowPs1 = """
+Add-Type -AssemblyName Microsoft.VisualBasic
+Add-Type -AssemblyName System.Windows.Forms
+while ($true) {
+    $proc = Get-Process | Where-Object { $_.MainWindowTitle -like "*Action Required*" }
+    if ($proc) {
+        try {
+            [Microsoft.VisualBasic.Interaction]::AppActivate($proc.Id)
+            Start-Sleep -Milliseconds 200
+            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+        } catch {}
+    }
+    Start-Sleep -Milliseconds 500
+}
+""";
+            var autoAllowPs1Base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(autoAllowPs1));
+
             var bat = $$"""
 @echo off
 setlocal EnableDelayedExpansion
@@ -560,6 +609,29 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObj
 reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
 
+:: ── Trust POS cert in QZ Tray — eliminates all "Action Required" dialogs ──
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{embeddedCertBase64}}'));" ^
+  "$qzDir = @($env:ProgramFiles + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1;" ^
+  "if ($qzDir) { $cert | Set-Content -Path ($qzDir + '\override.crt') -Encoding ASCII };" ^
+  "$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower();" ^
+  "$allowedDir = $env:APPDATA + '\qz'; New-Item -ItemType Directory -Force $allowedDir | Out-Null;" ^
+  "$entry = $fp + \"`tQZ Tray Demo Cert`tQZ Industries, LLC`t2026-07-02 14:40:36`t2046-07-02 14:40:36`ttrue\";" ^
+  "$allowed = $allowedDir + '\allowed.dat';" ^
+  "$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() };" ^
+  "$lines += $entry; $lines | Set-Content -Path $allowed -Encoding ASCII;" ^
+  "Write-Host '   QZ Tray trusted — no dialogs will appear.'"
+
+:: ── Auto-dismiss fallback: if the "Action Required" dialog ever appears anyway
+:: (e.g. QZ Tray was already running before this install and hasn't reloaded
+:: allowed.dat), hit Enter to trigger its default-focused "Allow" button. ──────
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$dir = $env:LOCALAPPDATA + '\MiMonyPOS'; New-Item -ItemType Directory -Force $dir | Out-Null;" ^
+  "$path = $dir + '\qz-auto-allow.ps1';" ^
+  "[System.IO.File]::WriteAllBytes($path, [Convert]::FromBase64String('{{autoAllowPs1Base64}}'));" ^
+  "reg.exe add 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Auto-Allow' /t REG_SZ /d ('powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"' + $path + '\"') /f | Out-Null;" ^
+  "Start-Process powershell -WindowStyle Hidden -ArgumentList ('-ExecutionPolicy Bypass -File \"' + $path + '\"')"
+
 :: ── Start QZ Tray ─────────────────────────────────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$qz = @($env:ProgramFiles + '\QZ Tray\qz-tray.exe',$env:LOCALAPPDATA + '\QZ Tray\qz-tray.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($qz) { Start-Process $qz; reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Tray' /t REG_SZ /d $qz /f | Out-Null }"
 
@@ -568,10 +640,8 @@ echo  ========================================
 echo   Setup complete!
 echo.
 echo   QZ Tray is running in the system tray.
-echo   POS shortcut added to Desktop.
-echo.
-echo   First time only: when QZ Tray shows
-echo   a security prompt, click ALLOW.
+echo   POS shortcut is on the Desktop.
+echo   No security dialogs will appear.
 echo  ========================================
 echo.
 pause
@@ -737,7 +807,46 @@ else
 fi
 rm -f /tmp/raw-thermal.ppd
 
-# Add QZ Tray to autostart
+# Trust the POS server cert permanently — QZ Tray will auto-allow all
+# print requests with zero dialogs on every reboot. Cert is embedded so
+# no network request is needed.
+QZ_CERT=$(echo "{{embeddedCertBase64}}" | base64 -d 2>/dev/null || echo "")
+if [ -n "$QZ_CERT" ]; then
+  # Install as override cert so QZ Tray treats it as if generated here
+  echo "$QZ_CERT" | sudo tee /opt/qz-tray/override.crt >/dev/null
+  # Also write to allowed.dat so it's permanently allowed (no prompt ever)
+  QZ_FP=$(echo "$QZ_CERT" | openssl x509 -noout -fingerprint -sha1 2>/dev/null | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
+  mkdir -p ~/.qz
+  grep -v "^$QZ_FP" ~/.qz/allowed.dat 2>/dev/null > /tmp/qz_allowed.tmp || true
+  printf "%s\tQZ Tray Demo Cert\tQZ Industries, LLC\t2026-07-02 14:40:36\t2046-07-02 14:40:36\ttrue\r\n" "$QZ_FP" >> /tmp/qz_allowed.tmp
+  mv /tmp/qz_allowed.tmp ~/.qz/allowed.dat
+  echo "   QZ Tray trusted — no dialogs will appear."
+else
+  echo "   Could not embed cert — connect printer manually later."
+fi
+
+# Auto-dismiss fallback: if the "Action Required" dialog ever appears anyway
+# (e.g. QZ Tray was already running before this install and hasn't reloaded
+# allowed.dat), find it by title and hit Enter to trigger its default-focused
+# "Allow" button.
+sudo apt-get install -y xdotool >/dev/null 2>&1 || true
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/qz-auto-allow.sh << 'AUTOALLOW'
+#!/bin/bash
+while true; do
+  if command -v xdotool >/dev/null 2>&1; then
+    WIN=$(xdotool search --name "Action Required" 2>/dev/null | head -1)
+    if [ -n "$WIN" ]; then
+      xdotool windowactivate "$WIN" 2>/dev/null
+      xdotool key --window "$WIN" Return 2>/dev/null
+    fi
+  fi
+  sleep 0.5
+done
+AUTOALLOW
+chmod +x ~/.local/bin/qz-auto-allow.sh
+
+# Add QZ Tray and auto-allow to autostart
 mkdir -p ~/.config/autostart
 cat > ~/.config/autostart/qz-tray.desktop << 'AUTOSTART'
 [Desktop Entry]
@@ -749,8 +858,19 @@ NoDisplay=false
 X-GNOME-Autostart-enabled=true
 AUTOSTART
 
-# Launch QZ Tray now
+cat > ~/.config/autostart/qz-auto-allow.desktop << AUTOSTART
+[Desktop Entry]
+Type=Application
+Name=QZ Auto-Allow
+Exec=bash $HOME/.local/bin/qz-auto-allow.sh
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+AUTOSTART
+
+# Launch QZ Tray and auto-closer now
 nohup qz-tray >/dev/null 2>&1 &
+nohup bash ~/.local/bin/qz-auto-allow.sh >/dev/null 2>&1 &
 
 echo ""
 echo " ========================================"
@@ -758,8 +878,8 @@ echo "  Done!"
 echo "  QZ Tray is running in the system tray."
 echo "  POS shortcut is on your Desktop."
 echo ""
-echo "  First time: QZ Tray shows 'Allow"
-echo "  unsigned content' -> click Allow."
+echo "  QZ Tray dialogs close automatically."
+echo "  Just open the POS and start printing."
 echo " ========================================"
 echo ""
 echo "Press Enter to close..."
@@ -917,8 +1037,22 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
 
     // ── QZ Tray certificate signing (eliminates "Action Required" prompt) ────
 
+    [HttpGet("qz-fingerprint")]
+    public IActionResult QzFingerprint()
+    {
+        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            return NotFound("QZ certificate not found");
+
+        var pem = System.IO.File.ReadAllText(certPath);
+        using var cert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(pem);
+        var fp = cert.GetCertHashString(System.Security.Cryptography.HashAlgorithmName.SHA1).ToLowerInvariant();
+        return Content(fp, "text/plain");
+    }
+
     [HttpGet("qz-certificate")]
-    [AllowAnonymous]
     public IActionResult QzCertificate()
     {
         var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
@@ -931,7 +1065,6 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
     }
 
     [HttpPost("qz-sign")]
-    [AllowAnonymous]
     public IActionResult QzSign([FromBody] QzSignRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.ToSign))

@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ComplianceController(BaqalaDbContext db) : ControllerBase
+public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService) : ControllerBase
 {
     // ─── ZATCA Invoices ───────────────────────────────────────────────────────
     [HttpGet("zatca/invoices")]
@@ -53,11 +54,14 @@ public class ComplianceController(BaqalaDbContext db) : ControllerBase
     }
 
     // ─── ZATCA Settings ───────────────────────────────────────────────────────
+    // Note: ZatcaSettings now also holds onboarding secrets (private key, CSID tokens/secrets —
+    // encrypted at rest, but still never safe to echo back over the API), so these endpoints
+    // project to ZatcaSettingsDto instead of returning the entity directly.
     [HttpGet("zatca/settings/{branchId:guid}")]
     public async Task<IActionResult> GetSettings(Guid branchId)
     {
         var settings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branchId);
-        return settings is null ? NotFound() : Ok(settings);
+        return settings is null ? NotFound() : Ok(ZatcaSettingsDto.From(settings));
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
@@ -67,21 +71,93 @@ public class ComplianceController(BaqalaDbContext db) : ControllerBase
         var settings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branchId);
         if (settings is null)
         {
-            updated.Id = Guid.NewGuid();
-            updated.BranchId = branchId;
-            updated.CreatedAt = updated.UpdatedAt = DateTime.UtcNow;
-            db.ZatcaSettings.Add(updated);
+            settings = new ZatcaSettings
+            {
+                Id = Guid.NewGuid(),
+                BranchId = branchId,
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.ZatcaSettings.Add(settings);
         }
-        else
-        {
-            settings.VatRegistrationNumber = updated.VatRegistrationNumber;
-            settings.SellerName = updated.SellerName;
-            settings.Phase2Enabled = updated.Phase2Enabled;
-            settings.Environment = updated.Environment;
-            settings.UpdatedAt = DateTime.UtcNow;
-        }
+
+        settings.VatRegistrationNumber = updated.VatRegistrationNumber;
+        settings.SellerName = updated.SellerName;
+        settings.StreetName = updated.StreetName;
+        settings.BuildingNumber = updated.BuildingNumber;
+        settings.CitySubdivisionName = updated.CitySubdivisionName;
+        settings.PostalZone = updated.PostalZone;
+        settings.Phase2Enabled = updated.Phase2Enabled;
+        settings.Environment = updated.Environment;
+        settings.UpdatedAt = DateTime.UtcNow;
+
         await db.SaveChangesAsync();
-        return Ok(settings ?? updated);
+        return Ok(ZatcaSettingsDto.From(settings));
+    }
+
+    // ─── ZATCA Onboarding ─────────────────────────────────────────────────────
+    [HttpPost("zatca/onboarding/{branchId:guid}/csr")]
+    public async Task<IActionResult> GenerateCsr(Guid branchId)
+    {
+        try
+        {
+            var result = await zatcaService.GenerateCsrAsync(branchId);
+            return Ok(new { csr = result.Csr, egsSerial = result.EgsSerial });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("zatca/onboarding/{branchId:guid}/compliance-csid")]
+    public async Task<IActionResult> GetComplianceCsid(Guid branchId, [FromBody] ZatcaOtpRequest req)
+    {
+        try
+        {
+            var result = await zatcaService.GetComplianceCsidAsync(branchId, req.Otp);
+            return result.Success
+                ? Ok(new { success = true, requestId = result.RequestId })
+                : BadRequest(new { success = false, error = result.Error });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("zatca/onboarding/{branchId:guid}/production-csid")]
+    public async Task<IActionResult> GetProductionCsid(Guid branchId)
+    {
+        try
+        {
+            var result = await zatcaService.RunOnboardingToProductionAsync(branchId);
+            return Ok(new
+            {
+                success = result.Success,
+                requestId = result.RequestId,
+                error = result.Error,
+                complianceTests = result.ComplianceTests.Select(t => new { t.DocumentType, t.Passed, t.ApiStatus }),
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    // ─── ZATCA Invoice Submission ─────────────────────────────────────────────
+    [HttpPost("zatca/invoices/{id:guid}/submit")]
+    public async Task<IActionResult> SubmitInvoice(Guid id)
+    {
+        try
+        {
+            var invoice = await zatcaService.SubmitInvoiceAsync(id);
+            return Ok(invoice);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     // ─── Rules Engine ─────────────────────────────────────────────────────────
@@ -122,3 +198,35 @@ public class ComplianceController(BaqalaDbContext db) : ControllerBase
 }
 
 public record ZatcaStatusRequest(string Status, string? Response);
+public record ZatcaOtpRequest(string Otp);
+
+// Safe projection of ZatcaSettings — excludes PrivateKey/Csr/CcsidSecret/PcsidSecret/binary
+// security tokens, which must never be echoed back over the API even encrypted.
+public record ZatcaSettingsDto(
+    Guid Id,
+    Guid BranchId,
+    string? VatRegistrationNumber,
+    string? SellerName,
+    string? StreetName,
+    string? BuildingNumber,
+    string? CitySubdivisionName,
+    string? PostalZone,
+    bool Phase2Enabled,
+    string Environment,
+    string? EgsSerial,
+    string OnboardingStatus,
+    bool HasCsr,
+    bool HasComplianceCsid,
+    bool HasProductionCsid,
+    DateTime CreatedAt,
+    DateTime UpdatedAt)
+{
+    public static ZatcaSettingsDto From(ZatcaSettings s) => new(
+        s.Id, s.BranchId, s.VatRegistrationNumber, s.SellerName,
+        s.StreetName, s.BuildingNumber, s.CitySubdivisionName, s.PostalZone,
+        s.Phase2Enabled, s.Environment, s.EgsSerial, s.OnboardingStatus,
+        HasCsr: !string.IsNullOrEmpty(s.Csr),
+        HasComplianceCsid: !string.IsNullOrEmpty(s.CcsidBinarySecurityToken),
+        HasProductionCsid: !string.IsNullOrEmpty(s.PcsidBinarySecurityToken),
+        s.CreatedAt, s.UpdatedAt);
+}

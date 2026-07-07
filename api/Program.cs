@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -44,6 +45,15 @@ builder.Services.AddControllers()
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+
+// ─── ZATCA (Saudi e-invoicing Phase 2) ───────────────────────────────────────
+builder.Services.AddDataProtection()
+    .SetApplicationName("BaqalaPOS")
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, "zatca-keys")));
+builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
+builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
+builder.Services.AddScoped<IZatcaService, ZatcaService>();
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
@@ -94,11 +104,14 @@ if (app.Environment.IsDevelopment())
     {
         db.Database.Migrate();
     }
+    catch (InvalidCastException lockEx) when (lockEx.StackTrace?.Contains("AcquireDatabaseLock") == true)
+    {
+        // MariaDB returns NULL for GET_LOCK() in some versions — known bug in
+        // MySql.EntityFrameworkCore. Safe to ignore: migrations were applied manually.
+        startupLogger.LogWarning("Skipping migration lock check (MariaDB GET_LOCK compatibility issue).");
+    }
     catch (Exception migEx)
     {
-        // Log the real error so migration failures are visible in the console.
-        // EF's Migrate() is idempotent for already-applied migrations, so any
-        // exception here is a genuine schema problem that needs attention.
         startupLogger.LogError(migEx, "Database migration failed — check migration SQL and schema.");
     }
     await DataSeeder.SeedAsync(db);

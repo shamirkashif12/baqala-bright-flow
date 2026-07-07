@@ -356,6 +356,18 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  generateZatcaCsr: (branchId: string) =>
+    request<{ csr: string; egsSerial: string }>(`/api/compliance/zatca/onboarding/${branchId}/csr`, { method: "POST" }),
+  getZatcaComplianceCsid: (branchId: string, otp: string) =>
+    request<{ success: boolean; requestId?: string; error?: string }>(`/api/compliance/zatca/onboarding/${branchId}/compliance-csid`, {
+      method: "POST",
+      body: JSON.stringify({ otp }),
+    }),
+  getZatcaProductionCsid: (branchId: string) =>
+    request<{ success: boolean; requestId?: string; error?: string; complianceTests: { documentType: string; passed: boolean; apiStatus?: string }[] }>(
+      `/api/compliance/zatca/onboarding/${branchId}/production-csid`, { method: "POST" }),
+  submitZatcaInvoice: (invoiceId: string) =>
+    request<ZatcaInvoice>(`/api/compliance/zatca/invoices/${invoiceId}/submit`, { method: "POST" }),
 
   // Audit Logs
   getAuditLogs: (params?: { entityType?: string; page?: number }) => {
@@ -518,6 +530,7 @@ export const api = {
     fees?: { name: string; amount: number }[];
     splitBreakdown?: { method: string; amount: number }[];
     printerName?: string;
+    zatcaQrCode?: string;
   }) =>
     printerRequest<{ message: string; jobId?: string }>("/api/printer/print-receipt", { method: "POST", body: JSON.stringify(invoice) }),
   getPrintJobs: (printer?: string) =>
@@ -610,6 +623,10 @@ export interface Order {
   branch?: { id: string; name: string };
   cashier?: { id: string; fullName: string };
   customer?: { id: string; fullName: string; phone: string; email?: string };
+  // Only populated on the createOrder response — the real ZATCA-signed QR/status, when Phase 2
+  // is onboarded for the branch. Absent otherwise; callers should fall back to a Phase-1 QR.
+  zatcaQrCode?: string;
+  zatcaInvoiceStatus?: string;
 }
 
 export interface OrderItem {
@@ -753,13 +770,17 @@ export interface CustomerReturnItem {
 
 export interface ZatcaSettings {
   id?: string; branchId: string; vatRegistrationNumber?: string; sellerName?: string;
-  phase2Enabled: boolean; environment: string; createdAt?: string; updatedAt?: string;
+  streetName?: string; buildingNumber?: string; citySubdivisionName?: string; postalZone?: string;
+  phase2Enabled: boolean; environment: string;
+  egsSerial?: string; onboardingStatus?: string;
+  hasCsr?: boolean; hasComplianceCsid?: boolean; hasProductionCsid?: boolean;
+  createdAt?: string; updatedAt?: string;
 }
 
 export interface ZatcaInvoice {
   id: string; invoiceNumber: string; orderId: string; branchId: string;
   invoiceType: string; issueDate: string; totalAmount: number; taxAmount: number;
-  zatcaStatus: string; buyerName?: string; qrCodeValue?: string;
+  zatcaStatus: string; zatcaResponse?: string; buyerName?: string; buyerVatNumber?: string; qrCodeValue?: string;
   branch?: { id: string; name: string };
 }
 

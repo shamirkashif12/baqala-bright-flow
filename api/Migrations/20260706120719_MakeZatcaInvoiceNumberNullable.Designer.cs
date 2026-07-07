@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260706120719_MakeZatcaInvoiceNumberNullable")]
+    partial class MakeZatcaInvoiceNumberNullable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -61,12 +64,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<string>("OldValues")
                         .HasColumnType("longtext")
                         .HasColumnName("old_values");
-
-                    b.Property<string>("Severity")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("severity");
 
                     b.Property<Guid?>("UserId")
                         .HasColumnType("char(36)")
@@ -185,14 +182,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("id");
 
-                    b.Property<DateTime?>("ApprovedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("approved_at");
-
-                    b.Property<Guid?>("ApprovedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("approved_by");
-
                     b.Property<Guid>("BranchId")
                         .HasColumnType("char(36)")
                         .HasColumnName("branch_id");
@@ -209,17 +198,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("cashier_id");
 
-                    b.Property<string>("CloseReason")
-                        .HasColumnType("longtext")
-                        .HasColumnName("close_reason");
-
                     b.Property<DateTime?>("ClosedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("closed_at");
-
-                    b.Property<Guid?>("ClosedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("closed_by");
 
                     b.Property<decimal?>("ClosingAmount")
                         .HasColumnType("decimal(18,4)")
@@ -240,10 +221,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<decimal>("OpeningAmount")
                         .HasColumnType("decimal(18,4)")
                         .HasColumnName("opening_amount");
-
-                    b.Property<bool>("RequiresApproval")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("requires_approval");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -751,11 +728,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("is_active");
 
-                    b.Property<string>("MinCustomerTier")
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("min_customer_tier");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -770,10 +742,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<Guid?>("ProductId")
                         .HasColumnType("char(36)")
                         .HasColumnName("product_id");
-
-                    b.Property<bool>("RequiresCustomer")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("requires_customer");
 
                     b.Property<DateTime?>("StartDate")
                         .HasColumnType("datetime(6)")

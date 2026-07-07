@@ -43,6 +43,22 @@ public class ZatcaInvoice
     [MaxLength(20), Column("buyer_vat_number")]
     public string? BuyerVatNumber { get; set; }
 
+    // Structured buyer address — required by ZATCA for Standard (B2B) invoices.
+    [MaxLength(255), Column("buyer_street_name")]
+    public string? BuyerStreetName { get; set; }
+
+    [MaxLength(50), Column("buyer_building_number")]
+    public string? BuyerBuildingNumber { get; set; }
+
+    [MaxLength(255), Column("buyer_city_subdivision_name")]
+    public string? BuyerCitySubdivisionName { get; set; }
+
+    [MaxLength(100), Column("buyer_city_name")]
+    public string? BuyerCityName { get; set; }
+
+    [MaxLength(20), Column("buyer_postal_zone")]
+    public string? BuyerPostalZone { get; set; }
+
     [Column("qr_code_value")]
     public string? QrCodeValue { get; set; }
 
@@ -82,6 +98,19 @@ public class ZatcaSettings
     [MaxLength(500), Column("seller_name")]
     public string? SellerName { get; set; }
 
+    // ─── Structured postal address (ZATCA UBL requires discrete fields; Branch.Address is free text) ───
+    [MaxLength(255), Column("street_name")]
+    public string? StreetName { get; set; }
+
+    [MaxLength(50), Column("building_number")]
+    public string? BuildingNumber { get; set; }
+
+    [MaxLength(255), Column("city_subdivision_name")]
+    public string? CitySubdivisionName { get; set; }
+
+    [MaxLength(20), Column("postal_zone")]
+    public string? PostalZone { get; set; }
+
     [Column("csid")]
     public string? Csid { get; set; }
 
@@ -96,6 +125,42 @@ public class ZatcaSettings
 
     [MaxLength(50), Column("environment")]
     public string Environment { get; set; } = "sandbox"; // sandbox | production
+
+    // ─── ZATCA Onboarding State (encrypted at rest via IDataProtector) ────────
+    [Column("csr")]
+    public string? Csr { get; set; }
+
+    [MaxLength(255), Column("egs_serial")]
+    public string? EgsSerial { get; set; }
+
+    [MaxLength(100), Column("ccsid_request_id")]
+    public string? CcsidRequestId { get; set; }
+
+    [Column("ccsid_binary_security_token")]
+    public string? CcsidBinarySecurityToken { get; set; }
+
+    [Column("ccsid_secret")]
+    public string? CcsidSecret { get; set; }
+
+    [MaxLength(100), Column("pcsid_request_id")]
+    public string? PcsidRequestId { get; set; }
+
+    [Column("pcsid_binary_security_token")]
+    public string? PcsidBinarySecurityToken { get; set; }
+
+    [Column("pcsid_secret")]
+    public string? PcsidSecret { get; set; }
+
+    [Column("last_icv")]
+    public int LastIcv { get; set; } = 0;
+
+    // Base64 SHA-256 of an empty string — ZATCA's well-known seed hash for a fresh device chain.
+    [MaxLength(255), Column("last_invoice_hash")]
+    public string LastInvoiceHash { get; set; } = "NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==";
+
+    // not_started | csr_generated | compliance_csid_obtained | production_ready
+    [MaxLength(50), Column("onboarding_status")]
+    public string OnboardingStatus { get; set; } = "not_started";
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

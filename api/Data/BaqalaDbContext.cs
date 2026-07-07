@@ -108,6 +108,12 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
         modelBuilder.Entity<ZatcaSettings>()
             .HasIndex(z => z.BranchId).IsUnique();
+        modelBuilder.Entity<ZatcaSettings>()
+            .Property(z => z.LastInvoiceHash)
+            .HasDefaultValue("NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==");
+        modelBuilder.Entity<ZatcaSettings>()
+            .Property(z => z.OnboardingStatus)
+            .HasDefaultValue("not_started");
 
         modelBuilder.Entity<PosSettings>()
             .HasIndex(p => p.BranchId).IsUnique();

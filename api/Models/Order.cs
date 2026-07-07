@@ -76,6 +76,13 @@ public class Order
     public ICollection<OrderItem> Items { get; set; } = [];
     public ICollection<OrderPayment> Payments { get; set; } = [];
     [JsonIgnore] public ICollection<CustomerReturn> Returns { get; set; } = [];
+
+    // Populated only on the Create response (not persisted) so the receipt can render the real
+    // ZATCA-signed QR instead of a client-reconstructed approximation. Null when Phase 2 isn't
+    // onboarded for the branch, or when submission failed — callers should fall back to a
+    // Phase-1-style QR in that case.
+    [NotMapped] public string? ZatcaQrCode { get; set; }
+    [NotMapped] public string? ZatcaInvoiceStatus { get; set; }
 }
 
 [Table("order_items")]

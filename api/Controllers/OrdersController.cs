@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, ILogger<OrdersController> logger) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll(
@@ -151,6 +151,52 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService) : 
         }
 
         await db.SaveChangesAsync();
+
+        // ── ZATCA Phase 2: auto-create + submit e-invoice ──────────────────────
+        var zatcaSettings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == order.BranchId);
+        if (zatcaSettings is { Phase2Enabled: true, OnboardingStatus: "production_ready" })
+        {
+            string? buyerName = null;
+            if (order.CustomerId.HasValue)
+            {
+                buyerName = (await db.Customers.FindAsync(order.CustomerId.Value))?.FullName;
+            }
+
+            var zatcaInvoice = new ZatcaInvoice
+            {
+                Id = Guid.NewGuid(),
+                OrderId = order.Id,
+                BranchId = order.BranchId,
+                InvoiceType = "simplified", // POS sales are always B2C — no buyer VAT captured on Customer
+                IssueDate = order.CreatedAt,
+                TotalAmount = order.TotalAmount,
+                TaxAmount = order.TaxAmount,
+                DiscountAmount = order.DiscountAmount,
+                BuyerName = buyerName,
+                ZatcaStatus = "pending",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.ZatcaInvoices.Add(zatcaInvoice);
+            await db.SaveChangesAsync();
+
+            // Submitted synchronously (not fire-and-forget) so the checkout response — and thus
+            // the printed receipt — carries the real ZATCA-signed QR code, not a client-side
+            // approximation. A ZATCA failure must not fail the sale itself; the invoice is left
+            // in whatever status SubmitInvoiceAsync set (e.g. "rejected") for later retry via
+            // POST zatca/invoices/{id}/submit.
+            try
+            {
+                var submitted = await zatcaService.SubmitInvoiceAsync(zatcaInvoice.Id);
+                order.ZatcaQrCode = submitted.QrCodeValue;
+                order.ZatcaInvoiceStatus = submitted.ZatcaStatus;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "ZATCA submission failed for invoice {InvoiceId}", zatcaInvoice.Id);
+                order.ZatcaInvoiceStatus = "pending";
+            }
+        }
 
         // ── Loyalty points: earn 1 point per SAR spent ────────────────────────
         if (order.CustomerId.HasValue)

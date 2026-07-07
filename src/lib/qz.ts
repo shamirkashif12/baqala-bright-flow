@@ -6,12 +6,13 @@ import qz from "qz-tray";
 import { buildEscPos, type ReceiptData } from "./escpos";
 import { api } from "./api";
 
-// Signed mode — certificate from backend eliminates the "Action Required" prompt.
+// Cert-signed mode. The server cert fingerprint is added to ~/.qz/allowed.dat
+// by the installer, so QZ Tray auto-allows with no dialog on every machine.
 qz.security.setCertificatePromise((resolve) => {
   fetch(api.qzCertificateUrl())
     .then(r => r.ok ? r.text() : Promise.reject(r.statusText))
     .then(resolve)
-    .catch(() => resolve(null)); // fall back to unsigned if cert not available
+    .catch(() => resolve(null));
 });
 qz.security.setSignaturePromise((toSign) => (resolve) => {
   api.qzSign(toSign).then(resolve).catch(() => resolve(null));
