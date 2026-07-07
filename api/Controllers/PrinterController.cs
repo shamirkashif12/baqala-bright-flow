@@ -6,8 +6,14 @@ using System.Text.RegularExpressions;
 
 namespace BaqalaPOS.Api.Controllers;
 
+// This entire controller is an unauthenticated, locally-hosted printer-agent API — the frontend
+// talks to it via a separate base URL/API key (PRINTER_API_KEY in api.ts), not the app's Bearer
+// JWT, and QZ Tray/direct browser downloads (setup-installer, qz-install-script) never carry
+// one either. Must stay [AllowAnonymous] even though the global fallback policy in Program.cs
+// requires auth everywhere else.
 [ApiController]
 [Route("api/[controller]")]
+[AllowAnonymous]
 public class PrinterController(IConfiguration config) : ControllerBase
 {
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -970,7 +976,6 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
     // ── QZ Tray certificate signing (eliminates "Action Required" prompt) ────
 
     [HttpGet("qz-fingerprint")]
-    [AllowAnonymous]
     public IActionResult QzFingerprint()
     {
         var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
@@ -986,7 +991,6 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
     }
 
     [HttpGet("qz-certificate")]
-    [AllowAnonymous]
     public IActionResult QzCertificate()
     {
         var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
@@ -999,7 +1003,6 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
     }
 
     [HttpPost("qz-sign")]
-    [AllowAnonymous]
     public IActionResult QzSign([FromBody] QzSignRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.ToSign))
