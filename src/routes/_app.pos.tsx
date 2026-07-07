@@ -45,67 +45,6 @@ function buildZatcaTlv(sellerName: string, vatNumber: string, timestamp: string,
 
 
 
-// ─── Build standalone receipt HTML (no Tailwind — safe for headless Chrome) ──
-function buildReceiptHtml(inv: {
-  orderNumber: string; createdAt: string; branchName: string;
-  vatNumber: string; sellerName: string; customerName?: string;
-  items: { name: string; qty: number; price: number }[];
-  subtotal: number; discount: number; vat: number; total: number;
-  taxLabel: string; paymentMethod?: string;
-  splitBreakdown?: { method: string; amount: number }[];
-  tobaccoExcise?: number;
-  fees?: { name: string; amount: number }[];
-}, qrSvg: string): string {
-  const fmt = (n: number) => n.toFixed(2);
-  const date = new Date(inv.createdAt).toLocaleString("en-SA", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  });
-  const row = (l: string, r: string, bold = false) =>
-    `<div style="display:flex;justify-content:space-between;margin:2px 0;${bold ? "font-weight:bold;font-size:13px;" : ""}"><span>${l}</span><span>${r}</span></div>`;
-  const divider = () => `<div style="border-top:1px dashed #000;margin:6px 0"></div>`;
-  const center = (s: string, extra = "") =>
-    `<div style="text-align:center;${extra}">${s}</div>`;
-
-  const items = inv.items.map(i =>
-    row(`${i.qty} × ${i.name}`, `SAR ${fmt(i.qty * i.price)}`)
-  ).join("");
-
-  const payments = inv.splitBreakdown?.length
-    ? inv.splitBreakdown.map(p => row(p.method.charAt(0).toUpperCase() + p.method.slice(1), `SAR ${fmt(p.amount)}`)).join("")
-    : row("Payment", inv.paymentMethod ?? "Cash");
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>
-  @page { margin:2mm; size:80mm auto; }
-  body { font-family:'Courier New',monospace; font-size:11px; color:#000;
-         background:#fff; margin:0; padding:6px 8px; width:74mm; }
-  svg { display:block; margin:8px auto; width:90px; height:90px; }
-</style></head><body>
-${center(`<strong style="font-size:13px">${inv.sellerName || inv.branchName}</strong>`)}
-${inv.vatNumber ? center(`VAT ${inv.vatNumber}`) : ""}
-${center("Tax Invoice", "margin-bottom:4px")}
-${divider()}
-<div>Invoice No.</div>
-<div style="font-weight:bold">${inv.orderNumber}</div>
-<div>${date}</div>
-${inv.customerName ? `<div>Customer: ${inv.customerName}</div>` : ""}
-${divider()}
-${items}
-${divider()}
-${row("Subtotal", `SAR ${fmt(inv.subtotal)}`)}
-${inv.discount > 0 ? row("Discount", `-SAR ${fmt(inv.discount)}`) : ""}
-${inv.tobaccoExcise ? row("Tobacco Excise", `SAR ${fmt(inv.tobaccoExcise)}`) : ""}
-${(inv.fees ?? []).map(f => row(f.name, `SAR ${fmt(f.amount)}`)).join("")}
-${inv.vat > 0 ? row(inv.taxLabel || "VAT 15%", `SAR ${fmt(inv.vat)}`) : ""}
-${divider()}
-${row("TOTAL", `SAR ${fmt(inv.total)}`, true)}
-${payments}
-${divider()}
-${qrSvg ? `${qrSvg}${center("ZATCA Phase 2 — scan to verify", "font-size:9px;margin-top:4px")}` : ""}
-${center("Thank you!", "margin-top:8px")}
-</body></html>`;
-}
 
 export const Route = createFileRoute("/_app/pos")({ component: POS });
 
@@ -494,8 +433,19 @@ function PrinterSetupDialog() {
                     <Printer className="h-4 w-4" />
                     Download POS Setup Installer
                   </a>
-                  <div className="space-y-1">
-                    <p><span className="font-medium text-foreground">Windows:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.bat</code> → Accept UAC prompt</p>
+                  <div className="space-y-2">
+                    <div>
+                      <p className="font-medium text-foreground mb-1">Windows:</p>
+                      <p className="mb-1 text-[11px]">Press <kbd className="bg-muted border rounded px-1">Win + R</kbd>, paste the command below, press Enter → click <strong>Yes</strong> on the blue prompt:</p>
+                      <div className="flex items-center gap-1.5">
+                        <code className="flex-1 bg-muted px-2 py-1 rounded text-[10px] break-all select-all">{`powershell -c "iex(irm '${api.setupPs1Url()}')"`}</code>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded px-2 py-1 bg-muted hover:bg-muted/70 text-xs"
+                          onClick={() => navigator.clipboard.writeText(`powershell -c "iex(irm '${api.setupPs1Url()}')"`) }
+                        >Copy</button>
+                      </div>
+                    </div>
                     <p><span className="font-medium text-foreground">macOS:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.command</code></p>
                     <p><span className="font-medium text-foreground">Linux:</span> Open Terminal → paste this command:</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -508,7 +458,6 @@ function PrinterSetupDialog() {
                     </div>
                   </div>
                   <p>Installs QZ Tray silently + creates a POS shortcut on the Desktop. QZ Tray starts automatically on every boot.</p>
-                  <p className="text-amber-600 font-medium">⚠ First run: QZ Tray shows an <strong>Allow unsigned content</strong> prompt — click Allow, then click Connect above.</p>
                 </div>
               )}
 

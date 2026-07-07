@@ -1085,6 +1085,94 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
                                 System.Security.Cryptography.RSASignaturePadding.Pkcs1);
         return Content(Convert.ToBase64String(sig), "text/plain");
     }
+
+    // ── Windows PowerShell one-liner installer ───────────────────────────────
+    // User runs in Win+R:  powershell -c "iex(irm 'http://<server>/api/printer/setup-ps1')"
+    // Script self-elevates to admin, installs QZ Tray, trusts cert, creates shortcut.
+    [HttpGet("setup-ps1")]
+    public async Task<IActionResult> SetupPs1()
+    {
+        var posUrl = config["PosUrl"] ?? $"{Request.Scheme}://{Request.Host}";
+
+        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
+        var embeddedCert = System.IO.File.Exists(certPath)
+            ? (await System.IO.File.ReadAllTextAsync(certPath)).Trim()
+            : "";
+        var certBase64 = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(embeddedCert));
+
+        var ps1 = $$"""
+# MiMony POS — Windows Setup Script
+# Run via: powershell -c "iex(irm '{{posUrl}}/api/printer/setup-ps1')"
+
+# ── Self-elevate to Administrator ────────────────────────────────────────────
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -Command `"iex(irm '{{posUrl}}/api/printer/setup-ps1')`"" -Verb RunAs
+    exit
+}
+
+Write-Host ""
+Write-Host "  ========================================"
+Write-Host "   MiMony POS - One-Click Setup"
+Write-Host "  ========================================"
+Write-Host ""
+
+# ── Install QZ Tray ──────────────────────────────────────────────────────────
+Write-Host "[1/4] Downloading QZ Tray..."
+try {
+    $r = Invoke-RestMethod 'https://api.github.com/repos/qzind/tray/releases/latest'
+    $url = ($r.assets | Where-Object { $_.name -like '*.exe' -and $_.name -notlike '*arm64*' } | Select-Object -First 1).browser_download_url
+} catch {
+    $url = 'https://github.com/qzind/tray/releases/download/v2.2.6/qz-tray-2.2.6-x86_64.exe'
+}
+Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\qz-tray-setup.exe" -UseBasicParsing
+Write-Host "[2/4] Installing QZ Tray silently..."
+Start-Process "$env:TEMP\qz-tray-setup.exe" -ArgumentList '/S' -Wait
+Start-Sleep -Seconds 8
+Remove-Item "$env:TEMP\qz-tray-setup.exe" -Force -ErrorAction SilentlyContinue
+
+# ── Trust cert — eliminates all Action Required dialogs ──────────────────────
+Write-Host "[3/4] Trusting POS certificate..."
+$cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{certBase64}}'))
+$qzDir = @("$env:ProgramFiles\QZ Tray", "$env:LOCALAPPDATA\QZ Tray") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($qzDir) { $cert | Set-Content -Path "$qzDir\override.crt" -Encoding ASCII }
+$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower()
+$allowedDir = "$env:APPDATA\qz"; New-Item -ItemType Directory -Force $allowedDir | Out-Null
+$entry = "$fp`tQZ Tray Demo Cert`tQZ Industries, LLC`t2026-07-02 14:40:36`t2046-07-02 14:40:36`ttrue"
+$allowed = "$allowedDir\allowed.dat"
+$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() }
+($lines + $entry) | Set-Content -Path $allowed -Encoding ASCII
+
+# ── Desktop shortcut + Chrome policy ─────────────────────────────────────────
+Write-Host "[4/4] Creating POS shortcut..."
+$ws = New-Object -ComObject WScript.Shell
+$sc = $ws.CreateShortcut("$env:PUBLIC\Desktop\MiMony POS.lnk")
+$browser = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe","$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($browser) { $sc.TargetPath = $browser; $sc.Arguments = "--kiosk {{posUrl}}/pos --disable-infobars --no-first-run --unsafely-treat-insecure-origin-as-secure={{posUrl}}" }
+else { $sc.TargetPath = 'C:\Windows\explorer.exe'; $sc.Arguments = '{{posUrl}}/pos' }
+$sc.Save()
+reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f | Out-Null
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f | Out-Null
+
+# ── Start QZ Tray ────────────────────────────────────────────────────────────
+$qz = @("$env:ProgramFiles\QZ Tray\qz-tray.exe","$env:LOCALAPPDATA\QZ Tray\qz-tray.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($qz) {
+    Start-Process $qz
+    reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v 'QZ Tray' /t REG_SZ /d $qz /f | Out-Null
+}
+
+Write-Host ""
+Write-Host "  ========================================"
+Write-Host "   Setup complete!"
+Write-Host "   QZ Tray is running. No dialogs will"
+Write-Host "   appear when printing."
+Write-Host "  ========================================"
+Write-Host ""
+Read-Host "Press Enter to close"
+""";
+        return Content(ps1, "text/plain");
+    }
 }
 
 public record QzSignRequest(string ToSign);

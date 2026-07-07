@@ -486,6 +486,8 @@ export const api = {
   qzInstallScriptUrl: () => `${BASE}/api/printer/qz-install-script`,
   // Returns the direct URL to download the one-click POS Setup installer (OS-specific)
   setupInstallerUrl: () => `${BASE}/api/printer/setup-installer`,
+  // Returns the Windows PowerShell one-liner install command (no download needed)
+  setupPs1Url: () => `${BASE}/api/printer/setup-ps1`,
   qzCertificateUrl: () => `${BASE}/api/printer/qz-certificate`,
   qzSign: (toSign: string) =>
     fetch(`${BASE}/api/printer/qz-sign`, {
