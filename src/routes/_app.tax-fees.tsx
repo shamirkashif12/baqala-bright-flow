@@ -168,13 +168,18 @@ function TaxFees() {
           </Link>
         </div>
         <div className="grid sm:grid-cols-5 gap-2 text-sm">
-          {[
-            { l: "Product Price", v: <><SARIcon />20.00</> },
-            { l: "VAT 15%", v: <><SARIcon />3.00</> },
-            { l: "Tobacco Tax", v: <><SARIcon />20.00</> },
-            { l: "Custom Fee", v: <><SARIcon />2.00</> },
-            { l: "Total Payable", v: <><SARIcon />45.00</>, strong: true },
-          ].map(r => (
+          {(() => {
+            const basePrice = 20;
+            const customFee = 2;
+            const { fee, vat, total } = tobaccoTotal(basePrice);
+            return [
+              { l: "Product Price", v: <><SARIcon />{basePrice.toFixed(2)}</> },
+              { l: "VAT 15%", v: <><SARIcon />{vat.toFixed(2)}</> },
+              { l: "Tobacco Tax", v: <><SARIcon />{fee.toFixed(2)}</> },
+              { l: "Custom Fee", v: <><SARIcon />{customFee.toFixed(2)}</> },
+              { l: "Total Payable", v: <><SARIcon />{(total + customFee).toFixed(2)}</>, strong: true },
+            ];
+          })().map(r => (
             <div
               key={r.l}
               className={`rounded-xl border bg-background p-3 ${r.strong ? "border-primary/40 ring-1 ring-primary/30" : "border-border/60"}`}

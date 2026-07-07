@@ -1,4 +1,5 @@
 using BaqalaPOS.Api.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -12,6 +13,7 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class AuthController(BaqalaDbContext db, IConfiguration config) : ControllerBase
 {
+    [AllowAnonymous]
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {

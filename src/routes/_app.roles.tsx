@@ -189,7 +189,6 @@ const RECOMMENDED: Record<string, RecommendedEntry[]> = {
     { module: "Orders",     flags: ["canView", "canExport"] },
     { module: "Coupons",    flags: ["canView", "canCreate", "canEdit", "canExport"] },
     { module: "Customers",  flags: ["canView", "canCreate", "canEdit", "canExport"] },
-    { module: "Returns",    flags: ["canView"] },
     { module: "Sales",      flags: ["canView", "canExport"] },
     { module: "Reports",    flags: ["canView", "canExport"] },
     { module: "Inventory",  flags: ["canView"] },

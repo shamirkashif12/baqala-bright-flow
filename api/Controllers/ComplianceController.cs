@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using BaqalaPOS.Api.Services;
@@ -27,6 +28,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         return invoice is null ? NotFound() : Ok(invoice);
     }
 
+    [RequirePermission("Compliance", PermAction.Create)]
     [HttpPost("zatca/invoices")]
     public async Task<IActionResult> CreateInvoice([FromBody] ZatcaInvoice invoice)
     {
@@ -38,6 +40,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         return CreatedAtAction(nameof(GetInvoiceById), new { id = invoice.Id }, invoice);
     }
 
+    [RequirePermission("Compliance", PermAction.Edit)]
     [HttpPatch("zatca/invoices/{id:guid}/status")]
     public async Task<IActionResult> UpdateInvoiceStatus(Guid id, [FromBody] ZatcaStatusRequest req)
     {
@@ -61,6 +64,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         return settings is null ? NotFound() : Ok(ZatcaSettingsDto.From(settings));
     }
 
+    [RequirePermission("Compliance", PermAction.Edit)]
     [HttpPut("zatca/settings/{branchId:guid}")]
     public async Task<IActionResult> UpsertSettings(Guid branchId, [FromBody] ZatcaSettings updated)
     {
@@ -166,6 +170,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         return Ok(await query.OrderByDescending(r => r.Priority).ToListAsync());
     }
 
+    [RequirePermission("Rules Engine", PermAction.Create)]
     [HttpPost("rules")]
     public async Task<IActionResult> CreateRule([FromBody] RulesEngine rule)
     {
@@ -176,6 +181,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         return Created($"/api/compliance/rules/{rule.Id}", rule);
     }
 
+    [RequirePermission("Rules Engine", PermAction.Edit)]
     [HttpPut("rules/{id:guid}")]
     public async Task<IActionResult> UpdateRule(Guid id, [FromBody] RulesEngine updated)
     {

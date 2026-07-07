@@ -155,6 +155,8 @@ export const api = {
     request<CashierShift>("/api/shifts/open", { method: "POST", body: JSON.stringify(data) }),
   closeShift: (id: string, data: CloseShiftPayload) =>
     request<CashierShift>(`/api/shifts/${id}/close`, { method: "POST", body: JSON.stringify(data) }),
+  approveVariance: (id: string) =>
+    request<CashierShift>(`/api/shifts/${id}/approve-variance`, { method: "POST" }),
 
   // Terminals
   getTerminals: (params?: { branchId?: string; status?: string }) => {
@@ -587,6 +589,8 @@ export interface CashierShift {
   cashSales: number; cardSales: number; digitalSales: number;
   totalSales: number; variance?: number;
   status: string; openedAt: string; closedAt?: string; notes?: string;
+  requiresApproval?: boolean; approvedBy?: string; approvedAt?: string;
+  closedBy?: string; closeReason?: string;
   cashier?: { id: string; fullName: string };
   terminal?: { id: string; terminalCode: string; name: string };
 }
@@ -595,7 +599,7 @@ export interface OpenShiftPayload {
   cashierId: string; branchId: string; terminalId?: string; openingAmount: number;
 }
 
-export interface CloseShiftPayload { closingAmount: number; notes?: string; }
+export interface CloseShiftPayload { closingAmount: number; notes?: string; reason?: string; }
 
 export interface Terminal {
   id: string; terminalCode: string; name: string; branchId: string;
@@ -648,6 +652,7 @@ export interface Discount {
   discountType: string; // percentage | fixed
   value: number; isActive: boolean;
   startDate?: string; endDate?: string; createdAt: string;
+  requiresCustomer?: boolean; minCustomerTier?: string; // standard | silver | gold | platinum
   product?: { id: string; name: string; sku: string };
   branch?: { id: string; name: string };
 }
@@ -898,9 +903,13 @@ export interface DashboardMetrics {
   orders: {
     pending: number; processing: number; readyToDeliver: number;
     delivered: number; cancelled: number; totalToday: number;
+    // % change vs the equivalent prior period (e.g. "today" vs yesterday)
+    pendingDeltaPct: number; processingDeltaPct: number;
+    readyToDeliverDeltaPct: number; deliveredDeltaPct: number;
   };
   sales: {
     totalToday: number;
+    totalTodayDeltaPct: number;
     paymentBreakdown: { method: string; amount: number; pct: number }[];
   };
   shifts: { active: number; totalCashiers: number };

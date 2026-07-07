@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Ok(await query.OrderByDescending(e => e.ExpenseDate).ToListAsync());
     }
 
+    [RequirePermission("Accounting & Finance", PermAction.Create)]
     [HttpPost("expenses")]
     public async Task<IActionResult> CreateExpense([FromBody] Expense expense)
     {
@@ -36,6 +38,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Created($"/api/finance/expenses/{expense.Id}", expense);
     }
 
+    [RequirePermission("Accounting & Finance", PermAction.Edit)]
     [HttpPut("expenses/{id:guid}")]
     public async Task<IActionResult> UpdateExpense(Guid id, [FromBody] Expense updated)
     {
@@ -54,6 +57,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Ok(expense);
     }
 
+    [RequirePermission("Accounting & Finance", PermAction.Delete)]
     [HttpDelete("expenses/{id:guid}")]
     public async Task<IActionResult> DeleteExpense(Guid id)
     {
@@ -64,6 +68,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return NoContent();
     }
 
+    [RequirePermission("Accounting & Finance", PermAction.Approve)]
     [HttpPatch("expenses/{id:guid}/approve")]
     public async Task<IActionResult> ApproveExpense(Guid id, [FromBody] ApproveExpenseRequest req)
     {
@@ -84,6 +89,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Ok(await query.OrderBy(t => t.Name).ToListAsync());
     }
 
+    [RequirePermission("Accounting & Finance", PermAction.Create)]
     [HttpPost("expense-types")]
     public async Task<IActionResult> CreateExpenseType([FromBody] ExpenseType expenseType)
     {
@@ -94,6 +100,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Created($"/api/finance/expense-types/{expenseType.Id}", expenseType);
     }
 
+    [RequirePermission("Accounting & Finance", PermAction.Edit)]
     [HttpPut("expense-types/{id:guid}")]
     public async Task<IActionResult> UpdateExpenseType(Guid id, [FromBody] ExpenseType updated)
     {
@@ -108,6 +115,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Ok(expenseType);
     }
 
+    [RequirePermission("Accounting & Finance", PermAction.Delete)]
     [HttpDelete("expense-types/{id:guid}")]
     public async Task<IActionResult> DeleteExpenseType(Guid id)
     {
@@ -140,6 +148,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return coupon is null ? NotFound("Coupon invalid or expired.") : Ok(coupon);
     }
 
+    [RequirePermission("Coupons", PermAction.Create)]
     [HttpPost("coupons")]
     public async Task<IActionResult> CreateCoupon([FromBody] Coupon coupon)
     {
@@ -151,6 +160,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Created($"/api/finance/coupons/{coupon.Id}", coupon);
     }
 
+    [RequirePermission("Coupons", PermAction.Edit)]
     [HttpPut("coupons/{id:guid}")]
     public async Task<IActionResult> UpdateCoupon(Guid id, [FromBody] Coupon updated)
     {
@@ -169,6 +179,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Ok(coupon);
     }
 
+    [RequirePermission("Coupons", PermAction.Delete)]
     [HttpDelete("coupons/{id:guid}")]
     public async Task<IActionResult> DeleteCoupon(Guid id)
     {
@@ -188,6 +199,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Ok(await query.OrderBy(r => r.RuleName).ToListAsync());
     }
 
+    [RequirePermission("Tax & Fees", PermAction.Create)]
     [HttpPost("tax-rules")]
     public async Task<IActionResult> CreateTaxRule([FromBody] TaxFeeRule rule)
     {
@@ -198,6 +210,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         return Created($"/api/finance/tax-rules/{rule.Id}", rule);
     }
 
+    [RequirePermission("Tax & Fees", PermAction.Edit)]
     [HttpPut("tax-rules/{id:guid}")]
     public async Task<IActionResult> UpdateTaxRule(Guid id, [FromBody] TaxFeeRule updated)
     {

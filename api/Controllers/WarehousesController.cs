@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -30,6 +31,7 @@ public class WarehousesController(BaqalaDbContext db) : ControllerBase
         return w is null ? NotFound() : Ok(w);
     }
 
+    [RequirePermission("Warehouses", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Warehouse warehouse)
     {
@@ -40,6 +42,7 @@ public class WarehousesController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = warehouse.Id }, warehouse);
     }
 
+    [RequirePermission("Warehouses", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Warehouse updated)
     {
@@ -54,6 +57,7 @@ public class WarehousesController(BaqalaDbContext db) : ControllerBase
     }
 
     // Link branch to warehouse
+    [RequirePermission("Warehouses", PermAction.Edit)]
     [HttpPost("{id:guid}/branches")]
     public async Task<IActionResult> AddBranch(Guid id, [FromBody] AddBranchWarehouseRequest req)
     {
@@ -64,6 +68,7 @@ public class WarehousesController(BaqalaDbContext db) : ControllerBase
         return Ok();
     }
 
+    [RequirePermission("Warehouses", PermAction.Edit)]
     [HttpDelete("{id:guid}/branches/{branchId:guid}")]
     public async Task<IActionResult> RemoveBranch(Guid id, Guid branchId)
     {

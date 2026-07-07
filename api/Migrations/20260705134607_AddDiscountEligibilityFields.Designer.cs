@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260705134607_AddDiscountEligibilityFields")]
+    partial class AddDiscountEligibilityFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -61,12 +64,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<string>("OldValues")
                         .HasColumnType("longtext")
                         .HasColumnName("old_values");
-
-                    b.Property<string>("Severity")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("severity");
 
                     b.Property<Guid?>("UserId")
                         .HasColumnType("char(36)")
@@ -185,14 +182,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("id");
 
-                    b.Property<DateTime?>("ApprovedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("approved_at");
-
-                    b.Property<Guid?>("ApprovedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("approved_by");
-
                     b.Property<Guid>("BranchId")
                         .HasColumnType("char(36)")
                         .HasColumnName("branch_id");
@@ -209,17 +198,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("cashier_id");
 
-                    b.Property<string>("CloseReason")
-                        .HasColumnType("longtext")
-                        .HasColumnName("close_reason");
-
                     b.Property<DateTime?>("ClosedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("closed_at");
-
-                    b.Property<Guid?>("ClosedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("closed_by");
 
                     b.Property<decimal?>("ClosingAmount")
                         .HasColumnType("decimal(18,4)")
@@ -240,10 +221,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<decimal>("OpeningAmount")
                         .HasColumnType("decimal(18,4)")
                         .HasColumnName("opening_amount");
-
-                    b.Property<bool>("RequiresApproval")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("requires_approval");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -3313,35 +3290,10 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("branch_id");
 
-                    b.Property<string>("BuyerBuildingNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("buyer_building_number");
-
-                    b.Property<string>("BuyerCityName")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("buyer_city_name");
-
-                    b.Property<string>("BuyerCitySubdivisionName")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("buyer_city_subdivision_name");
-
                     b.Property<string>("BuyerName")
                         .HasMaxLength(255)
                         .HasColumnType("varchar(255)")
                         .HasColumnName("buyer_name");
-
-                    b.Property<string>("BuyerPostalZone")
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("buyer_postal_zone");
-
-                    b.Property<string>("BuyerStreetName")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("buyer_street_name");
 
                     b.Property<string>("BuyerVatNumber")
                         .HasMaxLength(20)
@@ -3429,29 +3381,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("branch_id");
 
-                    b.Property<string>("BuildingNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("building_number");
-
-                    b.Property<string>("CcsidBinarySecurityToken")
-                        .HasColumnType("longtext")
-                        .HasColumnName("ccsid_binary_security_token");
-
-                    b.Property<string>("CcsidRequestId")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("ccsid_request_id");
-
-                    b.Property<string>("CcsidSecret")
-                        .HasColumnType("longtext")
-                        .HasColumnName("ccsid_secret");
-
-                    b.Property<string>("CitySubdivisionName")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("city_subdivision_name");
-
                     b.Property<string>("ComplianceCheckInvoiceId")
                         .HasColumnType("longtext")
                         .HasColumnName("compliance_check_invoice_id");
@@ -3464,62 +3393,15 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("longtext")
                         .HasColumnName("csid");
 
-                    b.Property<string>("Csr")
-                        .HasColumnType("longtext")
-                        .HasColumnName("csr");
-
-                    b.Property<string>("EgsSerial")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("egs_serial");
-
                     b.Property<string>("Environment")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)")
                         .HasColumnName("environment");
 
-                    b.Property<int>("LastIcv")
-                        .HasColumnType("int")
-                        .HasColumnName("last_icv");
-
-                    b.Property<string>("LastInvoiceHash")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasDefaultValue("NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==")
-                        .HasColumnName("last_invoice_hash");
-
-                    b.Property<string>("OnboardingStatus")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasDefaultValue("not_started")
-                        .HasColumnName("onboarding_status");
-
-                    b.Property<string>("PcsidBinarySecurityToken")
-                        .HasColumnType("longtext")
-                        .HasColumnName("pcsid_binary_security_token");
-
-                    b.Property<string>("PcsidRequestId")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("pcsid_request_id");
-
-                    b.Property<string>("PcsidSecret")
-                        .HasColumnType("longtext")
-                        .HasColumnName("pcsid_secret");
-
                     b.Property<bool>("Phase2Enabled")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("phase2_enabled");
-
-                    b.Property<string>("PostalZone")
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("postal_zone");
 
                     b.Property<string>("PrivateKey")
                         .HasColumnType("longtext")
@@ -3529,11 +3411,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)")
                         .HasColumnName("seller_name");
-
-                    b.Property<string>("StreetName")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("street_name");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)")

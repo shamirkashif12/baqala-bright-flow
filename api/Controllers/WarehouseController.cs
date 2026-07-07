@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -38,6 +39,7 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
         return request is null ? NotFound() : Ok(request);
     }
 
+    [RequirePermission("Stock Transfers", PermAction.Create)]
     [HttpPost("requests")]
     public async Task<IActionResult> CreateRequest([FromBody] WarehouseRequest request)
     {
@@ -52,6 +54,7 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetRequestById), new { id = request.Id }, request);
     }
 
+    [RequirePermission("Stock Transfers", PermAction.Approve)]
     [HttpPatch("requests/{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveRequest req)
     {
@@ -64,6 +67,7 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
         return Ok(request);
     }
 
+    [RequirePermission("Stock Transfers", PermAction.Edit)]
     [HttpPatch("requests/{id:guid}/delivery")]
     public async Task<IActionResult> UpdateDelivery(Guid id, [FromBody] UpdateStatusRequest req)
     {
