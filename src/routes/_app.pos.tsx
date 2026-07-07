@@ -433,19 +433,8 @@ function PrinterSetupDialog() {
                     <Printer className="h-4 w-4" />
                     Download POS Setup Installer
                   </a>
-                  <div className="space-y-2">
-                    <div>
-                      <p className="font-medium text-foreground mb-1">Windows:</p>
-                      <p className="mb-1 text-[11px]">Press <kbd className="bg-muted border rounded px-1">Win + R</kbd>, paste the command below, press Enter → click <strong>Yes</strong> on the blue prompt:</p>
-                      <div className="flex items-center gap-1.5">
-                        <code className="flex-1 bg-muted px-2 py-1 rounded text-[10px] break-all select-all">{`powershell -c "iex(irm '${api.setupPs1Url()}')"`}</code>
-                        <button
-                          type="button"
-                          className="shrink-0 rounded px-2 py-1 bg-muted hover:bg-muted/70 text-xs"
-                          onClick={() => navigator.clipboard.writeText(`powershell -c "iex(irm '${api.setupPs1Url()}')"`) }
-                        >Copy</button>
-                      </div>
-                    </div>
+                  <div className="space-y-1">
+                    <p><span className="font-medium text-foreground">Windows:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.bat</code> → click <strong>Run</strong> → click <strong>Yes</strong></p>
                     <p><span className="font-medium text-foreground">macOS:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.command</code></p>
                     <p><span className="font-medium text-foreground">Linux:</span> Open Terminal → paste this command:</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
