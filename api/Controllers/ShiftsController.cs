@@ -106,6 +106,22 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit) : Control
             if (terminal != null) { terminal.LastSync = now; terminal.UpdatedAt = now; }
         }
 
+        // Opening a shift is this app's real-world equivalent of checking in for work — without
+        // this, the Attendance/Shift report's "Check-in" column has nothing to match against and
+        // shows "—" for every shift, since it can only match a shift to an attendance record that
+        // already exists for the same cashier on the same calendar day.
+        var today = now.Date;
+        var hasAttendanceToday = await db.StaffAttendances
+            .AnyAsync(a => a.UserId == req.CashierId && a.CheckIn != null && a.CheckIn >= today);
+        if (!hasAttendanceToday)
+        {
+            db.StaffAttendances.Add(new StaffAttendance
+            {
+                Id = Guid.NewGuid(), UserId = req.CashierId, BranchId = req.BranchId,
+                CheckIn = now, Status = "present",
+            });
+        }
+
         await db.SaveChangesAsync();
 
         await audit.LogAsync(
@@ -165,19 +181,24 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit) : Control
             entityId: shift.Id,
             userId: shift.CashierId,
             branchId: shift.BranchId,
+            // Before Value reflects the real field the shift started with (Opening Amount, from
+            // cashier_shifts) rather than a generic "Status: Open" placeholder.
+            beforeValue: $"Opening Amount: SAR {shift.OpeningAmount:F2}",
             details: $"Closing: SAR {req.ClosingAmount:F2} · Variance: SAR {shift.Variance:F2}" +
                       (shift.RequiresApproval ? " · Exceeds review threshold — pending manager approval" : ""),
             severity: severity);
 
         if (isManagerOverride)
         {
+            var cashierName = (await db.Users.FindAsync(shift.CashierId))?.FullName ?? "Unknown cashier";
             await audit.LogAsync(
                 action: "Shift closed on behalf of another cashier",
                 entityType: "CashierShift",
                 entityId: shift.Id,
                 userId: actorId,
                 branchId: shift.BranchId,
-                details: $"Closed cashier {shift.CashierId}'s shift. Reason: {req.Reason}",
+                beforeValue: $"Opening Amount: SAR {shift.OpeningAmount:F2}",
+                details: $"Closed {cashierName}'s shift. Reason: {req.Reason}",
                 severity: "warning");
         }
 

@@ -2,6 +2,7 @@ using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -43,6 +44,7 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(new BaqalaPOS.Api.Services.UtcDateTimeConverter());
     });
 
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 
@@ -73,6 +75,14 @@ var jwtAudience = jwtSection["Audience"];
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        // Without this, ASP.NET Core silently renames short inbound claim types to long
+        // ClaimTypes.* URIs (a well-known JwtBearer default) — e.g. the "role" claim
+        // AuthController issues becomes unreadable via User.FindFirst("role"), which is
+        // exactly how every RequirePermissionAttribute/GetCallerContext check in this API
+        // reads it. Left enabled, role != "tenant_admin" is always true (role reads as
+        // null), so every "skip this check for tenant_admin" and every branch-scoping
+        // override silently never fires for anyone, admin or not.
+        options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = !string.IsNullOrEmpty(jwtIssuer),
@@ -127,8 +137,15 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchWarehouseRegionsAsync(db);
     await DataSeeder.PatchRemoveTestBranchesAsync(db);
     await DataSeeder.PatchRemoveNonCashierShiftsAsync(db);
+    await DataSeeder.PatchCloseDuplicateOpenShiftsAsync(db);
+    await DataSeeder.PatchBackfillShiftCheckInsAsync(db);
     await DataSeeder.PatchRemoveEmptyOrdersAsync(db);
     await DataSeeder.PatchRemoveQaTestDataAsync(db);
+    await DataSeeder.PatchRemoveBootstrapAuditNoiseAsync(db);
+    await DataSeeder.PatchBackfillEmptyAuditSeverityAsync(db);
+    await DataSeeder.PatchTrimExportAuditNoiseAsync(db);
+    await DataSeeder.PatchBackfillMissingOrderTaxAsync(db);
+    await DataSeeder.PatchEnsureFreshDemoDataAsync(db);
     app.MapOpenApi();
 }
 
@@ -178,6 +195,32 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
     app.UseHttpsRedirection();
 }
+
+// ─── Global exception handler (FRD §5.5: "no technical stack trace in UI") ──────
+// ASP.NET Core's Development-mode default (the Developer Exception Page) returns the
+// full exception including stack trace as the response body, which frontend toasts
+// were displaying verbatim. Log the full exception server-side; return a short,
+// reference-tagged message to the client in every environment.
+app.UseExceptionHandler(handler =>
+{
+    handler.Run(async context =>
+    {
+        var feature = context.Features.Get<IExceptionHandlerFeature>();
+        var referenceId = Guid.NewGuid().ToString()[..8];
+        if (feature?.Error is { } ex)
+        {
+            context.RequestServices.GetRequiredService<ILogger<Program>>()
+                .LogError(ex, "Unhandled exception [{ReferenceId}] on {Path}", referenceId, feature.Path);
+        }
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = $"Something went wrong on our end. Reference: {referenceId}",
+            referenceId,
+        });
+    });
+});
 
 app.UseCors("FrontendPolicy");
 app.UseAuthentication();

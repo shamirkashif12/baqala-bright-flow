@@ -94,8 +94,14 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // otherwise a sale has no verifiable link back to the terminal/shift that rang it up.
         if (order.CashierId.HasValue)
         {
+            // A cashier should only ever have one open shift (ShiftsController.OpenShift rejects
+            // opening a second one) — ordered defensively in case stale data still has more than
+            // one, so a sale always binds to whichever shift the cashier most recently checked
+            // into rather than an arbitrary row the database happens to return first.
             var activeShift = await db.CashierShifts
-                .FirstOrDefaultAsync(s => s.CashierId == order.CashierId && s.Status == "open");
+                .Where(s => s.CashierId == order.CashierId && s.Status == "open")
+                .OrderByDescending(s => s.OpenedAt)
+                .FirstOrDefaultAsync();
             if (activeShift is not null)
             {
                 order.ShiftId = activeShift.Id;
@@ -113,7 +119,17 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         order.Id = Guid.NewGuid();
         order.OrderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
         order.CreatedAt = order.UpdatedAt = DateTime.UtcNow;
-        foreach (var item in order.Items) { item.Id = Guid.NewGuid(); item.OrderId = order.Id; }
+        foreach (var item in order.Items)
+        {
+            item.Id = Guid.NewGuid();
+            item.OrderId = order.Id;
+            // The POS checkout only ever sends a single order-level tax total, never a per-line
+            // figure, so OrderItem.TaxAmount would otherwise stay at its 0 default forever — which
+            // is why the Tax Report (which sums this column) always read 0. Allocate the order's
+            // tax proportionally by each item's share of the subtotal.
+            if (item.TaxAmount == 0 && order.Subtotal > 0)
+                item.TaxAmount = Math.Round(item.TotalPrice / order.Subtotal * order.TaxAmount, 2);
+        }
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
         db.Orders.Add(order);
 

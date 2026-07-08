@@ -98,7 +98,7 @@ function ProductSales() {
             {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Input placeholder="Search SKU or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />
+        <Input placeholder="Search SKU, barcode or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

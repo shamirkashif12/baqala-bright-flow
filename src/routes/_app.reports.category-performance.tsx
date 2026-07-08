@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type CategoryPerformanceReport as CategoryPerformanceData, type CategoryPerformanceRow, type ReportExportFormat } from "@/lib/api";
+import { api, type CategoryPerformanceReport as CategoryPerformanceData, type CategoryPerformanceRow, type ReportExportFormat, type Category } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -39,22 +39,26 @@ function CategoryPerformance() {
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [categoryId, setCategoryId] = useState("all");
+  const [categories, setCategories] = useState<Category[]>([]);
   const [data, setData] = useState<CategoryPerformanceData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => { api.getCategories().then(setCategories).catch(() => {}); }, []);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getCategoryPerformanceReport({ from, to, branchId: branchId !== "all" ? branchId : undefined })
+    api.getCategoryPerformanceReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, categoryId: categoryId !== "all" ? categoryId : undefined })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId]);
+  }, [from, to, branchId, categoryId]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportCategoryPerformanceReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, exportedBy: user?.id, includeMargin: canViewMargin, format });
+      const blob = await api.exportCategoryPerformanceReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, categoryId: categoryId !== "all" ? categoryId : undefined, exportedBy: user?.id, includeMargin: canViewMargin, format });
       downloadBlob(blob, `category-performance-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -82,11 +86,20 @@ function CategoryPerformance() {
             </SelectContent>
           </Select>
         )}
+        <Select value={categoryId} onValueChange={setCategoryId}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <MetricCard label="Top Category" value={kpis?.topCategory ?? "—"} icon={Tags} accent="primary" />
+        {canViewMargin && <MetricCard label="Highest Margin Category" value={kpis?.highestMarginCategory ?? "—"} icon={Percent} accent="success" />}
+        <MetricCard label="Category Return Rate" value={`${kpis?.categoryReturnRatePct ?? 0}%`} icon={Layers} accent="warning" />
         <MetricCard label="Categories Sold" value={String(kpis?.totalCategoriesSold ?? 0)} icon={Layers} />
         <MetricCard label="Category Discount Value" value={<><SARIcon />{fmt(kpis?.categoryDiscountValue ?? 0)}</>} icon={Percent} accent="warning" />
       </div>
@@ -116,6 +129,7 @@ function CategoryPerformance() {
             { key: "grossSales", label: "Gross Sales", render: (r: CategoryPerformanceRow) => <><SARIcon />{fmt(r.grossSales)}</> },
             { key: "discounts", label: "Discounts", render: (r: CategoryPerformanceRow) => <><SARIcon />{fmt(r.discounts)}</> },
             { key: "returns", label: "Returns", render: (r: CategoryPerformanceRow) => <><SARIcon />{fmt(r.returns)}</> },
+            { key: "returnRatePct", label: "Return Rate %", render: (r: CategoryPerformanceRow) => `${r.returnRatePct}%` },
             { key: "netSales", label: "Net Sales", render: (r: CategoryPerformanceRow) => <span className="font-semibold"><SARIcon />{fmt(r.netSales)}</span> },
             { key: "salesContributionPct", label: "Contribution %", render: (r: CategoryPerformanceRow) => `${r.salesContributionPct}%` },
             ...(canViewMargin

@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type AttendanceShiftReport as AttendanceShiftData, type AttendanceShiftRow, type ReportExportFormat } from "@/lib/api";
+import { api, type AttendanceShiftReport as AttendanceShiftData, type AttendanceShiftRow, type ReportExportFormat, type Terminal, type User, type Role } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -37,22 +37,48 @@ function AttendanceShift() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [status, setStatus] = useState("all");
+  const [staffId, setStaffId] = useState("all");
+  const [roleId, setRoleId] = useState("all");
+  const [terminalId, setTerminalId] = useState("all");
+  const [varianceThreshold, setVarianceThreshold] = useState("");
+  const [staff, setStaff] = useState<User[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [data, setData] = useState<AttendanceShiftData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setStaff(u.filter((x) => x.status === "active"))).catch(() => {});
+    api.getTerminals({ branchId: branchId !== "all" ? branchId : undefined }).then(setTerminals).catch(() => {});
+    setStaffId("all");
+    setTerminalId("all");
+  }, [branchId]);
+
+  useEffect(() => { api.getRoles().then(setRoles).catch(() => {}); }, []);
+
+  const filterParams = {
+    from, to, branchId: branchId !== "all" ? branchId : undefined,
+    status: status !== "all" ? status : undefined,
+    staffId: staffId !== "all" ? staffId : undefined,
+    roleId: roleId !== "all" ? roleId : undefined,
+    terminalId: terminalId !== "all" ? terminalId : undefined,
+    varianceThreshold: varianceThreshold ? Number(varianceThreshold) : undefined,
+  };
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getAttendanceShiftReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, status: status !== "all" ? status : undefined })
+    api.getAttendanceShiftReport(filterParams)
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, status]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, branchId, status, staffId, roleId, terminalId, varianceThreshold]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportAttendanceShiftReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, status: status !== "all" ? status : undefined, exportedBy: user?.id, format });
+      const blob = await api.exportAttendanceShiftReport({ ...filterParams, exportedBy: user?.id, format });
       downloadBlob(blob, `attendance-shift-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -86,11 +112,36 @@ function AttendanceShift() {
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Shift Status" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Any Status</SelectItem>
+            <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="open">Open</SelectItem>
             <SelectItem value="closed">Closed</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={staffId} onValueChange={setStaffId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Staff" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Staff</SelectItem>
+            {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={roleId} onValueChange={setRoleId}>
+          <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Role" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Roles</SelectItem>
+            {roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={terminalId} onValueChange={setTerminalId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Terminal" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Terminals</SelectItem>
+            {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Input
+          type="number" placeholder="Min variance (SAR)" value={varianceThreshold}
+          onChange={(e) => setVarianceThreshold(e.target.value)} className="h-9 w-40"
+        />
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -132,7 +183,7 @@ function AttendanceShift() {
             { key: "expectedCash", label: "Expected Cash", render: (r: AttendanceShiftRow) => <><SARIcon />{fmt(r.expectedCash)}</> },
             { key: "countedCash", label: "Counted Cash", render: (r: AttendanceShiftRow) => (r.countedCash != null ? <><SARIcon />{fmt(r.countedCash)}</> : "—") },
             { key: "variance", label: "Variance", render: (r: AttendanceShiftRow) => (r.variance != null ? <span className={cn("font-semibold", isHighVariance(r) && "text-destructive")}><SARIcon />{fmt(r.variance)}</span> : "—") },
-            { key: "status", label: "Status", render: (r: AttendanceShiftRow) => <StatusBadge status={r.status === "open" ? "in progress" : "closed"} /> },
+            { key: "status", label: "Status", render: (r: AttendanceShiftRow) => <StatusBadge status={r.status} /> },
           ]}
           rows={data?.rows ?? []}
         />

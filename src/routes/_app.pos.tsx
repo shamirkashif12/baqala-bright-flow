@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter } from "@/lib/api";
+import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter, type InventoryBatch } from "@/lib/api";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { useAuth } from "@/lib/auth";
@@ -730,9 +730,30 @@ function POS() {
       })
       .catch(() => {});
 
-    // Block sale of expired items — mirrors the "Block sale of expired items" rule.
-    api.getBatches({ branchId: branch.id, status: "expired" })
-      .then((batches) => setExpiredProductIds(new Set(batches.map((b) => b.productId))))
+    // Block sale of expired items — mirrors the "Block sale of expired items" rule exactly as
+    // OrdersController.Create enforces it server-side: a product is blocked once it has at least
+    // one batch on record but NONE with remaining stock that isn't past its expiry date. Filtering
+    // by the stored `status === "expired"` field alone (as this used to) misses batches whose
+    // Status was set once at receiving time and never updated as the real ExpiryDate passed — the
+    // backend catches those anyway and only rejects at checkout, so the product looked selectable
+    // here until payment was confirmed. Fetching all batches and computing live avoids that gap.
+    api.getBatches({ branchId: branch.id })
+      .then((batches) => {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const byProduct = new Map<string, InventoryBatch[]>();
+        for (const b of batches) {
+          if (!byProduct.has(b.productId)) byProduct.set(b.productId, []);
+          byProduct.get(b.productId)!.push(b);
+        }
+        const blocked = new Set<string>();
+        for (const [productId, productBatches] of byProduct) {
+          const hasSellable = productBatches.some((b) =>
+            b.remainingQuantity > 0 && b.status !== "expired" &&
+            (!b.expiryDate || new Date(b.expiryDate) >= today));
+          if (!hasSellable) blocked.add(productId);
+        }
+        setExpiredProductIds(blocked);
+      })
       .catch(() => {});
 
     // Unscoped by branch — a cashier can only ever hold one open shift at a
@@ -1211,7 +1232,10 @@ function POS() {
       cashierId: activeShift?.cashierId ?? user?.id,
       subtotal,
       discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal,
-      taxAmount: vatAmount + customFeeTotal,
+      // Kept distinct (previously lumped together as taxAmount) so the Tax and Fee reports,
+      // which read these as two separate figures, don't see fees miscounted as VAT.
+      taxAmount: vatAmount,
+      customFeeAmount: customFeeTotal,
       totalAmount: total,
       paymentStatus: "paid",
       orderStatus: "completed",

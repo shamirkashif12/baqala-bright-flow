@@ -959,22 +959,33 @@ public static class DataSeeder
     // ─── Backfill: Test Users (one per role, Pakistan123@) ───────────────────
     private static async Task SeedTestUsersAsync(BaqalaDbContext db)
     {
-        var brOlaya = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-001");
+        var brOlaya   = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-001");
+        var brKhobar  = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-002");
+        var brJeddah  = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-003");
+        var brMadinah = await db.Branches.FirstOrDefaultAsync(b => b.BranchCode == "BR-004");
 
-        var testUsers = new[]
+        var testUsers = new (string Email, string Username, string FullName, string FullNameAr, string RoleName, Guid? BranchId)[]
         {
-            ("ahmad.aziz@mytm.co",         "ahmad.aziz",        "Ahmad Aziz",          "أحمد عزيز",       "Tenant Administrator"),
-            ("sara.manager@baqala.sa",     "sara.manager",      "Sara Al Manager",     "سارة المديرة",    "Branch Manager"),
-            ("khalid.cashier@baqala.sa",   "khalid.cashier",    "Khalid Al Cashier",   "خالد الكاشير",    "Cashier"),
-            ("nora.cashier2@baqala.sa",    "nora.cashier2",     "Nora Al Cashier",     "نورة الكاشير",    "Cashier"),
-            ("yousef.store@baqala.sa",     "yousef.store",      "Yousef Al Store",     "يوسف أمين",       "Storekeeper"),
-            ("omar.supervisor@baqala.sa",  "omar.supervisor",   "Omar Al Supervisor",  "عمر المشرف",      "Supervisor"),
-            ("bilal.finance@baqala.sa",    "bilal.finance",     "Bilal Al Finance",    "بلال المالية",    "Finance User"),
-            ("layla.marketing@baqala.sa",  "layla.marketing",   "Layla Al Marketing",  "ليلى التسويق",    "Marketing User"),
-            ("tarek.picker@baqala.sa",     "tarek.picker",      "Tarek Al Picker",     "طارق الجامع",     "Picker"),
+            ("ahmad.aziz@mytm.co",         "ahmad.aziz",        "Ahmad Aziz",          "أحمد عزيز",       "Tenant Administrator", brOlaya?.Id),
+            ("sara.manager@baqala.sa",     "sara.manager",      "Sara Al Manager",     "سارة المديرة",    "Branch Manager",       brOlaya?.Id),
+            ("khalid.cashier@baqala.sa",   "khalid.cashier",    "Khalid Al Cashier",   "خالد الكاشير",    "Cashier",              brOlaya?.Id),
+            ("nora.cashier2@baqala.sa",    "nora.cashier2",     "Nora Al Cashier",     "نورة الكاشير",    "Cashier",              brOlaya?.Id),
+            ("yousef.store@baqala.sa",     "yousef.store",      "Yousef Al Store",     "يوسف أمين",       "Storekeeper",          brOlaya?.Id),
+            ("omar.supervisor@baqala.sa",  "omar.supervisor",   "Omar Al Supervisor",  "عمر المشرف",      "Supervisor",           brOlaya?.Id),
+            ("bilal.finance@baqala.sa",    "bilal.finance",     "Bilal Al Finance",    "بلال المالية",    "Finance User",         brOlaya?.Id),
+            ("layla.marketing@baqala.sa",  "layla.marketing",   "Layla Al Marketing",  "ليلى التسويق",    "Marketing User",       brOlaya?.Id),
+            ("tarek.picker@baqala.sa",     "tarek.picker",      "Tarek Al Picker",     "طارق الجامع",     "Picker",               brOlaya?.Id),
+            // One Pakistan123@-login Cashier per remaining branch — Jeddah and Madinah previously had
+            // no Cashier-role user at all (only a Branch Manager/Storekeeper), so neither the real
+            // shift-open flow nor the demo-data freshness patch could ever generate cashier/terminal/
+            // attendance data there. Khobar's only cashier was a pre-existing demo account with a
+            // different password, so it gets one too for a consistent login across all four branches.
+            ("sami.cashier@baqala.sa",     "sami.cashier",      "Sami Al Cashier",     "سامي الكاشير",    "Cashier",              brKhobar?.Id),
+            ("fahad.cashier@baqala.sa",    "fahad.cashier",     "Fahad Al Cashier",    "فهد الكاشير",     "Cashier",              brJeddah?.Id),
+            ("reem.cashier@baqala.sa",     "reem.cashier",      "Reem Al Cashier",     "ريم الكاشير",     "Cashier",              brMadinah?.Id),
         };
 
-        foreach (var (email, username, fullName, fullNameAr, roleName) in testUsers)
+        foreach (var (email, username, fullName, fullNameAr, roleName, branchId) in testUsers)
         {
             if (await db.Users.AnyAsync(u => u.Email == email)) continue;
             var role = await db.Roles.FirstOrDefaultAsync(r => r.Name == roleName);
@@ -989,7 +1000,7 @@ public static class DataSeeder
                 PasswordHash = Hash("Pakistan123@"),
                 PinHash = Hash("1234"),
                 RoleId = role.Id,
-                BranchId = brOlaya?.Id,
+                BranchId = branchId,
                 Status = "active",
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
@@ -1669,6 +1680,60 @@ public static class DataSeeder
     // Earlier dummy/test data seeded orders with no line items at all — not a
     // real defect (the persistence/read path is correct for orders that do
     // have items), just junk rows that shouldn't show up in Orders/Dashboard counts.
+    // A cashier should only ever hold one open shift at a time — ShiftsController.OpenShift
+    // rejects opening a second one — but stale data from before that guard existed (or created
+    // directly, bypassing the API) can leave a cashier with more than one "open" row. That made
+    // OrdersController.Create's active-shift lookup pick an arbitrary one of them, so a sale could
+    // silently attach to the wrong terminal/branch entirely. Close every open shift except each
+    // cashier's most recently opened one.
+    public static async Task PatchCloseDuplicateOpenShiftsAsync(BaqalaDbContext db)
+    {
+        var openShifts = await db.CashierShifts.Where(s => s.Status == "open").ToListAsync();
+        var duplicates = openShifts
+            .GroupBy(s => s.CashierId)
+            .Where(g => g.Count() > 1)
+            .SelectMany(g => g.OrderByDescending(s => s.OpenedAt).Skip(1))
+            .ToList();
+        if (duplicates.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        foreach (var shift in duplicates)
+        {
+            shift.Status = "closed";
+            shift.ClosedAt = now;
+            shift.ClosingAmount = shift.OpeningAmount + shift.CashSales;
+            shift.Variance = 0;
+        }
+        await db.SaveChangesAsync();
+    }
+
+    // Backfills a check-in record for every existing shift that predates ShiftsController.OpenShift
+    // creating one automatically — otherwise the Attendance/Shift report's "Check-in" column shows
+    // "—" for any shift opened before that change (it can only match a shift to an attendance record
+    // that already exists for the same cashier on the same calendar day).
+    public static async Task PatchBackfillShiftCheckInsAsync(BaqalaDbContext db)
+    {
+        var shifts = await db.CashierShifts.Select(s => new { s.CashierId, s.BranchId, s.OpenedAt }).ToListAsync();
+        var attendanceDays = (await db.StaffAttendances.Where(a => a.CheckIn != null)
+                .Select(a => new { a.UserId, Day = a.CheckIn!.Value.Date }).ToListAsync())
+            .Select(a => (a.UserId, a.Day)).ToHashSet();
+
+        var missing = shifts
+            .Where(s => !attendanceDays.Contains((s.CashierId, s.OpenedAt.Date)))
+            .GroupBy(s => (s.CashierId, Day: s.OpenedAt.Date))
+            .Select(g => g.OrderBy(s => s.OpenedAt).First())
+            .ToList();
+        if (missing.Count == 0) return;
+
+        foreach (var s in missing)
+            db.StaffAttendances.Add(new StaffAttendance
+            {
+                Id = Guid.NewGuid(), UserId = s.CashierId, BranchId = s.BranchId,
+                CheckIn = s.OpenedAt, Status = "present",
+            });
+        await db.SaveChangesAsync();
+    }
+
     public static async Task PatchRemoveEmptyOrdersAsync(BaqalaDbContext db)
     {
         var emptyOrderIds = await db.Orders
@@ -1711,6 +1776,275 @@ public static class DataSeeder
             db.Products.RemoveRange(db.Products.Where(p => p.Id == productId));
             await db.SaveChangesAsync();
         }
+    }
+
+    // These 5 rows were only ever bootstrap narration ("System initialized and seeded", etc.),
+    // not real business events — they clutter the Audit Trail report (always severity "info",
+    // dated at whenever the DB was first created) and confuse anyone testing it for real.
+    private static readonly string[] BootstrapAuditActions =
+    [
+        "System initialized and seeded",
+        "Branches created: Olaya, Khobar, Jeddah, Madinah",
+        "Staff users created and roles assigned",
+        "Cashier shift opened at Olaya branch",
+        "Inventory stock seeded: 12 SKUs across 4 branches",
+    ];
+
+    // The migration that added AuditLog.Severity (20260705135415_AddShiftApprovalAndAuditSeverity)
+    // backfilled every pre-existing row with an empty string, not "info" — those rows render as a
+    // blank/uncolored severity badge and sort ambiguously in the severity-first default view.
+    public static async Task PatchBackfillEmptyAuditSeverityAsync(BaqalaDbContext db)
+    {
+        var blankRows = await db.AuditLogs.Where(a => a.Severity == "").ToListAsync();
+        if (blankRows.Count == 0) return;
+        foreach (var row in blankRows) row.Severity = "info";
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task PatchRemoveBootstrapAuditNoiseAsync(BaqalaDbContext db)
+    {
+        // One DELETE per action string (matching the loop pattern the other Patch* methods use)
+        // rather than a single Contains(noiseIds) — the MySQL EF Core provider here can't assign
+        // a type mapping to a parameterized List<Guid>/List<string> IN-list.
+        var changed = false;
+        foreach (var action in BootstrapAuditActions)
+        {
+            var rows = await db.AuditLogs.Where(a => a.Action == action).ToListAsync();
+            if (rows.Count == 0) continue;
+            db.AuditLogs.RemoveRange(rows);
+            changed = true;
+        }
+        if (changed) await db.SaveChangesAsync();
+    }
+
+    // Several reports default to "today" (Cashier Sales, Attendance/Shift) or "this month"
+    // (Waste/Spoilage, VAT/ZATCA, Returns/Refunds) per the FRD's default-period rules, but the
+    // one-time seed above only ever wrote a handful of orders/shifts dated at whatever moment
+    // the database was first created — a few days later those default views go back to showing
+    // nothing. This runs on every boot and tops up exactly what's missing for "today"/"this
+    // month", per active branch (not just Olaya), so the demo data doesn't go stale and every
+    // branch — not only the one the original one-time seed happened to touch — has something
+    // to show under the default filters.
+    public static async Task PatchEnsureFreshDemoDataAsync(BaqalaDbContext db)
+    {
+        var branches = await db.Branches.Where(b => b.Status == "active").ToListAsync();
+        foreach (var branch in branches)
+            await EnsureFreshDemoDataForBranchAsync(db, branch);
+    }
+
+    private static async Task EnsureFreshDemoDataForBranchAsync(BaqalaDbContext db, Branch branch)
+    {
+        var today = DateTime.UtcNow.Date;
+
+        var cashier = await db.Users.Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.BranchId == branch.Id && u.Role!.Name == "Cashier" && u.Status == "active");
+        var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.BranchId == branch.Id);
+        var products = await db.Products.Where(p => p.Status == "active").Take(3).ToListAsync();
+        if (cashier is null || products.Count == 0) return;
+
+        // ── Today's cashier shift + a couple of orders ──────────────────────────
+        var hasShiftToday = await db.CashierShifts.AnyAsync(s => s.CashierId == cashier.Id && s.OpenedAt >= today);
+        if (!hasShiftToday)
+        {
+            var shift = new CashierShift
+            {
+                Id = Guid.NewGuid(), CashierId = cashier.Id, BranchId = branch.Id, TerminalId = terminal?.Id,
+                OpeningAmount = 500, CashSales = 0, CardSales = 0, DigitalSales = 0, TotalSales = 0,
+                Status = "open", OpenedAt = today.AddHours(8),
+            };
+            db.CashierShifts.Add(shift);
+            await db.SaveChangesAsync();
+
+            decimal cashTotal = 0, cardTotal = 0;
+            for (var i = 0; i < 3; i++)
+            {
+                var product = products[i % products.Count];
+                var qty = 2m + i;
+                var subtotal = qty * product.BasePrice;
+                var tax = Math.Round(subtotal * product.TaxPercentage / 100m, 2);
+                var method = i == 0 ? "cash" : "card";
+                var order = new Order
+                {
+                    Id = Guid.NewGuid(), OrderNumber = $"ORD-TODAY-{branch.BranchCode}-{today:yyyyMMdd}-{i + 1}", Source = "pos",
+                    BranchId = branch.Id, CashierId = cashier.Id, TerminalId = terminal?.Id, ShiftId = shift.Id,
+                    OrderStatus = "delivered", PaymentStatus = "paid",
+                    Subtotal = subtotal, TaxAmount = tax,
+                    CustomFeeAmount = i == 2 ? 5m : 0m,
+                    TotalAmount = subtotal + tax + (i == 2 ? 5m : 0m),
+                    CreatedAt = today.AddHours(9).AddMinutes(i * 20), UpdatedAt = DateTime.UtcNow,
+                };
+                order.Items.Add(new OrderItem
+                {
+                    Id = Guid.NewGuid(), OrderId = order.Id, ProductId = product.Id,
+                    Quantity = qty, UnitPrice = product.BasePrice, TotalPrice = subtotal, TaxAmount = tax,
+                });
+                order.Payments.Add(new OrderPayment
+                {
+                    Id = Guid.NewGuid(), OrderId = order.Id, PaymentMethod = method,
+                    Amount = order.TotalAmount, Status = "completed", CreatedAt = order.CreatedAt,
+                });
+                db.Orders.Add(order);
+                if (method == "cash") cashTotal += order.TotalAmount; else cardTotal += order.TotalAmount;
+            }
+            shift.CashSales = cashTotal;
+            shift.CardSales = cardTotal;
+            shift.TotalSales = cashTotal + cardTotal;
+            await db.SaveChangesAsync();
+        }
+
+        // ── Today's staff attendance check-in ───────────────────────────────────
+        var hasAttendanceToday = await db.StaffAttendances.AnyAsync(a => a.UserId == cashier.Id && a.CheckIn >= today);
+        if (!hasAttendanceToday)
+        {
+            db.StaffAttendances.Add(new StaffAttendance
+            {
+                Id = Guid.NewGuid(), UserId = cashier.Id, BranchId = branch.Id,
+                CheckIn = today.AddHours(8), Status = "present",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // ── This month's waste/spoilage event ───────────────────────────────────
+        var monthStart = new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Must match the Waste/Spoilage report's own filter (AdjustmentType waste/damage) —
+        // checking for "any adjustment this month" was a false positive whenever an unrelated
+        // adjustment type (recount, expiry write-off, transfer correction, etc.) already existed
+        // for the branch this month, which permanently skipped seeding an actual waste/damage row.
+        var hasWasteThisMonth = await db.InventoryAdjustments.AnyAsync(a =>
+            a.BranchId == branch.Id && a.CreatedAt >= monthStart && (a.AdjustmentType == "waste" || a.AdjustmentType == "damage"));
+        if (!hasWasteThisMonth)
+        {
+            var wasteProduct = products[0];
+            var batch = await db.InventoryBatches.FirstOrDefaultAsync(b => b.ProductId == wasteProduct.Id && b.BranchId == branch.Id);
+            db.InventoryAdjustments.Add(new InventoryAdjustment
+            {
+                Id = Guid.NewGuid(), ProductId = wasteProduct.Id, BranchId = branch.Id, BatchId = batch?.Id,
+                AdjustmentType = "damage", Quantity = 2, Reason = "Damaged packaging",
+                Notes = "Found damaged during shelf restock", AdjustedBy = cashier.Id,
+                CreatedAt = today.AddHours(10),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // ── This month's ZATCA invoice sample (Phase 2 onboarding isn't configured in this
+        // demo environment, so the real checkout flow never creates one — without at least a
+        // few rows here, the VAT/ZATCA report has nothing to show regardless of date filter) ──
+        var hasInvoiceThisMonth = await db.ZatcaInvoices.AnyAsync(z => z.BranchId == branch.Id && z.CreatedAt >= monthStart);
+        if (!hasInvoiceThisMonth)
+        {
+            var recentOrders = await db.Orders
+                .Where(o => o.BranchId == branch.Id && o.PaymentStatus == "paid" && o.CreatedAt >= monthStart)
+                .OrderByDescending(o => o.CreatedAt)
+                .Take(3)
+                .ToListAsync();
+            var statuses = new[] { "accepted", "pending", "rejected" };
+            for (var i = 0; i < recentOrders.Count; i++)
+            {
+                var o = recentOrders[i];
+                db.ZatcaInvoices.Add(new ZatcaInvoice
+                {
+                    Id = Guid.NewGuid(), OrderId = o.Id, BranchId = branch.Id,
+                    InvoiceNumber = $"INV-{o.OrderNumber}", InvoiceType = "simplified",
+                    IssueDate = o.CreatedAt, TotalAmount = o.TotalAmount, TaxAmount = o.TaxAmount,
+                    DiscountAmount = o.DiscountAmount, ZatcaStatus = statuses[i % statuses.Length],
+                    ZatcaResponse = statuses[i % statuses.Length] == "rejected" ? "Invalid QR payload" : null,
+                    CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+                });
+            }
+            if (recentOrders.Count > 0) await db.SaveChangesAsync();
+        }
+
+        // ── This month's customer return sample (Returns/Refunds defaults to the current
+        // month — without at least one row here, that default view is empty until someone
+        // actually processes a return this month) ──────────────────────────────────────────
+        var hasReturnThisMonth = await db.CustomerReturns.AnyAsync(r => r.BranchId == branch.Id && r.CreatedAt >= monthStart);
+        if (!hasReturnThisMonth)
+        {
+            var returnableOrder = await db.Orders.Include(o => o.Items)
+                .Where(o => o.BranchId == branch.Id && o.PaymentStatus == "paid" && o.CreatedAt >= monthStart && o.Items.Any())
+                .OrderByDescending(o => o.CreatedAt)
+                .FirstOrDefaultAsync();
+            var returnItem = returnableOrder?.Items.FirstOrDefault();
+            if (returnableOrder is not null && returnItem is not null)
+            {
+                var ret = new CustomerReturn
+                {
+                    Id = Guid.NewGuid(), ReturnNumber = $"RET-TODAY-{branch.BranchCode}-{today:yyyyMMdd}",
+                    OrderId = returnableOrder.Id, BranchId = branch.Id, ProcessedBy = cashier.Id,
+                    ReturnType = "partial_return", RefundMethod = "cash", RefundAmount = returnItem.TotalPrice,
+                    Reason = "Customer changed mind", Status = "completed", ApprovedBy = cashier.Id,
+                    CreatedAt = today.AddHours(11),
+                };
+                ret.Items.Add(new CustomerReturnItem
+                {
+                    Id = Guid.NewGuid(), ReturnId = ret.Id, ProductId = returnItem.ProductId, OrderItemId = returnItem.Id,
+                    Quantity = 1, UnitPrice = returnItem.UnitPrice, RefundAmount = returnItem.TotalPrice, Condition = "good",
+                });
+                db.CustomerReturns.Add(ret);
+                await db.SaveChangesAsync();
+            }
+        }
+    }
+
+    // Repeated `export_report` audit entries from testing the same report many times over
+    // (same report clicked minutes apart, over and over) are real events but add no signal —
+    // they just bury genuine activity under a wall of near-identical rows. Keep only the most
+    // recent handful and drop the rest; runs on every boot so the noise never re-accumulates
+    // past a reasonable ceiling.
+    private const int MaxKeptExportAuditLogs = 15;
+
+    public static async Task PatchTrimExportAuditNoiseAsync(BaqalaDbContext db)
+    {
+        var exportLogIds = await db.AuditLogs
+            .Where(a => a.Action == "export_report")
+            .OrderByDescending(a => a.CreatedAt)
+            .Skip(MaxKeptExportAuditLogs)
+            .Select(a => a.Id)
+            .ToListAsync();
+        if (exportLogIds.Count == 0) return;
+
+        foreach (var id in exportLogIds)
+            db.AuditLogs.RemoveRange(db.AuditLogs.Where(a => a.Id == id));
+        await db.SaveChangesAsync();
+    }
+
+    // Historical paid orders created before checkout reliably computed VAT have TaxAmount == 0
+    // on the order and every line item even though Subtotal is nonzero — the Tax Report (which
+    // sums OrderItem.TaxAmount) and the VAT/ZATCA report show these as a flat SAR 0 forever,
+    // since nothing recomputes tax after the fact. Backfill each affected item from its own
+    // product's real TaxPercentage (not a flat rate) so zero-rated products stay zero-rated
+    // and the Tax Report's rate-based grouping stays meaningful.
+    public static async Task PatchBackfillMissingOrderTaxAsync(BaqalaDbContext db)
+    {
+        // Checked per line item, not per order — a mixed-cart order can already have a nonzero
+        // Order.TaxAmount (from whichever items DID get taxed at checkout) while a specific item
+        // still sits at 0, and filtering at the order header would skip fixing that item forever.
+        var paidOrders = await db.Orders.Include(o => o.Items).ThenInclude(i => i.Product)
+            .Where(o => o.PaymentStatus == "paid")
+            .ToListAsync();
+
+        var touchedAny = false;
+        foreach (var order in paidOrders)
+        {
+            var changed = false;
+            foreach (var item in order.Items.Where(i => i.TaxAmount == 0))
+            {
+                var rate = item.Product?.TaxPercentage ?? 0m;
+                var itemTaxable = item.TotalPrice - item.DiscountAmount;
+                if (rate > 0 && itemTaxable > 0)
+                {
+                    item.TaxAmount = Math.Round(itemTaxable * rate / 100m, 2);
+                    changed = true;
+                }
+            }
+            if (!changed) continue;
+            if (order.Subtotal <= 0)
+                order.Subtotal = order.Items.Sum(i => i.TotalPrice);
+            order.TaxAmount = order.Items.Sum(i => i.TaxAmount);
+            order.TotalAmount = order.Subtotal - order.DiscountAmount + order.TaxAmount + order.CustomFeeAmount;
+            touchedAny = true;
+        }
+        if (touchedAny) await db.SaveChangesAsync();
     }
 
     // ─── Backfill: Offers ────────────────────────────────────────────────────

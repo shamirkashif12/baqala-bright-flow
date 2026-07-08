@@ -70,7 +70,8 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
             entityType: "PosSettings",
             entityId: settings.Id,
             branchId: branchId,
-            details: $"RequireShiftOpen:{settings.RequireShiftOpen} AutoPrint:{settings.AutoPrintReceipt} Offline:{settings.OfflineModeEnabled} BlockExpired:{settings.BlockExpiredItems}");
+            details: $"RequireShiftOpen:{settings.RequireShiftOpen} AutoPrint:{settings.AutoPrintReceipt} Offline:{settings.OfflineModeEnabled} BlockExpired:{settings.BlockExpiredItems}",
+            severity: "warning");
 
         return Ok(settings);
     }
@@ -122,7 +123,8 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
             action: "Tenant settings updated",
             entityType: "TenantSettings",
             branchId: branchId,
-            details: $"{settings.Count} key(s) updated");
+            details: $"{settings.Count} key(s) updated",
+            severity: "warning");
 
         return Ok(new { message = "Settings updated successfully.", updatedCount = settings.Count });
     }

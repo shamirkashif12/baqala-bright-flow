@@ -120,7 +120,7 @@ function TobaccoExcise() {
             { key: "exciseRate", label: "Excise Rate", render: (r: TobaccoExciseRow) => `${r.exciseRate}%` },
             { key: "exciseAmount", label: "Excise Amount", render: (r: TobaccoExciseRow) => <span className="font-semibold"><SARIcon />{fmt(r.exciseAmount)}</span> },
             { key: "netExcise", label: "Net Excise", render: (r: TobaccoExciseRow) => <><SARIcon />{fmt(r.netExcise)}</> },
-            { key: "complianceStatus", label: "Compliance Status", render: (r: TobaccoExciseRow) => <StatusBadge status={r.complianceStatus === "ok" ? "active" : "critical"} /> },
+            { key: "complianceStatus", label: "Compliance Status", render: (r: TobaccoExciseRow) => <StatusBadge status={r.complianceStatus} /> },
           ]}
           rows={data?.rows ?? []}
         />

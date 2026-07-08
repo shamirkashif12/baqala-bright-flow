@@ -418,9 +418,9 @@ export const api = {
   },
 
   // Reports
-  getDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string }) =>
+  getDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; customerType?: string }) =>
     request<DailySalesReport>(`/api/reports/daily-sales${toQuery(params)}`),
-  exportDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; customerType?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/daily-sales/export${toQuery(params)}`),
 
   getMonthlySalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; comparePrevious?: boolean }) =>
@@ -448,9 +448,9 @@ export const api = {
   exportInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/inventory-snapshot/export${toQuery(params)}`),
 
-  getBranchSalesReport: (params?: { from?: string; to?: string; city?: string }) =>
+  getBranchSalesReport: (params?: { from?: string; to?: string; city?: string; customerType?: string }) =>
     request<BranchSalesReport>(`/api/reports/branch-sales${toQuery(params)}`),
-  exportBranchSalesReport: (params?: { from?: string; to?: string; city?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+  exportBranchSalesReport: (params?: { from?: string; to?: string; city?: string; customerType?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/branch-sales/export${toQuery(params)}`),
 
   getTerminalReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; status?: string }) =>
@@ -463,9 +463,9 @@ export const api = {
   exportProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; search?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/product-sales/export${toQuery(params)}`),
 
-  getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string }) =>
+  getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string }) =>
     request<CategoryPerformanceReport>(`/api/reports/category-performance${toQuery(params)}`),
-  exportCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+  exportCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/category-performance/export${toQuery(params)}`),
 
   getSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string }) =>
@@ -478,14 +478,14 @@ export const api = {
   exportWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; exportedBy?: string; includeCost?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/waste-spoilage/export${toQuery(params)}`),
 
-  getReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string }) =>
+  getReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; customerType?: string; reason?: string }) =>
     request<ReturnsRefundsReport>(`/api/reports/returns-refunds${toQuery(params)}`),
-  exportReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; customerType?: string; reason?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/returns-refunds/export${toQuery(params)}`),
 
-  getAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string }) =>
+  getAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string; roleId?: string; terminalId?: string; varianceThreshold?: number }) =>
     request<AttendanceShiftReport>(`/api/reports/attendance-shift${toQuery(params)}`),
-  exportAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string; roleId?: string; terminalId?: string; varianceThreshold?: number; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/attendance-shift/export${toQuery(params)}`),
 
   getAuditTrailReport: (params?: { from?: string; to?: string; userId?: string; module?: string; severity?: string; branchId?: string }) =>
@@ -708,7 +708,7 @@ export interface InventoryBatch {
 export interface Order {
   id: string; orderNumber: string; source: string; branchId: string;
   customerId?: string; cashierId?: string; subtotal: number; discountAmount: number;
-  taxAmount: number; totalAmount: number; paymentStatus: string; orderStatus: string;
+  taxAmount: number; customFeeAmount?: number; totalAmount: number; paymentStatus: string; orderStatus: string;
   createdAt: string; items?: OrderItem[]; payments?: OrderPayment[];
   branch?: { id: string; name: string };
   cashier?: { id: string; fullName: string };
@@ -1133,6 +1133,7 @@ export interface InventorySnapshotRow {
 export interface InventorySnapshotReport {
   kpis: { totalStockValue: number; skuCount: number; availableQty: number; reservedQty: number; outOfStockSkus: number; negativeStockExceptions: number };
   rows: InventorySnapshotRow[];
+  snapshotAt: string;
 }
 
 export interface BranchSalesRow {
@@ -1166,11 +1167,12 @@ export interface ProductSalesReport {
 
 export interface CategoryPerformanceRow {
   categoryId: string; categoryName: string; parentCategory: string; skuCount: number; unitsSold: number;
-  grossSales: number; discounts: number; returns: number; netSales: number; salesContributionPct: number;
+  grossSales: number; discounts: number; returns: number; returnsQty: number; returnRatePct: number;
+  netSales: number; salesContributionPct: number;
   cogs: number; grossProfit: number; marginPct: number | null;
 }
 export interface CategoryPerformanceReport {
-  kpis: { topCategory?: string; totalCategoriesSold: number; categoryDiscountValue: number };
+  kpis: { topCategory?: string; highestMarginCategory?: string; categoryReturnRatePct: number; totalCategoriesSold: number; categoryDiscountValue: number };
   rows: CategoryPerformanceRow[];
 }
 
@@ -1186,7 +1188,7 @@ export interface SupplierPerformanceReport {
 
 export interface WasteSpoilageRow {
   wasteId: string; dateTime: string; sku: string; productName: string; category: string; branch: string;
-  qty: number; reason: string; costValue: number; notes?: string;
+  qty: number; reason: string; costValue: number; notes?: string; batchNumber?: string; expiryDate?: string;
 }
 export interface WasteSpoilageReport {
   kpis: { totalWriteOffValue: number; expiredItems: number; damagedItems: number; topWasteCategory?: string; wastePctOfSales: number };
@@ -1194,8 +1196,9 @@ export interface WasteSpoilageReport {
 }
 
 export interface ReturnRefundRow {
-  returnId: string; originalOrderId: string; dateTime: string; branch: string; cashier: string; customer: string;
-  returnType: string; reason: string; refundMethod: string; refundAmount: number; vatReversal: number; status: string;
+  returnId: string; originalOrderId: string; invoiceNo: string; dateTime: string; branch: string; cashier: string; customer: string;
+  returnType: string; reason: string; skus: string; qty: number; refundMethod: string; refundAmount: number; vatReversal: number;
+  approvedBy: string; status: string;
 }
 export interface ReturnsRefundsReport {
   kpis: { returnCount: number; refundValue: number; vatReversed: number; topReturnReason?: string; highestReturnBranch?: string; refundsPending: number };

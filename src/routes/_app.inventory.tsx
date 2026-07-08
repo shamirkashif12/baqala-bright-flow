@@ -726,10 +726,21 @@ function AdjustDialog({ item, onClose, onDone }: { item: StockItem | null; onClo
     const diff = qty - item.quantity;
     setSaving(true); setError("");
     try {
+      // A decrease reasoned as Damage/Loss is a real waste event, not just a generic stock
+      // correction — the Waste/Spoilage report filters on AdjustmentType being exactly "damage"
+      // or "waste", so those two reasons need to carry through as the type itself (not just land
+      // in the free-text reason), or a real "record this as damaged" action would never appear
+      // there. Cycle count/correction/return-to-supplier and any increase stay generic, matching
+      // the stock-quantity direction logic in InventoryController.Adjust unchanged.
+      const adjustmentType = diff >= 0
+        ? "addition"
+        : reason === "damage" ? "damage"
+        : reason === "loss" ? "waste"
+        : "reduction";
       await api.adjustInventory({
         productId: item.productId, branchId: item.branchId,
         quantity: Math.abs(diff),
-        adjustmentType: diff >= 0 ? "addition" : "reduction",
+        adjustmentType,
         reason: notes || reason,
       });
       onDone(); onClose();

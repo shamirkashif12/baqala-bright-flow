@@ -132,7 +132,7 @@ function VatZatca() {
             { key: "taxableAmount", label: "Taxable Amount", render: (r: VatZatcaRow) => <><SARIcon />{fmt(r.taxableAmount)}</> },
             { key: "vatAmount", label: "VAT Amount", render: (r: VatZatcaRow) => <span className="font-semibold"><SARIcon />{fmt(r.vatAmount)}</span> },
             { key: "totalWithVat", label: "Total With VAT", render: (r: VatZatcaRow) => <><SARIcon />{fmt(r.totalWithVat)}</> },
-            { key: "zatcaStatus", label: "ZATCA Status", render: (r: VatZatcaRow) => <StatusBadge status={r.zatcaStatus === "accepted" ? "active" : r.zatcaStatus === "rejected" ? "critical" : "pending"} /> },
+            { key: "zatcaStatus", label: "ZATCA Status", render: (r: VatZatcaRow) => <StatusBadge status={r.zatcaStatus} /> },
           ]}
           rows={data?.rows ?? []}
         />

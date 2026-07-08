@@ -116,7 +116,7 @@ function LowStock() {
             { key: "recommendedReorderQty", label: "Recommended Qty" },
             { key: "preferredSupplier", label: "Preferred Supplier", render: (r: LowStockRow) => r.preferredSupplier ?? "—" },
             { key: "lastSoldDate", label: "Last Sold", render: (r: LowStockRow) => (r.lastSoldDate ? new Date(r.lastSoldDate).toLocaleDateString("en-SA") : "Never") },
-            { key: "urgency", label: "Urgency", render: (r: LowStockRow) => <StatusBadge status={r.urgency === "ok" ? "in stock" : r.urgency === "critical" ? "out of stock" : "low"} /> },
+            { key: "urgency", label: "Urgency", render: (r: LowStockRow) => <StatusBadge status={r.urgency} /> },
           ]}
           rows={data?.rows ?? []}
         />

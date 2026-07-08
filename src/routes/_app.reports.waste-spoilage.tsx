@@ -128,8 +128,10 @@ function WasteSpoilage() {
             { key: "productName", label: "Product" },
             { key: "category", label: "Category" },
             { key: "branch", label: "Branch" },
+            { key: "batchNumber", label: "Batch/Lot", render: (r: WasteSpoilageRow) => r.batchNumber ?? "—" },
+            { key: "expiryDate", label: "Expiry Date", render: (r: WasteSpoilageRow) => r.expiryDate ? new Date(r.expiryDate).toLocaleDateString("en-SA") : "—" },
             { key: "qty", label: "Qty" },
-            { key: "reason", label: "Reason", render: (r: WasteSpoilageRow) => <StatusBadge status={r.reason === "damage" ? "expired" : "pending"} /> },
+            { key: "reason", label: "Reason", render: (r: WasteSpoilageRow) => <StatusBadge status={r.reason} /> },
             ...(canViewCost ? [{ key: "costValue", label: "Cost Value", render: (r: WasteSpoilageRow) => <><SARIcon />{fmt(r.costValue)}</> }] : []),
             { key: "notes", label: "Notes", render: (r: WasteSpoilageRow) => r.notes ?? "—" },
           ]}

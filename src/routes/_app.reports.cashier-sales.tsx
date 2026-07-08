@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type CashierSalesReport, type CashierSalesRow, type ReportExportFormat } from "@/lib/api";
+import { api, type CashierSalesReport, type CashierSalesRow, type ReportExportFormat, type Terminal, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -35,22 +35,40 @@ function CashierSales() {
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [terminalId, setTerminalId] = useState("all");
+  const [cashierId, setCashierId] = useState("all");
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [cashiers, setCashiers] = useState<User[]>([]);
   const [data, setData] = useState<CashierSalesReport | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    api.getTerminals({ branchId: branchId !== "all" ? branchId : undefined }).then(setTerminals).catch(() => {});
+    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setCashiers(u.filter((x) => x.status === "active" && x.roleName === "Cashier"))).catch(() => {});
+    setTerminalId("all");
+    setCashierId("all");
+  }, [branchId]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getCashierSalesReport({ from, to, branchId: branchId !== "all" ? branchId : undefined })
+    api.getCashierSalesReport({
+      from, to, branchId: branchId !== "all" ? branchId : undefined,
+      terminalId: terminalId !== "all" ? terminalId : undefined, cashierId: cashierId !== "all" ? cashierId : undefined,
+    })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId]);
+  }, [from, to, branchId, terminalId, cashierId]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportCashierSalesReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, exportedBy: user?.id, format });
+      const blob = await api.exportCashierSalesReport({
+        from, to, branchId: branchId !== "all" ? branchId : undefined,
+        terminalId: terminalId !== "all" ? terminalId : undefined, cashierId: cashierId !== "all" ? cashierId : undefined,
+        exportedBy: user?.id, format,
+      });
       downloadBlob(blob, `cashier-sales-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -82,6 +100,20 @@ function CashierSales() {
             </SelectContent>
           </Select>
         )}
+        <Select value={terminalId} onValueChange={setTerminalId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Terminal" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Terminals</SelectItem>
+            {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={cashierId} onValueChange={setCashierId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Cashier" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Cashiers</SelectItem>
+            {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
