@@ -130,7 +130,11 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit) : Control
             entityId: shift.Id,
             userId: req.CashierId,
             branchId: req.BranchId,
-            details: $"Opening amount: SAR {req.OpeningAmount:F2}");
+            // Before Value shows the opening float the cashier was handed (e.g. SAR 500 default) —
+            // without this it rendered as "—" even though the amount was captured on the shift itself.
+            // After Value stays "—" (no `details`) at open time — there is no "after" state to
+            // report yet; that only exists once the shift is actually closed.
+            beforeValue: $"Opening Amount: SAR {req.OpeningAmount:F2}");
 
         return Created($"/api/shifts/{shift.Id}", shift);
     }

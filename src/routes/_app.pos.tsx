@@ -133,7 +133,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
         try {
           await api.adjustInventory({ productId: selected.id, branchId, quantity: qty, adjustmentType: "receive", reason: "Quick stock-in from POS" });
         } catch {
-          await api.receiveBatch({ productId: selected.id, branchId, quantity: qty, remainingQuantity: qty, receivedDate: new Date().toISOString(), status: "active" });
+          await api.receiveBatch({ productId: selected.id, branchId, quantity: qty });
         }
         onStockAdded(selected, currentStock + qty);
       } else {

@@ -74,18 +74,24 @@ function ReceiveBatchDialog({ branches, products, suppliers, onDone, lockedBranc
   const [form, setForm] = useState({
     productId: "", branchId: lockedBranchId ?? "", supplierId: "",
     quantity: "", purchaseCost: "", expiryDate: "",
-    batchNumber: "", notes: "",
+    batchNumber: "", notes: "", damagedOrReturnReason: "",
   });
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
   function reset() {
-    setForm({ productId: "", branchId: lockedBranchId ?? "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "" });
+    setForm({ productId: "", branchId: lockedBranchId ?? "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "", damagedOrReturnReason: "" });
   }
+
+  const isPastExpiry = !!form.expiryDate && form.expiryDate < new Date().toISOString().slice(0, 10);
 
   async function handleSave() {
     if (!form.productId || !form.branchId || !form.quantity) {
       toast.error("Product, branch and quantity are required");
+      return;
+    }
+    if (isPastExpiry && !form.damagedOrReturnReason.trim()) {
+      toast.error("Expiry date is in the past — provide a damaged/return reason to log it as write-off stock");
       return;
     }
     setSaving(true);
@@ -99,13 +105,14 @@ function ReceiveBatchDialog({ branches, products, suppliers, onDone, lockedBranc
         expiryDate: form.expiryDate || undefined,
         batchNumber: form.batchNumber || undefined,
         notes: form.notes || undefined,
-      } as Parameters<typeof api.receiveBatch>[0]);
+        damagedOrReturnReason: form.damagedOrReturnReason || undefined,
+      });
       toast.success("Batch received successfully");
       reset();
       setOpen(false);
       onDone();
-    } catch {
-      toast.error("Failed to receive batch");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to receive batch");
     } finally {
       setSaving(false);
     }
@@ -162,11 +169,21 @@ function ReceiveBatchDialog({ branches, products, suppliers, onDone, lockedBranc
             <div>
               <Label>Expiry Date</Label>
               <Input type="date" value={form.expiryDate} onChange={e => set("expiryDate", e.target.value)} />
+              {isPastExpiry && (
+                <p className="mt-1 text-xs text-destructive">Past expiry — a damaged/return reason is required below.</p>
+              )}
             </div>
             <div>
               <Label>Batch Number</Label>
               <Input value={form.batchNumber} onChange={e => set("batchNumber", e.target.value)} placeholder="Auto-generated if blank" />
             </div>
+            {isPastExpiry && (
+              <div className="col-span-2">
+                <Label>Damaged / Return Reason *</Label>
+                <Input value={form.damagedOrReturnReason} onChange={e => set("damagedOrReturnReason", e.target.value)}
+                  placeholder="e.g. Received already expired — logging for write-off" />
+              </div>
+            )}
             <div className="col-span-2">
               <Label>Notes</Label>
               <Textarea rows={2} value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Optional notes…" />

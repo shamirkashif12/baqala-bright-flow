@@ -34,7 +34,15 @@ public class AuditService(BaqalaDbContext db, IHttpContextAccessor httpContextAc
         // The FRD's Audit Trail "IP Address" column was always blank — nothing ever captured
         // it. The caller's HttpContext is available here (this runs inside a request), so read
         // it once at the point of logging rather than threading it through every call site.
-        var ipAddress = httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+        // Prefer X-Forwarded-For when present — behind a reverse proxy/load balancer,
+        // Connection.RemoteIpAddress is the proxy's own address, not the real client's, so
+        // relying on it alone silently shows the proxy IP (or null, for some proxy/named-pipe
+        // setups) for every single row.
+        var httpContext = httpContextAccessor.HttpContext;
+        var forwardedFor = httpContext?.Request.Headers["X-Forwarded-For"].ToString();
+        var ipAddress = !string.IsNullOrWhiteSpace(forwardedFor)
+            ? forwardedFor.Split(',')[0].Trim()
+            : httpContext?.Connection.RemoteIpAddress?.ToString();
         db.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(),

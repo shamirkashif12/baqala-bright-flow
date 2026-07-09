@@ -152,7 +152,7 @@ export const api = {
     const q = new URLSearchParams({ ...(branchId && { branchId }), daysAhead: String(daysAhead) }).toString();
     return request<InventoryBatch[]>(`/api/inventory/batches/expiring?${q}`);
   },
-  receiveBatch: (data: Partial<InventoryBatch>) =>
+  receiveBatch: (data: ReceiveBatchPayload) =>
     request<InventoryBatch>("/api/inventory/batches", { method: "POST", body: JSON.stringify(data) }),
   adjustInventory: (data: AdjustInventoryPayload) =>
     request<{ id: string }>("/api/inventory/adjustments", { method: "POST", body: JSON.stringify(data) }),
@@ -703,6 +703,13 @@ export interface InventoryBatch {
   status: string;
   product?: Product;
   supplier?: { id: string; name: string };
+}
+
+export interface ReceiveBatchPayload {
+  productId: string; branchId: string; supplierId?: string;
+  quantity: number; purchaseCost?: number; expiryDate?: string;
+  batchNumber?: string; notes?: string; reorderLevel?: number;
+  damagedOrReturnReason?: string;
 }
 
 export interface Order {
