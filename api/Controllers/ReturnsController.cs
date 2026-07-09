@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,7 +11,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ReturnsController(BaqalaDbContext db) : ControllerBase
+public class ReturnsController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
 {
     // Reads the live "Manager approval — refund > SAR 100" Rules Engine threshold, mirroring
     // ShiftsController.GetCashVarianceThresholdAsync, so this gate stays in sync with whatever
@@ -25,9 +26,24 @@ public class ReturnsController(BaqalaDbContext db) : ControllerBase
         return match.Success && decimal.TryParse(match.Value, out var v) ? v : 100m;
     }
 
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's returns —
+    // same fix as AuditLogsController/TerminalsController/DashboardController. branchId was only
+    // an optional query param; a call with none (e.g. NotificationsPopover's pending-returns
+    // count) returned every branch's returns regardless of caller role.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            branchId = callerBranchId;
+
         var query = db.CustomerReturns.Include(r => r.Customer).Include(r => r.Order).AsQueryable();
         if (branchId.HasValue) query = query.Where(r => r.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(r => r.Status == status);
@@ -55,6 +71,20 @@ public class ReturnsController(BaqalaDbContext db) : ControllerBase
         foreach (var item in ret.Items) { item.Id = Guid.NewGuid(); item.ReturnId = ret.Id; }
         db.CustomerReturns.Add(ret);
         await db.SaveChangesAsync();
+
+        if (ret.ProcessedBy.HasValue)
+        {
+            await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
+                "Returns", "Return Started", "Return Started",
+                $"Return started for Invoice {ret.ReturnNumber}",
+                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+        }
+
+        await notifications.NotifyRoleAsync(["Manager", "Admin"], ret.BranchId,
+            "Returns", "Return Approval Required", "Return Approval Required",
+            $"Return {ret.ReturnNumber} requires approval (SAR {ret.RefundAmount:F2})",
+            severity: "warning", entityType: "CustomerReturn", entityId: ret.Id);
+
         return CreatedAtAction(nameof(GetById), new { id = ret.Id }, ret);
     }
 
@@ -75,6 +105,20 @@ public class ReturnsController(BaqalaDbContext db) : ControllerBase
         if (Guid.TryParse(sub, out var approver)) ret.ApprovedBy = approver;
         ret.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        if (ret.ProcessedBy.HasValue)
+        {
+            await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
+                "Admin / Security",
+                req.Approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                req.Approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                req.Approved
+                    ? $"Return {ret.ReturnNumber} was approved"
+                    : $"Return {ret.ReturnNumber} was rejected",
+                severity: req.Approved ? "info" : "warning",
+                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+        }
+
         return Ok(ret);
     }
 
@@ -114,6 +158,19 @@ public class ReturnsController(BaqalaDbContext db) : ControllerBase
         ret.Status = "completed";
         ret.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        if (ret.ProcessedBy.HasValue)
+        {
+            await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
+                "Returns", "Return Completed", "Return Completed",
+                $"Return {ret.ReturnNumber} completed successfully",
+                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+            await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
+                "Payment", "Refund Processed", "Refund Processed",
+                $"Refund completed for Invoice {ret.ReturnNumber}",
+                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+        }
+
         return Ok(ret);
     }
 }

@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, ILogger<OrdersController> logger) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, ILogger<OrdersController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's orders —
     // mirrors ReportsController.GetCallerContext. Previously branchId was just an optional query
@@ -241,11 +241,35 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 var submitted = await zatcaService.SubmitInvoiceAsync(zatcaInvoice.Id);
                 order.ZatcaQrCode = submitted.QrCodeValue;
                 order.ZatcaInvoiceStatus = submitted.ZatcaStatus;
+
+                if (submitted.ZatcaStatus == "rejected")
+                {
+                    await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                        "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
+                        $"ZATCA submission failed for Invoice {order.OrderNumber}",
+                        severity: "error", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                }
+                else
+                {
+                    await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                        "ZATCA", "ZATCA Invoice Generated", "ZATCA Invoice Generated",
+                        "ZATCA invoice generated",
+                        entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                }
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "ZATCA submission failed for invoice {InvoiceId}", zatcaInvoice.Id);
                 order.ZatcaInvoiceStatus = "pending";
+
+                await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                    "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
+                    $"ZATCA submission failed for Invoice {order.OrderNumber}",
+                    severity: "error", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                    "ZATCA", "ZATCA Pending Queue", "ZATCA Pending Queue",
+                    $"Invoice {order.OrderNumber} pending ZATCA sync",
+                    severity: "warning", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
             }
         }
 
@@ -281,6 +305,14 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                         CreatedAt = DateTime.UtcNow,
                     });
                     await db.SaveChangesAsync();
+
+                    if (order.CashierId.HasValue)
+                    {
+                        await notifications.NotifyUserAsync(order.CashierId.Value,
+                            "Customer / Loyalty", "Loyalty Points Earned", "Loyalty Points Earned",
+                            $"Customer earned {earned:F0} loyalty points",
+                            entityType: "Order", entityId: order.Id, branchId: order.BranchId);
+                    }
                 }
 
                 // ── Send invoice email ─────────────────────────────────────────

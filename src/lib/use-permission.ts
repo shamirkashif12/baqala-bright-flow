@@ -9,20 +9,16 @@ export interface ModulePermissions {
 }
 
 /**
- * Returns the current user's CRUD permissions for a given module name.
- * tenant_admin always gets full permissions.
- * All other roles read from the permissions map embedded in their JWT.
+ * Returns the current user's CRUD permissions for a given module name,
+ * read from the RolePermissions matrix (with per-user overrides applied) —
+ * including for tenant_admin, whose access is governed by the same matrix
+ * as every other role.
  */
 export function usePermission(module: string): ModulePermissions {
   const { user } = useAuth();
 
   if (!user) {
     return { canCreate: false, canEdit: false, canDelete: false, canApprove: false, canExport: false };
-  }
-
-  // tenant_admin bypasses all restrictions
-  if (user.role === "tenant_admin") {
-    return { canCreate: true, canEdit: true, canDelete: true, canApprove: true, canExport: true };
   }
 
   const p = user.permissions?.[module];

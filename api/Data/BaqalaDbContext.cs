@@ -77,6 +77,9 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     // Audit
     public DbSet<AuditLog> AuditLogs { get; set; }
 
+    // Notifications
+    public DbSet<Notification> Notifications { get; set; }
+
     // Generic key-value settings per branch
     public DbSet<TenantSetting> TenantSettings { get; set; }
 

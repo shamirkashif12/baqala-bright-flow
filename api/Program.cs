@@ -47,6 +47,8 @@ builder.Services.AddControllers()
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddHostedService<OperationalAlertsService>();
 
 // ─── ZATCA (Saudi e-invoicing Phase 2) ───────────────────────────────────────
 builder.Services.AddDataProtection()

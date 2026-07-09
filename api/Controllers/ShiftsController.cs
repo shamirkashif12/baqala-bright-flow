@@ -10,7 +10,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ShiftsController(BaqalaDbContext db, IAuditService audit) : ControllerBase
+public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotificationService notifications) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
@@ -87,7 +87,17 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit) : Control
         {
             var terminalTaken = await db.CashierShifts
                 .AnyAsync(s => s.TerminalId == req.TerminalId && s.Status == "open");
-            if (terminalTaken) return Conflict("This terminal already has an open shift with another cashier.");
+            if (terminalTaken)
+            {
+                if (callerId.HasValue)
+                {
+                    await notifications.NotifyUserAsync(callerId.Value,
+                        "Terminal / Branch", "Terminal Shift Conflict", "Terminal Shift Conflict",
+                        "Terminal already assigned to another cashier",
+                        severity: "warning", entityType: "Terminal", entityId: req.TerminalId, branchId: req.BranchId);
+                }
+                return Conflict("This terminal already has an open shift with another cashier.");
+            }
         }
 
         var now = DateTime.UtcNow;
@@ -135,6 +145,18 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit) : Control
             // After Value stays "—" (no `details`) at open time — there is no "after" state to
             // report yet; that only exists once the shift is actually closed.
             beforeValue: $"Opening Amount: SAR {req.OpeningAmount:F2}");
+
+        // The doc's own example message ("Shift opened with SAR 500 opening cash") reads as a
+        // confirmation to the cashier who just checked in, not just an FYI to their manager —
+        // NotifyRoleAsync(["Manager","Admin"]) alone never includes the Cashier-role account.
+        await notifications.NotifyUserAsync(req.CashierId,
+            "Cashier Shift", "Shift Opened", "Shift Opened",
+            $"Shift opened with SAR {req.OpeningAmount:F2} opening cash",
+            entityType: "CashierShift", entityId: shift.Id, branchId: req.BranchId);
+        await notifications.NotifyRoleAsync(["Manager", "Admin"], req.BranchId,
+            "Cashier Shift", "Shift Opened", "Shift Opened",
+            $"Shift opened with SAR {req.OpeningAmount:F2} opening cash",
+            entityType: "CashierShift", entityId: shift.Id);
 
         return Created($"/api/shifts/{shift.Id}", shift);
     }
@@ -204,6 +226,18 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit) : Control
                 beforeValue: $"Opening Amount: SAR {shift.OpeningAmount:F2}",
                 details: $"Closed {cashierName}'s shift. Reason: {req.Reason}",
                 severity: "warning");
+        }
+
+        if (shift.RequiresApproval)
+        {
+            await notifications.NotifyUserAsync(shift.CashierId,
+                "Cashier Shift", "Cash Variance Alert", "Cash Variance Alert",
+                $"Cash variance detected: SAR {varianceAbs:F2}",
+                severity: "warning", entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId);
+            await notifications.NotifyRoleAsync(["Manager", "Admin"], shift.BranchId,
+                "Cashier Shift", "Cash Variance Alert", "Cash Variance Alert",
+                $"Cash variance detected: SAR {varianceAbs:F2} — pending manager approval",
+                severity: "warning", entityType: "CashierShift", entityId: shift.Id);
         }
 
         return Ok(shift);

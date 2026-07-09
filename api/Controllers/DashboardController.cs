@@ -8,6 +8,19 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class DashboardController(BaqalaDbContext db) : ControllerBase
 {
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's metrics —
+    // same fix as AuditLogsController/TerminalsController/OrdersController. Previously branchId
+    // was just an optional query param the frontend happened to pre-fill with the caller's
+    // branch; a direct call with no branchId (e.g. NotificationsPopover's api.getDashboard())
+    // returned every branch's low-stock/out-of-stock/expiring counts regardless of caller role,
+    // so a Jeddah cashier saw Riyadh's alerts too.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetMetrics(
         [FromQuery] string? period = "today",
@@ -39,6 +52,9 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
 
         // ─── Branch-scoped queryables ───────────────────────────────────────
         var branchGuid = Guid.TryParse(branchId, out var g) ? g : (Guid?)null;
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            branchGuid = callerBranchId;
 
         var ordersQ    = db.Orders.AsQueryable();
         var paymentsQ  = db.OrderPayments.AsQueryable();

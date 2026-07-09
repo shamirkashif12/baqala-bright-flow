@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class TerminalsController(BaqalaDbContext db) : ControllerBase
+public class TerminalsController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's terminals —
     // same fix as DevicesController/OrdersController: branchId was only an optional query param.
@@ -70,9 +71,19 @@ public class TerminalsController(BaqalaDbContext db) : ControllerBase
     {
         var terminal = await db.Terminals.FindAsync(id);
         if (terminal is null) return NotFound();
+        var prevStatus = terminal.Status;
         terminal.Status = req.Status;
         terminal.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        if (req.Status == "offline" && prevStatus != "offline")
+        {
+            await notifications.NotifyRoleAsync(["Manager", "Admin"], terminal.BranchId,
+                "Terminal / Branch", "Terminal Offline", "Terminal Offline",
+                $"Terminal {terminal.Name} is offline",
+                severity: "error", entityType: "Terminal", entityId: terminal.Id);
+        }
+
         return Ok(terminal);
     }
 

@@ -1,6 +1,9 @@
 export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
 export const PRINTER_API_KEY = "baqala_printer_api_url";
 export const DEFAULT_PRINTER_AGENT = "http://localhost:5008";
+// Fired on window after a successful api.notify() so NotificationsPopover can refetch
+// immediately instead of waiting for its poll interval.
+export const NOTIFICATION_CREATED_EVENT = "baqala:notification-created";
 
 export function getPrinterBase(): string {
   return (typeof window !== "undefined" ? localStorage.getItem(PRINTER_API_KEY) : null) ?? DEFAULT_PRINTER_AGENT;
@@ -388,6 +391,45 @@ export const api = {
       branchId: data.branchId ?? null,
       newValues: data.details ?? null,
     }) }),
+
+  // Notifications
+  getNotifications: (params?: { unreadOnly?: boolean; page?: number; pageSize?: number }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))).toString();
+    return request<{ total: number; page: number; pageSize: number; items: Notification[] }>(`/api/notifications${q ? `?${q}` : ""}`);
+  },
+  getUnreadNotificationCount: () =>
+    request<{ count: number }>("/api/notifications/unread-count"),
+  markNotificationRead: (id: string) =>
+    request<Notification>(`/api/notifications/${id}/read`, { method: "POST" }),
+  markAllNotificationsRead: () =>
+    request<{ success: boolean }>("/api/notifications/read-all", { method: "POST" }),
+  // Self-notify: logs a Bell notification for the current user. Fire-and-forget by design —
+  // callers should never await this or let it block/break the UI action it's attached to.
+  notify: (
+    category: string,
+    type: string,
+    title: string,
+    message: string,
+    opts?: { severity?: "info" | "warning" | "error"; entityType?: string; entityId?: string; branchId?: string }
+  ) =>
+    request<{ success: boolean }>("/api/notifications", {
+      method: "POST",
+      body: JSON.stringify({
+        category, type, title, message,
+        severity: opts?.severity ?? "info",
+        entityType: opts?.entityType,
+        entityId: opts?.entityId,
+        branchId: opts?.branchId,
+      }),
+    })
+      .then((res) => {
+        // Bell polls on an interval for notifications triggered by other users/the backend, but
+        // a self-notify is caused by the current user's own action right now — waiting out the
+        // poll interval to see it would read as "the notification never showed up".
+        if (typeof window !== "undefined") window.dispatchEvent(new Event(NOTIFICATION_CREATED_EVENT));
+        return res;
+      })
+      .catch(() => {}),
 
   // POS Settings
   getPosSettings: (branchId: string) =>
@@ -893,6 +935,14 @@ export interface AuditLog {
   details?: string;   // legacy alias
   newValues?: string; // backend field — contains human-readable details
   branchId?: string;
+}
+
+export interface Notification {
+  id: string; userId: string; branchId?: string;
+  category: string; type: string; title: string; message: string;
+  severity: "info" | "warning" | "error";
+  entityType?: string; entityId?: string;
+  isRead: boolean; readAt?: string; createdAt: string;
 }
 
 export interface PosSettingsRecord {

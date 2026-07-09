@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/stock-transfers")]
-public class StockTransfersController(BaqalaDbContext db) : ControllerBase
+public class StockTransfersController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll(
@@ -151,6 +152,25 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         };
         db.StockTransfers.Add(transfer);
         await db.SaveChangesAsync();
+
+        if (transfer.DestBranchId.HasValue)
+        {
+            await notifications.NotifyRoleAsync(["Manager", "Admin"], transfer.DestBranchId,
+                "Inventory", "Stock Transfer Pending Acceptance", "Stock Transfer Pending Acceptance",
+                $"Transfer {transfer.TransferNumber} pending acceptance",
+                entityType: "StockTransfer", entityId: transfer.Id);
+        }
+
+        // Return-to-supplier transfer — confirm to whoever created it, since there's no branch
+        // recipient to notify (the "destination" is the supplier, not a Users-linked entity).
+        if (transfer.TransferType == "warehouse_to_supplier" && transfer.CreatedBy != Guid.Empty)
+        {
+            await notifications.NotifyUserAsync(transfer.CreatedBy,
+                "Suppliers / Purchase Orders", "Supplier Return Created", "Supplier Return Created",
+                $"Supplier return created: {transfer.TransferNumber}",
+                entityType: "StockTransfer", entityId: transfer.Id);
+        }
+
         return CreatedAtAction(nameof(GetById), new { id = transfer.Id }, transfer);
     }
 
@@ -317,6 +337,16 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         await SyncLinkedPoStatus(transfer);
 
         await db.SaveChangesAsync();
+
+        if (transfer.CreatedBy != Guid.Empty)
+        {
+            await notifications.NotifyUserAsync(transfer.CreatedBy,
+                "Inventory", "Stock Transfer Received", "Stock Transfer Received",
+                $"Stock transfer {transfer.TransferNumber} received",
+                entityType: "StockTransfer", entityId: transfer.Id,
+                branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
+        }
+
         return Ok(transfer);
     }
 
@@ -402,6 +432,29 @@ public class StockTransfersController(BaqalaDbContext db) : ControllerBase
         }
 
         await db.SaveChangesAsync();
+
+        if (req.Status == "completed" && prev != "completed" && transfer.CreatedBy != Guid.Empty)
+        {
+            await notifications.NotifyUserAsync(transfer.CreatedBy,
+                "Inventory", "Stock Transfer Received", "Stock Transfer Received",
+                $"Stock transfer {transfer.TransferNumber} received",
+                entityType: "StockTransfer", entityId: transfer.Id,
+                branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
+        }
+
+        if ((req.Status == "approved" || req.Status == "rejected") && prev != req.Status && transfer.CreatedBy != Guid.Empty)
+        {
+            var approved = req.Status == "approved";
+            await notifications.NotifyUserAsync(transfer.CreatedBy,
+                "Admin / Security", approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                approved
+                    ? $"Transfer {transfer.TransferNumber} was approved"
+                    : $"Transfer {transfer.TransferNumber} was rejected",
+                severity: approved ? "info" : "warning",
+                entityType: "StockTransfer", entityId: transfer.Id);
+        }
+
         return Ok(transfer);
     }
 

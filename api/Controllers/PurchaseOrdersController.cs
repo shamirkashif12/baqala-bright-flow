@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,8 +9,11 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/purchase-orders")]
-public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
+public class PurchaseOrdersController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? supplierId,
@@ -112,6 +116,25 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         };
         db.PurchaseOrders.Add(po);
         await db.SaveChangesAsync();
+
+        // No branch to scope by for a warehouse-only PO — notify admins only rather than every
+        // branch manager tenant-wide (NotifyRoleAsync treats a null branchId as unscoped).
+        var poRoles = po.BranchId.HasValue ? new[] { "Manager", "Admin" } : new[] { "Admin" };
+        await notifications.NotifyRoleAsync(poRoles, po.BranchId,
+            "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
+            $"Purchase Order {po.PoNumber} created",
+            entityType: "PurchaseOrder", entityId: po.Id);
+
+        // Confirmation to whoever placed the order — NotifyRoleAsync above only reaches them if
+        // they happen to hold the Manager/Admin role; an Inventory Staff orderer wouldn't.
+        if (po.OrderedBy != Guid.Empty)
+        {
+            await notifications.NotifyUserAsync(po.OrderedBy,
+                "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
+                $"Purchase Order {po.PoNumber} created",
+                entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId);
+        }
+
         return CreatedAtAction(nameof(GetById), new { id = po.Id }, po);
     }
 
@@ -121,10 +144,25 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
     {
         var po = await db.PurchaseOrders.FindAsync(id);
         if (po is null) return NotFound();
+        var prevStatus = po.Status;
         po.Status = req.Status;
         if (req.ApprovedBy.HasValue) po.ApprovedBy = req.ApprovedBy;
         po.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        if ((req.Status == "approved" || req.Status == "rejected") && prevStatus != req.Status && po.OrderedBy != Guid.Empty)
+        {
+            var approved = req.Status == "approved";
+            await notifications.NotifyUserAsync(po.OrderedBy,
+                "Admin / Security", approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                approved
+                    ? $"Purchase Order {po.PoNumber} was approved"
+                    : $"Purchase Order {po.PoNumber} was rejected",
+                severity: approved ? "info" : "warning",
+                entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId);
+        }
+
         return Ok(po);
     }
 
@@ -253,6 +291,22 @@ public class PurchaseOrdersController(BaqalaDbContext db) : ControllerBase
         }
 
         await db.SaveChangesAsync();
+
+        var deliveryRoles = po.BranchId.HasValue ? new[] { "Manager", "Admin" } : new[] { "Admin" };
+        await notifications.NotifyRoleAsync(deliveryRoles, po.BranchId,
+            "Suppliers / Purchase Orders", "Supplier Delivery Received", "Supplier Delivery Received",
+            $"Supplier delivery received for PO {po.PoNumber}",
+            entityType: "PurchaseOrder", entityId: po.Id);
+
+        var callerId = CallerId();
+        if (callerId.HasValue)
+        {
+            await notifications.NotifyUserAsync(callerId.Value,
+                "Suppliers / Purchase Orders", "Supplier Delivery Received", "Supplier Delivery Received",
+                $"Supplier delivery received for PO {po.PoNumber}",
+                entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId);
+        }
+
         return Ok(po);
     }
 

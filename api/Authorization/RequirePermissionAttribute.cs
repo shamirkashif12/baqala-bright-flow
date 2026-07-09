@@ -1,5 +1,6 @@
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -17,9 +18,10 @@ public static class PermissionCheck
     {
         if (user.Identity?.IsAuthenticated != true) return false;
 
-        var role = user.FindFirst("role")?.Value;
-        if (role == "tenant_admin") return true;
-
+        // tenant_admin's access is governed by the same RolePermissions matrix as every other
+        // role below — no bypass. (Previously always returned true here; removed at the tenant's
+        // request, who accepted that misconfiguring the Admin role's own Roles/Users permissions
+        // can strand the tenant with no one able to grant permissions back.)
         if (!Guid.TryParse(user.FindFirst("roleId")?.Value, out var roleId)) return false;
 
         // Per-user override takes precedence over the role default for the same module.
@@ -48,7 +50,8 @@ public static class PermissionCheck
 // Server-side enforcement of the same Module/Action permission matrix the frontend
 // already reads via usePermission() (src/lib/use-permission.ts) — until now that matrix
 // was only used to hide/show UI, so any authenticated caller could hit the API directly
-// and bypass it entirely. tenant_admin always bypasses, matching usePermission()'s rule.
+// and bypass it entirely. No role bypass, including tenant_admin — see the comment in
+// PermissionCheck.HasPermissionAsync above.
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = true)]
 public class RequirePermissionAttribute(string module, PermAction action) : Attribute, IAsyncAuthorizationFilter
 {
@@ -69,6 +72,17 @@ public class RequirePermissionAttribute(string module, PermAction action) : Attr
             context.Result = new Microsoft.AspNetCore.Mvc.ObjectResult(
                 new { message = $"You do not have permission to {action.ToString().ToLower()} {module}." })
             { StatusCode = 403 };
+
+            var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
+            if (Guid.TryParse(userIdClaim, out var userId))
+            {
+                var branchId = Guid.TryParse(user.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+                var notifications = context.HttpContext.RequestServices.GetRequiredService<INotificationService>();
+                await notifications.NotifyUserAsync(userId,
+                    "Admin / Security", "Unauthorized Action Attempt", "Unauthorized Action Attempt",
+                    $"You do not have permission for this action ({action.ToString().ToLower()} {module})",
+                    severity: "warning", branchId: branchId);
+            }
         }
     }
 }

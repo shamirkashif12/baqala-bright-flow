@@ -97,8 +97,9 @@ const ROUTE_RULES: RouteRule[] = [
 
 function isAllowed(rule: RouteRule, user: ReturnType<typeof useAuth>["user"]): boolean {
   if (!user) return false;
-  // tenant_admin (including super admin ahmadaziz) bypasses all restrictions
-  if (user.role === "tenant_admin") return true;
+  // No role bypass, including tenant_admin — module-gated routes are governed by the same
+  // RolePermissions matrix as everyone else; role-only rules below already list "tenant_admin"
+  // explicitly wherever it should still pass.
   // Explicit block takes priority over module permission
   if (rule.blockRoles?.includes(user.role as AppRole)) return false;
   if (rule.module) return user.permissions?.[rule.module]?.canView === true;
@@ -110,7 +111,6 @@ function isAllowed(rule: RouteRule, user: ReturnType<typeof useAuth>["user"]): b
  * Wraps the routed page content. If the signed-in user doesn't have permission
  * for the current path, redirects them to their role's default landing page
  * instead of showing an "Access Denied" screen.
- * tenant_admin always passes through regardless of the rule.
  */
 export function RouteGuard({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();

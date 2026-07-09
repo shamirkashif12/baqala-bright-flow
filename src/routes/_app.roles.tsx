@@ -534,11 +534,6 @@ function Roles() {
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {active.isSystem ? "System role — permissions editable, name protected" : "Custom role"}
                       </p>
-                      {active.name === "Admin" && (
-                        <p className="text-xs text-amber-600 mt-1">
-                          Reference only — the Admin role always has full access regardless of the matrix below, so no one can be locked out of Roles &amp; Users management.
-                        </p>
-                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <Button size="sm" className="gradient-primary text-primary-foreground border-0 h-8" onClick={handleSave} disabled={saving || !dirty}>

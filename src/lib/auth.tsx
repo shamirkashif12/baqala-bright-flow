@@ -298,7 +298,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const canViewModule = useCallback(
     (module: string) => {
       if (!user) return false;
-      if (user.role === "tenant_admin") return true;
       return user.permissions[module]?.canView === true;
     },
     [user],
