@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { RoleGate } from "@/components/role-gate";
+import { ModuleGate } from "@/components/role-gate";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
@@ -25,9 +25,9 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/zatca-settings")({
   component: () => (
-    <RoleGate allow={["tenant_admin"]}>
+    <ModuleGate module="Compliance">
       <ZatcaSettings />
-    </RoleGate>
+    </ModuleGate>
   ),
 });
 

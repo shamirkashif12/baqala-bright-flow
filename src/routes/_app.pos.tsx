@@ -1213,9 +1213,12 @@ function POS() {
   ) => {
     if (!branch) throw new Error("No branch configured");
     if (!cart.length) throw new Error("Cart is empty");
-    // A shift's cash drawer is a Cashier-only concept — only cashiers need one
-    // open to sell. Admins/managers covering a register aren't reconciling a
-    // till, so they can ring up a sale without checking in first.
+    // FR-SLS-05 (deliberate exception, not a gap): a shift's cash drawer is a
+    // Cashier-only concept — the check-in flow (CheckInDialog) only ever lists
+    // Cashier-role accounts, so Branch Manager/Supervisor structurally can't open
+    // one. They can ring up a sale covering a register without checking in first;
+    // the server records this override in the audit log since the resulting order
+    // has no ShiftId to reconcile against (see OrdersController.Create).
     if (user?.role === "cashier" && !activeShift)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
 

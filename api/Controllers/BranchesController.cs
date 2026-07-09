@@ -11,11 +11,26 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class BranchesController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch record —
+    // this previously had no branch filter at all, returning every branch (including disabled
+    // ones) to any authenticated user regardless of role.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status)
     {
         var query = db.Branches.AsQueryable();
         if (!string.IsNullOrEmpty(status)) query = query.Where(b => b.Status == status);
+
+        var (role, branchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && branchId.HasValue)
+            query = query.Where(b => b.Id == branchId);
+
         return Ok(await query.OrderBy(b => b.Name).ToListAsync());
     }
 

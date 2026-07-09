@@ -10,6 +10,7 @@ import { MetricCard } from "@/components/metric-card";
 import { api, type TaxFeeRule, type PosSettingsRecord } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useBranch } from "@/lib/branch-context";
+import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/compliance")({ component: Compliance });
@@ -30,6 +31,11 @@ const TOGGLE_DEFAULTS: Toggles = {
 
 function Compliance() {
   const { selectedBranch } = useBranch();
+  // Toggles are persisted through SettingsController (RequirePermission("Settings", Edit)),
+  // not the Compliance module — gate them on what the backend actually checks, so a
+  // Compliance-view-only role can't be shown editable controls it can't actually save.
+  const { canEdit: canEditSettings } = usePermission("Settings");
+  const { canCreate: canCreateComplianceRule } = usePermission("Compliance");
   const [rules, setRules] = useState<TaxFeeRule[]>([]);
   const [toggles, setToggles] = useState<Toggles>(TOGGLE_DEFAULTS);
   const [settingsId, setSettingsId] = useState<string | undefined>(undefined);
@@ -62,7 +68,7 @@ function Compliance() {
   }
 
   async function saveToggles() {
-    if (!selectedBranch?.id) return;
+    if (!selectedBranch?.id || !canEditSettings) return;
     setSaving(true);
     try {
       await api.updatePosSettings(selectedBranch.id, { ...toggles, branchId: selectedBranch.id });
@@ -100,7 +106,7 @@ function Compliance() {
             <Switch
               checked={toggles.blockExpiredItems}
               onCheckedChange={toggle("blockExpiredItems")}
-              disabled={loading}
+              disabled={loading || !canEditSettings}
             />
           </div>
           <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
@@ -111,7 +117,7 @@ function Compliance() {
             <Switch
               checked={toggles.warnNearExpiry}
               onCheckedChange={toggle("warnNearExpiry")}
-              disabled={loading}
+              disabled={loading || !canEditSettings}
             />
           </div>
           <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
@@ -122,7 +128,7 @@ function Compliance() {
             <Switch
               checked={toggles.requireManagerApprovalForRefund}
               onCheckedChange={toggle("requireManagerApprovalForRefund")}
-              disabled={loading}
+              disabled={loading || !canEditSettings}
             />
           </div>
           <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
@@ -133,7 +139,7 @@ function Compliance() {
             <Switch
               checked={toggles.blockNonpermissibleItems}
               onCheckedChange={toggle("blockNonpermissibleItems")}
-              disabled={loading}
+              disabled={loading || !canEditSettings}
             />
           </div>
         </div>
@@ -141,14 +147,14 @@ function Compliance() {
           <Button
             className="gradient-primary text-primary-foreground border-0"
             onClick={saveToggles}
-            disabled={saving || loading}
+            disabled={saving || loading || !canEditSettings}
           >
             {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save toggles"}
           </Button>
         </div>
       </Card>
 
-      <Toolbar placeholder="Search SKU / rule…" primaryLabel="Add Rule" />
+      <Toolbar placeholder="Search SKU / rule…" primaryLabel={canCreateComplianceRule ? "Add Rule" : undefined} />
       <DataTable
         columns={[
           { key: "ruleName", label: "Rule Name" },

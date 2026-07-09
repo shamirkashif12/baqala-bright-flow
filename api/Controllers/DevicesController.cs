@@ -10,9 +10,22 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class DevicesController(BaqalaDbContext db) : ControllerBase
 {
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's devices —
+    // branchId was previously just an optional query param, so a branch_manager fetching devices
+    // with no filter (as the frontend does) saw every branch's device fleet.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+
         var query = db.Devices
             .Include(d => d.Branch)
             .Include(d => d.Terminal)

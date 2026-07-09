@@ -223,15 +223,19 @@ function Terminals() {
 
   const load = useCallback(() => {
     setLoading(true);
+    // .catch() per call so one failing endpoint doesn't wipe out the others' data —
+    // Promise.all otherwise rejects the whole batch and skips every setState below,
+    // which is exactly why a healthy /api/terminals response was rendering as
+    // "No terminals found" whenever a sibling call (e.g. /api/users) failed.
     Promise.all([
       api.getTerminals({
         branchId: br !== "all" ? br : undefined,
         status: st !== "all" ? st : undefined,
-      }),
-      api.getBranches(),
-      api.getUsers(),
+      }).catch(() => []),
+      api.getBranches().catch(() => []),
+      api.getUsers().catch(() => []),
       // Cashiers only ever see their own shifts — feeds view-sheet sync log
-      api.getShifts({ cashierId: user?.role === "cashier" ? user.id : undefined }),
+      api.getShifts({ cashierId: user?.role === "cashier" ? user.id : undefined }).catch(() => []),
     ])
       .then(([t, b, u, s]) => { setTerminals(t); setBranches(b); setUsers(u); setAllShifts(s); })
       .finally(() => setLoading(false));

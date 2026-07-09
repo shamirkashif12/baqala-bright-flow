@@ -420,7 +420,13 @@ function Roles() {
   const [permUser, setPermUser] = useState<User | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [data, usersData] = await Promise.all([api.getRoles(), api.getUsers()]);
+    // Each call is isolated with .catch() so one endpoint failing doesn't discard
+    // the other's already-successful response — Promise.all rejects the whole batch
+    // (and never calls setRoles/setUsers at all) if either fetch throws.
+    const [data, usersData] = await Promise.all([
+      api.getRoles().catch(() => []),
+      api.getUsers().catch(() => []),
+    ]);
     setRoles(data);
     setUsers(usersData);
     return data;

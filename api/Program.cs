@@ -138,6 +138,7 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchRemoveTestBranchesAsync(db);
     await DataSeeder.PatchRemoveNonCashierShiftsAsync(db);
     await DataSeeder.PatchCloseDuplicateOpenShiftsAsync(db);
+    await DataSeeder.PatchCloseLegacyDemoShiftsAsync(db);
     await DataSeeder.PatchBackfillShiftCheckInsAsync(db);
     await DataSeeder.PatchRemoveEmptyOrdersAsync(db);
     await DataSeeder.PatchRemoveQaTestDataAsync(db);
@@ -212,6 +213,22 @@ app.UseExceptionHandler(handler =>
             context.RequestServices.GetRequiredService<ILogger<Program>>()
                 .LogError(ex, "Unhandled exception [{ReferenceId}] on {Path}", referenceId, feature.Path);
         }
+
+        // This branch is a separate mini-pipeline that does NOT include CorsMiddleware
+        // (UseExceptionHandler re-executes only the delegate given here, not the rest of
+        // the app pipeline), and context.Response.Clear() above already wiped any CORS
+        // headers CorsMiddleware had written before the exception was thrown. Without
+        // this, every unhandled 500 shows up in the browser as a CORS failure
+        // (net::ERR_FAILED, no Access-Control-Allow-Origin) instead of a readable error,
+        // since the browser can't read a cross-origin response missing those headers.
+        var origin = context.Request.Headers.Origin.ToString();
+        if (!string.IsNullOrEmpty(origin))
+        {
+            context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+            context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+            context.Response.Headers["Vary"] = "Origin";
+        }
+
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsJsonAsync(new

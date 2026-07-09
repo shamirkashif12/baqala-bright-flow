@@ -1707,6 +1707,39 @@ public static class DataSeeder
         await db.SaveChangesAsync();
     }
 
+    // The one-time seed above (shiftFahad/shiftMohammed) opened shifts for the legacy demo
+    // identities khalid@mimoney.sa / nora@mimoney.sa on POS-01/POS-02 at Olaya and never closed
+    // them — unlike every other seeded shift, nothing in normal app usage ever logs in as those
+    // accounts again to close them. Left "open" forever, they permanently occupy those two
+    // terminals (ShiftsController.OpenShift refuses a second open shift per terminal), so the
+    // real charter accounts (khalid.cashier@baqala.sa / nora.cashier2@baqala.sa) run out of free
+    // terminals to check into even though nobody is actually using POS-01/POS-02. Scoped to these
+    // two known-stale seed accounts specifically, not "any shift open a while" — a real store can
+    // legitimately leave a shift open for a long time and this must never auto-close those.
+    public static async Task PatchCloseLegacyDemoShiftsAsync(BaqalaDbContext db)
+    {
+        // One query per email (matching PatchRemoveBootstrapAuditNoiseAsync) — the MySQL EF Core
+        // provider here can't assign a type mapping to a parameterized List<string> IN-list.
+        var legacyEmails = new[] { "khalid@mimoney.sa", "nora@mimoney.sa" };
+        var now = DateTime.UtcNow;
+        var changed = false;
+        foreach (var email in legacyEmails)
+        {
+            var staleShifts = await db.CashierShifts
+                .Where(s => s.Status == "open" && s.Cashier!.Email == email)
+                .ToListAsync();
+            foreach (var shift in staleShifts)
+            {
+                shift.Status = "closed";
+                shift.ClosedAt = now;
+                shift.ClosingAmount = shift.OpeningAmount + shift.CashSales;
+                shift.Variance = 0;
+                changed = true;
+            }
+        }
+        if (changed) await db.SaveChangesAsync();
+    }
+
     // Backfills a check-in record for every existing shift that predates ShiftsController.OpenShift
     // creating one automatically — otherwise the Attendance/Shift report's "Check-in" column shows
     // "—" for any shift opened before that change (it can only match a shift to an attendance record

@@ -10,9 +10,21 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class TerminalsController(BaqalaDbContext db) : ControllerBase
 {
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's terminals —
+    // same fix as DevicesController/OrdersController: branchId was only an optional query param.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+
         var query = db.Terminals.Include(t => t.Branch).Include(t => t.AssignedCashier).Include(t => t.Devices).AsQueryable();
         if (branchId.HasValue) query = query.Where(t => t.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);

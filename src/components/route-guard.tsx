@@ -82,7 +82,13 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/admin",               roles: ["tenant_admin"] },
   { url: "/categories",          roles: ["tenant_admin"] },
   { url: "/maintenance",         roles: ["tenant_admin"] },
-  { url: "/zatca-settings",      roles: ["tenant_admin"] },
+  // ZATCA Settings (CSID/cert status, VAT/CR registration) was hardcoded to
+  // tenant_admin only, orphaning it from the "Compliance" module permission that
+  // already gates /zatca and /compliance and that the backend's own settings PUT
+  // enforces (ComplianceController.UpsertSettings requires Compliance+Edit) — so a
+  // Finance User/Accountant granted Compliance access could never reach the page
+  // to use it. Module-gate it like its sibling Compliance routes instead.
+  { url: "/zatca-settings",      module: "Compliance" },
   { url: "/plans",               roles: ["tenant_admin"] },
   { url: "/mobile-pos",          roles: ["tenant_admin"] },
   { url: "/mpos-app",            roles: ["tenant_admin"] },

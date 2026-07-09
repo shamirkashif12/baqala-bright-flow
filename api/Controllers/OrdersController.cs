@@ -9,8 +9,19 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, ILogger<OrdersController> logger) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, ILogger<OrdersController> logger) : ControllerBase
 {
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's orders —
+    // mirrors ReportsController.GetCallerContext. Previously branchId was just an optional query
+    // param the frontend happened to pre-fill with the caller's branch; a direct API call with a
+    // different/no branchId returned every branch's orders regardless of role.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
@@ -19,6 +30,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+
         var query = db.Orders
             .Include(o => o.Branch)
             .Include(o => o.Cashier)
@@ -92,6 +106,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // Terminal binding: derive the shift/terminal from the cashier's actual open shift
         // server-side rather than trusting client input (which never sent these at all) —
         // otherwise a sale has no verifiable link back to the terminal/shift that rang it up.
+        // FR-SLS-05: only the Cashier role's cash drawer needs shift reconciliation — shifts
+        // are a Cashier-only concept in this system (see ShiftsController/CheckInDialog), so
+        // Branch Manager/Supervisor covering a register deliberately check out without one.
+        string? checkoutWithoutShiftRole = null;
         if (order.CashierId.HasValue)
         {
             // A cashier should only ever have one open shift (ShiftsController.OpenShift rejects
@@ -113,6 +131,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     .FirstOrDefaultAsync(u => u.Id == order.CashierId);
                 if (cashierUser?.Role?.Name == "Cashier")
                     return BadRequest(new { message = "No active shift found for this cashier — check in before processing sales." });
+
+                // Elevated-role override taken — the sale proceeds with no ShiftId to
+                // reconcile against, so log who did it (see audit entry after save below).
+                checkoutWithoutShiftRole = cashierUser?.Role?.Name ?? "Unknown role";
             }
         }
 
@@ -168,6 +190,18 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         }
 
         await db.SaveChangesAsync();
+
+        if (checkoutWithoutShiftRole is not null)
+        {
+            await audit.LogAsync(
+                action: "Checkout without active shift (elevated-role override)",
+                entityType: "Order",
+                entityId: order.Id,
+                userId: order.CashierId,
+                branchId: order.BranchId,
+                details: $"{checkoutWithoutShiftRole} completed order {order.OrderNumber} with no open shift — sale has no ShiftId to reconcile against.",
+                severity: "warning");
+        }
 
         // ── ZATCA Phase 2: auto-create + submit e-invoice ──────────────────────
         var zatcaSettings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == order.BranchId);
