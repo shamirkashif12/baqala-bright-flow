@@ -33,18 +33,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_discounts", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_discounts_branches_branch_id",
-                        column: x => x.branch_id,
-                        principalTable: "branches",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_discounts_products_product_id",
-                        column: x => x.product_id,
-                        principalTable: "products",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.SetNull);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -76,24 +64,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_offers", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_offers_branches_branch_id",
-                        column: x => x.branch_id,
-                        principalTable: "branches",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_offers_products_get_product_id",
-                        column: x => x.get_product_id,
-                        principalTable: "products",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_offers_products_trigger_product_id",
-                        column: x => x.trigger_product_id,
-                        principalTable: "products",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.SetNull);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -121,6 +91,37 @@ namespace BaqalaPOS.Api.Migrations
                 name: "IX_offers_trigger_product_id",
                 table: "offers",
                 column: "trigger_product_id");
+
+            // branches/products were created in InitialSchema — see MigrationCollationHelper.
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_discounts_branches_branch_id",
+                table: "discounts", column: "branch_id",
+                principalTable: "branches", principalColumn: "id",
+                onDelete: ReferentialAction.SetNull, nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_discounts_products_product_id",
+                table: "discounts", column: "product_id",
+                principalTable: "products", principalColumn: "id",
+                onDelete: ReferentialAction.SetNull, nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_offers_branches_branch_id",
+                table: "offers", column: "branch_id",
+                principalTable: "branches", principalColumn: "id",
+                onDelete: ReferentialAction.SetNull, nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_offers_products_get_product_id",
+                table: "offers", column: "get_product_id",
+                principalTable: "products", principalColumn: "id",
+                onDelete: ReferentialAction.SetNull, nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_offers_products_trigger_product_id",
+                table: "offers", column: "trigger_product_id",
+                principalTable: "products", principalColumn: "id",
+                onDelete: ReferentialAction.SetNull, nullable: true);
         }
 
         /// <inheritdoc />

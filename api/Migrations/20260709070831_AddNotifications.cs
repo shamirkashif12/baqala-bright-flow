@@ -11,6 +11,9 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // No inline FKs here — branches/users were created in an earlier migration, so their
+            // actual collation may not match whatever this table's new columns get from the
+            // server's ambient default. See MigrationCollationHelper for why.
             migrationBuilder.CreateTable(
                 name: "notifications",
                 columns: table => new
@@ -32,17 +35,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_notifications", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_notifications_branches_branch_id",
-                        column: x => x.branch_id,
-                        principalTable: "branches",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_notifications_users_user_id",
-                        column: x => x.user_id,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -55,6 +47,23 @@ namespace BaqalaPOS.Api.Migrations
                 name: "IX_notifications_user_id_is_read_created_at",
                 table: "notifications",
                 columns: new[] { "user_id", "is_read", "created_at" });
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_notifications_branches_branch_id",
+                table: "notifications",
+                column: "branch_id",
+                principalTable: "branches",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_notifications_users_user_id",
+                table: "notifications",
+                column: "user_id",
+                principalTable: "users",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
         }
 
         /// <inheritdoc />
