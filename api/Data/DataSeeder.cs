@@ -1795,7 +1795,10 @@ public static class DataSeeder
             .ToListAsync();
         if (badBatchIds.Count > 0)
         {
-            db.InventoryBatches.RemoveRange(db.InventoryBatches.Where(b => badBatchIds.Contains(b.Id)));
+            // Loop-per-id instead of badBatchIds.Contains(...) in the EF query —
+            // this MySQL provider fails to type-map a List<Guid> used inside Contains().
+            foreach (var id in badBatchIds)
+                db.InventoryBatches.RemoveRange(db.InventoryBatches.Where(b => b.Id == id));
             await db.SaveChangesAsync();
         }
 
