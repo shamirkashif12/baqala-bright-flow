@@ -105,8 +105,13 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
             .ToListAsync();
         if (otherBranchIds.Count == 0) return;
 
+        // Avoid `otherBranchIds.Contains(...)` in a SQL WHERE — the MySQL EF Core provider
+        // used here cannot assign a type mapping to a parameterized List<Guid> IN-list, which
+        // throws at query time (same constraint worked around throughout ReportsController).
+        // Filtering by "not this branch" instead needs no list parameter at all; the per-branch
+        // match below runs in-memory over the already-materialized rows.
         var otherSettings = await db.ZatcaSettings
-            .Where(z => otherBranchIds.Contains(z.BranchId))
+            .Where(z => z.BranchId != updatedBranchId)
             .ToListAsync();
 
         foreach (var branchId in otherBranchIds)
