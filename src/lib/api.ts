@@ -1,6 +1,9 @@
 export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
 export const PRINTER_API_KEY = "baqala_printer_api_url";
 export const DEFAULT_PRINTER_AGENT = "http://localhost:5008";
+// Fired on window after a successful api.notify() so NotificationsPopover can refetch
+// immediately instead of waiting for its poll interval.
+export const NOTIFICATION_CREATED_EVENT = "baqala:notification-created";
 
 export function getPrinterBase(): string {
   return (typeof window !== "undefined" ? localStorage.getItem(PRINTER_API_KEY) : null) ?? DEFAULT_PRINTER_AGENT;
@@ -152,7 +155,7 @@ export const api = {
     const q = new URLSearchParams({ ...(branchId && { branchId }), daysAhead: String(daysAhead) }).toString();
     return request<InventoryBatch[]>(`/api/inventory/batches/expiring?${q}`);
   },
-  receiveBatch: (data: Partial<InventoryBatch>) =>
+  receiveBatch: (data: ReceiveBatchPayload) =>
     request<InventoryBatch>("/api/inventory/batches", { method: "POST", body: JSON.stringify(data) }),
   adjustInventory: (data: AdjustInventoryPayload) =>
     request<{ id: string }>("/api/inventory/adjustments", { method: "POST", body: JSON.stringify(data) }),
@@ -389,6 +392,45 @@ export const api = {
       newValues: data.details ?? null,
     }) }),
 
+  // Notifications
+  getNotifications: (params?: { unreadOnly?: boolean; page?: number; pageSize?: number }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))).toString();
+    return request<{ total: number; page: number; pageSize: number; items: Notification[] }>(`/api/notifications${q ? `?${q}` : ""}`);
+  },
+  getUnreadNotificationCount: () =>
+    request<{ count: number }>("/api/notifications/unread-count"),
+  markNotificationRead: (id: string) =>
+    request<Notification>(`/api/notifications/${id}/read`, { method: "POST" }),
+  markAllNotificationsRead: () =>
+    request<{ success: boolean }>("/api/notifications/read-all", { method: "POST" }),
+  // Self-notify: logs a Bell notification for the current user. Fire-and-forget by design —
+  // callers should never await this or let it block/break the UI action it's attached to.
+  notify: (
+    category: string,
+    type: string,
+    title: string,
+    message: string,
+    opts?: { severity?: "info" | "warning" | "error"; entityType?: string; entityId?: string; branchId?: string }
+  ) =>
+    request<{ success: boolean }>("/api/notifications", {
+      method: "POST",
+      body: JSON.stringify({
+        category, type, title, message,
+        severity: opts?.severity ?? "info",
+        entityType: opts?.entityType,
+        entityId: opts?.entityId,
+        branchId: opts?.branchId,
+      }),
+    })
+      .then((res) => {
+        // Bell polls on an interval for notifications triggered by other users/the backend, but
+        // a self-notify is caused by the current user's own action right now — waiting out the
+        // poll interval to see it would read as "the notification never showed up".
+        if (typeof window !== "undefined") window.dispatchEvent(new Event(NOTIFICATION_CREATED_EVENT));
+        return res;
+      })
+      .catch(() => {}),
+
   // POS Settings
   getPosSettings: (branchId: string) =>
     request<PosSettingsRecord>(`/api/settings/pos/${branchId}`),
@@ -418,9 +460,9 @@ export const api = {
   },
 
   // Reports
-  getDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string }) =>
+  getDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; customerType?: string }) =>
     request<DailySalesReport>(`/api/reports/daily-sales${toQuery(params)}`),
-  exportDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; customerType?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/daily-sales/export${toQuery(params)}`),
 
   getMonthlySalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; comparePrevious?: boolean }) =>
@@ -448,9 +490,9 @@ export const api = {
   exportInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/inventory-snapshot/export${toQuery(params)}`),
 
-  getBranchSalesReport: (params?: { from?: string; to?: string; city?: string }) =>
+  getBranchSalesReport: (params?: { from?: string; to?: string; city?: string; customerType?: string }) =>
     request<BranchSalesReport>(`/api/reports/branch-sales${toQuery(params)}`),
-  exportBranchSalesReport: (params?: { from?: string; to?: string; city?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+  exportBranchSalesReport: (params?: { from?: string; to?: string; city?: string; customerType?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/branch-sales/export${toQuery(params)}`),
 
   getTerminalReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; status?: string }) =>
@@ -463,9 +505,9 @@ export const api = {
   exportProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; search?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/product-sales/export${toQuery(params)}`),
 
-  getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string }) =>
+  getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string }) =>
     request<CategoryPerformanceReport>(`/api/reports/category-performance${toQuery(params)}`),
-  exportCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+  exportCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/category-performance/export${toQuery(params)}`),
 
   getSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string }) =>
@@ -478,14 +520,14 @@ export const api = {
   exportWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; exportedBy?: string; includeCost?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/waste-spoilage/export${toQuery(params)}`),
 
-  getReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string }) =>
+  getReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; customerType?: string; reason?: string }) =>
     request<ReturnsRefundsReport>(`/api/reports/returns-refunds${toQuery(params)}`),
-  exportReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; customerType?: string; reason?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/returns-refunds/export${toQuery(params)}`),
 
-  getAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string }) =>
+  getAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string; roleId?: string; terminalId?: string; varianceThreshold?: number }) =>
     request<AttendanceShiftReport>(`/api/reports/attendance-shift${toQuery(params)}`),
-  exportAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportAttendanceShiftReport: (params?: { from?: string; to?: string; branchId?: string; staffId?: string; status?: string; roleId?: string; terminalId?: string; varianceThreshold?: number; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/attendance-shift/export${toQuery(params)}`),
 
   getAuditTrailReport: (params?: { from?: string; to?: string; userId?: string; module?: string; severity?: string; branchId?: string }) =>
@@ -705,10 +747,17 @@ export interface InventoryBatch {
   supplier?: { id: string; name: string };
 }
 
+export interface ReceiveBatchPayload {
+  productId: string; branchId: string; supplierId?: string;
+  quantity: number; purchaseCost?: number; expiryDate?: string;
+  batchNumber?: string; notes?: string; reorderLevel?: number;
+  damagedOrReturnReason?: string;
+}
+
 export interface Order {
   id: string; orderNumber: string; source: string; branchId: string;
   customerId?: string; cashierId?: string; subtotal: number; discountAmount: number;
-  taxAmount: number; totalAmount: number; paymentStatus: string; orderStatus: string;
+  taxAmount: number; customFeeAmount?: number; totalAmount: number; paymentStatus: string; orderStatus: string;
   createdAt: string; items?: OrderItem[]; payments?: OrderPayment[];
   branch?: { id: string; name: string };
   cashier?: { id: string; fullName: string };
@@ -886,6 +935,14 @@ export interface AuditLog {
   details?: string;   // legacy alias
   newValues?: string; // backend field — contains human-readable details
   branchId?: string;
+}
+
+export interface Notification {
+  id: string; userId: string; branchId?: string;
+  category: string; type: string; title: string; message: string;
+  severity: "info" | "warning" | "error";
+  entityType?: string; entityId?: string;
+  isRead: boolean; readAt?: string; createdAt: string;
 }
 
 export interface PosSettingsRecord {
@@ -1133,6 +1190,7 @@ export interface InventorySnapshotRow {
 export interface InventorySnapshotReport {
   kpis: { totalStockValue: number; skuCount: number; availableQty: number; reservedQty: number; outOfStockSkus: number; negativeStockExceptions: number };
   rows: InventorySnapshotRow[];
+  snapshotAt: string;
 }
 
 export interface BranchSalesRow {
@@ -1166,11 +1224,12 @@ export interface ProductSalesReport {
 
 export interface CategoryPerformanceRow {
   categoryId: string; categoryName: string; parentCategory: string; skuCount: number; unitsSold: number;
-  grossSales: number; discounts: number; returns: number; netSales: number; salesContributionPct: number;
+  grossSales: number; discounts: number; returns: number; returnsQty: number; returnRatePct: number;
+  netSales: number; salesContributionPct: number;
   cogs: number; grossProfit: number; marginPct: number | null;
 }
 export interface CategoryPerformanceReport {
-  kpis: { topCategory?: string; totalCategoriesSold: number; categoryDiscountValue: number };
+  kpis: { topCategory?: string; highestMarginCategory?: string; categoryReturnRatePct: number; totalCategoriesSold: number; categoryDiscountValue: number };
   rows: CategoryPerformanceRow[];
 }
 
@@ -1186,7 +1245,7 @@ export interface SupplierPerformanceReport {
 
 export interface WasteSpoilageRow {
   wasteId: string; dateTime: string; sku: string; productName: string; category: string; branch: string;
-  qty: number; reason: string; costValue: number; notes?: string;
+  qty: number; reason: string; costValue: number; notes?: string; batchNumber?: string; expiryDate?: string;
 }
 export interface WasteSpoilageReport {
   kpis: { totalWriteOffValue: number; expiredItems: number; damagedItems: number; topWasteCategory?: string; wastePctOfSales: number };
@@ -1194,8 +1253,9 @@ export interface WasteSpoilageReport {
 }
 
 export interface ReturnRefundRow {
-  returnId: string; originalOrderId: string; dateTime: string; branch: string; cashier: string; customer: string;
-  returnType: string; reason: string; refundMethod: string; refundAmount: number; vatReversal: number; status: string;
+  returnId: string; originalOrderId: string; invoiceNo: string; dateTime: string; branch: string; cashier: string; customer: string;
+  returnType: string; reason: string; skus: string; qty: number; refundMethod: string; refundAmount: number; vatReversal: number;
+  approvedBy: string; status: string;
 }
 export interface ReturnsRefundsReport {
   kpis: { returnCount: number; refundValue: number; vatReversed: number; topReturnReason?: string; highestReturnBranch?: string; refundsPending: number };

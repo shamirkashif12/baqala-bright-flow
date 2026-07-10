@@ -27,6 +27,12 @@ public class AuditLog
     [Column("new_values")]
     public string? NewValues { get; set; } // JSON string
 
+    // Longer free-text context that doesn't belong in Before/After Value (which should stay a
+    // short field-level snapshot) — e.g. why a shift variance exceeded the review threshold, or
+    // the reason a manager gave for closing another cashier's shift.
+    [Column("notes")]
+    public string? Notes { get; set; }
+
     [MaxLength(50), Column("ip_address")]
     public string? IpAddress { get; set; }
 

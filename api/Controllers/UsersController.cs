@@ -25,7 +25,10 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         var users = await query.Select(u => new
         {
             u.Id, u.Email, u.Username, u.FullName, u.FullNameAr, u.Phone,
-            u.RoleId, RoleName = u.Role.Name,
+            // Left-join Role like Branch below — a dangling RoleId (deleted/renamed role)
+            // would otherwise turn u.Role.Name into a required-navigation INNER JOIN and
+            // silently drop that user from the whole list instead of just showing no role.
+            u.RoleId, RoleName = u.Role != null ? u.Role.Name : null,
             u.BranchId, BranchName = u.Branch != null ? u.Branch.Name : null,
             u.Status, u.LastLogin, u.CreatedAt,
             HasCustomPermissions = db.UserPermissions.Any(p => p.UserId == u.Id)
@@ -40,7 +43,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
             .Select(u => new
             {
                 u.Id, u.Email, u.Username, u.FullName, u.FullNameAr, u.Phone,
-                u.RoleId, RoleName = u.Role.Name,
+                u.RoleId, RoleName = u.Role != null ? u.Role.Name : null,
                 u.BranchId, BranchName = u.Branch != null ? u.Branch.Name : null,
                 u.Status, u.LastLogin, u.CreatedAt,
                 HasCustomPermissions = db.UserPermissions.Any(p => p.UserId == u.Id)

@@ -82,7 +82,13 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/admin",               roles: ["tenant_admin"] },
   { url: "/categories",          roles: ["tenant_admin"] },
   { url: "/maintenance",         roles: ["tenant_admin"] },
-  { url: "/zatca-settings",      roles: ["tenant_admin"] },
+  // ZATCA Settings (CSID/cert status, VAT/CR registration) was hardcoded to
+  // tenant_admin only, orphaning it from the "Compliance" module permission that
+  // already gates /zatca and /compliance and that the backend's own settings PUT
+  // enforces (ComplianceController.UpsertSettings requires Compliance+Edit) — so a
+  // Finance User/Accountant granted Compliance access could never reach the page
+  // to use it. Module-gate it like its sibling Compliance routes instead.
+  { url: "/zatca-settings",      module: "Compliance" },
   { url: "/plans",               roles: ["tenant_admin"] },
   { url: "/mobile-pos",          roles: ["tenant_admin"] },
   { url: "/mpos-app",            roles: ["tenant_admin"] },
@@ -91,8 +97,9 @@ const ROUTE_RULES: RouteRule[] = [
 
 function isAllowed(rule: RouteRule, user: ReturnType<typeof useAuth>["user"]): boolean {
   if (!user) return false;
-  // tenant_admin (including super admin ahmadaziz) bypasses all restrictions
-  if (user.role === "tenant_admin") return true;
+  // No role bypass, including tenant_admin — module-gated routes are governed by the same
+  // RolePermissions matrix as everyone else; role-only rules below already list "tenant_admin"
+  // explicitly wherever it should still pass.
   // Explicit block takes priority over module permission
   if (rule.blockRoles?.includes(user.role as AppRole)) return false;
   if (rule.module) return user.permissions?.[rule.module]?.canView === true;
@@ -104,7 +111,6 @@ function isAllowed(rule: RouteRule, user: ReturnType<typeof useAuth>["user"]): b
  * Wraps the routed page content. If the signed-in user doesn't have permission
  * for the current path, redirects them to their role's default landing page
  * instead of showing an "Access Denied" screen.
- * tenant_admin always passes through regardless of the rule.
  */
 export function RouteGuard({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();

@@ -49,7 +49,13 @@ function RegisteredUsers() {
 
   const load = () => {
     setLoading(true);
-    Promise.all([api.getUsers(), api.getBranches(), api.getRoles()])
+    // .catch() per call so one failing endpoint doesn't wipe out the others' data —
+    // Promise.all otherwise rejects the whole batch and skips every setState below.
+    Promise.all([
+      api.getUsers().catch(() => []),
+      api.getBranches().catch(() => []),
+      api.getRoles().catch(() => []),
+    ])
       .then(([u, b, r]) => { setUsers(u); setBranches(b); setRoles(r); })
       .finally(() => setLoading(false));
   };
@@ -100,7 +106,7 @@ function RegisteredUsers() {
   const setS = (k: keyof UserForm) => (v: string) =>
     setForm(p => ({ ...p, [k]: v }));
 
-  const isTenantAdminRole = roles.find(r => r.id === form.roleId)?.name === "Tenant Administrator";
+  const isTenantAdminRole = roles.find(r => r.id === form.roleId)?.name === "Admin";
 
   const initials = (name: string) => name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const avatarColor = (name: string) => {

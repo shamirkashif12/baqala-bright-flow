@@ -420,7 +420,13 @@ function Roles() {
   const [permUser, setPermUser] = useState<User | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [data, usersData] = await Promise.all([api.getRoles(), api.getUsers()]);
+    // Each call is isolated with .catch() so one endpoint failing doesn't discard
+    // the other's already-successful response — Promise.all rejects the whole batch
+    // (and never calls setRoles/setUsers at all) if either fetch throws.
+    const [data, usersData] = await Promise.all([
+      api.getRoles().catch(() => []),
+      api.getUsers().catch(() => []),
+    ]);
     setRoles(data);
     setUsers(usersData);
     return data;
@@ -528,11 +534,6 @@ function Roles() {
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {active.isSystem ? "System role — permissions editable, name protected" : "Custom role"}
                       </p>
-                      {active.name === "Admin" && (
-                        <p className="text-xs text-amber-600 mt-1">
-                          Reference only — the Admin role always has full access regardless of the matrix below, so no one can be locked out of Roles &amp; Users management.
-                        </p>
-                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <Button size="sm" className="gradient-primary text-primary-foreground border-0 h-8" onClick={handleSave} disabled={saving || !dirty}>

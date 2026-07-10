@@ -34,28 +34,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_stock_discrepancies", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_stock_discrepancies_products_product_id",
-                        column: x => x.product_id,
-                        principalTable: "products",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_stock_discrepancies_purchase_orders_po_id",
-                        column: x => x.po_id,
-                        principalTable: "purchase_orders",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_stock_discrepancies_stock_transfers_transfer_id",
-                        column: x => x.transfer_id,
-                        principalTable: "stock_transfers",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_stock_discrepancies_suppliers_supplier_id",
-                        column: x => x.supplier_id,
-                        principalTable: "suppliers",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -81,26 +59,10 @@ namespace BaqalaPOS.Api.Migrations
                 {
                     table.PrimaryKey("PK_supplier_credit_notes", x => x.id);
                     table.ForeignKey(
-                        name: "FK_supplier_credit_notes_purchase_orders_po_id",
-                        column: x => x.po_id,
-                        principalTable: "purchase_orders",
-                        principalColumn: "id");
-                    table.ForeignKey(
                         name: "FK_supplier_credit_notes_stock_discrepancies_discrepancy_id",
                         column: x => x.discrepancy_id,
                         principalTable: "stock_discrepancies",
                         principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_supplier_credit_notes_stock_transfers_transfer_id",
-                        column: x => x.transfer_id,
-                        principalTable: "stock_transfers",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_supplier_credit_notes_suppliers_supplier_id",
-                        column: x => x.supplier_id,
-                        principalTable: "suppliers",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -143,6 +105,50 @@ namespace BaqalaPOS.Api.Migrations
                 name: "IX_supplier_credit_notes_transfer_id",
                 table: "supplier_credit_notes",
                 column: "transfer_id");
+
+            // products/suppliers were created in InitialSchema, purchase_orders/stock_transfers
+            // in AddSupplyChainModels — all earlier migrations. See MigrationCollationHelper.
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_discrepancies_products_product_id",
+                table: "stock_discrepancies", column: "product_id",
+                principalTable: "products", principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_discrepancies_purchase_orders_po_id",
+                table: "stock_discrepancies", column: "po_id",
+                principalTable: "purchase_orders", principalColumn: "id",
+                onDelete: ReferentialAction.Restrict, nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_discrepancies_stock_transfers_transfer_id",
+                table: "stock_discrepancies", column: "transfer_id",
+                principalTable: "stock_transfers", principalColumn: "id",
+                onDelete: ReferentialAction.Restrict, nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_discrepancies_suppliers_supplier_id",
+                table: "stock_discrepancies", column: "supplier_id",
+                principalTable: "suppliers", principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_supplier_credit_notes_purchase_orders_po_id",
+                table: "supplier_credit_notes", column: "po_id",
+                principalTable: "purchase_orders", principalColumn: "id",
+                onDelete: ReferentialAction.Restrict, nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_supplier_credit_notes_stock_transfers_transfer_id",
+                table: "supplier_credit_notes", column: "transfer_id",
+                principalTable: "stock_transfers", principalColumn: "id",
+                onDelete: ReferentialAction.Restrict, nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_supplier_credit_notes_suppliers_supplier_id",
+                table: "supplier_credit_notes", column: "supplier_id",
+                principalTable: "suppliers", principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
         }
 
         /// <inheritdoc />

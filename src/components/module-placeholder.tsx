@@ -95,6 +95,9 @@ export function StatusBadge({ status }: { status: string }) {
     resolved: "bg-success/15 text-success border-success/30",
     synced: "bg-success/15 text-success border-success/30",
     "in stock": "bg-success/15 text-success border-success/30",
+    open: "bg-success/15 text-success border-success/30",
+    ok: "bg-success/15 text-success border-success/30",
+    accepted: "bg-success/15 text-success border-success/30",
 
     pending: "bg-warning/20 text-warning-foreground border-warning/40",
     "near expiry": "bg-warning/20 text-warning-foreground border-warning/40",
@@ -102,6 +105,9 @@ export function StatusBadge({ status }: { status: string }) {
     low: "bg-warning/20 text-warning-foreground border-warning/40",
     "in progress": "bg-warning/20 text-warning-foreground border-warning/40",
     maintenance: "bg-warning/20 text-warning-foreground border-warning/40",
+    warning: "bg-warning/20 text-warning-foreground border-warning/40",
+    waste: "bg-warning/20 text-warning-foreground border-warning/40",
+    submitted: "bg-warning/20 text-warning-foreground border-warning/40",
 
     expired: "bg-destructive/15 text-destructive border-destructive/30",
     offline: "bg-destructive/15 text-destructive border-destructive/30",
@@ -109,6 +115,10 @@ export function StatusBadge({ status }: { status: string }) {
     critical: "bg-destructive/15 text-destructive border-destructive/30",
     blocked: "bg-destructive/15 text-destructive border-destructive/30",
     "out of stock": "bg-destructive/15 text-destructive border-destructive/30",
+    damage: "bg-destructive/15 text-destructive border-destructive/30",
+    negative: "bg-destructive/15 text-destructive border-destructive/30",
+    rejected: "bg-destructive/15 text-destructive border-destructive/30",
+    "missing excise config": "bg-destructive/15 text-destructive border-destructive/30",
 
     inactive: "bg-muted text-muted-foreground border-border",
     closed: "bg-muted text-muted-foreground border-border",
@@ -117,9 +127,9 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize", map[s] ?? "bg-primary/10 text-primary border-primary/20")}>
       <span className={cn("h-1.5 w-1.5 rounded-full",
-        ["active","online","paid","safe","resolved","synced","in stock"].includes(s) && "bg-success",
-        ["pending","near expiry","syncing","low","in progress","maintenance"].includes(s) && "bg-warning",
-        ["expired","offline","overdue","critical","blocked","out of stock"].includes(s) && "bg-destructive",
+        ["active","online","paid","safe","resolved","synced","in stock","open","ok","accepted"].includes(s) && "bg-success",
+        ["pending","near expiry","syncing","low","in progress","maintenance","warning","waste","submitted"].includes(s) && "bg-warning",
+        ["expired","offline","overdue","critical","blocked","out of stock","damage","negative","rejected","missing excise config"].includes(s) && "bg-destructive",
         ["inactive","closed","draft"].includes(s) && "bg-muted-foreground",
       )} />
       {status}

@@ -36,6 +36,7 @@ function DailySales() {
   const [cashierId, setCashierId] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState("all");
   const [orderStatus, setOrderStatus] = useState("all");
+  const [customerType, setCustomerType] = useState("all");
   const [data, setData] = useState<DailySalesReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [hideEmptyHours, setHideEmptyHours] = useState(true);
@@ -44,7 +45,7 @@ function DailySales() {
 
   useEffect(() => {
     api.getTerminals({ branchId: branchId !== "all" ? branchId : undefined }).then(setTerminals).catch(() => {});
-    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setCashiers(u.filter((x) => x.status === "active"))).catch(() => {});
+    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setCashiers(u.filter((x) => x.status === "active" && x.roleName === "Cashier"))).catch(() => {});
     setTerminalId("all");
     setCashierId("all");
   }, [branchId]);
@@ -58,11 +59,12 @@ function DailySales() {
       cashierId: cashierId !== "all" ? cashierId : undefined,
       paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
       orderStatus: orderStatus !== "all" ? orderStatus : undefined,
+      customerType: customerType !== "all" ? customerType : undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [date, branchId, terminalId, cashierId, paymentMethod, orderStatus]);
+  }, [date, branchId, terminalId, cashierId, paymentMethod, orderStatus, customerType]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -74,6 +76,7 @@ function DailySales() {
         cashierId: cashierId !== "all" ? cashierId : undefined,
         paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
         orderStatus: orderStatus !== "all" ? orderStatus : undefined,
+        customerType: customerType !== "all" ? customerType : undefined,
         exportedBy: user?.id, format,
       });
       downloadBlob(blob, `daily-sales-${date}.${format}`);
@@ -136,6 +139,14 @@ function DailySales() {
             <SelectItem value="delivered">Delivered</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={customerType} onValueChange={setCustomerType}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Customer Type" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Customers</SelectItem>
+            <SelectItem value="registered">Registered</SelectItem>
+            <SelectItem value="walk-in">Walk-in</SelectItem>
           </SelectContent>
         </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>

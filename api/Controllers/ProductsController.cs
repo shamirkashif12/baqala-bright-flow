@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ProductsController(BaqalaDbContext db) : ControllerBase
+public class ProductsController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? categoryId, [FromQuery] string? status, [FromQuery] string? search)
@@ -60,6 +61,7 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
     {
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
+        var previousPrice = product.BasePrice;
         product.Name = updated.Name;
         product.NameAr = updated.NameAr;
         product.CategoryId = updated.CategoryId;
@@ -77,6 +79,18 @@ public class ProductsController(BaqalaDbContext db) : ControllerBase
         product.ImageUrl = updated.ImageUrl;
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        if (previousPrice != product.BasePrice)
+        {
+            // Catalog is tenant-wide (not branch-specific), so this is a broadcast to every
+            // Manager/Admin rather than a single branch — unlike the shift/return/transfer
+            // triggers which scope to the branch the event happened in.
+            await notifications.NotifyRoleAsync(["Manager", "Admin"], null,
+                "Sales / Checkout", "Price Updated", "Price Updated",
+                $"Price updated for {product.Name}: SAR {previousPrice:F2} → SAR {product.BasePrice:F2}",
+                entityType: "Product", entityId: product.Id);
+        }
+
         return Ok(product);
     }
 

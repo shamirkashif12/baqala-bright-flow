@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type TaxReport as TaxReportData, type TaxReportRow, type ReportExportFormat } from "@/lib/api";
+import { api, type TaxReport as TaxReportData, type TaxReportRow, type ReportExportFormat, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -36,22 +36,29 @@ function TaxReportPage() {
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [cashierId, setCashierId] = useState("all");
+  const [cashiers, setCashiers] = useState<User[]>([]);
   const [data, setData] = useState<TaxReportData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setCashiers(u.filter((x) => x.status === "active" && x.roleName === "Cashier"))).catch(() => {});
+    setCashierId("all");
+  }, [branchId]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getTaxReport({ from, to, branchId: branchId !== "all" ? branchId : undefined })
+    api.getTaxReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, cashierId: cashierId !== "all" ? cashierId : undefined })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId]);
+  }, [from, to, branchId, cashierId]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportTaxReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, exportedBy: user?.id, format });
+      const blob = await api.exportTaxReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, cashierId: cashierId !== "all" ? cashierId : undefined, exportedBy: user?.id, format });
       downloadBlob(blob, `tax-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -85,6 +92,13 @@ function TaxReportPage() {
             </SelectContent>
           </Select>
         )}
+        <Select value={cashierId} onValueChange={setCashierId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Cashier" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Cashiers</SelectItem>
+            {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

@@ -19,8 +19,9 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 export const Route = createFileRoute("/_app/reports/inventory-snapshot")({ component: InventorySnapshot });
 
 function InventorySnapshot() {
-  const { user } = useAuth();
+  const { user, canViewModule } = useAuth();
   const { canExport } = usePermission("Reports");
+  const canViewCost = canViewModule("Accounting & Finance");
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
   const { branches } = useBranch();
 
@@ -72,11 +73,16 @@ function InventorySnapshot() {
             </SelectContent>
           </Select>
         )}
+        {data?.snapshotAt && (
+          <span className="text-xs text-muted-foreground">
+            Snapshot as of {new Date(data.snapshotAt).toLocaleString("en-SA", { dateStyle: "medium", timeStyle: "short" })}
+          </span>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
-        <MetricCard label="Total Stock Value" value={<><SARIcon />{fmt(kpis?.totalStockValue ?? 0)}</>} icon={Boxes} accent="primary" />
+        {canViewCost && <MetricCard label="Total Stock Value" value={<><SARIcon />{fmt(kpis?.totalStockValue ?? 0)}</>} icon={Boxes} accent="primary" />}
         <MetricCard label="SKU Count" value={String(kpis?.skuCount ?? 0)} icon={Package} />
         <MetricCard label="Available Qty" value={String(kpis?.availableQty ?? 0)} icon={PackageCheck} accent="success" />
         <MetricCard label="Reserved Qty" value={String(kpis?.reservedQty ?? 0)} icon={Package} accent="warning" />
@@ -84,18 +90,20 @@ function InventorySnapshot() {
         <MetricCard label="Negative Stock Exceptions" value={String(kpis?.negativeStockExceptions ?? 0)} icon={AlertTriangle} accent="destructive" />
       </div>
 
-      <Card className="p-6 border-border/60 shadow-card">
-        <h3 className="font-semibold mb-4">Stock Value by Branch</h3>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={branchValue}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="name" fontSize={11} />
-            <YAxis fontSize={11} />
-            <Tooltip formatter={(v: number) => fmtSAR(v)} />
-            <Bar dataKey="value" fill="var(--primary)" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </Card>
+      {canViewCost && (
+        <Card className="p-6 border-border/60 shadow-card">
+          <h3 className="font-semibold mb-4">Stock Value by Branch</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={branchValue}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="name" fontSize={11} />
+              <YAxis fontSize={11} />
+              <Tooltip formatter={(v: number) => fmtSAR(v)} />
+              <Bar dataKey="value" fill="var(--primary)" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
 
       {loading ? (
         <div className="text-muted-foreground text-sm py-4">Loading…</div>
@@ -110,11 +118,15 @@ function InventorySnapshot() {
             { key: "reservedQty", label: "Reserved Qty" },
             { key: "availableQty", label: "Available Qty" },
             { key: "reorderLevel", label: "Reorder Level" },
-            { key: "costPrice", label: "Cost Price", render: (r: InventorySnapshotRow) => <><SARIcon />{fmt(r.costPrice)}</> },
-            { key: "stockCostValue", label: "Stock Cost Value", render: (r: InventorySnapshotRow) => <span className="font-semibold"><SARIcon />{fmt(r.stockCostValue)}</span> },
+            ...(canViewCost
+              ? [
+                  { key: "costPrice", label: "Cost Price", render: (r: InventorySnapshotRow) => <><SARIcon />{fmt(r.costPrice)}</> },
+                  { key: "stockCostValue", label: "Stock Cost Value", render: (r: InventorySnapshotRow) => <span className="font-semibold"><SARIcon />{fmt(r.stockCostValue)}</span> },
+                ]
+              : []),
             { key: "retailValue", label: "Retail Value", render: (r: InventorySnapshotRow) => <><SARIcon />{fmt(r.retailValue)}</> },
             { key: "lastMovementDate", label: "Last Movement", render: (r: InventorySnapshotRow) => new Date(r.lastMovementDate).toLocaleDateString("en-SA") },
-            { key: "stockStatus", label: "Status", render: (r: InventorySnapshotRow) => <StatusBadge status={r.stockStatus === "negative" ? "critical" : r.stockStatus} /> },
+            { key: "stockStatus", label: "Status", render: (r: InventorySnapshotRow) => <StatusBadge status={r.stockStatus} /> },
           ]}
           rows={data?.rows ?? []}
         />

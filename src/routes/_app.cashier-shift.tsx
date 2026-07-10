@@ -298,6 +298,11 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
   const handleSubmit = async () => {
     if (!cashierId || !branchId) { setError("Cashier and branch are required."); return; }
     if (!terminalId) { setError("Terminal is required — pick the till you're checking into."); return; }
+    if (!openingAmount || parseFloat(openingAmount) <= 0) {
+      setError("Please enter opening cash to start shift.");
+      api.notify("Cashier Shift", "Opening Cash Missing", "Opening Cash Missing", "Please enter opening cash to start shift", { severity: "warning" });
+      return;
+    }
     setSubmitting(true); setError(null);
     try {
       await api.openShift({ cashierId, branchId, terminalId, openingAmount: parseFloat(openingAmount) || 0 });

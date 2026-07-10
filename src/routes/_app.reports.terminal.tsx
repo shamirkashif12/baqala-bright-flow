@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type TerminalReport as TerminalReportData, type TerminalReportRow, type ReportExportFormat } from "@/lib/api";
+import { api, type TerminalReport as TerminalReportData, type TerminalReportRow, type ReportExportFormat, type Terminal } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -32,23 +32,37 @@ function TerminalReportPage() {
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [terminalId, setTerminalId] = useState("all");
   const [status, setStatus] = useState("all");
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [data, setData] = useState<TerminalReportData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    api.getTerminals({ branchId: branchId !== "all" ? branchId : undefined }).then(setTerminals).catch(() => {});
+    setTerminalId("all");
+  }, [branchId]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getTerminalReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, status: status !== "all" ? status : undefined })
+    api.getTerminalReport({
+      from, to, branchId: branchId !== "all" ? branchId : undefined,
+      terminalId: terminalId !== "all" ? terminalId : undefined, status: status !== "all" ? status : undefined,
+    })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, status]);
+  }, [from, to, branchId, terminalId, status]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportTerminalReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, status: status !== "all" ? status : undefined, exportedBy: user?.id, format });
+      const blob = await api.exportTerminalReport({
+        from, to, branchId: branchId !== "all" ? branchId : undefined,
+        terminalId: terminalId !== "all" ? terminalId : undefined, status: status !== "all" ? status : undefined,
+        exportedBy: user?.id, format,
+      });
       downloadBlob(blob, `terminal-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -76,6 +90,13 @@ function TerminalReportPage() {
             </SelectContent>
           </Select>
         )}
+        <Select value={terminalId} onValueChange={setTerminalId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Terminal" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Terminals</SelectItem>
+            {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>

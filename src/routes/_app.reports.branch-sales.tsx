@@ -3,11 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
+import { useBranch } from "@/lib/branch-context";
 import { api, type BranchSalesReport, type BranchSalesRow, type ReportExportFormat } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
@@ -29,26 +31,33 @@ function BranchSales() {
   const { user, canViewModule } = useAuth();
   const { canExport } = usePermission("Reports");
   const canViewMargin = canViewModule("Accounting & Finance");
+  const { branches } = useBranch();
+  const cities = Array.from(new Set(branches.map((b) => b.city).filter((c): c is string => !!c))).sort();
+  // Non-admins are branch-scoped server-side regardless of this filter (they only ever see
+  // their own branch's row), and useBranch() only returns their one branch — a City dropdown
+  // with a single option is confusing, not useful, so only tenant_admin sees it at all.
+  const canFilterByCity = user?.role === "tenant_admin";
 
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
-  const [city, setCity] = useState("");
+  const [city, setCity] = useState("all");
+  const [customerType, setCustomerType] = useState("all");
   const [data, setData] = useState<BranchSalesReport | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getBranchSalesReport({ from, to, city: city || undefined })
+    api.getBranchSalesReport({ from, to, city: city !== "all" ? city : undefined, customerType: customerType !== "all" ? customerType : undefined })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, city]);
+  }, [from, to, city, customerType]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportBranchSalesReport({ from, to, city: city || undefined, exportedBy: user?.id, includeMargin: canViewMargin, format });
+      const blob = await api.exportBranchSalesReport({ from, to, city: city !== "all" ? city : undefined, customerType: customerType !== "all" ? customerType : undefined, exportedBy: user?.id, includeMargin: canViewMargin, format });
       downloadBlob(blob, `branch-sales-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -67,7 +76,23 @@ function BranchSales() {
           <span className="text-xs text-muted-foreground">–</span>
           <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
         </div>
-        <Input placeholder="Filter by city" value={city} onChange={(e) => setCity(e.target.value)} className="h-9 w-40" />
+        {canFilterByCity && (
+          <Select value={city} onValueChange={setCity}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="City" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Cities</SelectItem>
+              {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        <Select value={customerType} onValueChange={setCustomerType}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Customer Type" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Customers</SelectItem>
+            <SelectItem value="registered">Registered</SelectItem>
+            <SelectItem value="walk-in">Walk-in</SelectItem>
+          </SelectContent>
+        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

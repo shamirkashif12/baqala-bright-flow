@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService) : ControllerBase
+public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService, INotificationService notifications) : ControllerBase
 {
     // ─── ZATCA Invoices ───────────────────────────────────────────────────────
     [HttpGet("zatca/invoices")]
@@ -187,6 +187,13 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         try
         {
             var invoice = await zatcaService.SubmitInvoiceAsync(id);
+            if (invoice.ZatcaStatus == "rejected")
+            {
+                await notifications.NotifyRoleAsync(["Admin"], invoice.BranchId,
+                    "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
+                    $"ZATCA submission failed for invoice {invoice.InvoiceNumber ?? invoice.Id.ToString()}",
+                    severity: "error", entityType: "ZatcaInvoice", entityId: invoice.Id);
+            }
             return Ok(invoice);
         }
         catch (InvalidOperationException ex)

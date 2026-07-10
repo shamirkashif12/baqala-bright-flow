@@ -156,7 +156,10 @@ namespace BaqalaPOS.Api.Migrations
                 table: "coupons",
                 column: "created_by");
 
-            migrationBuilder.AddForeignKey(
+            // `created_by` is a pre-existing column from InitialSchema, only now getting its
+            // first FK — its collation may not match `users.id`'s if the server's ambient
+            // default drifted between the two migrations. See MigrationCollationHelper.
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_coupons_users_created_by",
                 table: "coupons",
                 column: "created_by",
@@ -164,7 +167,7 @@ namespace BaqalaPOS.Api.Migrations
                 principalColumn: "id",
                 onDelete: ReferentialAction.Restrict);
 
-            migrationBuilder.AddForeignKey(
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_tax_fee_rules_users_created_by",
                 table: "tax_fee_rules",
                 column: "created_by",

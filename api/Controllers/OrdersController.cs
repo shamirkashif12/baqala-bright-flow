@@ -9,8 +9,19 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, ILogger<OrdersController> logger) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, ILogger<OrdersController> logger) : ControllerBase
 {
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's orders —
+    // mirrors ReportsController.GetCallerContext. Previously branchId was just an optional query
+    // param the frontend happened to pre-fill with the caller's branch; a direct API call with a
+    // different/no branchId returned every branch's orders regardless of role.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
@@ -19,6 +30,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+
         var query = db.Orders
             .Include(o => o.Branch)
             .Include(o => o.Cashier)
@@ -92,11 +106,21 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // Terminal binding: derive the shift/terminal from the cashier's actual open shift
         // server-side rather than trusting client input (which never sent these at all) —
         // otherwise a sale has no verifiable link back to the terminal/shift that rang it up.
+        // FR-SLS-05: only the Cashier role's cash drawer needs shift reconciliation — shifts
+        // are a Cashier-only concept in this system (see ShiftsController/CheckInDialog), so
+        // Branch Manager/Supervisor covering a register deliberately check out without one.
         CashierShift? activeShift = null;
+        string? checkoutWithoutShiftRole = null;
         if (order.CashierId.HasValue)
         {
+            // A cashier should only ever have one open shift (ShiftsController.OpenShift rejects
+            // opening a second one) — ordered defensively in case stale data still has more than
+            // one, so a sale always binds to whichever shift the cashier most recently checked
+            // into rather than an arbitrary row the database happens to return first.
             activeShift = await db.CashierShifts
-                .FirstOrDefaultAsync(s => s.CashierId == order.CashierId && s.Status == "open");
+                .Where(s => s.CashierId == order.CashierId && s.Status == "open")
+                .OrderByDescending(s => s.OpenedAt)
+                .FirstOrDefaultAsync();
             if (activeShift is not null)
             {
                 order.ShiftId = activeShift.Id;
@@ -108,13 +132,27 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     .FirstOrDefaultAsync(u => u.Id == order.CashierId);
                 if (cashierUser?.Role?.Name == "Cashier")
                     return BadRequest(new { message = "No active shift found for this cashier — check in before processing sales." });
+
+                // Elevated-role override taken — the sale proceeds with no ShiftId to
+                // reconcile against, so log who did it (see audit entry after save below).
+                checkoutWithoutShiftRole = cashierUser?.Role?.Name ?? "Unknown role";
             }
         }
 
         order.Id = Guid.NewGuid();
         order.OrderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
         order.CreatedAt = order.UpdatedAt = DateTime.UtcNow;
-        foreach (var item in order.Items) { item.Id = Guid.NewGuid(); item.OrderId = order.Id; }
+        foreach (var item in order.Items)
+        {
+            item.Id = Guid.NewGuid();
+            item.OrderId = order.Id;
+            // The POS checkout only ever sends a single order-level tax total, never a per-line
+            // figure, so OrderItem.TaxAmount would otherwise stay at its 0 default forever — which
+            // is why the Tax Report (which sums this column) always read 0. Allocate the order's
+            // tax proportionally by each item's share of the subtotal.
+            if (item.TaxAmount == 0 && order.Subtotal > 0)
+                item.TaxAmount = Math.Round(item.TotalPrice / order.Subtotal * order.TaxAmount, 2);
+        }
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
         db.Orders.Add(order);
 
@@ -173,6 +211,18 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
         await db.SaveChangesAsync();
 
+        if (checkoutWithoutShiftRole is not null)
+        {
+            await audit.LogAsync(
+                action: "Checkout without active shift (elevated-role override)",
+                entityType: "Order",
+                entityId: order.Id,
+                userId: order.CashierId,
+                branchId: order.BranchId,
+                details: $"{checkoutWithoutShiftRole} completed order {order.OrderNumber} with no open shift — sale has no ShiftId to reconcile against.",
+                severity: "warning");
+        }
+
         // ── ZATCA Phase 2: auto-create + submit e-invoice ──────────────────────
         var zatcaSettings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == order.BranchId);
         if (zatcaSettings is { Phase2Enabled: true, OnboardingStatus: "production_ready" })
@@ -211,11 +261,35 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 var submitted = await zatcaService.SubmitInvoiceAsync(zatcaInvoice.Id);
                 order.ZatcaQrCode = submitted.QrCodeValue;
                 order.ZatcaInvoiceStatus = submitted.ZatcaStatus;
+
+                if (submitted.ZatcaStatus == "rejected")
+                {
+                    await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                        "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
+                        $"ZATCA submission failed for Invoice {order.OrderNumber}",
+                        severity: "error", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                }
+                else
+                {
+                    await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                        "ZATCA", "ZATCA Invoice Generated", "ZATCA Invoice Generated",
+                        "ZATCA invoice generated",
+                        entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                }
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "ZATCA submission failed for invoice {InvoiceId}", zatcaInvoice.Id);
                 order.ZatcaInvoiceStatus = "pending";
+
+                await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                    "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
+                    $"ZATCA submission failed for Invoice {order.OrderNumber}",
+                    severity: "error", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                    "ZATCA", "ZATCA Pending Queue", "ZATCA Pending Queue",
+                    $"Invoice {order.OrderNumber} pending ZATCA sync",
+                    severity: "warning", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
             }
         }
 
@@ -251,6 +325,14 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                         CreatedAt = DateTime.UtcNow,
                     });
                     await db.SaveChangesAsync();
+
+                    if (order.CashierId.HasValue)
+                    {
+                        await notifications.NotifyUserAsync(order.CashierId.Value,
+                            "Customer / Loyalty", "Loyalty Points Earned", "Loyalty Points Earned",
+                            $"Customer earned {earned:F0} loyalty points",
+                            entityType: "Order", entityId: order.Id, branchId: order.BranchId);
+                    }
                 }
 
                 // ── Send invoice email ─────────────────────────────────────────

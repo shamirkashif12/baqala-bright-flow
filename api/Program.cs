@@ -2,6 +2,7 @@ using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -43,8 +44,11 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(new BaqalaPOS.Api.Services.UtcDateTimeConverter());
     });
 
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddHostedService<OperationalAlertsService>();
 
 // ─── ZATCA (Saudi e-invoicing Phase 2) ───────────────────────────────────────
 builder.Services.AddDataProtection()
@@ -73,6 +77,14 @@ var jwtAudience = jwtSection["Audience"];
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        // Without this, ASP.NET Core silently renames short inbound claim types to long
+        // ClaimTypes.* URIs (a well-known JwtBearer default) — e.g. the "role" claim
+        // AuthController issues becomes unreadable via User.FindFirst("role"), which is
+        // exactly how every RequirePermissionAttribute/GetCallerContext check in this API
+        // reads it. Left enabled, role != "tenant_admin" is always true (role reads as
+        // null), so every "skip this check for tenant_admin" and every branch-scoping
+        // override silently never fires for anyone, admin or not.
+        options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = !string.IsNullOrEmpty(jwtIssuer),
@@ -127,8 +139,16 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchWarehouseRegionsAsync(db);
     await DataSeeder.PatchRemoveTestBranchesAsync(db);
     await DataSeeder.PatchRemoveNonCashierShiftsAsync(db);
+    await DataSeeder.PatchCloseDuplicateOpenShiftsAsync(db);
+    await DataSeeder.PatchCloseLegacyDemoShiftsAsync(db);
+    await DataSeeder.PatchBackfillShiftCheckInsAsync(db);
     await DataSeeder.PatchRemoveEmptyOrdersAsync(db);
     await DataSeeder.PatchRemoveQaTestDataAsync(db);
+    await DataSeeder.PatchRemoveBootstrapAuditNoiseAsync(db);
+    await DataSeeder.PatchBackfillEmptyAuditSeverityAsync(db);
+    await DataSeeder.PatchTrimExportAuditNoiseAsync(db);
+    await DataSeeder.PatchBackfillMissingOrderTaxAsync(db);
+    await DataSeeder.PatchEnsureFreshDemoDataAsync(db);
     app.MapOpenApi();
 }
 
@@ -178,6 +198,48 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
     app.UseHttpsRedirection();
 }
+
+// ─── Global exception handler (FRD §5.5: "no technical stack trace in UI") ──────
+// ASP.NET Core's Development-mode default (the Developer Exception Page) returns the
+// full exception including stack trace as the response body, which frontend toasts
+// were displaying verbatim. Log the full exception server-side; return a short,
+// reference-tagged message to the client in every environment.
+app.UseExceptionHandler(handler =>
+{
+    handler.Run(async context =>
+    {
+        var feature = context.Features.Get<IExceptionHandlerFeature>();
+        var referenceId = Guid.NewGuid().ToString()[..8];
+        if (feature?.Error is { } ex)
+        {
+            context.RequestServices.GetRequiredService<ILogger<Program>>()
+                .LogError(ex, "Unhandled exception [{ReferenceId}] on {Path}", referenceId, feature.Path);
+        }
+
+        // This branch is a separate mini-pipeline that does NOT include CorsMiddleware
+        // (UseExceptionHandler re-executes only the delegate given here, not the rest of
+        // the app pipeline), and context.Response.Clear() above already wiped any CORS
+        // headers CorsMiddleware had written before the exception was thrown. Without
+        // this, every unhandled 500 shows up in the browser as a CORS failure
+        // (net::ERR_FAILED, no Access-Control-Allow-Origin) instead of a readable error,
+        // since the browser can't read a cross-origin response missing those headers.
+        var origin = context.Request.Headers.Origin.ToString();
+        if (!string.IsNullOrEmpty(origin))
+        {
+            context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+            context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+            context.Response.Headers["Vary"] = "Origin";
+        }
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = $"Something went wrong on our end. Reference: {referenceId}",
+            referenceId,
+        });
+    });
+});
 
 app.UseCors("FrontendPolicy");
 app.UseAuthentication();

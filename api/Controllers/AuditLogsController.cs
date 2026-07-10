@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -9,6 +10,20 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class AuditLogsController(BaqalaDbContext db) : ControllerBase
 {
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's events.
+    // Rows with no BranchId (tenant-level actions — role/settings changes, etc.) are excluded
+    // for scoped roles rather than shown, since they aren't "this branch's" activity either.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
+    // Previously ungated — any authenticated user of any role could call this directly and page
+    // through the entire tenant audit trail, independent of whether their role's "Audit Logs"
+    // permission (checked client-side by ModuleGate) even granted View.
+    [RequirePermission("Audit Logs", PermAction.View)]
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? userId,
@@ -25,6 +40,10 @@ public class AuditLogsController(BaqalaDbContext db) : ControllerBase
         if (entityId.HasValue) query = query.Where(a => a.EntityId == entityId);
         if (from.HasValue) query = query.Where(a => a.CreatedAt >= from);
         if (to.HasValue) query = query.Where(a => a.CreatedAt <= to);
+
+        var (role, branchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && branchId.HasValue)
+            query = query.Where(a => a.BranchId == branchId);
 
         var total = await query.CountAsync();
         var items = await query

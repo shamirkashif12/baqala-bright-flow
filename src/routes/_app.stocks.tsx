@@ -698,6 +698,12 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
     try {
       await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "damage", reason: form.reason || undefined, adjustedBy: user?.id });
       toast.success("Wastage recorded");
+      const productName = products.find(p => p.id === form.productId)?.name ?? "item";
+      const isExpiry = /expir/i.test(form.reason);
+      api.notify("Wastage / Spoilage", isExpiry ? "Expired Stock Write-Off" : "Wastage Recorded",
+        isExpiry ? "Expired Stock Write-Off" : "Wastage Recorded",
+        isExpiry ? "Expired stock write-off completed" : `Wastage recorded for ${productName}`,
+        { entityType: "Product", entityId: form.productId, branchId: form.branchId });
       setOpen(false);
       setForm({ productId: "", branchId: "", quantity: "", reason: "" });
       onDone();

@@ -1,4 +1,4 @@
-import { Bell, Search, Languages, HelpCircle, ChevronDown, Building2, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw } from "lucide-react";
+import { Bell, Search, Languages, HelpCircle, ChevronDown, Building2, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { useState, useEffect } from "react";
-import { api, type Terminal as TerminalRecord } from "@/lib/api";
+import { api, NOTIFICATION_CREATED_EVENT } from "@/lib/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +22,11 @@ import {
 } from "@/components/ui/popover";
 
 // ── Notifications popover ──────────────────────────────────────────────────────
+// Every item here is a real /api/notifications row — there is no separate client-computed
+// "live status" layer anymore. Low stock, out-of-stock, near-expiry, expired, and offline
+// terminals are all scanned and persisted server-side (see api/Services/OperationalAlertsService
+// and the discrete triggers wired into the relevant controllers), so this component's only job
+// is fetch/display/mark-read against that single source of truth.
 type NotifItem = {
   id: string;
   tone: "info" | "warning" | "error";
@@ -29,6 +34,7 @@ type NotifItem = {
   title: string;
   body: string;
   relTime: string;
+  isRead: boolean;
 };
 
 const TONE_DOT: Record<NotifItem["tone"], string> = {
@@ -37,84 +43,81 @@ const TONE_DOT: Record<NotifItem["tone"], string> = {
   error: "bg-destructive",
 };
 
+const CATEGORY_ICON: Record<string, React.FC<{ className?: string }>> = {
+  "Sales / Checkout": ShoppingCart,
+  "Payment": CreditCard,
+  "Cashier Shift": AlertTriangle,
+  "Inventory": Package,
+  "Expiry / Perishable": Clock,
+  "Wastage / Spoilage": Trash2,
+  "Returns": RotateCcw,
+  "Discounts / Coupons": Tag,
+  "Customer / Loyalty": UserIcon,
+  "Suppliers / Purchase Orders": Truck,
+  "Tax / Fees / Tobacco": FileText,
+  "ZATCA": FileText,
+  "Hardware / Devices": Printer,
+  "Terminal / Branch": WifiOff,
+  "Admin / Security": ShieldCheck,
+};
+
+function relativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function NotificationsPopover() {
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotifItem[]>([]);
-  const [read, setRead] = useState(false);
+  const [persisted, setPersisted] = useState<NotifItem[]>([]);
+
+  const loadPersisted = () => {
+    api.getNotifications({ pageSize: 20 }).then(res => {
+      setPersisted(res.items.map(n => ({
+        id: n.id,
+        tone: n.severity,
+        Icon: CATEGORY_ICON[n.category] ?? AlertTriangle,
+        title: n.title,
+        body: n.message,
+        relTime: relativeTime(n.createdAt),
+        persisted: true,
+        isRead: n.isRead,
+      })));
+    }).catch(() => {});
+  };
 
   useEffect(() => {
-    Promise.all([
-      api.getDashboard().catch(() => null),
-      api.getReturns({ status: "pending" }).catch(() => []),
-      api.getTerminals().catch(() => []),
-    ]).then(([dashboard, pendingReturns, terminals]) => {
-      const items: NotifItem[] = [];
-
-      const lowStockItems = dashboard?.inventory?.lowStockItems ?? [];
-      if (lowStockItems.length > 0) {
-        const branch = lowStockItems[0]?.branch ?? "";
-        items.push({
-          id: "low-stock",
-          tone: "warning",
-          Icon: Package,
-          title: `${lowStockItems.length} low-stock item${lowStockItems.length !== 1 ? "s" : ""}`,
-          body: `${lowStockItems.slice(0, 2).map((i: { name: string }) => i.name).join(", ")}${lowStockItems.length > 2 ? ` +${lowStockItems.length - 2} more` : ""}${branch ? ` · ${branch}` : ""}`,
-          relTime: "just now",
-        });
-      }
-
-      const outOfStock = dashboard?.inventory?.outOfStockCount ?? 0;
-      if (outOfStock > 0) {
-        items.push({
-          id: "out-of-stock",
-          tone: "error",
-          Icon: AlertTriangle,
-          title: `${outOfStock} SKU${outOfStock !== 1 ? "s" : ""} out of stock`,
-          body: "Replenishment required across branches",
-          relTime: "just now",
-        });
-      }
-
-      if (pendingReturns.length > 0) {
-        items.push({
-          id: "pending-returns",
-          tone: "info",
-          Icon: RotateCcw,
-          title: `${pendingReturns.length} pending return${pendingReturns.length !== 1 ? "s" : ""}`,
-          body: "Customer returns require your review and approval",
-          relTime: "just now",
-        });
-      }
-
-      const offlineTerminals = (terminals as TerminalRecord[]).filter(t => t.status === "offline");
-      if (offlineTerminals.length > 0) {
-        items.push({
-          id: "offline-terminals",
-          tone: "error",
-          Icon: WifiOff,
-          title: `${offlineTerminals.length} terminal${offlineTerminals.length !== 1 ? "s" : ""} offline`,
-          body: offlineTerminals.slice(0, 2).map(t => `${t.terminalCode}${t.branch?.name ? ` (${t.branch.name})` : ""}`).join(", "),
-          relTime: "just now",
-        });
-      }
-
-      const expiringCount = dashboard?.inventory?.expiringCount ?? 0;
-      if (expiringCount > 0) {
-        items.push({
-          id: "expiring",
-          tone: "warning",
-          Icon: AlertTriangle,
-          title: `${expiringCount} item${expiringCount !== 1 ? "s" : ""} expiring soon`,
-          body: "Products expiring within 30 days — check inventory",
-          relTime: "just now",
-        });
-      }
-
-      setNotifications(items);
-    });
+    loadPersisted();
+    const interval = setInterval(loadPersisted, 30000);
+    // Backend/other-user-triggered notifications rely on the poll above, but a notification
+    // caused by this user's own action (scan, checkout, hold, ...) should show up right away
+    // rather than waiting up to 30s — api.notify() fires this event once its POST resolves.
+    const onCreated = () => loadPersisted();
+    window.addEventListener(NOTIFICATION_CREATED_EVENT, onCreated);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener(NOTIFICATION_CREATED_EVENT, onCreated);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const unread = read ? 0 : notifications.length;
+  // Read notifications drop out of the list entirely rather than staying dimmed — once you've
+  // acted on/dismissed something, there's no reason for it to keep taking up space here.
+  const notifications = persisted.filter(n => !n.isRead);
+  const unread = notifications.length;
+
+  const markAllRead = () => {
+    api.markAllNotificationsRead().then(loadPersisted).catch(() => {});
+  };
+
+  const markOneRead = (item: NotifItem) => {
+    setPersisted(prev => prev.map(n => n.id === item.id ? { ...n, isRead: true } : n));
+    api.markNotificationRead(item.id).catch(() => {});
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -140,7 +143,12 @@ function NotificationsPopover() {
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">All clear — no alerts right now</div>
           ) : (
             notifications.map(n => (
-              <div key={n.id} className="flex items-start gap-3 px-4 py-3">
+              <button
+                key={n.id}
+                onClick={() => markOneRead(n)}
+                title="Click to mark as read"
+                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+              >
                 <div className={`h-2 w-2 rounded-full mt-2 shrink-0 ${TONE_DOT[n.tone]}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium">{n.title}</p>
@@ -148,12 +156,12 @@ function NotificationsPopover() {
                   <p className="text-[10px] text-muted-foreground/70 mt-1">{n.relTime}</p>
                 </div>
                 <n.Icon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${n.tone === "error" ? "text-destructive" : n.tone === "warning" ? "text-amber-500" : "text-primary"}`} />
-              </div>
+              </button>
             ))
           )}
         </div>
         <div className="flex items-center justify-center py-2.5 border-t border-border/60">
-          <button onClick={() => setRead(true)} className="flex items-center gap-1.5 text-xs text-primary hover:underline">
+          <button onClick={markAllRead} className="flex items-center gap-1.5 text-xs text-primary hover:underline">
             <CheckCheck className="h-3.5 w-3.5" /> Mark all as read
           </button>
         </div>

@@ -1,4 +1,5 @@
 using BaqalaPOS.Api.Data;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +12,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvironment env) : ControllerBase
+public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvironment env, IAuditService audit) : ControllerBase
 {
     [AllowAnonymous]
     [HttpPost("login")]
@@ -31,7 +32,12 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
                                    && u.Status == "active");
 
         if (user is null)
+        {
+            // Previously never logged at all, so the Audit Trail's "Failed Logins" KPI (and the
+            // FRD's "Auditor reviews failed login attempts" scenario) had nothing to show.
+            await audit.LogAsync("login_failed", "User", null, null, null, $"{{\"email\":\"{emailNorm}\"}}", "warning");
             return Unauthorized(new { message = "Invalid email or password." });
+        }
 
         user.LastLogin = DateTime.UtcNow;
         user.UpdatedAt = DateTime.UtcNow;

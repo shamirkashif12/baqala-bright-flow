@@ -72,7 +72,7 @@ function AuditTrail() {
         <Select value={severity} onValueChange={setSeverity}>
           <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Severity" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Any Severity</SelectItem>
+            <SelectItem value="all">All Severity</SelectItem>
             <SelectItem value="info">Info</SelectItem>
             <SelectItem value="warning">Warning</SelectItem>
             <SelectItem value="critical">Critical</SelectItem>
@@ -81,7 +81,7 @@ function AuditTrail() {
         <Select value={module} onValueChange={setModule}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Module" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Any Module</SelectItem>
+            <SelectItem value="all">All Modules</SelectItem>
             <SelectItem value="Report">Report</SelectItem>
             <SelectItem value="Order">Order</SelectItem>
             <SelectItem value="User">User</SelectItem>
@@ -123,13 +123,15 @@ function AuditTrail() {
           columns={[
             { key: "eventId", label: "Event ID" },
             { key: "timestamp", label: "Timestamp", render: (r: AuditTrailRow) => new Date(r.timestamp).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" }) },
-            { key: "severity", label: "Severity", render: (r: AuditTrailRow) => <StatusBadge status={r.severity === "critical" ? "critical" : r.severity === "warning" ? "pending" : "active"} /> },
+            { key: "severity", label: "Severity", render: (r: AuditTrailRow) => <StatusBadge status={r.severity} /> },
             { key: "module", label: "Module" },
             { key: "action", label: "Action" },
             { key: "user", label: "User" },
             { key: "role", label: "Role" },
             { key: "branch", label: "Branch" },
             { key: "ipAddress", label: "IP Address" },
+            { key: "beforeValue", label: "Before Value", render: (r: AuditTrailRow) => <span className="block max-w-[220px] whitespace-normal break-words font-mono text-xs">{r.beforeValue ?? "—"}</span> },
+            { key: "afterValue", label: "After Value", render: (r: AuditTrailRow) => <span className="block max-w-[220px] whitespace-normal break-words font-mono text-xs">{r.afterValue ?? "—"}</span> },
           ]}
           rows={data?.rows ?? []}
         />

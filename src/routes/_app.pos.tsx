@@ -16,12 +16,22 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter } from "@/lib/api";
+import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter, type InventoryBatch } from "@/lib/api";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
+
+// Distinguishes a printer-connectivity failure from a generic print error using the message
+// text — qz.ts/api.printReceipt don't return a structured error code, just a message string.
+function notifyPrintFailure(msg: string) {
+  const offline = /offline|not detected|no printer|not connected/i.test(msg);
+  api.notify("Hardware / Devices", offline ? "Receipt Printer Offline" : "Receipt Print Failed",
+    offline ? "Receipt Printer Offline" : "Receipt Print Failed",
+    offline ? "Receipt printer is offline" : "Receipt print failed",
+    { severity: "error" });
+}
 
 // ─── ZATCA Phase 2 TLV QR encoder ────────────────────────────────────────────
 // Encodes seller name, VAT number, timestamp, total, VAT amount per ZATCA spec.
@@ -133,7 +143,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
         try {
           await api.adjustInventory({ productId: selected.id, branchId, quantity: qty, adjustmentType: "receive", reason: "Quick stock-in from POS" });
         } catch {
-          await api.receiveBatch({ productId: selected.id, branchId, quantity: qty, remainingQuantity: qty, receivedDate: new Date().toISOString(), status: "active" });
+          await api.receiveBatch({ productId: selected.id, branchId, quantity: qty });
         }
         onStockAdded(selected, currentStock + qty);
       } else {
@@ -730,9 +740,30 @@ function POS() {
       })
       .catch(() => {});
 
-    // Block sale of expired items — mirrors the "Block sale of expired items" rule.
-    api.getBatches({ branchId: branch.id, status: "expired" })
-      .then((batches) => setExpiredProductIds(new Set(batches.map((b) => b.productId))))
+    // Block sale of expired items — mirrors the "Block sale of expired items" rule exactly as
+    // OrdersController.Create enforces it server-side: a product is blocked once it has at least
+    // one batch on record but NONE with remaining stock that isn't past its expiry date. Filtering
+    // by the stored `status === "expired"` field alone (as this used to) misses batches whose
+    // Status was set once at receiving time and never updated as the real ExpiryDate passed — the
+    // backend catches those anyway and only rejects at checkout, so the product looked selectable
+    // here until payment was confirmed. Fetching all batches and computing live avoids that gap.
+    api.getBatches({ branchId: branch.id })
+      .then((batches) => {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const byProduct = new Map<string, InventoryBatch[]>();
+        for (const b of batches) {
+          if (!byProduct.has(b.productId)) byProduct.set(b.productId, []);
+          byProduct.get(b.productId)!.push(b);
+        }
+        const blocked = new Set<string>();
+        for (const [productId, productBatches] of byProduct) {
+          const hasSellable = productBatches.some((b) =>
+            b.remainingQuantity > 0 && b.status !== "expired" &&
+            (!b.expiryDate || new Date(b.expiryDate) >= today));
+          if (!hasSellable) blocked.add(productId);
+        }
+        setExpiredProductIds(blocked);
+      })
       .catch(() => {});
 
     // Unscoped by branch — a cashier can only ever hold one open shift at a
@@ -797,6 +828,8 @@ function POS() {
               description: `"${p.name}" has an expired batch and is blocked from sale.`,
               duration: 4000,
             });
+            api.notify("Expiry / Perishable", "Expired Item Scanned", "Expired Item Scanned",
+              `This batch is expired and cannot be sold: ${p.name}`, { severity: "warning", entityType: "Product", entityId: p.id });
             return;
           }
           const stock = stockMapRef.current.get(p.id) ?? 0;
@@ -813,17 +846,25 @@ function POS() {
               description: `"${p.name}" has ${stock} unit(s) available at this branch.`,
               duration: 4000,
             });
+            if (stock === 0) {
+              api.notify("Inventory", "Out of Stock", "Out of Stock", `Out of stock: ${p.name}`,
+                { severity: "error", entityType: "Product", entityId: p.id });
+            }
             return;
           }
           setFlashSku(p.sku);
           setTimeout(() => setFlashSku(null), 600);
           setScanFlash(true);
           setTimeout(() => setScanFlash(false), 800);
+          api.notify("Sales / Checkout", "Item Added to Cart", "Item Added to Cart", `Product added: ${p.name}`,
+            { entityType: "Product", entityId: p.id });
         } else {
           toast.error(`Barcode "${code}" not found`, {
             description: "This product is not in inventory. Add it first via Inventory → Add Product.",
             duration: 4000,
           });
+          api.notify("Sales / Checkout", "Product Not Found", "Product Not Found",
+            `Product not found for scanned barcode "${code}"`, { severity: "warning" });
         }
         return;
       }
@@ -1009,6 +1050,8 @@ function POS() {
         description: `"${p.name}" has an expired batch and is blocked from sale.`,
         duration: 4000,
       });
+      api.notify("Expiry / Perishable", "Expired Item Scanned", "Expired Item Scanned",
+        `This batch is expired and cannot be sold: ${p.name}`, { severity: "warning", entityType: "Product", entityId: p.id });
       return;
     }
     const stock = stockMap.get(p.id) ?? 0;
@@ -1019,6 +1062,10 @@ function POS() {
         description: `"${p.name}" has ${stock} unit(s) available at this branch.`,
         duration: 4000,
       });
+      if (stock === 0) {
+        api.notify("Inventory", "Out of Stock", "Out of Stock", `Out of stock: ${p.name}`,
+          { severity: "error", entityType: "Product", entityId: p.id });
+      }
       return;
     }
     setCart((c) => {
@@ -1031,6 +1078,8 @@ function POS() {
     setQuery("");
     setShowResults(false);
     searchRef.current?.focus();
+    api.notify("Sales / Checkout", "Item Added to Cart", "Item Added to Cart", `Product added: ${p.name}`,
+      { entityType: "Product", entityId: p.id });
   };
 
   // ─── Search / barcode scan ─────────────────────────────────────────────────────
@@ -1090,6 +1139,8 @@ function POS() {
           description: "This product is not in inventory. Add it first via Inventory → Add Product.",
           duration: 4000,
         });
+        api.notify("Sales / Checkout", "Product Not Found", "Product Not Found",
+          `Product not found for scanned barcode "${trimmed}"`, { severity: "warning" });
         setQuery("");
       }
     }
@@ -1104,6 +1155,8 @@ function POS() {
     try {
       const c = await api.getCustomerByPhone(customerPhone.trim());
       setCustomer(c);
+      api.notify("Customer / Loyalty", "Customer Added", "Customer Added", "Customer attached successfully",
+        { entityType: "Customer", entityId: c.id });
     } catch {
       setCustomer(null);
       setCustomerNotFound(true);
@@ -1121,6 +1174,8 @@ function POS() {
       setCustomer(c);
       setCustomerNotFound(false);
       setNewCustomerName("");
+      api.notify("Customer / Loyalty", "Customer Added", "Customer Added", "Customer attached successfully",
+        { entityType: "Customer", entityId: c.id });
     } catch {
       // leave not-found state so cashier can retry
     } finally {
@@ -1136,9 +1191,13 @@ function POS() {
     try {
       const coupon = await api.validateCoupon(couponCode.trim().toUpperCase());
       setAppliedCoupon(coupon);
+      api.notify("Discounts / Coupons", "Coupon Applied", "Coupon Applied", `Coupon applied: ${coupon.code}`,
+        { entityType: "Coupon", entityId: coupon.id });
     } catch {
       setCouponError("Invalid or expired coupon");
       setAppliedCoupon(null);
+      api.notify("Discounts / Coupons", "Invalid Coupon", "Invalid Coupon", "Coupon is invalid or expired",
+        { severity: "warning" });
     } finally {
       setCouponLoading(false);
     }
@@ -1153,15 +1212,17 @@ function POS() {
   // ─── Hold / reopen ─────────────────────────────────────────────────────────────
   const hold = () => {
     if (!cart.length) return;
+    const holdId = `HOLD-${String(16 + holds.length).padStart(3, "0")}`;
     setHolds((h) => [
       {
-        id: `HOLD-${String(16 + h.length).padStart(3, "0")}`,
+        id: holdId,
         items: cart,
         total,
         at: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
       },
       ...h,
     ]);
+    api.notify("Sales / Checkout", "Bill On Hold", "Bill On Hold", `Bill ${holdId} has been held`);
     resetSale();
   };
 
@@ -1170,10 +1231,11 @@ function POS() {
     if (!h) return;
     setCart(h.items);
     setHolds((hs) => hs.filter((x) => x.id !== id));
-
+    api.notify("Sales / Checkout", "Held Bill Recalled", "Held Bill Recalled", `Held bill ${id} recalled`);
   };
 
   const resetSale = () => {
+    api.notify("Sales / Checkout", "New Sale Started", "New Sale Started", "New sale started");
     setCart([]);
     setAppliedCoupon(null);
     setCouponCode("");
@@ -1192,9 +1254,12 @@ function POS() {
   ) => {
     if (!branch) throw new Error("No branch configured");
     if (!cart.length) throw new Error("Cart is empty");
-    // A shift's cash drawer is a Cashier-only concept — only cashiers need one
-    // open to sell. Admins/managers covering a register aren't reconciling a
-    // till, so they can ring up a sale without checking in first.
+    // FR-SLS-05 (deliberate exception, not a gap): a shift's cash drawer is a
+    // Cashier-only concept — the check-in flow (CheckInDialog) only ever lists
+    // Cashier-role accounts, so Branch Manager/Supervisor structurally can't open
+    // one. They can ring up a sale covering a register without checking in first;
+    // the server records this override in the audit log since the resulting order
+    // has no ShiftId to reconcile against (see OrdersController.Create).
     if (user?.role === "cashier" && !activeShift)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
 
@@ -1211,7 +1276,10 @@ function POS() {
       cashierId: activeShift?.cashierId ?? user?.id,
       subtotal,
       discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal,
-      taxAmount: vatAmount + customFeeTotal,
+      // Kept distinct (previously lumped together as taxAmount) so the Tax and Fee reports,
+      // which read these as two separate figures, don't see fees miscounted as VAT.
+      taxAmount: vatAmount,
+      customFeeAmount: customFeeTotal,
       totalAmount: total,
       paymentStatus: "paid",
       orderStatus: "completed",
@@ -1223,6 +1291,21 @@ function POS() {
       })),
       payments,
     });
+
+    api.notify("Payment", "Payment Successful", "Payment Successful", `Payment successful for Invoice ${order.orderNumber}`,
+      { entityType: "Order", entityId: order.id });
+    if (tobaccoExcise > 0) {
+      api.notify("Tax / Fees / Tobacco", "Tobacco Excise Applied", "Tobacco Excise Applied", "Tobacco excise applied",
+        { entityType: "Order", entityId: order.id });
+    }
+    if (customFeeTotal > 0) {
+      api.notify("Tax / Fees / Tobacco", "Custom Fee Applied", "Custom Fee Applied", "Custom fee applied to item",
+        { entityType: "Order", entityId: order.id });
+    }
+    if (triggeredOffers.length > 0) {
+      api.notify("Discounts / Coupons", "Promotion Applied", "Promotion Applied",
+        triggeredOffers.map(o => o.name).join(", "), { entityType: "Order", entityId: order.id });
+    }
 
     // Snapshot invoice data before cart is cleared
     const invoiceData: InvoiceSnapshot = {
@@ -1277,6 +1360,7 @@ function POS() {
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : "Print failed";
         toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
+        notifyPrintFailure(msg);
       });
   }, [invOpen, invoice]);
 
@@ -1932,6 +2016,7 @@ function POS() {
                   .catch((err: unknown) => {
                     const msg = err instanceof Error ? err.message : "Print failed";
                     toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
+                    notifyPrintFailure(msg);
                   });
               }}
             >
@@ -2024,10 +2109,16 @@ function PaymentDialog({
         await onCharge(tab);
       }
       setStatus("success");
+      if (tab === "cash") {
+        api.notify("Payment", "Cash Payment Completed", "Cash Payment Completed",
+          `Cash received. Change: SAR ${change.toFixed(2)}`);
+      }
       setTimeout(onDone, 800);
     } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : "Payment failed. Please try again.");
+      const msg = e instanceof Error ? e.message : "Payment failed. Please try again.";
+      setErrorMsg(msg);
       setStatus("failed");
+      api.notify("Payment", "Payment Failed", "Payment Failed", msg, { severity: "error" });
     }
   };
 
