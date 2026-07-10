@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type TobaccoExciseReport as TobaccoExciseData, type TobaccoExciseRow, type ReportExportFormat } from "@/lib/api";
+import { api, type TobaccoExciseReport as TobaccoExciseData, type TobaccoExciseRow, type ReportExportFormat, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -36,22 +36,40 @@ function TobaccoExcise() {
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [cashierId, setCashierId] = useState("all");
+  const [cashiers, setCashiers] = useState<User[]>([]);
   const [data, setData] = useState<TobaccoExciseData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined })
+      // Any staff role can ring up a sale (Branch Manager/Supervisor covering a register), not
+      // just the Cashier role — filtering this list to literal "Cashier" meant a manager's own
+      // sales could never be selected here, even though "All Employees" clearly included them.
+      .then((u) => setCashiers(u.filter((x) => x.status === "active")))
+      .catch(() => {});
+    setCashierId("all");
+  }, [branchId]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getTobaccoExciseReport({ from, to, branchId: branchId !== "all" ? branchId : undefined })
+    api.getTobaccoExciseReport({
+      from, to, branchId: branchId !== "all" ? branchId : undefined,
+      cashierId: cashierId !== "all" ? cashierId : undefined,
+    })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId]);
+  }, [from, to, branchId, cashierId]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportTobaccoExciseReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, exportedBy: user?.id, format });
+      const blob = await api.exportTobaccoExciseReport({
+        from, to, branchId: branchId !== "all" ? branchId : undefined,
+        cashierId: cashierId !== "all" ? cashierId : undefined, exportedBy: user?.id, format,
+      });
       downloadBlob(blob, `tobacco-excise-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -79,6 +97,13 @@ function TobaccoExcise() {
             </SelectContent>
           </Select>
         )}
+        <Select value={cashierId} onValueChange={setCashierId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -115,6 +140,7 @@ function TobaccoExcise() {
             { key: "brand", label: "Brand" },
             { key: "category", label: "Category" },
             { key: "branch", label: "Branch" },
+            { key: "employee", label: "Employee" },
             { key: "unitsSold", label: "Units Sold" },
             { key: "taxablePrice", label: "Taxable Price", render: (r: TobaccoExciseRow) => <><SARIcon />{fmt(r.taxablePrice)}</> },
             { key: "exciseRate", label: "Excise Rate", render: (r: TobaccoExciseRow) => `${r.exciseRate}%` },

@@ -16,6 +16,7 @@ import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { api, type TaxFeeRule, type Product } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
+import { useAuth } from "@/lib/auth";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/tax-fees")({ component: TaxFees });
@@ -57,6 +58,7 @@ function feeTypeDisplay(r: TaxFeeRule): { type: string; value: React.ReactNode }
 
 function TaxFees() {
   const { canCreate, canEdit } = usePermission("Tax & Fees");
+  const { canViewModule } = useAuth();
   const [rules, setRules] = useState<TaxFeeRule[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
@@ -163,9 +165,11 @@ function TaxFees() {
             </h3>
             <p className="text-xs text-muted-foreground">Live preview of price + VAT + tobacco excise + custom fees</p>
           </div>
-          <Link to="/zatca-settings" className="text-xs text-primary font-semibold hover:underline flex items-center gap-1">
-            <LinkIcon className="h-3 w-3" /> Open ZATCA settings →
-          </Link>
+          {canViewModule("Compliance") && (
+            <Link to="/zatca-settings" className="text-xs text-primary font-semibold hover:underline flex items-center gap-1">
+              <LinkIcon className="h-3 w-3" /> Open ZATCA settings →
+            </Link>
+          )}
         </div>
         <div className="grid sm:grid-cols-5 gap-2 text-sm">
           {(() => {

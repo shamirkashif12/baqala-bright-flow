@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Gift, Pencil, Power, Trash2, Plus, Tag, PercentCircle, TicketCheck, Zap, X, ChevronDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { api, type Coupon, type Discount, type Offer, type Product, type Branch } from "@/lib/api";
+import { api, type Coupon, type Discount, type Offer, type Product, type Branch, type Category } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
 
@@ -21,6 +21,15 @@ export const Route = createFileRoute("/_app/coupons")({ component: Coupons });
 
 const today = new Date().toISOString().slice(0, 10);
 const nextMonth = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
+// A coupon/discount/offer whose end date is already in the past is dead on arrival — the end
+// date must be today or later, and can't be before its own start date. Used by all three forms
+// below (Coupons, Discounts, Offers), which each carry the same start/end validity period.
+function validityRangeError(startDate: string, endDate: string): string | null {
+  if (endDate < today) return "End date cannot be in the past.";
+  if (startDate && endDate < startDate) return "End date must be on or after the start date.";
+  return null;
+}
 
 function FL({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -59,6 +68,44 @@ function BranchMultiSelect({ branches, value, onChange }: {
           <div className="border-t border-border/50 mt-1 pt-1">
             <button type="button" className="w-full text-xs text-muted-foreground px-2 py-1 hover:bg-muted rounded text-left" onClick={() => onChange([])}>
               Clear selection
+            </button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Reused by the Discounts tab's "Exclude products" field (category/all/branch-scoped discounts
+// carving out specific SKUs) — same interaction pattern as BranchMultiSelect above.
+function ProductMultiSelect({ products, value, onChange }: {
+  products: Product[]; value: string[]; onChange: (ids: string[]) => void;
+}) {
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter(x => x !== id) : [...value, id]);
+  const label = value.length === 0 ? "No exclusions"
+    : value.length === 1 ? (products.find(p => p.id === value[0])?.name ?? "1 product")
+    : `${value.length} products excluded`;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" className="h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-left flex items-center justify-between hover:bg-accent/40 transition-colors">
+          <span className={value.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
+          <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="p-1 w-64 max-h-64 overflow-y-auto">
+        {products.map(p => (
+          <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer select-none" onClick={() => toggle(p.id)}>
+            <div className={`h-3.5 w-3.5 rounded border flex items-center justify-center shrink-0 ${value.includes(p.id) ? "bg-primary border-primary" : "border-input"}`}>
+              {value.includes(p.id) && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
+            </div>
+            <span className="text-sm truncate">{p.name} <span className="text-muted-foreground text-xs">— {p.sku}</span></span>
+          </div>
+        ))}
+        {value.length > 0 && (
+          <div className="border-t border-border/50 mt-1 pt-1">
+            <button type="button" className="w-full text-xs text-muted-foreground px-2 py-1 hover:bg-muted rounded text-left" onClick={() => onChange([])}>
+              Clear exclusions
             </button>
           </div>
         )}
@@ -125,6 +172,8 @@ function CouponsTab() {
 
   const handleSave = async () => {
     if (!form.name || !form.code) { toast.error("Name and code are required"); return; }
+    const rangeError = validityRangeError(form.startDate, form.endDate);
+    if (rangeError) { toast.error(rangeError); return; }
     setSaving(true);
     try {
       const payload = { name: form.name, code: form.code.toUpperCase(), type: form.type, value: Number(form.value), startDate: form.startDate, endDate: form.endDate, usageLimit: form.usageLimit ? Number(form.usageLimit) : undefined, status: form.status };
@@ -233,7 +282,7 @@ function CouponsTab() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <FL label="Start Date"><Input type="date" value={form.startDate} onChange={set("startDate")} className="h-9" /></FL>
-              <FL label="End Date"><Input type="date" value={form.endDate} onChange={set("endDate")} className="h-9" /></FL>
+              <FL label="End Date"><Input type="date" value={form.endDate} onChange={set("endDate")} min={form.startDate || today} className="h-9" /></FL>
             </div>
             <FL label="Usage Limit (blank = unlimited)"><Input type="number" value={form.usageLimit} onChange={set("usageLimit")} className="h-9" placeholder="∞" /></FL>
             {editItem && (
@@ -261,18 +310,21 @@ function CouponsTab() {
 // ─── Discounts Tab ────────────────────────────────────────────────────────────
 
 type DiscountForm = {
-  name: string; appliesTo: string; productId: string; branchIds: string[];
+  name: string; appliesTo: string; productId: string; categoryId: string; branchIds: string[];
   discountType: string; value: string; isActive: boolean; startDate: string; endDate: string;
+  excludedProductIds: string[];
 };
 const emptyDiscount: DiscountForm = {
-  name: "", appliesTo: "all", productId: "", branchIds: [],
+  name: "", appliesTo: "all", productId: "", categoryId: "", branchIds: [],
   discountType: "percentage", value: "", isActive: true, startDate: today, endDate: nextMonth,
+  excludedProductIds: [],
 };
 
 function DiscountsTab() {
   const { canCreate, canEdit, canDelete } = usePermission("Coupons");
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -284,30 +336,39 @@ function DiscountsTab() {
   useEffect(() => {
     load();
     api.getProducts().then(setProducts).catch(() => {});
+    api.getCategories().then(setCategories).catch(() => {});
     api.getBranches().then(setBranches).catch(() => {});
   }, []);
 
   const openCreate = () => { setEditItem(null); setForm(emptyDiscount); setSheetOpen(true); };
   const openEdit = (d: Discount) => {
     setEditItem(d);
+    let excludedProductIds: string[] = [];
+    try { const parsed = d.excludedProductIdsJson ? JSON.parse(d.excludedProductIdsJson) : []; if (Array.isArray(parsed)) excludedProductIds = parsed; } catch { /* ignore */ }
     setForm({
-      name: d.name, appliesTo: d.appliesTo, productId: d.productId ?? "",
+      name: d.name, appliesTo: d.appliesTo, productId: d.productId ?? "", categoryId: d.categoryId ?? "",
       branchIds: d.branchId ? [d.branchId] : [], discountType: d.discountType, value: String(d.value),
       isActive: d.isActive, startDate: d.startDate?.slice(0, 10) ?? today, endDate: d.endDate?.slice(0, 10) ?? nextMonth,
+      excludedProductIds,
     });
     setSheetOpen(true);
   };
 
   const handleSave = async () => {
     if (!form.name) { toast.error("Name is required"); return; }
+    if (form.appliesTo === "category" && !form.categoryId) { toast.error("Select a category"); return; }
+    const rangeError = validityRangeError(form.startDate, form.endDate);
+    if (rangeError) { toast.error(rangeError); return; }
     setSaving(true);
     try {
       const base = {
         name: form.name, appliesTo: form.appliesTo,
         productId: form.appliesTo === "product" ? form.productId || undefined : undefined,
+        categoryId: form.appliesTo === "category" ? form.categoryId || undefined : undefined,
         discountType: form.discountType, value: Number(form.value),
         isActive: form.isActive,
         startDate: form.startDate || undefined, endDate: form.endDate || undefined,
+        excludedProductIds: form.excludedProductIds.length > 0 ? form.excludedProductIds : undefined,
       };
       if (editItem) {
         const branchId = form.appliesTo === "branch" ? (form.branchIds[0] || undefined) : undefined;
@@ -337,7 +398,7 @@ function DiscountsTab() {
   const appliesToLabel = (d: Discount) => {
     if (d.appliesTo === "product") return d.product?.name ?? "Specific product";
     if (d.appliesTo === "branch") return d.branch?.name ?? "Specific branch";
-    if (d.appliesTo === "category") return "Specific category";
+    if (d.appliesTo === "category") return categories.find(c => c.id === d.categoryId)?.name ?? "Specific category";
     return "All branches";
   };
 
@@ -426,9 +487,25 @@ function DiscountsTab() {
                 </Select>
               </FL>
             )}
+            {form.appliesTo === "category" && (
+              <FL label="Category">
+                <Select value={form.categoryId} onValueChange={setS("categoryId")}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>
+                    {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FL>
+            )}
             {form.appliesTo === "branch" && (
               <FL label="Branches (select one or more)">
                 <BranchMultiSelect branches={branches} value={form.branchIds} onChange={ids => setForm(p => ({ ...p, branchIds: ids }))} />
+              </FL>
+            )}
+
+            {(form.appliesTo === "all" || form.appliesTo === "branch" || form.appliesTo === "category") && (
+              <FL label="Exclude specific products (optional)">
+                <ProductMultiSelect products={products} value={form.excludedProductIds} onChange={ids => setForm(p => ({ ...p, excludedProductIds: ids }))} />
               </FL>
             )}
 
@@ -446,7 +523,7 @@ function DiscountsTab() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <FL label="Start Date"><Input type="date" value={form.startDate} onChange={set("startDate")} className="h-9" /></FL>
-              <FL label="End Date"><Input type="date" value={form.endDate} onChange={set("endDate")} className="h-9" /></FL>
+              <FL label="End Date"><Input type="date" value={form.endDate} onChange={set("endDate")} min={form.startDate || today} className="h-9" /></FL>
             </div>
             <div className="flex items-center gap-2">
               <input type="checkbox" id="isActive" checked={form.isActive} onChange={e => setForm(p => ({ ...p, isActive: e.target.checked }))} className="h-4 w-4 accent-primary" />
@@ -543,6 +620,8 @@ function OffersTab() {
     if (form.offerType === "combo" && comboIds.length < 2) {
       toast.error("Combo requires at least 2 products"); return;
     }
+    const rangeError = validityRangeError(form.startDate, form.endDate);
+    if (rangeError) { toast.error(rangeError); return; }
     setSaving(true);
     try {
       const itemsDesc = form.offerType === "combo"
@@ -883,7 +962,7 @@ function OffersTab() {
             </FL>
             <div className="grid grid-cols-2 gap-3">
               <FL label="Start Date"><Input type="date" value={form.startDate} onChange={set("startDate")} className="h-9" /></FL>
-              <FL label="End Date"><Input type="date" value={form.endDate} onChange={set("endDate")} className="h-9" /></FL>
+              <FL label="End Date"><Input type="date" value={form.endDate} onChange={set("endDate")} min={form.startDate || today} className="h-9" /></FL>
             </div>
             <FL label="Usage Limit (blank = unlimited)">
               <Input type="number" value={form.usageLimit} onChange={set("usageLimit")} className="h-9" placeholder="∞" />

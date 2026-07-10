@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260710122553_RemoveOrderApprovalWorkflow")]
+    partial class RemoveOrderApprovalWorkflow
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1554,21 +1557,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("id");
 
-                    b.Property<int>("AdjustmentCapPerDayUnits")
-                        .HasColumnType("int")
-                        .HasColumnName("adjustment_cap_per_day_units");
-
                     b.Property<bool>("AllowCustomerViewPaidShifts")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("allow_customer_view_paid_shifts");
-
-                    b.Property<bool>("AllowExpiredItemReturn")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("allow_expired_item_return");
-
-                    b.Property<bool>("AllowExpiryManagerOverride")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("allow_expiry_manager_override");
 
                     b.Property<bool>("AllowNearExpirySale")
                         .HasColumnType("tinyint(1)")
@@ -1578,45 +1569,21 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("allow_negative_stock");
 
-                    b.Property<bool>("AllowRefundReversalWithin24h")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("allow_refund_reversal_within_24h");
-
-                    b.Property<bool>("AllowReturnsWithoutReceipt")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("allow_returns_without_receipt");
-
                     b.Property<bool>("AllowTerminalSwitching")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("allow_terminal_switching");
-
-                    b.Property<bool>("AutoCheckoutOnShiftEnd")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("auto_checkout_on_shift_end");
 
                     b.Property<bool>("AutoLockIdle")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("auto_lock_idle");
 
-                    b.Property<bool>("AutoMoveExpiredToBlockedList")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("auto_move_expired_to_blocked_list");
-
                     b.Property<bool>("AutoPrintReceipt")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("auto_print_receipt");
 
-                    b.Property<bool>("AutoPrintRefundReceipt")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("auto_print_refund_receipt");
-
                     b.Property<bool>("BeepOnScan")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("beep_on_scan");
-
-                    b.Property<bool>("BlockAgeRestrictedAtCashier")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("block_age_restricted_at_cashier");
 
                     b.Property<bool>("BlockExpiredItems")
                         .HasColumnType("tinyint(1)")
@@ -1629,10 +1596,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<Guid>("BranchId")
                         .HasColumnType("char(36)")
                         .HasColumnName("branch_id");
-
-                    b.Property<decimal>("CashVarianceThresholdSar")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("cash_variance_threshold_sar");
 
                     b.Property<bool>("CashierCanCoupon")
                         .HasColumnType("tinyint(1)")
@@ -1654,61 +1617,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("cashier_can_refund");
 
-                    b.Property<decimal>("CashierMaxDiscountPct")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("cashier_max_discount_pct");
-
-                    b.Property<int>("CloseToExpiryAlertDays")
-                        .HasColumnType("int")
-                        .HasColumnName("close_to_expiry_alert_days");
-
-                    b.Property<bool>("CombineMultipleCoupons")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("combine_multiple_coupons");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
-
-                    b.Property<int>("ExpiryNotificationFrequencyHours")
-                        .HasColumnType("int")
-                        .HasColumnName("expiry_notification_frequency_hours");
-
-                    b.Property<bool>("IssueStoreCreditForDamagedItems")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("issue_store_credit_for_damaged_items");
-
-                    b.Property<bool>("ManagerApprovalForDamagedItems")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("manager_approval_for_damaged_items");
-
-                    b.Property<decimal>("ManagerMaxDiscountPct")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("manager_max_discount_pct");
-
-                    b.Property<decimal>("MaxCouponValueSar")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("max_coupon_value_sar");
-
-                    b.Property<decimal>("MaxOpeningCashSar")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("max_opening_cash_sar");
-
-                    b.Property<decimal>("MaxRefundPerCashierSar")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("max_refund_per_cashier_sar");
-
-                    b.Property<int>("MaxShiftDurationHours")
-                        .HasColumnType("int")
-                        .HasColumnName("max_shift_duration_hours");
-
-                    b.Property<int>("MinCustomerAge")
-                        .HasColumnType("int")
-                        .HasColumnName("min_customer_age");
-
-                    b.Property<decimal>("MinOpeningCashSar")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("min_opening_cash_sar");
 
                     b.Property<bool>("OfflineModeEnabled")
                         .HasColumnType("tinyint(1)")
@@ -1718,30 +1629,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("preserve_held_orders");
 
-                    b.Property<decimal>("RefundManagerApprovalAboveSar")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("refund_manager_approval_above_sar");
-
-                    b.Property<bool>("RefundableCard")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("refundable_card");
-
-                    b.Property<bool>("RefundableCash")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("refundable_cash");
-
-                    b.Property<bool>("RefundableWallet")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("refundable_wallet");
-
-                    b.Property<bool>("RequireBreakAfter4h")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("require_break_after_4h");
-
-                    b.Property<bool>("RequireManagerApprovalAboveCashThreshold")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("require_manager_approval_above_cash_threshold");
-
                     b.Property<bool>("RequireManagerApprovalForRefund")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("require_manager_approval_for_refund");
@@ -1749,14 +1636,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<bool>("RequireOpeningCashCount")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("require_opening_cash_count");
-
-                    b.Property<bool>("RequireReasonForAdjustments")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("require_reason_for_adjustments");
-
-                    b.Property<bool>("RequireReasonForDiscount")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("require_reason_for_discount");
 
                     b.Property<bool>("RequireReasonForVoid")
                         .HasColumnType("tinyint(1)")
@@ -1766,29 +1645,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("require_shift_open");
 
-                    b.Property<decimal>("ReturnManagerApprovalAboveSar")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("return_manager_approval_above_sar");
-
-                    b.Property<bool>("ReturnRequireReceiptOnly")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("return_require_receipt_only");
-
-                    b.Property<int>("ReturnWindowDays")
-                        .HasColumnType("int")
-                        .HasColumnName("return_window_days");
-
                     b.Property<bool>("SendSmsInvoice")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("send_sms_invoice");
-
-                    b.Property<bool>("TobaccoAgeRestricted")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("tobacco_age_restricted");
-
-                    b.Property<bool>("TobaccoRequireManagerApproval")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("tobacco_require_manager_approval");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)")
@@ -3682,116 +3541,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("warehouse_stock");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.ZatcaIdentity", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<string>("CcsidBinarySecurityToken")
-                        .HasColumnType("longtext")
-                        .HasColumnName("ccsid_binary_security_token");
-
-                    b.Property<string>("CcsidRequestId")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("ccsid_request_id");
-
-                    b.Property<string>("CcsidSecret")
-                        .HasColumnType("longtext")
-                        .HasColumnName("ccsid_secret");
-
-                    b.Property<string>("ComplianceCheckInvoiceId")
-                        .HasColumnType("longtext")
-                        .HasColumnName("compliance_check_invoice_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Csid")
-                        .HasColumnType("longtext")
-                        .HasColumnName("csid");
-
-                    b.Property<string>("Csr")
-                        .HasColumnType("longtext")
-                        .HasColumnName("csr");
-
-                    b.Property<string>("EgsSerial")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("egs_serial");
-
-                    b.Property<string>("Environment")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("environment");
-
-                    b.Property<int>("LastIcv")
-                        .HasColumnType("int")
-                        .HasColumnName("last_icv");
-
-                    b.Property<string>("LastInvoiceHash")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasDefaultValue("NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==")
-                        .HasColumnName("last_invoice_hash");
-
-                    b.Property<string>("OnboardingStatus")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasDefaultValue("not_started")
-                        .HasColumnName("onboarding_status");
-
-                    b.Property<string>("PcsidBinarySecurityToken")
-                        .HasColumnType("longtext")
-                        .HasColumnName("pcsid_binary_security_token");
-
-                    b.Property<string>("PcsidRequestId")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("pcsid_request_id");
-
-                    b.Property<string>("PcsidSecret")
-                        .HasColumnType("longtext")
-                        .HasColumnName("pcsid_secret");
-
-                    b.Property<bool>("Phase2Enabled")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("phase2_enabled");
-
-                    b.Property<string>("PrivateKey")
-                        .HasColumnType("longtext")
-                        .HasColumnName("private_key");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("zatca_identity");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = new Guid("00000000-0000-0000-0000-000000000001"),
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Environment = "sandbox",
-                            LastIcv = 0,
-                            LastInvoiceHash = "NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==",
-                            OnboardingStatus = "not_started",
-                            Phase2Enabled = false,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        });
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.ZatcaInvoice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3924,19 +3673,96 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("varchar(50)")
                         .HasColumnName("building_number");
 
+                    b.Property<string>("CcsidBinarySecurityToken")
+                        .HasColumnType("longtext")
+                        .HasColumnName("ccsid_binary_security_token");
+
+                    b.Property<string>("CcsidRequestId")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("ccsid_request_id");
+
+                    b.Property<string>("CcsidSecret")
+                        .HasColumnType("longtext")
+                        .HasColumnName("ccsid_secret");
+
                     b.Property<string>("CitySubdivisionName")
                         .HasMaxLength(255)
                         .HasColumnType("varchar(255)")
                         .HasColumnName("city_subdivision_name");
 
+                    b.Property<string>("ComplianceCheckInvoiceId")
+                        .HasColumnType("longtext")
+                        .HasColumnName("compliance_check_invoice_id");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("Csid")
+                        .HasColumnType("longtext")
+                        .HasColumnName("csid");
+
+                    b.Property<string>("Csr")
+                        .HasColumnType("longtext")
+                        .HasColumnName("csr");
+
+                    b.Property<string>("EgsSerial")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("egs_serial");
+
+                    b.Property<string>("Environment")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("environment");
+
+                    b.Property<int>("LastIcv")
+                        .HasColumnType("int")
+                        .HasColumnName("last_icv");
+
+                    b.Property<string>("LastInvoiceHash")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasDefaultValue("NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==")
+                        .HasColumnName("last_invoice_hash");
+
+                    b.Property<string>("OnboardingStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasDefaultValue("not_started")
+                        .HasColumnName("onboarding_status");
+
+                    b.Property<string>("PcsidBinarySecurityToken")
+                        .HasColumnType("longtext")
+                        .HasColumnName("pcsid_binary_security_token");
+
+                    b.Property<string>("PcsidRequestId")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("pcsid_request_id");
+
+                    b.Property<string>("PcsidSecret")
+                        .HasColumnType("longtext")
+                        .HasColumnName("pcsid_secret");
+
+                    b.Property<bool>("Phase2Enabled")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("phase2_enabled");
 
                     b.Property<string>("PostalZone")
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)")
                         .HasColumnName("postal_zone");
+
+                    b.Property<string>("PrivateKey")
+                        .HasColumnType("longtext")
+                        .HasColumnName("private_key");
 
                     b.Property<string>("SellerName")
                         .HasMaxLength(500)

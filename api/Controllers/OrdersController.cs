@@ -367,6 +367,172 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return Ok(order);
     }
 
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    // Order Editing (FR: "Edit orders from dashboard" — manager corrects mistakes, editable order
+    // with audit log). Permission-gated only — a cashier without Orders:Edit simply cannot edit.
+    [RequirePermission("Orders", PermAction.Edit)]
+    [HttpPatch("{id:guid}")]
+    public async Task<IActionResult> EditOrder(Guid id, [FromBody] OrderEditRequest req)
+    {
+        if (req.Items.Count == 0) return BadRequest(new { message = "An order must have at least one line item." });
+
+        var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound();
+
+        var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            order.Subtotal,
+            order.DiscountAmount,
+            order.TaxAmount,
+            order.TotalAmount,
+            order.Notes,
+            Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
+        });
+
+        // Reconcile inventory by the delta between old and new quantity per product — mirrors the
+        // decrement block in Create. Grouped by product first so a product simply changing
+        // quantity (the common case) nets to one adjustment instead of a remove-then-re-add.
+        var oldQtyByProduct = order.Items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.Sum(i => i.Quantity));
+        var newQtyByProduct = req.Items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.Sum(i => i.Quantity));
+        foreach (var productId in oldQtyByProduct.Keys.Union(newQtyByProduct.Keys))
+        {
+            var delta = newQtyByProduct.GetValueOrDefault(productId, 0m) - oldQtyByProduct.GetValueOrDefault(productId, 0m);
+            if (delta == 0) continue;
+
+            var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.ProductId == productId && s.BranchId == order.BranchId);
+            if (stock != null)
+            {
+                stock.Quantity -= delta;
+                stock.LastUpdated = DateTime.UtcNow;
+                stock.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                db.InventoryStocks.Add(new InventoryStock
+                {
+                    Id = Guid.NewGuid(),
+                    ProductId = productId,
+                    BranchId = order.BranchId,
+                    Quantity = -delta,
+                    LastUpdated = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+        }
+
+        // Replace line items wholesale rather than diffing individual rows — OrderItem has no
+        // dependents of its own besides Order, so this is safe and much simpler.
+        db.OrderItems.RemoveRange(order.Items);
+        var newItems = req.Items.Select(it =>
+        {
+            var totalPrice = it.Quantity * it.UnitPrice;
+            return new OrderItem
+            {
+                Id = Guid.NewGuid(),
+                OrderId = order.Id,
+                ProductId = it.ProductId,
+                Quantity = it.Quantity,
+                UnitPrice = it.UnitPrice,
+                TotalPrice = totalPrice,
+                CreatedAt = DateTime.UtcNow,
+            };
+        }).ToList();
+        db.OrderItems.AddRange(newItems);
+
+        // Recompute totals server-side from the new items — never trust a client-sent total.
+        // Discount carries over proportionally (capped to the new subtotal so it can't exceed it);
+        // tax is re-derived at the same effective rate the order was originally taxed at.
+        var newSubtotal = newItems.Sum(i => i.TotalPrice);
+        var taxRate = order.Subtotal > 0 ? order.TaxAmount / order.Subtotal : 0m;
+        var newDiscount = Math.Min(order.DiscountAmount, newSubtotal);
+        order.Subtotal = newSubtotal;
+        order.DiscountAmount = newDiscount;
+        order.TaxAmount = Math.Round((newSubtotal - newDiscount) * taxRate, 2);
+        order.TotalAmount = newSubtotal - newDiscount + order.TaxAmount + order.CustomFeeAmount;
+        order.Notes = req.Notes;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+
+        var afterSnapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            order.Subtotal,
+            order.DiscountAmount,
+            order.TaxAmount,
+            order.TotalAmount,
+            order.Notes,
+            Items = newItems.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
+        });
+        await audit.LogAsync(
+            action: "edit_order",
+            entityType: "Order",
+            entityId: order.Id,
+            userId: CallerId(),
+            branchId: order.BranchId,
+            details: afterSnapshot,
+            severity: "info",
+            beforeValue: beforeSnapshot);
+
+        var updated = await db.Orders
+            .Include(o => o.Items).ThenInclude(i => i.Product)
+            .Include(o => o.Payments)
+            .FirstOrDefaultAsync(o => o.Id == id);
+        return Ok(updated);
+    }
+
+    // Order void — permission-gated only, same as Edit above. A caller without Orders:Delete is
+    // blocked outright; there is no flag-then-approve fallback.
+    [RequirePermission("Orders", PermAction.Delete)]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> VoidOrder(Guid id, [FromBody] OrderVoidRequest req)
+    {
+        var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound();
+        if (order.OrderStatus == "cancelled") return BadRequest(new { message = "This order is already cancelled." });
+
+        var settings = await db.PosSettings.AsNoTracking().FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
+        if (settings?.RequireReasonForVoid == true && string.IsNullOrWhiteSpace(req.Reason))
+            return BadRequest(new { message = "A reason is required to void this order." });
+
+        var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new { order.OrderStatus, order.PaymentStatus });
+        await ApplyVoidAsync(order, req.Reason);
+
+        await audit.LogAsync(
+            action: "void_order",
+            entityType: "Order",
+            entityId: order.Id,
+            userId: CallerId(),
+            branchId: order.BranchId,
+            details: $"{{\"orderNumber\":\"{order.OrderNumber}\",\"reason\":{System.Text.Json.JsonSerializer.Serialize(req.Reason)}}}",
+            severity: "info",
+            beforeValue: beforeSnapshot,
+            notes: req.Reason);
+
+        return Ok(order);
+    }
+
+    private async Task ApplyVoidAsync(Order order, string? reason)
+    {
+        // Reverse inventory for every line — the items already left the shelf when the sale rang up.
+        foreach (var item in order.Items)
+        {
+            var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == order.BranchId);
+            if (stock != null)
+            {
+                stock.Quantity += item.Quantity;
+                stock.LastUpdated = DateTime.UtcNow;
+                stock.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+        order.OrderStatus = "cancelled";
+        order.VoidReason = reason;
+        order.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
     [RequirePermission("POS", PermAction.Create)]
     [HttpPost("{id:guid}/payments")]
     public async Task<IActionResult> AddPayment(Guid id, [FromBody] OrderPayment payment)
@@ -388,3 +554,6 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 }
 
 public record UpdateStatusRequest(string Status);
+public record OrderEditItemRequest(Guid? Id, Guid ProductId, decimal Quantity, decimal UnitPrice);
+public record OrderEditRequest(List<OrderEditItemRequest> Items, string? Notes);
+public record OrderVoidRequest(string? Reason);

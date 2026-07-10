@@ -46,6 +46,7 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
             EndDate = req.EndDate,
             RequiresCustomer = req.RequiresCustomer ?? false,
             MinCustomerTier = req.MinCustomerTier,
+            ExcludedProductIdsJson = SerializeExclusions(req.ExcludedProductIds),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -72,10 +73,14 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
         d.EndDate = req.EndDate;
         d.RequiresCustomer = req.RequiresCustomer ?? d.RequiresCustomer;
         d.MinCustomerTier = req.MinCustomerTier;
+        d.ExcludedProductIdsJson = SerializeExclusions(req.ExcludedProductIds);
         d.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(d);
     }
+
+    private static string? SerializeExclusions(List<Guid>? ids) =>
+        ids is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(ids) : null;
 
     [HttpPatch("{id:guid}/toggle")]
     public async Task<IActionResult> Toggle(Guid id)
@@ -112,5 +117,6 @@ public record DiscountRequest(
     DateTime? StartDate,
     DateTime? EndDate,
     bool? RequiresCustomer,
-    string? MinCustomerTier
+    string? MinCustomerTier,
+    List<Guid>? ExcludedProductIds
 );

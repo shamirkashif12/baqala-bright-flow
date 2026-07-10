@@ -60,6 +60,11 @@ public class Order
     [Column("notes")]
     public string? Notes { get; set; }
 
+    // Set when this order was voided/cancelled — PosSettings.RequireReasonForVoid gates whether
+    // a reason is mandatory.
+    [Column("void_reason")]
+    public string? VoidReason { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
