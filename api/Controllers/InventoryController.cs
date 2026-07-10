@@ -142,6 +142,7 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
         var query = db.InventoryAdjustments
             .Include(a => a.Product)
             .Include(a => a.Branch)
+            .Include(a => a.AdjustedByUser)
             .AsQueryable();
         if (branchId.HasValue) query = query.Where(a => a.BranchId == branchId);
         if (!string.IsNullOrEmpty(adjustmentType)) query = query.Where(a => a.AdjustmentType == adjustmentType);

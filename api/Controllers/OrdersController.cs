@@ -92,9 +92,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // Terminal binding: derive the shift/terminal from the cashier's actual open shift
         // server-side rather than trusting client input (which never sent these at all) —
         // otherwise a sale has no verifiable link back to the terminal/shift that rang it up.
+        CashierShift? activeShift = null;
         if (order.CashierId.HasValue)
         {
-            var activeShift = await db.CashierShifts
+            activeShift = await db.CashierShifts
                 .FirstOrDefaultAsync(s => s.CashierId == order.CashierId && s.Status == "open");
             if (activeShift is not null)
             {
@@ -116,6 +117,25 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         foreach (var item in order.Items) { item.Id = Guid.NewGuid(); item.OrderId = order.Id; }
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
         db.Orders.Add(order);
+
+        // Keep the till's running totals live so "expected cash"/variance at close-out
+        // reflects real sales instead of staying frozen at the opening amount — previously
+        // nothing on the whole codebase ever wrote CashSales/CardSales/DigitalSales/TotalSales
+        // after a shift opened, so every consumer of those fields (Closing Report, My Shift,
+        // cashier-sales report) was silently wrong for any shift opened through the real app.
+        if (activeShift is not null)
+        {
+            foreach (var pay in order.Payments)
+            {
+                switch (pay.PaymentMethod)
+                {
+                    case "cash": activeShift.CashSales += pay.Amount; break;
+                    case "card": activeShift.CardSales += pay.Amount; break;
+                    default: activeShift.DigitalSales += pay.Amount; break;
+                }
+                activeShift.TotalSales += pay.Amount;
+            }
+        }
 
         // ── Reduce inventory stock for each item ───────────────────────────────
         // A sale is never blocked here (the sellable-stock/expiry check above already gated

@@ -60,6 +60,51 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
             settings.AllowNearExpirySale              = updated.AllowNearExpirySale;
             settings.BlockExpiredItems                = updated.BlockExpiredItems;
             settings.BlockNonpermissibleItems         = updated.BlockNonpermissibleItems;
+            // Expiry policy tab
+            settings.CloseToExpiryAlertDays           = updated.CloseToExpiryAlertDays;
+            settings.AllowExpiryManagerOverride       = updated.AllowExpiryManagerOverride;
+            settings.AutoMoveExpiredToBlockedList     = updated.AutoMoveExpiredToBlockedList;
+            settings.ExpiryNotificationFrequencyHours = updated.ExpiryNotificationFrequencyHours;
+            // Permissible items policy tab
+            settings.TobaccoAgeRestricted             = updated.TobaccoAgeRestricted;
+            settings.TobaccoRequireManagerApproval    = updated.TobaccoRequireManagerApproval;
+            settings.BlockAgeRestrictedAtCashier      = updated.BlockAgeRestrictedAtCashier;
+            settings.MinCustomerAge                   = updated.MinCustomerAge;
+            // Returns policy tab
+            settings.ReturnWindowDays                 = updated.ReturnWindowDays;
+            settings.ReturnRequireReceiptOnly         = updated.ReturnRequireReceiptOnly;
+            settings.AllowReturnsWithoutReceipt       = updated.AllowReturnsWithoutReceipt;
+            settings.ReturnManagerApprovalAboveSar    = updated.ReturnManagerApprovalAboveSar;
+            settings.RefundableCash                   = updated.RefundableCash;
+            settings.RefundableCard                   = updated.RefundableCard;
+            settings.RefundableWallet                 = updated.RefundableWallet;
+            settings.IssueStoreCreditForDamagedItems  = updated.IssueStoreCreditForDamagedItems;
+            settings.AllowExpiredItemReturn           = updated.AllowExpiredItemReturn;
+            // Refund policy tab
+            settings.MaxRefundPerCashierSar           = updated.MaxRefundPerCashierSar;
+            settings.RefundManagerApprovalAboveSar    = updated.RefundManagerApprovalAboveSar;
+            settings.AllowRefundReversalWithin24h     = updated.AllowRefundReversalWithin24h;
+            settings.AutoPrintRefundReceipt           = updated.AutoPrintRefundReceipt;
+            // Discount policy tab
+            settings.CashierMaxDiscountPct            = updated.CashierMaxDiscountPct;
+            settings.ManagerMaxDiscountPct            = updated.ManagerMaxDiscountPct;
+            settings.RequireReasonForDiscount         = updated.RequireReasonForDiscount;
+            // Coupon policy tab
+            settings.CombineMultipleCoupons           = updated.CombineMultipleCoupons;
+            settings.MaxCouponValueSar                = updated.MaxCouponValueSar;
+            // Cashier shift policy tab
+            settings.MaxShiftDurationHours            = updated.MaxShiftDurationHours;
+            settings.RequireBreakAfter4h              = updated.RequireBreakAfter4h;
+            settings.AutoCheckoutOnShiftEnd           = updated.AutoCheckoutOnShiftEnd;
+            // Opening/closing cash policy tab
+            settings.MinOpeningCashSar                = updated.MinOpeningCashSar;
+            settings.MaxOpeningCashSar                = updated.MaxOpeningCashSar;
+            settings.CashVarianceThresholdSar         = updated.CashVarianceThresholdSar;
+            settings.RequireManagerApprovalAboveCashThreshold = updated.RequireManagerApprovalAboveCashThreshold;
+            // Inventory adjustment policy tab
+            settings.RequireReasonForAdjustments      = updated.RequireReasonForAdjustments;
+            settings.AdjustmentCapPerDayUnits         = updated.AdjustmentCapPerDayUnits;
+            settings.ManagerApprovalForDamagedItems   = updated.ManagerApprovalForDamagedItems;
 
             settings.UpdatedAt = DateTime.UtcNow;
         }
