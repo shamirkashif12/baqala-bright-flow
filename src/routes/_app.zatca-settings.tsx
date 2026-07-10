@@ -99,6 +99,24 @@ function ZatcaSettings() {
     }
   }
 
+  async function togglePhase2(v: boolean) {
+    if (!selectedBranch?.id) return;
+    const previous = zatca;
+    const next = { ...zatca, phase2Enabled: v };
+    setZatca(next);
+    setSaving(true);
+    try {
+      const updated = await api.updateZatcaSettings(selectedBranch.id, next);
+      setZatca(updated);
+      toast.success(v ? "ZATCA Phase 2 enabled — applied to all branches" : "ZATCA Phase 2 disabled — applied to all branches");
+    } catch {
+      setZatca(previous);
+      toast.error("Failed to update ZATCA Phase 2 status");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleGenerateCsr() {
     if (!selectedBranch?.id) return;
     setCsrBusy(true);
@@ -191,7 +209,7 @@ function ZatcaSettings() {
                   <p className="text-sm text-muted-foreground">Applied automatically on every billing & order issued from POS / MPOS / Web</p>
                 </div>
               </div>
-              <Switch checked={enabled} onCheckedChange={v => setZatca(p => ({ ...p, phase2Enabled: v }))} />
+              <Switch checked={enabled} disabled={saving || !selectedBranch} onCheckedChange={togglePhase2} />
             </div>
           </Card>
 
