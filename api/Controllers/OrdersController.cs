@@ -224,8 +224,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         }
 
         // ── ZATCA Phase 2: auto-create + submit e-invoice ──────────────────────
-        var zatcaSettings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == order.BranchId);
-        if (zatcaSettings is { Phase2Enabled: true, OnboardingStatus: "production_ready" })
+        var zatcaIdentity = await db.ZatcaIdentities.FindAsync(ZatcaIdentity.SingletonId);
+        if (zatcaIdentity is { Phase2Enabled: true, OnboardingStatus: "production_ready" })
         {
             string? buyerName = null;
             if (order.CustomerId.HasValue)

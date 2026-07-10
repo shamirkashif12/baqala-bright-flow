@@ -15,8 +15,8 @@ public record ZatcaProductionCsidResult(bool Success, string? RequestId, IReadOn
 public interface IZatcaService
 {
     Task<ZatcaCsrGenerationResult> GenerateCsrAsync(Guid branchId);
-    Task<ZatcaComplianceCsidResult> GetComplianceCsidAsync(Guid branchId, string otp);
-    Task<ZatcaProductionCsidResult> RunOnboardingToProductionAsync(Guid branchId);
+    Task<ZatcaComplianceCsidResult> GetComplianceCsidAsync(string otp);
+    Task<ZatcaProductionCsidResult> RunOnboardingToProductionAsync();
     Task<ZatcaInvoice> SubmitInvoiceAsync(Guid invoiceId);
 }
 
@@ -40,10 +40,11 @@ public class ZatcaService(
     {
         var branch = await db.Branches.FindAsync(branchId)
             ?? throw new InvalidOperationException($"Branch {branchId} not found.");
-        var settings = await GetOrCreateSettingsAsync(branchId);
+        var settings = await GetOrCreateBranchSettingsAsync(branchId);
+        var identity = await GetIdentityAsync();
 
         var config = new ZatcaCsrConfig(
-            Environment: MapCsrEnvironment(settings.Environment),
+            Environment: MapCsrEnvironment(identity.Environment),
             // Per ZATCA's Developer Portal Manual (§5.3.1): the CSR's Organization Identifier must
             // be the VAT registration number (15 digits, starting and ending with 3) — not the CR
             // number, which is a different, unrelated identifier used elsewhere on the invoice.
@@ -59,26 +60,26 @@ public class ZatcaService(
 
         var result = csrService.GenerateCsr(config);
 
-        settings.Csr = result.CsrBase64;
-        settings.PrivateKey = _protector.Protect(result.PrivateKeyRaw);
-        settings.EgsSerial = result.EgsSerial;
-        settings.OnboardingStatus = "csr_generated";
-        settings.UpdatedAt = DateTime.UtcNow;
+        identity.Csr = result.CsrBase64;
+        identity.PrivateKey = _protector.Protect(result.PrivateKeyRaw);
+        identity.EgsSerial = result.EgsSerial;
+        identity.OnboardingStatus = "csr_generated";
+        identity.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
         return new ZatcaCsrGenerationResult(result.CsrBase64, result.EgsSerial);
     }
 
-    public async Task<ZatcaComplianceCsidResult> GetComplianceCsidAsync(Guid branchId, string otp)
+    public async Task<ZatcaComplianceCsidResult> GetComplianceCsidAsync(string otp)
     {
-        var settings = await GetSettingsOrThrowAsync(branchId);
-        if (string.IsNullOrEmpty(settings.Csr))
-            throw new InvalidOperationException("No CSR on file for this branch. Generate a CSR first.");
+        var identity = await GetIdentityAsync();
+        if (string.IsNullOrEmpty(identity.Csr))
+            throw new InvalidOperationException("No CSR on file. Generate a CSR first.");
 
-        var result = await apiClient.GetComplianceCsidAsync(MapApiEnvironment(settings.Environment), settings.Csr, otp);
+        var result = await apiClient.GetComplianceCsidAsync(MapApiEnvironment(identity.Environment), identity.Csr, otp);
         if (!result.Success)
         {
-            logger.LogWarning("ZATCA compliance CSID request failed for branch {BranchId}: {Body}", branchId, result.RawBody);
+            logger.LogWarning("ZATCA compliance CSID request failed: {Body}", result.RawBody);
             return new ZatcaComplianceCsidResult(false, null, ExtractErrorMessage(result));
         }
 
@@ -92,25 +93,25 @@ public class ZatcaService(
             return new ZatcaComplianceCsidResult(false, requestId, "ZATCA response missing binarySecurityToken/secret.");
         }
 
-        settings.CcsidRequestId = requestId;
-        settings.CcsidBinarySecurityToken = binarySecurityToken;
-        settings.CcsidSecret = _protector.Protect(secret);
-        settings.OnboardingStatus = "compliance_csid_obtained";
-        settings.UpdatedAt = DateTime.UtcNow;
+        identity.CcsidRequestId = requestId;
+        identity.CcsidBinarySecurityToken = binarySecurityToken;
+        identity.CcsidSecret = _protector.Protect(secret);
+        identity.OnboardingStatus = "compliance_csid_obtained";
+        identity.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
         return new ZatcaComplianceCsidResult(true, requestId, null);
     }
 
-    public async Task<ZatcaProductionCsidResult> RunOnboardingToProductionAsync(Guid branchId)
+    public async Task<ZatcaProductionCsidResult> RunOnboardingToProductionAsync()
     {
-        var settings = await GetSettingsOrThrowAsync(branchId);
-        if (string.IsNullOrEmpty(settings.CcsidBinarySecurityToken) || string.IsNullOrEmpty(settings.CcsidSecret))
+        var identity = await GetIdentityAsync();
+        if (string.IsNullOrEmpty(identity.CcsidBinarySecurityToken) || string.IsNullOrEmpty(identity.CcsidSecret))
             throw new InvalidOperationException("Compliance CSID not found. Complete the compliance CSID step first.");
 
-        var ccsidSecret = _protector.Unprotect(settings.CcsidSecret);
-        var privateKey = _protector.Unprotect(settings.PrivateKey!);
-        var environment = MapApiEnvironment(settings.Environment);
+        var ccsidSecret = _protector.Unprotect(identity.CcsidSecret);
+        var privateKey = _protector.Unprotect(identity.PrivateKey!);
+        var environment = MapApiEnvironment(identity.Environment);
 
         // ZATCA requires 6 fixed document types for compliance testing.
         var documentTypes = new (string Prefix, string TypeCode, string Description, string? InstructionNote)[]
@@ -134,9 +135,9 @@ public class ZatcaService(
             var subtype = isSimplified ? "0200000" : "0100000";
 
             var doc = _xmlBuilder.ModifyForComplianceTest($"{prefix}-0001", subtype, typeCode, icv, pih, instructionNote);
-            var signed = _signer.Sign(doc, DecodeCertificateContent(settings.CcsidBinarySecurityToken), privateKey);
+            var signed = _signer.Sign(doc, DecodeCertificateContent(identity.CcsidBinarySecurityToken), privateKey);
 
-            var response = await apiClient.ComplianceChecksAsync(environment, settings.CcsidBinarySecurityToken, ccsidSecret, signed);
+            var response = await apiClient.ComplianceChecksAsync(environment, identity.CcsidBinarySecurityToken, ccsidSecret, signed);
             var (passed, apiStatus, alreadyCompliant) = EvaluateComplianceResponse(response, isSimplified);
 
             outcomes.Add(new ZatcaComplianceTestOutcome(description, passed, apiStatus));
@@ -154,7 +155,7 @@ public class ZatcaService(
             return new ZatcaProductionCsidResult(false, null, outcomes, "One or more compliance checks failed.");
         }
 
-        var prodResult = await apiClient.GetProductionCsidAsync(environment, settings.CcsidBinarySecurityToken, ccsidSecret, settings.CcsidRequestId ?? "");
+        var prodResult = await apiClient.GetProductionCsidAsync(environment, identity.CcsidBinarySecurityToken, ccsidSecret, identity.CcsidRequestId ?? "");
         if (!prodResult.Success)
         {
             return new ZatcaProductionCsidResult(false, null, outcomes, ExtractErrorMessage(prodResult));
@@ -170,14 +171,14 @@ public class ZatcaService(
             return new ZatcaProductionCsidResult(false, requestId, outcomes, "ZATCA response missing binarySecurityToken/secret.");
         }
 
-        settings.PcsidRequestId = requestId;
-        settings.PcsidBinarySecurityToken = binarySecurityToken;
-        settings.PcsidSecret = _protector.Protect(secret);
+        identity.PcsidRequestId = requestId;
+        identity.PcsidBinarySecurityToken = binarySecurityToken;
+        identity.PcsidSecret = _protector.Protect(secret);
         // Production CSID is a new device/credential — start a fresh hash chain.
-        settings.LastIcv = 0;
-        settings.LastInvoiceHash = SeedInvoiceHash;
-        settings.OnboardingStatus = "production_ready";
-        settings.UpdatedAt = DateTime.UtcNow;
+        identity.LastIcv = 0;
+        identity.LastInvoiceHash = SeedInvoiceHash;
+        identity.OnboardingStatus = "production_ready";
+        identity.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
         return new ZatcaProductionCsidResult(true, requestId, outcomes, null);
@@ -192,23 +193,37 @@ public class ZatcaService(
             ?? throw new InvalidOperationException($"ZATCA invoice {invoiceId} not found.");
         var branch = await db.Branches.FindAsync(invoice.BranchId)
             ?? throw new InvalidOperationException($"Branch {invoice.BranchId} not found.");
-        var settings = await GetSettingsOrThrowAsync(invoice.BranchId);
+        var settings = await GetOrCreateBranchSettingsAsync(invoice.BranchId);
 
-        if (string.IsNullOrEmpty(settings.PcsidBinarySecurityToken) || string.IsNullOrEmpty(settings.PcsidSecret))
-            throw new InvalidOperationException("Branch is not onboarded to ZATCA production yet.");
         if (invoice.Order is null || invoice.Order.Items.Count == 0)
             throw new InvalidOperationException("Invoice has no order line items to report.");
 
-        var pcsidSecret = _protector.Unprotect(settings.PcsidSecret);
-        var privateKey = _protector.Unprotect(settings.PrivateKey!);
-        var environment = MapApiEnvironment(settings.Environment);
+        // Every branch signs under the same shared certificate and increments the same ICV/hash
+        // chain, so the read-modify-write below (and the external ZATCA call in between) must be
+        // serialized across concurrent submissions from any branch — otherwise two branches could
+        // compute the same ICV/PIH and fork the tamper-evident chain. EF has no FOR UPDATE API, so
+        // this row-locks the singleton identity row via raw SQL for the whole transaction, held
+        // across the external HTTP call. If EnableRetryOnFailure() is ever added to Program.cs,
+        // this block must move inside db.Database.CreateExecutionStrategy().ExecuteAsync(...).
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        var identity = await db.ZatcaIdentities
+            .FromSqlRaw("SELECT * FROM zatca_identity WHERE id = {0} FOR UPDATE", ZatcaIdentity.SingletonId)
+            .SingleAsync();
+
+        if (string.IsNullOrEmpty(identity.PcsidBinarySecurityToken) || string.IsNullOrEmpty(identity.PcsidSecret))
+            throw new InvalidOperationException("Not onboarded to ZATCA production yet.");
+
+        var pcsidSecret = _protector.Unprotect(identity.PcsidSecret);
+        var privateKey = _protector.Unprotect(identity.PrivateKey!);
+        var environment = MapApiEnvironment(identity.Environment);
 
         // Standard vs simplified selection: B2B (buyer VAT known) uses standard/clearance,
         // otherwise simplified/reporting — matches PHP's subtype-driven branch.
         var isSimplified = string.IsNullOrEmpty(invoice.BuyerVatNumber);
 
-        var icv = settings.LastIcv + 1;
-        var pih = settings.LastInvoiceHash;
+        var icv = identity.LastIcv + 1;
+        var pih = identity.LastInvoiceHash;
 
         var invoiceTypeCode = invoice.InvoiceType switch
         {
@@ -255,11 +270,11 @@ public class ZatcaService(
             DiscountAmount: invoice.DiscountAmount);
 
         var invoiceDoc = _xmlBuilder.Build(data);
-        var signed = _signer.Sign(invoiceDoc, DecodeCertificateContent(settings.PcsidBinarySecurityToken), privateKey);
+        var signed = _signer.Sign(invoiceDoc, DecodeCertificateContent(identity.PcsidBinarySecurityToken), privateKey);
 
         var response = isSimplified
-            ? await apiClient.InvoiceReportingAsync(environment, settings.PcsidBinarySecurityToken, pcsidSecret, signed)
-            : await apiClient.InvoiceClearanceAsync(environment, settings.PcsidBinarySecurityToken, pcsidSecret, signed);
+            ? await apiClient.InvoiceReportingAsync(environment, identity.PcsidBinarySecurityToken, pcsidSecret, signed)
+            : await apiClient.InvoiceClearanceAsync(environment, identity.PcsidBinarySecurityToken, pcsidSecret, signed);
 
         var statusField = isSimplified ? "reportingStatus" : "clearanceStatus";
         var status = response.Body.RootElement.TryGetProperty(statusField, out var statusEl) ? statusEl.GetString() ?? "" : "";
@@ -273,9 +288,9 @@ public class ZatcaService(
 
         if (isAccepted)
         {
-            settings.LastIcv = icv;
-            settings.LastInvoiceHash = signed.InvoiceHash;
-            settings.UpdatedAt = DateTime.UtcNow;
+            identity.LastIcv = icv;
+            identity.LastInvoiceHash = signed.InvoiceHash;
+            identity.UpdatedAt = DateTime.UtcNow;
         }
         else
         {
@@ -283,10 +298,11 @@ public class ZatcaService(
         }
 
         await db.SaveChangesAsync();
+        await tx.CommitAsync();
         return invoice;
     }
 
-    private async Task<ZatcaSettings> GetOrCreateSettingsAsync(Guid branchId)
+    private async Task<ZatcaSettings> GetOrCreateBranchSettingsAsync(Guid branchId)
     {
         var settings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branchId);
         if (settings is not null) return settings;
@@ -297,9 +313,9 @@ public class ZatcaService(
         return settings;
     }
 
-    private async Task<ZatcaSettings> GetSettingsOrThrowAsync(Guid branchId) =>
-        await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branchId)
-            ?? throw new InvalidOperationException($"No ZATCA settings found for branch {branchId}. Generate a CSR first.");
+    private async Task<ZatcaIdentity> GetIdentityAsync() =>
+        await db.ZatcaIdentities.FindAsync(ZatcaIdentity.SingletonId)
+            ?? throw new InvalidOperationException("ZATCA identity row missing — migration seed did not run.");
 
     // ZATCA's binarySecurityToken is double base64-encoded. The raw value (as returned by the
     // CSID APIs) is correct as-is for Basic Auth, but ZatcaInvoiceSigner expects the certificate

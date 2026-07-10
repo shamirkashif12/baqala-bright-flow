@@ -61,12 +61,14 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     public async Task<IActionResult> GetSettings(Guid branchId)
     {
         var settings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branchId);
-        return settings is null ? NotFound() : Ok(ZatcaSettingsDto.From(settings));
+        if (settings is null) return NotFound();
+        var identity = await db.ZatcaIdentities.FindAsync(ZatcaIdentity.SingletonId);
+        return Ok(ZatcaSettingsDto.From(settings, identity!));
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
     [HttpPut("zatca/settings/{branchId:guid}")]
-    public async Task<IActionResult> UpsertSettings(Guid branchId, [FromBody] ZatcaSettings updated)
+    public async Task<IActionResult> UpsertSettings(Guid branchId, [FromBody] ZatcaSettingsUpdateRequest updated)
     {
         var settings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branchId);
         if (settings is null)
@@ -86,52 +88,17 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         settings.BuildingNumber = updated.BuildingNumber;
         settings.CitySubdivisionName = updated.CitySubdivisionName;
         settings.PostalZone = updated.PostalZone;
-        settings.Phase2Enabled = updated.Phase2Enabled;
-        settings.Environment = updated.Environment;
         settings.UpdatedAt = DateTime.UtcNow;
 
-        await SyncPhase2EnabledAcrossBranchesAsync(branchId, settings.Phase2Enabled);
+        // Phase2Enabled/Environment are shared mart-wide — one certificate, one flag, no per-branch sync needed.
+        var identity = await db.ZatcaIdentities.FindAsync(ZatcaIdentity.SingletonId)
+            ?? throw new InvalidOperationException("ZATCA identity row missing — migration seed did not run.");
+        identity.Phase2Enabled = updated.Phase2Enabled;
+        identity.Environment = updated.Environment;
+        identity.UpdatedAt = DateTime.UtcNow;
+
         await db.SaveChangesAsync();
-        return Ok(ZatcaSettingsDto.From(settings));
-    }
-
-    // ZATCA enablement is an admin-wide decision, not a per-branch one: turning it on/off
-    // for one branch must apply to every other branch under the same tenant.
-    private async Task SyncPhase2EnabledAcrossBranchesAsync(Guid updatedBranchId, bool phase2Enabled)
-    {
-        var otherBranchIds = await db.Branches
-            .Where(b => b.Id != updatedBranchId)
-            .Select(b => b.Id)
-            .ToListAsync();
-        if (otherBranchIds.Count == 0) return;
-
-        // Avoid `otherBranchIds.Contains(...)` in a SQL WHERE — the MySQL EF Core provider
-        // used here cannot assign a type mapping to a parameterized List<Guid> IN-list, which
-        // throws at query time (same constraint worked around throughout ReportsController).
-        // Filtering by "not this branch" instead needs no list parameter at all; the per-branch
-        // match below runs in-memory over the already-materialized rows.
-        var otherSettings = await db.ZatcaSettings
-            .Where(z => z.BranchId != updatedBranchId)
-            .ToListAsync();
-
-        foreach (var branchId in otherBranchIds)
-        {
-            var settings = otherSettings.FirstOrDefault(z => z.BranchId == branchId);
-            if (settings is null)
-            {
-                settings = new ZatcaSettings
-                {
-                    Id = Guid.NewGuid(),
-                    BranchId = branchId,
-                    CreatedAt = DateTime.UtcNow,
-                };
-                db.ZatcaSettings.Add(settings);
-            }
-
-            if (settings.Phase2Enabled == phase2Enabled) continue;
-            settings.Phase2Enabled = phase2Enabled;
-            settings.UpdatedAt = DateTime.UtcNow;
-        }
+        return Ok(ZatcaSettingsDto.From(settings, identity));
     }
 
     // ─── ZATCA Onboarding ─────────────────────────────────────────────────────
@@ -154,7 +121,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     {
         try
         {
-            var result = await zatcaService.GetComplianceCsidAsync(branchId, req.Otp);
+            var result = await zatcaService.GetComplianceCsidAsync(req.Otp);
             return result.Success
                 ? Ok(new { success = true, requestId = result.RequestId })
                 : BadRequest(new { success = false, error = result.Error });
@@ -170,7 +137,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     {
         try
         {
-            var result = await zatcaService.RunOnboardingToProductionAsync(branchId);
+            var result = await zatcaService.RunOnboardingToProductionAsync();
             return Ok(new
             {
                 success = result.Success,
@@ -247,8 +214,21 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
 public record ZatcaStatusRequest(string Status, string? Response);
 public record ZatcaOtpRequest(string Otp);
 
-// Safe projection of ZatcaSettings — excludes PrivateKey/Csr/CcsidSecret/PcsidSecret/binary
-// security tokens, which must never be echoed back over the API even encrypted.
+// Request body for PUT zatca/settings/{branchId} — branch display fields plus the mart-wide
+// shared Phase2Enabled/Environment flags (which the controller writes onto ZatcaIdentity).
+public record ZatcaSettingsUpdateRequest(
+    string? VatRegistrationNumber,
+    string? SellerName,
+    string? StreetName,
+    string? BuildingNumber,
+    string? CitySubdivisionName,
+    string? PostalZone,
+    bool Phase2Enabled,
+    string Environment);
+
+// Safe projection merging per-branch ZatcaSettings with the shared ZatcaIdentity — excludes
+// PrivateKey/Csr/CcsidSecret/PcsidSecret/binary security tokens, which must never be echoed back
+// over the API even encrypted.
 public record ZatcaSettingsDto(
     Guid Id,
     Guid BranchId,
@@ -268,12 +248,12 @@ public record ZatcaSettingsDto(
     DateTime CreatedAt,
     DateTime UpdatedAt)
 {
-    public static ZatcaSettingsDto From(ZatcaSettings s) => new(
+    public static ZatcaSettingsDto From(ZatcaSettings s, ZatcaIdentity i) => new(
         s.Id, s.BranchId, s.VatRegistrationNumber, s.SellerName,
         s.StreetName, s.BuildingNumber, s.CitySubdivisionName, s.PostalZone,
-        s.Phase2Enabled, s.Environment, s.EgsSerial, s.OnboardingStatus,
-        HasCsr: !string.IsNullOrEmpty(s.Csr),
-        HasComplianceCsid: !string.IsNullOrEmpty(s.CcsidBinarySecurityToken),
-        HasProductionCsid: !string.IsNullOrEmpty(s.PcsidBinarySecurityToken),
+        i.Phase2Enabled, i.Environment, i.EgsSerial, i.OnboardingStatus,
+        HasCsr: !string.IsNullOrEmpty(i.Csr),
+        HasComplianceCsid: !string.IsNullOrEmpty(i.CcsidBinarySecurityToken),
+        HasProductionCsid: !string.IsNullOrEmpty(i.PcsidBinarySecurityToken),
         s.CreatedAt, s.UpdatedAt);
 }
