@@ -32,10 +32,12 @@ const TOGGLE_DEFAULTS: Toggles = {
 function Compliance() {
   const { selectedBranch } = useBranch();
   // Toggles are persisted through SettingsController (RequirePermission("Settings", Edit)),
-  // not the Compliance module — gate them on what the backend actually checks, so a
-  // Compliance-view-only role can't be shown editable controls it can't actually save.
+  // so both that AND Compliance:Edit are required — otherwise a role with Settings:Edit
+  // for /pos-settings (e.g. Branch Manager) would also get editable controls here, even
+  // though Branch Manager is view-only on Compliance.
   const { canEdit: canEditSettings } = usePermission("Settings");
-  const { canCreate: canCreateComplianceRule } = usePermission("Compliance");
+  const { canEdit: canEditCompliance, canCreate: canCreateComplianceRule } = usePermission("Compliance");
+  const canEditToggles = canEditSettings && canEditCompliance;
   const [rules, setRules] = useState<TaxFeeRule[]>([]);
   const [toggles, setToggles] = useState<Toggles>(TOGGLE_DEFAULTS);
   const [settingsId, setSettingsId] = useState<string | undefined>(undefined);
@@ -68,7 +70,7 @@ function Compliance() {
   }
 
   async function saveToggles() {
-    if (!selectedBranch?.id || !canEditSettings) return;
+    if (!selectedBranch?.id || !canEditToggles) return;
     setSaving(true);
     try {
       await api.updatePosSettings(selectedBranch.id, { ...toggles, branchId: selectedBranch.id });
@@ -106,7 +108,7 @@ function Compliance() {
             <Switch
               checked={toggles.blockExpiredItems}
               onCheckedChange={toggle("blockExpiredItems")}
-              disabled={loading || !canEditSettings}
+              disabled={loading || !canEditToggles}
             />
           </div>
           <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
@@ -117,7 +119,7 @@ function Compliance() {
             <Switch
               checked={toggles.warnNearExpiry}
               onCheckedChange={toggle("warnNearExpiry")}
-              disabled={loading || !canEditSettings}
+              disabled={loading || !canEditToggles}
             />
           </div>
           <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
@@ -128,7 +130,7 @@ function Compliance() {
             <Switch
               checked={toggles.requireManagerApprovalForRefund}
               onCheckedChange={toggle("requireManagerApprovalForRefund")}
-              disabled={loading || !canEditSettings}
+              disabled={loading || !canEditToggles}
             />
           </div>
           <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
@@ -139,7 +141,7 @@ function Compliance() {
             <Switch
               checked={toggles.blockNonpermissibleItems}
               onCheckedChange={toggle("blockNonpermissibleItems")}
-              disabled={loading || !canEditSettings}
+              disabled={loading || !canEditToggles}
             />
           </div>
         </div>
@@ -147,7 +149,7 @@ function Compliance() {
           <Button
             className="gradient-primary text-primary-foreground border-0"
             onClick={saveToggles}
-            disabled={saving || loading || !canEditSettings}
+            disabled={saving || loading || !canEditToggles}
           >
             {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save toggles"}
           </Button>

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { api, type ZatcaSettings } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
+import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/zatca-settings")({
@@ -62,6 +63,7 @@ const defaultZatca: ZatcaSettings = {
 
 function ZatcaSettings() {
   const { selectedBranch } = useBranch();
+  const { canEdit } = usePermission("Compliance");
   const [zatca, setZatca] = useState<ZatcaSettings>(defaultZatca);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -86,7 +88,7 @@ function ZatcaSettings() {
   useEffect(loadSettings, [selectedBranch?.id]);
 
   async function saveZatca() {
-    if (!selectedBranch?.id) return;
+    if (!selectedBranch?.id || !canEdit) return;
     setSaving(true);
     try {
       const updated = await api.updateZatcaSettings(selectedBranch.id, zatca);
@@ -100,7 +102,7 @@ function ZatcaSettings() {
   }
 
   async function handleGenerateCsr() {
-    if (!selectedBranch?.id) return;
+    if (!selectedBranch?.id || !canEdit) return;
     setCsrBusy(true);
     try {
       const result = await api.generateZatcaCsr(selectedBranch.id);
@@ -115,7 +117,7 @@ function ZatcaSettings() {
   }
 
   async function handleComplianceCsid() {
-    if (!selectedBranch?.id || !otp) return;
+    if (!selectedBranch?.id || !otp || !canEdit) return;
     setOtpBusy(true);
     try {
       const result = await api.getZatcaComplianceCsid(selectedBranch.id, otp);
@@ -134,7 +136,7 @@ function ZatcaSettings() {
   }
 
   async function handleProductionCsid() {
-    if (!selectedBranch?.id) return;
+    if (!selectedBranch?.id || !canEdit) return;
     setProdBusy(true);
     try {
       const result = await api.getZatcaProductionCsid(selectedBranch.id);
@@ -220,7 +222,7 @@ function ZatcaSettings() {
                       <option value="production">Production</option>
                     </select></div>
                   <div className="flex justify-end">
-                    <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={saveZatca} disabled={saving}>
+                    <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={saveZatca} disabled={saving || !canEdit}>
                       {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save company info"}
                     </Button>
                   </div>
@@ -242,7 +244,7 @@ function ZatcaSettings() {
                   <div className="space-y-1"><Label className="text-xs">City</Label>
                     <Input className="h-9" value={selectedBranch.city ?? ""} disabled title="Edit on the Branches page" /></div>
                   <div className="flex justify-end">
-                    <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={saveZatca} disabled={saving}>
+                    <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={saveZatca} disabled={saving || !canEdit}>
                       {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save address"}
                     </Button>
                   </div>
@@ -257,7 +259,7 @@ function ZatcaSettings() {
                   <div className="rounded-xl border border-border/60 p-3.5 space-y-2">
                     <div className="flex items-center justify-between"><span className="text-sm font-medium">1. Generate CSR</span>{zatca.hasCsr && <CheckCircle2 className="h-4 w-4 text-success" />}</div>
                     <p className="text-xs text-muted-foreground">Creates a signing key and certificate request for this branch.</p>
-                    <Button size="sm" variant="outline" className="w-full" onClick={handleGenerateCsr} disabled={csrBusy}>
+                    <Button size="sm" variant="outline" className="w-full" onClick={handleGenerateCsr} disabled={csrBusy || !canEdit}>
                       {csrBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : zatca.hasCsr ? "Regenerate CSR" : "Generate CSR"}
                     </Button>
                     {csr && (
@@ -271,8 +273,8 @@ function ZatcaSettings() {
                   <div className="rounded-xl border border-border/60 p-3.5 space-y-2">
                     <div className="flex items-center justify-between"><span className="text-sm font-medium">2. Compliance CSID</span>{zatca.hasComplianceCsid && <CheckCircle2 className="h-4 w-4 text-success" />}</div>
                     <p className="text-xs text-muted-foreground">Enter the OTP ZATCA gave you for the CSR above.</p>
-                    <Input className="h-9" placeholder="OTP from Fatoora portal" value={otp} onChange={e => setOtp(e.target.value)} disabled={!zatca.hasCsr} />
-                    <Button size="sm" variant="outline" className="w-full" onClick={handleComplianceCsid} disabled={otpBusy || !otp || !zatca.hasCsr}>
+                    <Input className="h-9" placeholder="OTP from Fatoora portal" value={otp} onChange={e => setOtp(e.target.value)} disabled={!zatca.hasCsr || !canEdit} />
+                    <Button size="sm" variant="outline" className="w-full" onClick={handleComplianceCsid} disabled={otpBusy || !otp || !zatca.hasCsr || !canEdit}>
                       {otpBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Get Compliance CSID"}
                     </Button>
                   </div>
@@ -280,7 +282,7 @@ function ZatcaSettings() {
                   <div className="rounded-xl border border-border/60 p-3.5 space-y-2">
                     <div className="flex items-center justify-between"><span className="text-sm font-medium">3. Go to Production</span>{zatca.hasProductionCsid && <CheckCircle2 className="h-4 w-4 text-success" />}</div>
                     <p className="text-xs text-muted-foreground">Runs the 6 required compliance checks, then requests the Production CSID.</p>
-                    <Button size="sm" variant="outline" className="w-full" onClick={handleProductionCsid} disabled={prodBusy || !zatca.hasComplianceCsid}>
+                    <Button size="sm" variant="outline" className="w-full" onClick={handleProductionCsid} disabled={prodBusy || !zatca.hasComplianceCsid || !canEdit}>
                       {prodBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Run Compliance Tests & Get Production CSID"}
                     </Button>
                   </div>
