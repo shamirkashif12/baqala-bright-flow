@@ -164,6 +164,19 @@ export const api = {
     return request<InventoryAdjustment[]>(`/api/inventory/adjustments${q ? `?${q}` : ""}`);
   },
 
+  // Stock Counts (Stocking Review)
+  getStockCounts: (params?: { branchId?: string; status?: string }) =>
+    request<StockCount[]>(`/api/stock-counts${toQuery(params)}`),
+  getStockCount: (id: string) => request<StockCount>(`/api/stock-counts/${id}`),
+  startStockCount: (data: { branchId: string; categoryId?: string; startedBy?: string; notes?: string }) =>
+    request<StockCount>("/api/stock-counts", { method: "POST", body: JSON.stringify(data) }),
+  recordStockCount: (id: string, data: { productId: string; countedQuantity: number }) =>
+    request<StockCountItem>(`/api/stock-counts/${id}/count`, { method: "POST", body: JSON.stringify(data) }),
+  completeStockCount: (id: string, completedBy?: string) =>
+    request<StockCount>(`/api/stock-counts/${id}/complete`, { method: "POST", body: JSON.stringify({ completedBy }) }),
+  cancelStockCount: (id: string) =>
+    request<StockCount>(`/api/stock-counts/${id}/cancel`, { method: "PATCH" }),
+
   // Orders
   getOrders: (params?: { branchId?: string; status?: string; paymentStatus?: string; from?: string; to?: string }) => {
     const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
@@ -176,6 +189,10 @@ export const api = {
     request<Order>("/api/orders", { method: "POST", body: JSON.stringify(data) }),
   updateOrderStatus: (id: string, status: string) =>
     request<Order>(`/api/orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  editOrder: (id: string, data: { items: OrderEditItem[]; notes?: string }) =>
+    request<Order>(`/api/orders/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  voidOrder: (id: string, data: { reason?: string }) =>
+    request<Order>(`/api/orders/${id}`, { method: "DELETE", body: JSON.stringify(data) }),
 
   // Cashier Shifts
   getShifts: (params?: { branchId?: string; cashierId?: string; terminalId?: string; status?: string; dateFrom?: string; dateTo?: string }) => {
@@ -500,9 +517,9 @@ export const api = {
   exportTerminalReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; status?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/terminal/export${toQuery(params)}`),
 
-  getProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; search?: string }) =>
+  getProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; search?: string; cashierId?: string }) =>
     request<ProductSalesReport>(`/api/reports/product-sales${toQuery(params)}`),
-  exportProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; search?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+  exportProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; search?: string; cashierId?: string; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/product-sales/export${toQuery(params)}`),
 
   getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string }) =>
@@ -555,9 +572,9 @@ export const api = {
   exportFeeReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/fees/export${toQuery(params)}`),
 
-  getTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string }) =>
+  getTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string }) =>
     request<TobaccoExciseReport>(`/api/reports/tobacco-excise${toQuery(params)}`),
-  exportTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/tobacco-excise/export${toQuery(params)}`),
 
   getProfitMarginReport: (params?: { from?: string; to?: string; branchId?: string; groupBy?: "product" | "category" | "branch" }) =>
@@ -590,9 +607,9 @@ export const api = {
     const q = params?.isActive !== undefined ? `?isActive=${params.isActive}` : "";
     return request<Discount[]>(`/api/discounts${q}`);
   },
-  createDiscount: (data: Partial<Discount>) =>
+  createDiscount: (data: Partial<Discount> & { excludedProductIds?: string[] }) =>
     request<Discount>("/api/discounts", { method: "POST", body: JSON.stringify(data) }),
-  updateDiscount: (id: string, data: Partial<Discount>) =>
+  updateDiscount: (id: string, data: Partial<Discount> & { excludedProductIds?: string[] }) =>
     request<Discount>(`/api/discounts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   toggleDiscount: (id: string) =>
     request<Discount>(`/api/discounts/${id}/toggle`, { method: "PATCH" }),
@@ -766,12 +783,16 @@ export interface Order {
   // is onboarded for the branch. Absent otherwise; callers should fall back to a Phase-1 QR.
   zatcaQrCode?: string;
   zatcaInvoiceStatus?: string;
+  notes?: string;
+  voidReason?: string;
 }
 
 export interface OrderItem {
   id?: string; productId: string; quantity: number; unitPrice: number; totalPrice: number;
   product?: { id: string; name: string; sku: string };
 }
+
+export interface OrderEditItem { id?: string; productId: string; quantity: number; unitPrice: number; }
 
 export interface OrderPayment {
   id?: string; paymentMethod: string; amount: number; status: string;
@@ -847,6 +868,8 @@ export interface Discount {
   value: number; isActive: boolean;
   startDate?: string; endDate?: string; createdAt: string;
   requiresCustomer?: boolean; minCustomerTier?: string; // standard | silver | gold | platinum
+  // JSON array of product ids carved out of an all/branch/category scoped discount
+  excludedProductIdsJson?: string;
   product?: { id: string; name: string; sku: string };
   branch?: { id: string; name: string };
 }
@@ -1002,6 +1025,23 @@ export interface InventoryAdjustment {
   product?: Product;
   branch?: { id: string; name: string };
   adjustedByUser?: { id: string; fullName: string };
+}
+
+export interface StockCountItem {
+  id: string; stockCountId?: string; productId: string;
+  systemQuantity: number; countedQuantity?: number; variance?: number;
+  countedAt?: string; createdAt?: string;
+  product?: Product;
+}
+
+export interface StockCount {
+  id: string; branchId: string; categoryId?: string;
+  status: string; // draft | completed | cancelled
+  startedBy?: string; completedBy?: string; notes?: string;
+  startedAt: string; completedAt?: string;
+  branch?: { id: string; name: string };
+  category?: { id: string; name: string };
+  items?: StockCountItem[];
 }
 
 export interface Warehouse {
@@ -1318,7 +1358,7 @@ export interface FeeReport {
 }
 
 export interface TobaccoExciseRow {
-  sku: string; barcode: string; productName: string; brand: string; category: string; branch: string;
+  sku: string; barcode: string; productName: string; brand: string; category: string; branch: string; employee: string;
   unitsSold: number; taxablePrice: number; exciseRate: number; exciseAmount: number; vatAmount: number;
   returnsQty: number; exciseReversal: number; netExcise: number; complianceStatus: string;
 }

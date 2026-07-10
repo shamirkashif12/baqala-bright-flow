@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260710090929_AddStockCounts")]
+    partial class AddStockCounts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1370,6 +1373,10 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("decimal(18,4)")
                         .HasColumnName("discount_amount");
 
+                    b.Property<Guid?>("DiscountApprovedBy")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("discount_approved_by");
+
                     b.Property<string>("Notes")
                         .HasColumnType("longtext")
                         .HasColumnName("notes");
@@ -1421,6 +1428,10 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("VoidApprovedBy")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("void_approved_by");
 
                     b.Property<string>("VoidReason")
                         .HasColumnType("longtext")

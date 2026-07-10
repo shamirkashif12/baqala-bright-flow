@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow, type ReportExportFormat, type Category } from "@/lib/api";
+import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow, type ReportExportFormat, type Category, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -38,23 +38,35 @@ function ProductSales() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [categoryId, setCategoryId] = useState("all");
+  const [cashierId, setCashierId] = useState("all");
   const [search, setSearch] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
+  const [cashiers, setCashiers] = useState<User[]>([]);
   const [data, setData] = useState<ProductSalesData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { api.getCategories().then(setCategories).catch(() => {}); }, []);
+  useEffect(() => {
+    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined })
+      // Any staff role can ring up a sale (Branch Manager/Supervisor covering a register), not
+      // just the Cashier role — filtering this list to literal "Cashier" meant a manager's own
+      // sales could never be selected here, even though "All Employees" clearly included them.
+      .then((u) => setCashiers(u.filter((x) => x.status === "active")))
+      .catch(() => {});
+    setCashierId("all");
+  }, [branchId]);
 
   const load = useCallback(() => {
     setLoading(true);
     api.getProductSalesReport({
       from, to, branchId: branchId !== "all" ? branchId : undefined,
       categoryId: categoryId !== "all" ? categoryId : undefined, search: search || undefined,
+      cashierId: cashierId !== "all" ? cashierId : undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, categoryId, search]);
+  }, [from, to, branchId, categoryId, search, cashierId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -62,7 +74,8 @@ function ProductSales() {
     try {
       const blob = await api.exportProductSalesReport({
         from, to, branchId: branchId !== "all" ? branchId : undefined, categoryId: categoryId !== "all" ? categoryId : undefined,
-        search: search || undefined, exportedBy: user?.id, includeMargin: canViewMargin, format,
+        search: search || undefined, cashierId: cashierId !== "all" ? cashierId : undefined,
+        exportedBy: user?.id, includeMargin: canViewMargin, format,
       });
       downloadBlob(blob, `product-sales-${from}-to-${to}.${format}`);
     } catch (e) {
@@ -96,6 +109,13 @@ function ProductSales() {
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
             {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={cashierId} onValueChange={setCashierId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
           </SelectContent>
         </Select>
         <Input placeholder="Search SKU, barcode or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />

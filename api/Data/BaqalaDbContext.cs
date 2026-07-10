@@ -25,6 +25,8 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<InventoryStock> InventoryStocks { get; set; }
     public DbSet<InventoryBatch> InventoryBatches { get; set; }
     public DbSet<InventoryAdjustment> InventoryAdjustments { get; set; }
+    public DbSet<StockCount> StockCounts { get; set; }
+    public DbSet<StockCountItem> StockCountItems { get; set; }
 
     // Orders
     public DbSet<Order> Orders { get; set; }

@@ -1069,11 +1069,12 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("product-sales")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetProductSales(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] string? search)
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] string? search,
+        [FromQuery] Guid? cashierId)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildProductSalesAsync(rangeFrom, rangeTo, branchId, categoryId, search);
+        var result = await BuildProductSalesAsync(rangeFrom, rangeTo, branchId, categoryId, search, cashierId);
         if (!await CanViewFinanceAsync()) MaskProductSalesMargin(result);
         return Ok(result);
     }
@@ -1082,11 +1083,11 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportProductSales(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] string? search,
-        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+        [FromQuery] Guid? cashierId, [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildProductSalesAsync(rangeFrom, rangeTo, branchId, categoryId, search);
+        var result = await BuildProductSalesAsync(rangeFrom, rangeTo, branchId, categoryId, search, cashierId);
         var includeMargin = await CanViewFinanceAsync();
         if (!includeMargin) MaskProductSalesMargin(result);
         var headers = includeMargin
@@ -1114,7 +1115,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         foreach (var row in r.Rows) { row.Cogs = 0; row.GrossProfit = 0; row.MarginPct = null; }
     }
 
-    private async Task<ProductSalesResult> BuildProductSalesAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? categoryId, string? search)
+    private async Task<ProductSalesResult> BuildProductSalesAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? categoryId, string? search, Guid? cashierId = null)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
         if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
@@ -1122,6 +1123,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .Where(i => i.Order != null && i.Order.CreatedAt >= rangeFrom && i.Order.CreatedAt < rangeToExclusive && i.Order.PaymentStatus == "paid");
         if (branchId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.BranchId == branchId);
         if (categoryId.HasValue) itemsQ = itemsQ.Where(i => i.Product != null && i.Product.CategoryId == categoryId);
+        if (cashierId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.CashierId == cashierId);
         if (!string.IsNullOrEmpty(search)) itemsQ = itemsQ.Where(i => i.Product != null && (i.Product.Name.Contains(search) || i.Product.Sku.Contains(search) || (i.Product.Barcode != null && i.Product.Barcode.Contains(search))));
 
         var rawItems = await itemsQ.Select(i => new {
@@ -2115,25 +2117,25 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("tobacco-excise")]
     [RequirePermission("Reports", PermAction.View)]
-    public async Task<IActionResult> GetTobaccoExcise([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId)
+    public async Task<IActionResult> GetTobaccoExcise([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? cashierId)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        return Ok(await BuildTobaccoExciseAsync(rangeFrom, rangeTo, branchId));
+        return Ok(await BuildTobaccoExciseAsync(rangeFrom, rangeTo, branchId, cashierId));
     }
 
     [HttpGet("tobacco-excise/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportTobaccoExcise(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? cashierId, [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildTobaccoExciseAsync(rangeFrom, rangeTo, branchId);
-        var headers = new[] { "SKU", "Barcode", "Product Name", "Brand", "Category", "Branch", "Units Sold", "Taxable Price", "Excise Rate", "Excise Amount", "VAT Amount", "Returns Qty", "Excise Reversal", "Net Excise", "Compliance Status" };
+        var result = await BuildTobaccoExciseAsync(rangeFrom, rangeTo, branchId, cashierId);
+        var headers = new[] { "SKU", "Barcode", "Product Name", "Brand", "Category", "Branch", "Employee", "Units Sold", "Taxable Price", "Excise Rate", "Excise Amount", "VAT Amount", "Returns Qty", "Excise Reversal", "Net Excise", "Compliance Status" };
         var rows = result.Rows.Select(r => new object?[]
         {
-            r.Sku, r.Barcode, r.ProductName, r.Brand, r.Category, r.Branch, r.UnitsSold, r.TaxablePrice, r.ExciseRate, r.ExciseAmount,
+            r.Sku, r.Barcode, r.ProductName, r.Brand, r.Category, r.Branch, r.Employee, r.UnitsSold, r.TaxablePrice, r.ExciseRate, r.ExciseAmount,
             r.VatAmount, r.ReturnsQty, r.ExciseReversal, r.NetExcise, r.ComplianceStatus,
         }).ToList();
         await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
@@ -2148,7 +2150,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             kpis, headers, rows, $"tobacco-excise-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
-    private async Task<TobaccoExciseResult> BuildTobaccoExciseAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId)
+    private async Task<TobaccoExciseResult> BuildTobaccoExciseAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? cashierId = null)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
         if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
@@ -2156,10 +2158,12 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .Where(i => i.Order != null && i.Product != null && i.Product.IsTobacco
                 && i.Order.CreatedAt >= rangeFrom && i.Order.CreatedAt < rangeToExclusive && i.Order.PaymentStatus == "paid");
         if (branchId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.BranchId == branchId);
+        if (cashierId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.CashierId == cashierId);
 
         var rawItems = await itemsQ.Select(i => new {
             i.ProductId, Sku = i.Product!.Sku, Barcode = i.Product.Barcode, Name = i.Product.Name, Brand = i.Product.Brand,
             Category = i.Product.Category != null ? i.Product.Category.Name : "—", Branch = i.Order!.Branch!.Name,
+            CashierId = i.Order.CashierId, Employee = i.Order.Cashier != null ? i.Order.Cashier.FullName : "—",
             Qty = i.Quantity, TaxablePrice = i.UnitPrice, VatAmount = i.TaxAmount,
         }).ToListAsync();
 
@@ -2171,17 +2175,29 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var returnsByProduct = (await returnsQ.Select(ri => new { ri.ProductId, ri.Quantity }).ToListAsync())
             .GroupBy(x => x.ProductId).ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
 
-        var rows = rawItems.GroupBy(x => x.ProductId).Select(g =>
+        // Employee breakdown ("sold products by ... employee") — grouped by product AND cashier
+        // rather than product alone, so the same tobacco SKU sold by different cashiers shows as
+        // separate rows instead of one row that can only ever be attributed to whichever cashier
+        // EF's grouping happened to pick first.
+        var totalUnitsByProduct = rawItems.GroupBy(x => x.ProductId).ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
+
+        var rows = rawItems.GroupBy(x => new { x.ProductId, x.CashierId }).Select(g =>
         {
             var f = g.First();
             var unitsSold = g.Sum(x => x.Qty);
             var taxableBase = g.Sum(x => x.TaxablePrice * x.Qty);
             var exciseAmount = taxableBase * (defaultExcisePct / 100m);
-            var returnsQty = returnsByProduct.GetValueOrDefault(g.Key, 0m);
+            // Returns aren't cashier-attributed in this schema — split this product's total
+            // returns proportionally by each employee's share of units sold, rather than
+            // crediting the full return against every employee's row for the same product.
+            var productTotalUnits = totalUnitsByProduct.GetValueOrDefault(g.Key.ProductId, 0m);
+            var productReturnsQty = returnsByProduct.GetValueOrDefault(g.Key.ProductId, 0m);
+            var returnsQty = productTotalUnits > 0 ? Math.Round(productReturnsQty * (unitsSold / productTotalUnits), 2) : 0m;
             var exciseReversal = unitsSold > 0 ? Math.Round(exciseAmount * (returnsQty / unitsSold), 2) : 0m;
             return new TobaccoExciseRow
             {
                 Sku = f.Sku, Barcode = f.Barcode ?? "—", ProductName = f.Name, Brand = f.Brand ?? "—", Category = f.Category, Branch = f.Branch,
+                Employee = f.Employee,
                 UnitsSold = unitsSold, TaxablePrice = f.TaxablePrice, ExciseRate = defaultExcisePct, ExciseAmount = exciseAmount,
                 VatAmount = g.Sum(x => x.VatAmount), ReturnsQty = returnsQty, ExciseReversal = exciseReversal, NetExcise = exciseAmount - exciseReversal,
                 ComplianceStatus = defaultExcisePct > 0 ? "ok" : "missing excise config",
@@ -3021,6 +3037,7 @@ public sealed class TobaccoExciseRow
     public string Brand { get; init; } = "";
     public string Category { get; init; } = "";
     public string Branch { get; init; } = "";
+    public string Employee { get; init; } = "";
     public decimal UnitsSold { get; init; }
     public decimal TaxablePrice { get; init; }
     public decimal ExciseRate { get; init; }

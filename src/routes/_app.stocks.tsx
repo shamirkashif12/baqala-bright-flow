@@ -14,13 +14,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import {
   Boxes, ArrowDownToLine, ArrowUpFromLine, ClipboardCheck, Truck, Undo2,
   Trash2, Plus, History, FileBarChart, ScanLine, Package, AlertTriangle,
-  TrendingUp, BarChart3, Download, CheckCircle2, ImageOff,
+  TrendingUp, BarChart3, Download, CheckCircle2, ImageOff, X, RotateCcw, PlayCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  api, Branch, Product, Supplier, Warehouse,
+  api, Branch, Product, Supplier, Warehouse, Category,
   InventoryStock, InventoryBatch, InventoryAdjustment,
-  PurchaseOrder, StockTransfer,
+  PurchaseOrder, StockTransfer, StockCount, StockCountItem,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -755,6 +755,295 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
   );
 }
 
+// ─── Stocking Review (Stock Filters: physical count / live reconciliation) ────
+// Self-contained tab: snapshots system quantity per product at start, lets a manager scan/enter
+// counted quantities, then on completion reconciles any variance through the same
+// InventoryAdjustment pipeline the Stock-Out/Wastage tabs already write to.
+function StockingReviewTab({ branches }: { branches: Branch[] }) {
+  const { user } = useAuth();
+  const { canCreate, canEdit } = usePermission("Stocks");
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+
+  const [sessions, setSessions] = useState<StockCount[]>([]);
+  const [active, setActive] = useState<StockCount | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [startOpen, setStartOpen] = useState(false);
+  const [startBranch, setStartBranch] = useState(lockedBranchId ?? "");
+  const [startCategory, setStartCategory] = useState("all");
+  const [startNotes, setStartNotes] = useState("");
+  const [starting, setStarting] = useState(false);
+
+  const [scanQuery, setScanQuery] = useState("");
+  const [countInputs, setCountInputs] = useState<Record<string, string>>({});
+  const [completing, setCompleting] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    api.getStockCounts({ branchId: lockedBranchId ?? undefined }).then(setSessions).catch(() => {}).finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    load();
+    api.getProducts().then(setProducts).catch(() => {});
+    api.getCategories().then(setCategories).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openSession = (id: string) => {
+    api.getStockCount(id).then(s => {
+      setActive(s);
+      setCountInputs(Object.fromEntries((s.items ?? []).map(i => [i.productId, i.countedQuantity != null ? String(i.countedQuantity) : ""])));
+    }).catch(() => toast.error("Failed to load count session"));
+  };
+
+  const handleStart = async () => {
+    if (!startBranch) { toast.error("Select a branch"); return; }
+    setStarting(true);
+    try {
+      const session = await api.startStockCount({
+        branchId: startBranch, categoryId: startCategory !== "all" ? startCategory : undefined,
+        startedBy: user?.id, notes: startNotes || undefined,
+      });
+      toast.success(`Count session started — ${session.items?.length ?? 0} SKUs snapshotted`);
+      setStartOpen(false); setStartNotes(""); setStartCategory("all");
+      load();
+      openSession(session.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to start count");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const saveCount = async (productId: string, raw: string) => {
+    if (!active || raw.trim() === "") return;
+    const qty = Number(raw);
+    if (Number.isNaN(qty) || qty < 0) { toast.error("Enter a valid quantity"); return; }
+    try {
+      await api.recordStockCount(active.id, { productId, countedQuantity: qty });
+      openSession(active.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save count");
+    }
+  };
+
+  // Barcode/name search: jump to (or add) a line for the scanned product
+  const handleScan = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter" || !active) return;
+    const q = scanQuery.trim().toLowerCase();
+    if (!q) return;
+    const match = products.find(p => p.barcode?.toLowerCase() === q || p.sku.toLowerCase() === q)
+      ?? products.find(p => p.name.toLowerCase().includes(q));
+    if (!match) { toast.error(`No product matches "${scanQuery}"`); return; }
+    setScanQuery("");
+    const existing = active.items?.find(i => i.productId === match.id);
+    const current = existing?.countedQuantity ?? 0;
+    const next = current + 1;
+    setCountInputs(ci => ({ ...ci, [match.id]: String(next) }));
+    saveCount(match.id, String(next));
+    if (!existing) toast.info(`${match.name} added to count (not in original snapshot)`);
+  };
+
+  const handleComplete = async () => {
+    if (!active) return;
+    const counted = (active.items ?? []).filter(i => i.countedQuantity != null).length;
+    const total = active.items?.length ?? 0;
+    if (counted < total && !confirm(`${total - counted} item(s) haven't been counted yet and will be left unchanged. Complete anyway?`)) return;
+    setCompleting(true);
+    try {
+      const done = await api.completeStockCount(active.id, user?.id);
+      toast.success("Stock count completed — variances reconciled");
+      setActive(done);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to complete count");
+    } finally {
+      setCompleting(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!active || !confirm("Cancel this count session? No adjustments will be applied.")) return;
+    try {
+      await api.cancelStockCount(active.id);
+      toast.success("Count session cancelled");
+      setActive(null);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to cancel count");
+    }
+  };
+
+  const items = active?.items ?? [];
+  const countedCount = items.filter(i => i.countedQuantity != null).length;
+  const varianceCount = items.filter(i => i.variance != null && i.variance !== 0).length;
+
+  if (active) {
+    const isDraft = active.status === "draft";
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <Button variant="ghost" size="sm" className="h-7 text-xs -ml-2 mb-1" onClick={() => setActive(null)}>← Back to sessions</Button>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold">{active.branch?.name ?? "Count Session"}</h3>
+              <StBadge status={active.status} />
+              {active.category && <span className="text-xs text-muted-foreground">· {active.category.name} only</span>}
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Started {fmtDate(active.startedAt)} {fmtTime(active.startedAt)} · {countedCount}/{items.length} counted · {varianceCount} with variance
+            </p>
+          </div>
+          {isDraft && (canEdit) && (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCancel}>
+                <X className="h-3.5 w-3.5" /> Cancel Session
+              </Button>
+              <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={handleComplete} disabled={completing}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> {completing ? "Completing…" : "Complete & Reconcile"}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {isDraft && canEdit && (
+          <Card className="p-3 border-border/60">
+            <Label className="text-xs text-muted-foreground mb-1.5 block">Scan barcode or type SKU/name, then Enter — adds 1 unit to the count</Label>
+            <div className="relative">
+              <ScanLine className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input className="pl-9" placeholder="Scan or search…" value={scanQuery} onChange={e => setScanQuery(e.target.value)} onKeyDown={handleScan} />
+            </div>
+          </Card>
+        )}
+
+        <Card className="overflow-hidden border-border/60">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/40 border-b border-border/60 text-left">
+                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">SKU</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">System Qty</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Counted Qty</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Variance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map(item => {
+                  const variance = item.variance ?? null;
+                  return (
+                    <tr key={item.id} className="border-b border-border/40 last:border-0">
+                      <td className="px-4 py-2 font-medium">{item.product?.name ?? "Unknown"}</td>
+                      <td className="px-4 py-2 text-muted-foreground text-xs">{item.product?.sku}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{item.systemQuantity}</td>
+                      <td className="px-4 py-2 text-right">
+                        {isDraft && canEdit ? (
+                          <Input
+                            type="number" className="h-8 w-24 ml-auto text-right"
+                            value={countInputs[item.productId] ?? ""}
+                            onChange={e => setCountInputs(ci => ({ ...ci, [item.productId]: e.target.value }))}
+                            onBlur={e => saveCount(item.productId, e.target.value)}
+                            placeholder="—"
+                          />
+                        ) : (
+                          <span className="tabular-nums">{item.countedQuantity ?? "—"}</span>
+                        )}
+                      </td>
+                      <td className={`px-4 py-2 text-right font-semibold tabular-nums ${variance == null ? "text-muted-foreground" : variance === 0 ? "text-success" : variance > 0 ? "text-blue-600" : "text-destructive"}`}>
+                        {variance == null ? "—" : variance > 0 ? `+${variance}` : variance}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {items.length === 0 && (
+                  <tr><td colSpan={5} className="text-center py-10 text-muted-foreground text-sm">No items in this session.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <p className="text-sm text-muted-foreground">Physical stock counts — snapshot system quantity, scan what's actually on the shelf, reconcile the variance.</p>
+        {canCreate && (
+          <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => setStartOpen(true)}>
+            <PlayCircle className="h-3.5 w-3.5" /> Start New Count
+          </Button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="text-center py-10 text-sm text-muted-foreground">Loading…</div>
+      ) : (
+        <Card className="overflow-hidden border-border/60">
+          <div className="divide-y divide-border/40">
+            {sessions.map(s => (
+              <div key={s.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/30 cursor-pointer" onClick={() => openSession(s.id)}>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{s.branch?.name ?? "—"}</span>
+                    <StBadge status={s.status} />
+                    {s.category && <span className="text-xs text-muted-foreground">· {s.category.name}</span>}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Started {fmtDate(s.startedAt)} {fmtTime(s.startedAt)}
+                    {s.completedAt && ` · Completed ${fmtDate(s.completedAt)} ${fmtTime(s.completedAt)}`}
+                  </p>
+                </div>
+                <RotateCcw className="h-4 w-4 text-muted-foreground" />
+              </div>
+            ))}
+            {sessions.length === 0 && (
+              <div className="text-center py-10 text-sm text-muted-foreground">No stock count sessions yet.</div>
+            )}
+          </div>
+        </Card>
+      )}
+
+      <Dialog open={startOpen} onOpenChange={setStartOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Start Stock Count</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {!lockedBranchId && (
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Branch *</Label>
+                <Select value={startBranch} onValueChange={setStartBranch}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+                  <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            )}
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Category (optional — leave blank for full count)</Label>
+              <Select value={startCategory} onValueChange={setStartCategory}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Notes</Label>
+              <Textarea rows={2} value={startNotes} onChange={e => setStartNotes(e.target.value)} placeholder="e.g. Monthly cycle count — Beverages aisle" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStartOpen(false)}>Cancel</Button>
+            <Button onClick={handleStart} disabled={starting}>{starting ? "Starting…" : "Start Count"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function Stocks() {
@@ -1012,6 +1301,7 @@ function Stocks() {
           <TabsTrigger value="supplier-return" className="gap-1.5"><Undo2 className="h-3.5 w-3.5" />Supplier Return</TabsTrigger>
           <TabsTrigger value="wastage" className="gap-1.5"><Trash2 className="h-3.5 w-3.5" />Wastage</TabsTrigger>
           <TabsTrigger value="movement" className="gap-1.5"><History className="h-3.5 w-3.5" />Movement</TabsTrigger>
+          <TabsTrigger value="stocking-review" className="gap-1.5"><ClipboardCheck className="h-3.5 w-3.5" />Stocking Review</TabsTrigger>
           <TabsTrigger value="reports" className="gap-1.5"><FileBarChart className="h-3.5 w-3.5" />Reports</TabsTrigger>
         </TabsList>
 
@@ -1329,6 +1619,11 @@ function Stocks() {
                 )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── Stocking Review (Stock Filters: live count / reconciliation) ── */}
+        <TabsContent value="stocking-review">
+          <StockingReviewTab branches={branches} />
         </TabsContent>
 
         {/* ── Reports ── */}

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace BaqalaPOS.Api.Models;
 
@@ -131,4 +132,87 @@ public class InventoryAdjustment
     public Branch? Branch { get; set; }
     public InventoryBatch? Batch { get; set; }
     public User? AdjustedByUser { get; set; }
+}
+
+// Stock Filters — "Stocking review": a physical count session that snapshots system quantity per
+// product at start, records what was actually counted (e.g. via barcode scan), and on completion
+// posts InventoryAdjustment rows for any variance — reusing the existing adjustment pipeline
+// rather than writing a second one.
+[Table("stock_counts")]
+public class StockCount
+{
+    [Key, Column("id")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required, Column("branch_id")]
+    public Guid BranchId { get; set; }
+
+    // Optional scope — count just one category instead of the whole branch.
+    [Column("category_id")]
+    public Guid? CategoryId { get; set; }
+
+    // draft (open, still counting) | completed | cancelled
+    [Required, MaxLength(20), Column("status")]
+    public string Status { get; set; } = "draft";
+
+    [Column("started_by")]
+    public Guid? StartedBy { get; set; }
+
+    [Column("completed_by")]
+    public Guid? CompletedBy { get; set; }
+
+    [Column("notes")]
+    public string? Notes { get; set; }
+
+    [Column("started_at")]
+    public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+
+    [Column("completed_at")]
+    public DateTime? CompletedAt { get; set; }
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    // Navigation
+    public Branch? Branch { get; set; }
+    public Category? Category { get; set; }
+    public ICollection<StockCountItem> Items { get; set; } = [];
+}
+
+[Table("stock_count_items")]
+public class StockCountItem
+{
+    [Key, Column("id")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required, Column("stock_count_id")]
+    public Guid StockCountId { get; set; }
+
+    [Required, Column("product_id")]
+    public Guid ProductId { get; set; }
+
+    // Snapshotted when the count session started (or when this line was first added, for a
+    // product scanned that wasn't pre-loaded into the session).
+    [Column("system_quantity")]
+    public decimal SystemQuantity { get; set; }
+
+    [Column("counted_quantity")]
+    public decimal? CountedQuantity { get; set; }
+
+    // CountedQuantity - SystemQuantity, set once counted. Null while still pending.
+    [Column("variance")]
+    public decimal? Variance { get; set; }
+
+    [Column("counted_at")]
+    public DateTime? CountedAt { get; set; }
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // Navigation
+    [JsonIgnore] public StockCount? StockCount { get; set; }
+    public Product? Product { get; set; }
 }

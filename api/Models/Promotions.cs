@@ -53,6 +53,12 @@ public class Discount
     [MaxLength(20), Column("min_customer_tier")]
     public string? MinCustomerTier { get; set; }
 
+    // Product ids carved out of an "all"/"branch"/"category" scoped discount, stored as a JSON
+    // array (e.g. ["<guid>","<guid>"]) — mirrors the JSON-column convention already used for
+    // Offer.ItemsDescription rather than adding a join table for a small, rarely-queried list.
+    [Column("excluded_product_ids")]
+    public string? ExcludedProductIdsJson { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

@@ -24,6 +24,11 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/inventory")({ component: Inventory });
 
+// A freshly received batch can't already be expired — used as the min on both "Expiry date"
+// inputs below (Receive Batch / Quick Stock In) and to validate on submit, since some browsers
+// let a date be typed in manually past the input's own min.
+const todayStr = new Date().toISOString().slice(0, 10);
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function daysLeft(date?: string | null) {
@@ -136,6 +141,7 @@ function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppli
     if (!destBranchId && form.destType === "branch") return setError("Please select a branch.");
     if (!form.warehouseId && form.destType === "warehouse") return setError("Please select a warehouse.");
     if (lockedBranchId && form.destType === "branch" && destBranchId !== lockedBranchId) return setError("You can only receive stock into your own branch.");
+    if (form.expiryDate && form.expiryDate < todayStr) return setError("Expiry date cannot be in the past for a batch received today.");
     // For warehouse batches, find the branch that owns that warehouse
     const branchId = destBranchId || lockedBranchId || (branches[0]?.id ?? "");
     setSaving(true); setError("");
@@ -191,7 +197,7 @@ function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppli
             <Input type="number" min={1} className="h-9" placeholder="240" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Expiry date">
-            <Input type="date" className="h-9" value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
+            <Input type="date" className="h-9" min={todayStr} value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Purchase cost (per unit)">
             <Input type="number" step="0.01" className="h-9" placeholder="4.20" value={form.purchaseCost} onChange={e => set("purchaseCost")(e.target.value)} />
@@ -346,6 +352,9 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     if (missingFields.length > 0) {
       return setError(`${missingFields.join(", ")} ${missingFields.length > 1 ? "are" : "is"} required.`);
     }
+    if (form.expiryDate && form.expiryDate < todayStr) {
+      return setError("Expiry date cannot be in the past for stock received today.");
+    }
     setSaving(true); setError("");
     try {
       const product = await api.createProduct({
@@ -457,7 +466,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             <Input type="number" className="h-9" placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Expiry Date">
-            <Input type="date" className="h-9" value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
+            <Input type="date" className="h-9" min={todayStr} value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
           </FieldRow>
 
           {/* Discount */}

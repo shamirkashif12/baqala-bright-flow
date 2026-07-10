@@ -67,6 +67,19 @@ export const Route = createFileRoute("/_app/pos")({
 
 type CartItem = { name: string; sku: string; productId: string; qty: number; price: number; stock: number };
 
+// A bonus/free unit auto-added by a triggered bogo/buy_a_get_b offer, e.g. "buy 3 get 1 free":
+// productId is what the bonus applies to (same as the trigger product unless the offer names a
+// different "get" product), bonusQty how many free units, payPerUnit what the customer still
+// pays for each (0 for a pure BOGO, offer.offerPrice for a discounted buy_a_get_b).
+type BonusContribution = { offerId: string; offerName: string; productId: string; bonusQty: number; payPerUnit: number };
+
+// Cart line as actually rung up (paid qty + any auto-added bonus merged into one displayed qty) —
+// this is what's rendered, submitted at checkout, and used for inventory decrement, since bonus
+// units physically leave the shelf just like paid ones. `cart` itself always stays the
+// cashier-scanned paid quantity so offer thresholds have a stable baseline to recompute from on
+// every increment/decrement instead of compounding against an already-bonused total.
+type DisplayCartItem = CartItem & { bonusQty: number; isBonusOnly: boolean };
+
 type InvoiceSnapshot = {
   orderNumber: string;
   createdAt: string;
@@ -882,15 +895,81 @@ function POS() {
     return () => document.removeEventListener("keydown", handler);
   }, []); // stable — all mutable state accessed through refs
 
+  // ─── Bundle / multi-buy engine (bogo, buy_a_get_b) ────────────────────────────
+  // Trigger thresholds are always evaluated against `cart` (the cashier's actual scanned/paid
+  // quantity) — never against a total that already includes a previous bonus — so re-running this
+  // on every increment/decrement always recomputes the SAME bonus from the same baseline instead
+  // of compounding. "buy 3 get 1 free": triggerQuantity=3, getQuantity=1, offerType="bogo"; when
+  // getProductId is unset it defaults to the trigger product itself (same-SKU multi-buy).
+  const bonusContributions: BonusContribution[] = useMemo(() => {
+    const contributions: BonusContribution[] = [];
+    for (const o of activeOffers) {
+      if (o.offerType !== "bogo" && o.offerType !== "buy_a_get_b") continue;
+      // Only offers naming a specific trigger product auto-add quantity — matches "Bundle
+      // activates only for defined barcode/quantity". A blanket "buy 1 get 1 free on anything"
+      // (no triggerProductId) has no defined barcode, so it stays a pure discount below
+      // (offerDiscount) instead of inflating every cart line's displayed quantity.
+      if (!o.triggerProductId) continue;
+
+      const triggerItem = cart.find(i => i.productId === o.triggerProductId);
+      if (!triggerItem) continue;
+      const triggerQty = o.triggerQuantity ?? 1;
+      const getQty = o.getQuantity ?? 1;
+      const sets = Math.floor(triggerItem.qty / triggerQty);
+      if (sets <= 0) continue;
+      const getProductId = o.getProductId || o.triggerProductId;
+      // BOGO is always fully free; buy_a_get_b pays offer.offerPrice per bonus unit (0 = free).
+      const payPerUnit = o.offerType === "buy_a_get_b" ? (o.offerPrice ?? 0) : 0;
+      contributions.push({ offerId: o.id, offerName: o.name, productId: getProductId, bonusQty: sets * getQty, payPerUnit });
+    }
+    return contributions;
+  }, [cart, activeOffers]);
+
+  // What's actually rung up: paid cart lines with their bonus merged into the displayed quantity,
+  // plus a synthetic line for a bonus product that isn't otherwise in the cart (buy_a_get_b with a
+  // different "get" product). This is what renders, what gets submitted at checkout, and what
+  // inventory decrements against — bonus units physically leave the shelf too.
+  const displayCart: DisplayCartItem[] = useMemo(() => {
+    const bonusByProduct = new Map<string, number>();
+    for (const c of bonusContributions) bonusByProduct.set(c.productId, (bonusByProduct.get(c.productId) ?? 0) + c.bonusQty);
+
+    const result: DisplayCartItem[] = cart.map(c => {
+      const bonusQty = bonusByProduct.get(c.productId) ?? 0;
+      return { ...c, qty: c.qty + bonusQty, bonusQty, isBonusOnly: false };
+    });
+
+    const paidProductIds = new Set(cart.map(c => c.productId));
+    for (const [productId, bonusQty] of bonusByProduct) {
+      if (paidProductIds.has(productId) || bonusQty <= 0) continue;
+      const prod = products.find(p => p.id === productId);
+      if (!prod) continue;
+      result.push({
+        name: prod.name, sku: prod.sku, productId: prod.id,
+        qty: bonusQty, price: prod.basePrice, stock: stockMap.get(prod.id) ?? 0,
+        bonusQty, isBonusOnly: true,
+      });
+    }
+    return result;
+  }, [cart, bonusContributions, products, stockMap]);
+
+  const bundleDiscount = bonusContributions.reduce((sum, c) => {
+    const retailPrice = products.find(p => p.id === c.productId)?.basePrice
+      ?? cart.find(i => i.productId === c.productId)?.price ?? 0;
+    return sum + c.bonusQty * Math.max(0, retailPrice - c.payPerUnit);
+  }, 0);
+
   // ─── Calculations ─────────────────────────────────────────────────────────────
-  const subtotal = cart.reduce((s, i) => s + i.qty * i.price, 0);
-  const cartUnitCount = cart.reduce((s, i) => s + i.qty, 0);
+  // Gross figures are computed off displayCart (paid + bonus units) since bonus units still leave
+  // the shelf and are still subject to regulatory fees like tobacco excise — they're just then
+  // fully (or partially) discounted back out via bundleDiscount below.
+  const subtotal = displayCart.reduce((s, i) => s + i.qty * i.price, 0);
+  const cartUnitCount = displayCart.reduce((s, i) => s + i.qty, 0);
 
   // KSA tobacco excise: min 25 SAR OR 100% of base price, whichever is higher
   function calcTobaccoFee(base: number): number {
     return base <= 25 ? 25 : base;
   }
-  const tobaccoExcise = cart.reduce((sum, ci) => {
+  const tobaccoExcise = displayCart.reduce((sum, ci) => {
     const prod = products.find(p => p.id === ci.productId);
     if (!prod?.isTobacco || !tobaccoFeeEnabled) return sum;
     return sum + ci.qty * calcTobaccoFee(ci.price);
@@ -906,8 +985,17 @@ function POS() {
     if (!desc) return [];
     try { const d = JSON.parse(desc); return Array.isArray(d.products) ? d.products : []; } catch { return []; }
   }
+  // Parse a discount's excluded-product list, stored as a plain JSON array of ids
+  function parseIdList(json?: string | null): string[] {
+    if (!json) return [];
+    try { const d = JSON.parse(json); return Array.isArray(d) ? d : []; } catch { return []; }
+  }
 
-  // Active discounts: "all" applies to everything; "product" applies per matching product in cart
+  // Active discounts: "all"/"branch" apply across the whole basket (minus any excluded products),
+  // "product" applies to that one product, "category" applies to every cart line in that category
+  // (minus exclusions) — category/branch scoping and exclusions were previously silently ignored
+  // here even though the Discounts admin screen lets a manager configure them, so a "10% off
+  // Beverages" discount never actually applied at checkout.
   const discountSavings = activeDiscounts.reduce((sum, d) => {
     const now = new Date();
     if (d.startDate && new Date(d.startDate) > now) return sum;
@@ -920,36 +1008,50 @@ function POS() {
       const customerRank = customer ? tierRank[customer.tier ?? "standard"] ?? 0 : -1;
       if (customerRank < (tierRank[d.minCustomerTier] ?? 0)) return sum;
     }
-    if (d.appliesTo === "all") {
+    if (d.appliesTo === "branch" && d.branchId && branch && d.branchId !== branch.id) return sum;
+
+    const excludedIds = new Set(parseIdList(d.excludedProductIdsJson));
+
+    if (d.appliesTo === "all" || d.appliesTo === "branch") {
+      const eligible = displayCart.filter(ci => !excludedIds.has(ci.productId));
+      const eligibleSubtotal = eligible.reduce((s, ci) => s + ci.qty * ci.price, 0);
+      if (eligibleSubtotal <= 0) return sum;
       return sum + (d.discountType === "percentage"
-        ? subtotal * (d.value / 100)
-        : Math.min(d.value, subtotal));
+        ? eligibleSubtotal * (d.value / 100)
+        : Math.min(d.value, eligibleSubtotal));
     }
     if (d.appliesTo === "product" && d.productId) {
-      const item = cart.find(i => i.productId === d.productId);
+      if (excludedIds.has(d.productId)) return sum;
+      const item = displayCart.find(i => i.productId === d.productId);
       if (!item) return sum;
       return sum + (d.discountType === "percentage"
         ? item.qty * item.price * (d.value / 100)
         : Math.min(d.value * item.qty, item.qty * item.price));
+    }
+    if (d.appliesTo === "category" && d.categoryId) {
+      const lines = displayCart.filter(ci => {
+        if (excludedIds.has(ci.productId)) return false;
+        return products.find(p => p.id === ci.productId)?.categoryId === d.categoryId;
+      });
+      if (lines.length === 0) return sum;
+      return sum + lines.reduce((s, ci) => s + (d.discountType === "percentage"
+        ? ci.qty * ci.price * (d.value / 100)
+        : Math.min(d.value * ci.qty, ci.qty * ci.price)), 0);
     }
     return sum;
   }, 0);
 
   // Triggered offers — split into "discountable" (we can compute SAR savings) vs "notify only"
   const triggeredOffers = activeOffers.filter(o => {
-    if (o.offerType === "bogo") {
-      // With product: only triggers if that product is in cart
-      if (o.triggerProductId) return cart.some(i => i.productId === o.triggerProductId);
-      // Without product: blanket BOGO on any purchase
-      return cart.length > 0;
+    if (o.offerType === "bogo" || o.offerType === "buy_a_get_b") {
+      // Trigger threshold is always checked against the paid (non-bonus) cart — see
+      // bonusContributions above.
+      if (!o.triggerProductId) return o.offerType === "bogo" && cart.length > 0; // blanket BOGO
+      const trig = cart.find(i => i.productId === o.triggerProductId);
+      return trig !== undefined && trig.qty >= (o.triggerQuantity ?? 1);
     }
     if (o.offerType === "product_offer") {
       return o.triggerProductId ? cart.some(i => i.productId === o.triggerProductId) : false;
-    }
-    if (o.offerType === "buy_a_get_b") {
-      if (!o.triggerProductId) return false;
-      const trig = cart.find(i => i.productId === o.triggerProductId);
-      return trig !== undefined && trig.qty >= (o.triggerQuantity ?? 1);
     }
     if (o.offerType === "combo") {
       const ids = parseComboIds(o.itemsDescription);
@@ -962,29 +1064,24 @@ function POS() {
   });
 
   const offerDiscount = triggeredOffers.reduce((sum, o) => {
-    const item = o.triggerProductId ? cart.find(i => i.productId === o.triggerProductId) : null;
-    if (o.offerType === "bogo") {
-      if (item) {
-        // Product-specific BOGO
-        const sets = Math.floor(item.qty / ((o.triggerQuantity ?? 1) + (o.getQuantity ?? 1)));
-        return sum + sets * (o.getQuantity ?? 1) * item.price;
-      } else {
-        // Blanket BOGO: apply to every item in cart
-        return sum + cart.reduce((s, ci) => {
-          const sets = Math.floor(ci.qty / ((o.triggerQuantity ?? 1) + (o.getQuantity ?? 1)));
-          return s + sets * (o.getQuantity ?? 1) * ci.price;
-        }, 0);
-      }
+    // Product-specific bogo / buy_a_get_b are handled entirely by bundleDiscount above (single
+    // source of truth shared with displayCart's bonus quantities) — skip here to avoid
+    // double-counting.
+    if ((o.offerType === "bogo" || o.offerType === "buy_a_get_b") && o.triggerProductId) return sum;
+    if (o.offerType === "bogo" && !o.triggerProductId) {
+      // Blanket BOGO ("buy 1 get 1 free" on any product, no specific barcode) stays a pure
+      // discount rather than an auto-add-quantity mechanic — see bonusContributions above.
+      const triggerQty = o.triggerQuantity ?? 1;
+      const getQty = o.getQuantity ?? 1;
+      return sum + cart.reduce((s, ci) => {
+        const sets = Math.floor(ci.qty / (triggerQty + getQty));
+        return s + sets * getQty * ci.price;
+      }, 0);
     }
+    const item = o.triggerProductId ? cart.find(i => i.productId === o.triggerProductId) : null;
     if (o.offerType === "product_offer" && item) {
       if (o.discountPercentage) return sum + item.qty * item.price * (o.discountPercentage / 100);
       if (o.offerPrice != null) return sum + item.qty * Math.max(0, item.price - o.offerPrice);
-    }
-    if (o.offerType === "buy_a_get_b") {
-      const getItem = cart.find(i => i.productId === o.getProductId);
-      if (getItem) {
-        return sum + (o.getQuantity ?? 1) * Math.max(0, getItem.price - (o.offerPrice ?? 0));
-      }
     }
     if (o.offerType === "combo" && o.offerPrice != null) {
       const ids = parseComboIds(o.itemsDescription);
@@ -995,12 +1092,12 @@ function POS() {
       // Plain text combo: no automatic SAR discount (operator must apply manually)
     }
     return sum;
-  }, 0);
+  }, 0) + bundleDiscount;
 
   const totalAutoDiscount = discountSavings + offerDiscount;
 
   // Product-level discounts set in inventory (discount + discountType fields on Product)
-  const productDiscountTotal = cart.reduce((sum, ci) => {
+  const productDiscountTotal = displayCart.reduce((sum, ci) => {
     const prod = products.find(p => p.id === ci.productId);
     if (!prod?.discount || prod.discount <= 0) return sum;
     const saving = prod.discountType === "percentage"
@@ -1283,7 +1380,9 @@ function POS() {
       totalAmount: total,
       paymentStatus: "paid",
       orderStatus: "completed",
-      items: cart.map((item) => ({
+      // displayCart (not the raw paid cart) — bundle-bonus units physically leave the shelf too,
+      // so they must be submitted as real line items for the server's stock decrement to be correct.
+      items: displayCart.map((item) => ({
         productId: item.productId,
         quantity: item.qty,
         unitPrice: item.price,
@@ -1311,7 +1410,7 @@ function POS() {
     const invoiceData: InvoiceSnapshot = {
       orderNumber: order.orderNumber,
       createdAt: order.createdAt ?? new Date().toISOString(),
-      items: [...cart],
+      items: [...displayCart],
       subtotal,
       discount: couponDiscount + totalAutoDiscount + productDiscountTotal,
       vat: vatAmount,
@@ -1473,7 +1572,7 @@ function POS() {
                 <ShoppingCart className="h-4 w-4 text-primary" />
                 <p className="text-sm font-semibold">Scanned Items</p>
                 <Badge variant="outline" className="text-[10px]">
-                  {cart.reduce((s, i) => s + i.qty, 0)} units
+                  {cartUnitCount} units
                 </Badge>
               </div>
               <div className="flex items-center gap-2">
@@ -1488,7 +1587,7 @@ function POS() {
               </div>
             </div>
 
-            {cart.length === 0 ? (
+            {displayCart.length === 0 ? (
               <div className="text-center py-14 px-6">
                 <ScanBarcode className="h-10 w-10 mx-auto text-muted-foreground/50" />
                 <p className="text-sm font-medium mt-3">Ready to scan</p>
@@ -1496,38 +1595,51 @@ function POS() {
               </div>
             ) : (
               <div className="divide-y divide-border/40">
-                {cart.map((item, idx) => (
+                {displayCart.map((item, idx) => (
                   <div
                     key={item.sku}
                     className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${flashSku === item.sku ? "bg-primary/10" : "hover:bg-muted/30"}`}
                   >
                     <span className="text-xs text-muted-foreground tabular-nums w-6 text-right">{idx + 1}.</span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{item.name}</p>
+                      <p className="text-sm font-medium truncate flex items-center gap-1.5">
+                        {item.name}
+                        {item.bonusQty > 0 && (
+                          <span className="inline-flex items-center rounded-full bg-success/10 text-success text-[10px] font-semibold px-1.5 py-0.5">
+                            +{item.bonusQty} free
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[11px] text-muted-foreground">SKU {item.sku} · <SARIcon />{item.price.toFixed(2)}</p>
                     </div>
-                    <div className="flex items-center gap-1 bg-muted rounded-lg">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateQty(item.sku, -1)}>
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="w-6 text-center text-sm font-semibold tabular-nums">{item.qty}</span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => updateQty(item.sku, 1)}
-                        disabled={item.qty >= item.stock}
-                        title={item.qty >= item.stock ? `Only ${item.stock} in stock` : undefined}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </Button>
-                    </div>
+                    {item.isBonusOnly ? (
+                      <span className="text-xs font-semibold text-success px-2">Auto-added</span>
+                    ) : (
+                      <div className="flex items-center gap-1 bg-muted rounded-lg">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateQty(item.sku, -1)}>
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <span className="w-6 text-center text-sm font-semibold tabular-nums">{item.qty}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => updateQty(item.sku, 1)}
+                          disabled={item.qty >= item.stock}
+                          title={item.qty >= item.stock ? `Only ${item.stock} in stock` : undefined}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                     <span className="text-sm font-semibold tabular-nums w-20 text-right">
                       <SARIcon />{(item.qty * item.price).toFixed(2)}
                     </span>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => remove(item.sku)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {!item.isBonusOnly && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => remove(item.sku)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1608,13 +1720,16 @@ function POS() {
 
           {/* Cart items */}
           <div className="p-3 text-sm text-muted-foreground border-b border-border/60">
-            {cart.length === 0 ? (
+            {displayCart.length === 0 ? (
               <p className="text-center py-3 text-muted-foreground">Scan or search a product to start a sale.</p>
             ) : (
               <ul className="space-y-1">
-                {cart.map((i) => (
+                {displayCart.map((i) => (
                   <li key={i.sku} className="flex justify-between">
-                    <span className="truncate pr-2">{i.qty} × {i.name}</span>
+                    <span className="truncate pr-2">
+                      {i.qty} × {i.name}
+                      {i.bonusQty > 0 && <span className="text-success text-xs ml-1">(+{i.bonusQty} free)</span>}
+                    </span>
                     <span className="tabular-nums text-foreground"><SARIcon />{(i.qty * i.price).toFixed(2)}</span>
                   </li>
                 ))}
@@ -1729,7 +1844,7 @@ function POS() {
                 <span className="tabular-nums text-success">− <SARIcon />{couponDiscount.toFixed(2)}</span>
               </div>
             )}
-            {cart.map((ci) => {
+            {displayCart.map((ci) => {
               const prod = products.find(p => p.id === ci.productId);
               if (!prod?.discount || prod.discount <= 0) return null;
               const saving = prod.discountType === "percentage"
@@ -1754,19 +1869,28 @@ function POS() {
               const now = new Date();
               if (d.startDate && new Date(d.startDate) > now) return false;
               if (d.endDate && new Date(d.endDate) < now) return false;
-              if (d.appliesTo === "all") return cart.length > 0;
-              if (d.appliesTo === "product" && d.productId) return cart.some(i => i.productId === d.productId);
+              if (d.requiresCustomer && !customer) return false;
+              if (d.appliesTo === "branch") return !d.branchId || !branch || d.branchId === branch.id;
+              if (d.appliesTo === "all") return displayCart.length > 0;
+              if (d.appliesTo === "product" && d.productId) return displayCart.some(i => i.productId === d.productId);
+              if (d.appliesTo === "category" && d.categoryId) return displayCart.some(i => products.find(p => p.id === i.productId)?.categoryId === d.categoryId);
               return false;
             }).map(d => {
-              const saving = d.appliesTo === "all"
-                ? (d.discountType === "percentage" ? subtotal * (d.value / 100) : Math.min(d.value, subtotal))
-                : (() => {
-                    const item = cart.find(i => i.productId === d.productId);
-                    if (!item) return 0;
-                    return d.discountType === "percentage"
-                      ? item.qty * item.price * (d.value / 100)
-                      : Math.min(d.value * item.qty, item.qty * item.price);
-                  })();
+              // Reuses the exact same matching/exclusion rules as the top-level discountSavings
+              // calc — this panel is just a per-discount breakdown of that same total, not a
+              // second independent computation, so the two can never drift apart.
+              const excludedIds = new Set(parseIdList(d.excludedProductIdsJson));
+              let saving = 0;
+              if (d.appliesTo === "all" || d.appliesTo === "branch") {
+                const eligibleSubtotal = displayCart.filter(ci => !excludedIds.has(ci.productId)).reduce((s, ci) => s + ci.qty * ci.price, 0);
+                saving = d.discountType === "percentage" ? eligibleSubtotal * (d.value / 100) : Math.min(d.value, eligibleSubtotal);
+              } else if (d.appliesTo === "product" && d.productId && !excludedIds.has(d.productId)) {
+                const item = displayCart.find(i => i.productId === d.productId);
+                if (item) saving = d.discountType === "percentage" ? item.qty * item.price * (d.value / 100) : Math.min(d.value * item.qty, item.qty * item.price);
+              } else if (d.appliesTo === "category" && d.categoryId) {
+                const lines = displayCart.filter(ci => !excludedIds.has(ci.productId) && products.find(p => p.id === ci.productId)?.categoryId === d.categoryId);
+                saving = lines.reduce((s, ci) => s + (d.discountType === "percentage" ? ci.qty * ci.price * (d.value / 100) : Math.min(d.value * ci.qty, ci.qty * ci.price)), 0);
+              }
               return saving > 0 ? (
                 <div key={d.id} className="flex justify-between text-sm">
                   <span className="text-muted-foreground truncate max-w-[150px]">{d.name}</span>
@@ -1774,41 +1898,34 @@ function POS() {
                 </div>
               ) : null;
             })}
+            {bonusContributions.map(c => {
+              const prod = products.find(p => p.id === c.productId);
+              const saving = c.bonusQty * Math.max(0, (prod?.basePrice ?? 0) - c.payPerUnit);
+              if (saving <= 0) return null;
+              return (
+                <div key={c.offerId} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground truncate max-w-[150px]">{c.offerName} (+{c.bonusQty} {prod?.name ?? "free"})</span>
+                  <span className="tabular-nums text-success">− <SARIcon />{saving.toFixed(2)}</span>
+                </div>
+              );
+            })}
             {triggeredOffers.map(o => {
+              // Product-specific bogo/buy_a_get_b already shown via bonusContributions above.
+              if ((o.offerType === "bogo" || o.offerType === "buy_a_get_b") && o.triggerProductId) return null;
               const item = o.triggerProductId ? cart.find(i => i.productId === o.triggerProductId) : null;
               let saving = 0;
 
-              if (o.offerType === "bogo") {
-                if (item) {
-                  const sets = Math.floor(item.qty / ((o.triggerQuantity ?? 1) + (o.getQuantity ?? 1)));
-                  saving = sets * (o.getQuantity ?? 1) * item.price;
-                } else {
-                  saving = cart.reduce((s, ci) => {
-                    const sets = Math.floor(ci.qty / ((o.triggerQuantity ?? 1) + (o.getQuantity ?? 1)));
-                    return s + sets * (o.getQuantity ?? 1) * ci.price;
-                  }, 0);
-                }
+              if (o.offerType === "bogo" && !o.triggerProductId) {
+                const triggerQty = o.triggerQuantity ?? 1;
+                const getQty = o.getQuantity ?? 1;
+                saving = cart.reduce((s, ci) => {
+                  const sets = Math.floor(ci.qty / (triggerQty + getQty));
+                  return s + sets * getQty * ci.price;
+                }, 0);
               } else if (o.offerType === "product_offer" && item) {
                 saving = o.discountPercentage
                   ? item.qty * item.price * (o.discountPercentage / 100)
                   : item.qty * Math.max(0, item.price - (o.offerPrice ?? 0));
-              } else if (o.offerType === "buy_a_get_b") {
-                const getItem = cart.find(i => i.productId === o.getProductId);
-                if (getItem) {
-                  saving = (o.getQuantity ?? 1) * Math.max(0, getItem.price - (o.offerPrice ?? 0));
-                } else {
-                  const getPrice = o.offerPrice != null ? o.offerPrice : null;
-                  const freeLabel: ReactNode = getPrice === 0 || getPrice == null ? "FREE" : <><SARIcon />{getPrice.toFixed(2)}</>;
-                  return (
-                    <div key={o.id} className="flex items-start gap-1.5 text-xs text-blue-600 bg-blue-50 dark:bg-blue-950/30 rounded px-2 py-1.5">
-                      <span className="shrink-0">🎁</span>
-                      <span>
-                        <span className="font-semibold">{o.name}:</span>{" "}
-                        add <span className="font-semibold">{o.getProduct?.name ?? "the free item"}</span> to cart and pay only {freeLabel}
-                      </span>
-                    </div>
-                  );
-                }
               } else if (o.offerType === "combo" && o.offerPrice != null) {
                 const ids = parseComboIds(o.itemsDescription);
                 const retailTotal = ids.reduce((s, id) => s + (cart.find(i => i.productId === id)?.price ?? 0), 0);
@@ -1909,9 +2026,9 @@ function POS() {
             <Row k="Status" v="In progress" />
             {appliedCoupon && <Row k="Coupon" v={<>{appliedCoupon.code} (−<SARIcon />{couponDiscount.toFixed(2)})</>} />}
             <div className="pt-2 border-t">
-              {cart.map((i) => (
+              {displayCart.map((i) => (
                 <div key={i.sku} className="flex justify-between text-xs py-1">
-                  <span>{i.qty} × {i.name}</span>
+                  <span>{i.qty} × {i.name}{i.bonusQty > 0 && <span className="text-success"> (+{i.bonusQty} free)</span>}</span>
                   <span className="tabular-nums"><SARIcon />{(i.qty * i.price).toFixed(2)}</span>
                 </div>
               ))}

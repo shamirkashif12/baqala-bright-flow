@@ -24,9 +24,19 @@ public static class PermissionCheck
         // can strand the tenant with no one able to grant permissions back.)
         if (!Guid.TryParse(user.FindFirst("roleId")?.Value, out var roleId)) return false;
 
-        // Per-user override takes precedence over the role default for the same module.
         var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
-        IPermissionFlags? perm = Guid.TryParse(userIdClaim, out var userId)
+        Guid.TryParse(userIdClaim, out var userId);
+        return await HasPermissionForUserAsync(db, userId, roleId, module, action);
+    }
+
+    // Shared by HasPermissionAsync (resolves userId/roleId from the calling ClaimsPrincipal) and
+    // the Approval Workflow's verify-approver endpoint, which checks a DIFFERENT user's (the
+    // approver's) permission — one who isn't the currently authenticated caller, so there's no
+    // ClaimsPrincipal for them to read claims from.
+    public static async Task<bool> HasPermissionForUserAsync(BaqalaDbContext db, Guid userId, Guid roleId, string module, PermAction action)
+    {
+        // Per-user override takes precedence over the role default for the same module.
+        IPermissionFlags? perm = userId != Guid.Empty
             ? await db.UserPermissions.AsNoTracking()
                 .FirstOrDefaultAsync(p => p.UserId == userId && p.Module == module)
             : null;

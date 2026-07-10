@@ -13,8 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Printer, Download, Globe, Pencil, Package, CreditCard,
   User, Store, ChevronRight, Loader2, RefreshCw,
-  CheckCircle2, XCircle, Clock, Truck, AlertCircle, X, RotateCcw,
+  CheckCircle2, XCircle, Clock, Truck, AlertCircle, X, RotateCcw, Trash2, Ban,
 } from "lucide-react";
+import { toast } from "sonner";
 import { api, type Order, type Branch, type CustomerReturnItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -356,17 +357,191 @@ function RefundDialog({ order, open, onClose, onDone }: {
   );
 }
 
+// ─── Edit Order Dialog ────────────────────────────────────────────────────────
+// Order Editing (FR: "Edit orders from dashboard", "Editable order with audit log"). Scoped to
+// the fields that matter for correcting a mistake after the fact — line quantities, removing a
+// line, and notes — rather than a full re-run of the POS product search, keeping this a
+// correction tool rather than a second checkout flow.
+function EditOrderDialog({ order, open, onClose, onDone }: {
+  order: Order; open: boolean; onClose: () => void; onDone: () => void;
+}) {
+  const items = order.items ?? [];
+  type Line = { productId: string; name: string; unitPrice: number; quantity: number; removed: boolean };
+  const [lines, setLines] = useState<Line[]>(() => items.map(i => ({
+    productId: i.productId,
+    name: (i as any).product?.name ?? "Product",
+    unitPrice: i.unitPrice,
+    quantity: i.quantity,
+    removed: false,
+  })));
+  const [notes, setNotes] = useState(order.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const activeLines = lines.filter(l => !l.removed);
+  const newSubtotal = activeLines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
+
+  const setQty = (idx: number, d: number) =>
+    setLines(ls => ls.map((l, i) => (i === idx ? { ...l, quantity: Math.max(1, l.quantity + d) } : l)));
+  const toggleRemove = (idx: number) =>
+    setLines(ls => ls.map((l, i) => (i === idx ? { ...l, removed: !l.removed } : l)));
+
+  const handleSave = async () => {
+    if (activeLines.length === 0) { setError("An order must have at least one item."); return; }
+    setSaving(true);
+    setError("");
+    try {
+      await api.editOrder(order.id, {
+        items: activeLines.map(l => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })),
+        notes: notes || undefined,
+      });
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save changes.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+      <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+          <DHeader>
+            <DTitle className="flex items-center gap-2 text-base">
+              <Pencil className="h-4 w-4" /> Edit Order — {order.orderNumber}
+            </DTitle>
+            <DialogDescription className="text-xs">
+              Adjust quantities, remove items, or update notes. Changes are recorded in the audit log.
+            </DialogDescription>
+          </DHeader>
+
+          <div className="overflow-y-auto flex-1 space-y-3 py-1 pr-1">
+            <div className="space-y-2">
+              {lines.map((l, i) => (
+                <div key={i} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors ${l.removed ? "border-border bg-muted/20 opacity-50" : "border-border/60"}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{l.name}</p>
+                    <p className="text-xs text-muted-foreground">SAR {l.unitPrice.toFixed(2)} × each</p>
+                  </div>
+                  {!l.removed && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        className="h-6 w-6 rounded border flex items-center justify-center text-sm leading-none disabled:opacity-30 hover:bg-muted"
+                        disabled={l.quantity <= 1}
+                        onClick={() => setQty(i, -1)}
+                      >−</button>
+                      <span className="w-6 text-center text-sm tabular-nums font-medium">{l.quantity}</span>
+                      <button
+                        className="h-6 w-6 rounded border flex items-center justify-center text-sm leading-none hover:bg-muted"
+                        onClick={() => setQty(i, 1)}
+                      >+</button>
+                    </div>
+                  )}
+                  <Button
+                    size="icon" variant="ghost"
+                    className={`h-7 w-7 shrink-0 ${l.removed ? "text-success" : "text-destructive"}`}
+                    onClick={() => toggleRemove(i)}
+                  >
+                    {l.removed ? <RotateCcw className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Notes</p>
+              <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Reason for edit / internal note…" className="h-9" />
+            </div>
+
+            {error && <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 rounded px-3 py-2">{error}</p>}
+          </div>
+
+          <DialogFooter className="mt-2 flex-row items-center gap-2">
+            <div className="flex-1 text-sm">
+              <span className="text-muted-foreground">New subtotal:</span>
+              <span className="font-bold ml-1.5 text-primary">SAR {newSubtotal.toFixed(2)}</span>
+            </div>
+            <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+  );
+}
+
+// ─── Void Order Dialog ────────────────────────────────────────────────────────
+function VoidOrderDialog({ order, open, onClose, onDone }: {
+  order: Order; open: boolean; onClose: () => void; onDone: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleVoid = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await api.voidOrder(order.id, { reason: reason.trim() || undefined });
+      toast.success("Order voided.");
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to void order.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DHeader>
+          <DTitle className="flex items-center gap-2 text-base">
+            <Ban className="h-4 w-4 text-red-500" /> Void Order — {order.orderNumber}
+          </DTitle>
+          <DialogDescription className="text-xs">
+            This cancels the order and restores stock for its items.
+          </DialogDescription>
+        </DHeader>
+
+        <div className="space-y-2 py-1">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Reason</p>
+          <Input
+            value={reason}
+            onChange={e => { setReason(e.target.value); setError(""); }}
+            placeholder="e.g. Duplicate sale, customer cancelled…"
+            className="h-9"
+          />
+          {error && <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 rounded px-3 py-2">{error}</p>}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="destructive" onClick={handleVoid} disabled={saving}>
+            {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+            Void Order
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Order Detail Drawer ──────────────────────────────────────────────────────
 function OrderDetail({ orderId, onStatusChanged }: {
   orderId: string; onStatusChanged: () => void;
 }) {
-  const { canEdit, canApprove } = usePermission("Orders");
+  const { canEdit, canApprove, canDelete: canDeleteOrder } = usePermission("Orders");
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [newStatus, setNewStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [showRefundDialog, setShowRefundDialog] = useState(false);
+  const [showEditOrderDialog, setShowEditOrderDialog] = useState(false);
+  const [showVoidOrderDialog, setShowVoidOrderDialog] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -412,9 +587,25 @@ function OrderDetail({ orderId, onStatusChanged }: {
         <div className="flex flex-col items-end gap-1.5">
           <SBadge status={order.orderStatus} />
           <SBadge status={order.paymentStatus} />
-          <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs mt-0.5" onClick={() => printReceipt(order)}>
-            <Printer className="h-3.5 w-3.5" /> Print Receipt
-          </Button>
+          <div className="flex gap-1.5 mt-0.5">
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => printReceipt(order)}>
+              <Printer className="h-3.5 w-3.5" /> Print
+            </Button>
+            {!["cancelled", "refunded"].includes(order.orderStatus) && (
+              <>
+                {canEdit && (
+                  <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => setShowEditOrderDialog(true)}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </Button>
+                )}
+                {canDeleteOrder && (
+                  <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs text-destructive" onClick={() => setShowVoidOrderDialog(true)}>
+                    <Ban className="h-3.5 w-3.5" /> Void
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -548,6 +739,34 @@ function OrderDetail({ orderId, onStatusChanged }: {
             setShowRefundDialog(false);
             setEditing(false);
             setOrder(o => o ? { ...o, orderStatus: "refunded", paymentStatus: "refunded" } : o);
+            onStatusChanged();
+          }}
+        />
+      )}
+
+      {showEditOrderDialog && (
+        <EditOrderDialog
+          order={order}
+          open={showEditOrderDialog}
+          onClose={() => setShowEditOrderDialog(false)}
+          onDone={async () => {
+            setShowEditOrderDialog(false);
+            const refreshed = await api.getOrder(order.id);
+            setOrder(refreshed);
+            onStatusChanged();
+          }}
+        />
+      )}
+
+      {showVoidOrderDialog && (
+        <VoidOrderDialog
+          order={order}
+          open={showVoidOrderDialog}
+          onClose={() => setShowVoidOrderDialog(false)}
+          onDone={async () => {
+            setShowVoidOrderDialog(false);
+            const refreshed = await api.getOrder(order.id);
+            setOrder(refreshed);
             onStatusChanged();
           }}
         />
