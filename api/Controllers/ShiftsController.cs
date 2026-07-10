@@ -4,7 +4,6 @@ using BaqalaPOS.Api.Models;
 using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Text.RegularExpressions;
 
 namespace BaqalaPOS.Api.Controllers;
 
@@ -17,17 +16,16 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
 
     private string? CallerRole() => User.FindFirst("role")?.Value;
 
-    // Reads the live "Cash variance > SAR 200" Rules Engine threshold so the
-    // approval gate stays in sync with whatever a tenant admin configures there
-    // instead of a value baked into code. Falls back to 200 if the rule is
-    // missing/inactive or its condition text has no parseable number.
-    private async Task<decimal?> GetCashVarianceThresholdAsync()
+    // Reads the real, tenant-editable "Cash variance threshold" field from the
+    // Opening/Closing Cash Policy tab (Settings → Policies & Conditions), so this
+    // gate stays in sync with whatever a manager configures there. Only applied
+    // when `RequireManagerApprovalAboveCashThreshold` is on; falls back to the
+    // same 20 SAR default `PosSettings.CashVarianceThresholdSar` uses.
+    private async Task<decimal?> GetCashVarianceThresholdAsync(Guid branchId)
     {
-        var rule = await db.RulesEngine.FirstOrDefaultAsync(r =>
-            r.IsActive && r.RuleType == "approval" && r.RuleName.Contains("Cash variance"));
-        if (rule is null) return null;
-        var match = Regex.Match(rule.RuleConfig ?? "", @"\d+(\.\d+)?");
-        return match.Success && decimal.TryParse(match.Value, out var v) ? v : 200m;
+        var settings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == branchId);
+        if (settings is null) return 20m;
+        return settings.RequireManagerApprovalAboveCashThreshold ? settings.CashVarianceThresholdSar : null;
     }
 
     [HttpGet]
@@ -74,10 +72,11 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         if (CallerRole() == "cashier" && callerId != req.CashierId)
             return Forbid();
 
-        // Only Cashier-role accounts can hold a shift at all, regardless of who's opening it.
+        // Cashier and Branch Manager accounts can hold a shift (FR-CHK-06: the Manager App
+        // requires the same mandatory check-in + opening-cash flow as the Cashier POS).
         var cashierUser = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == req.CashierId);
-        if (cashierUser is null || cashierUser.Role?.Name != "Cashier")
-            return BadRequest("Only users with the Cashier role can be checked in for a shift.");
+        if (cashierUser is null || cashierUser.Role?.Name is not ("Cashier" or "Branch Manager" or "Manager"))
+            return BadRequest("Only users with the Cashier or Branch Manager role can be checked in for a shift.");
 
         var existing = await db.CashierShifts
             .AnyAsync(s => s.CashierId == req.CashierId && s.Status == "open");
@@ -188,7 +187,7 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         shift.CloseReason = req.Reason;
         shift.Variance = req.ClosingAmount - (shift.OpeningAmount + shift.CashSales);
 
-        var threshold = await GetCashVarianceThresholdAsync();
+        var threshold = await GetCashVarianceThresholdAsync(shift.BranchId);
         var varianceAbs = Math.Abs(shift.Variance ?? 0);
         shift.RequiresApproval = threshold.HasValue && varianceAbs > threshold.Value;
 

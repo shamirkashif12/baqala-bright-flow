@@ -90,8 +90,48 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         settings.Environment = updated.Environment;
         settings.UpdatedAt = DateTime.UtcNow;
 
+        await SyncPhase2EnabledAcrossBranchesAsync(branchId, settings.Phase2Enabled);
         await db.SaveChangesAsync();
         return Ok(ZatcaSettingsDto.From(settings));
+    }
+
+    // ZATCA enablement is an admin-wide decision, not a per-branch one: turning it on/off
+    // for one branch must apply to every other branch under the same tenant.
+    private async Task SyncPhase2EnabledAcrossBranchesAsync(Guid updatedBranchId, bool phase2Enabled)
+    {
+        var otherBranchIds = await db.Branches
+            .Where(b => b.Id != updatedBranchId)
+            .Select(b => b.Id)
+            .ToListAsync();
+        if (otherBranchIds.Count == 0) return;
+
+        // Avoid `otherBranchIds.Contains(...)` in a SQL WHERE — the MySQL EF Core provider
+        // used here cannot assign a type mapping to a parameterized List<Guid> IN-list, which
+        // throws at query time (same constraint worked around throughout ReportsController).
+        // Filtering by "not this branch" instead needs no list parameter at all; the per-branch
+        // match below runs in-memory over the already-materialized rows.
+        var otherSettings = await db.ZatcaSettings
+            .Where(z => z.BranchId != updatedBranchId)
+            .ToListAsync();
+
+        foreach (var branchId in otherBranchIds)
+        {
+            var settings = otherSettings.FirstOrDefault(z => z.BranchId == branchId);
+            if (settings is null)
+            {
+                settings = new ZatcaSettings
+                {
+                    Id = Guid.NewGuid(),
+                    BranchId = branchId,
+                    CreatedAt = DateTime.UtcNow,
+                };
+                db.ZatcaSettings.Add(settings);
+            }
+
+            if (settings.Phase2Enabled == phase2Enabled) continue;
+            settings.Phase2Enabled = phase2Enabled;
+            settings.UpdatedAt = DateTime.UtcNow;
+        }
     }
 
     // ─── ZATCA Onboarding ─────────────────────────────────────────────────────

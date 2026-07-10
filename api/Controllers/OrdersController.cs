@@ -109,6 +109,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // FR-SLS-05: only the Cashier role's cash drawer needs shift reconciliation — shifts
         // are a Cashier-only concept in this system (see ShiftsController/CheckInDialog), so
         // Branch Manager/Supervisor covering a register deliberately check out without one.
+        CashierShift? activeShift = null;
         string? checkoutWithoutShiftRole = null;
         if (order.CashierId.HasValue)
         {
@@ -116,7 +117,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             // opening a second one) — ordered defensively in case stale data still has more than
             // one, so a sale always binds to whichever shift the cashier most recently checked
             // into rather than an arbitrary row the database happens to return first.
-            var activeShift = await db.CashierShifts
+            activeShift = await db.CashierShifts
                 .Where(s => s.CashierId == order.CashierId && s.Status == "open")
                 .OrderByDescending(s => s.OpenedAt)
                 .FirstOrDefaultAsync();
@@ -154,6 +155,25 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         }
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
         db.Orders.Add(order);
+
+        // Keep the till's running totals live so "expected cash"/variance at close-out
+        // reflects real sales instead of staying frozen at the opening amount — previously
+        // nothing on the whole codebase ever wrote CashSales/CardSales/DigitalSales/TotalSales
+        // after a shift opened, so every consumer of those fields (Closing Report, My Shift,
+        // cashier-sales report) was silently wrong for any shift opened through the real app.
+        if (activeShift is not null)
+        {
+            foreach (var pay in order.Payments)
+            {
+                switch (pay.PaymentMethod)
+                {
+                    case "cash": activeShift.CashSales += pay.Amount; break;
+                    case "card": activeShift.CardSales += pay.Amount; break;
+                    default: activeShift.DigitalSales += pay.Amount; break;
+                }
+                activeShift.TotalSales += pay.Amount;
+            }
+        }
 
         // ── Reduce inventory stock for each item ───────────────────────────────
         // A sale is never blocked here (the sellable-stock/expiry check above already gated

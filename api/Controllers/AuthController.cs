@@ -54,6 +54,7 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
                 id = user.Id.ToString(),
                 email = user.Email,
                 fullName = user.FullName,
+                phone = user.Phone,
                 role = appRole,
                 branchId = user.BranchId?.ToString(),
                 branchName = user.Branch?.Name

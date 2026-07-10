@@ -1669,6 +1669,15 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .GroupBy(a => (a.UserId, Day: a.CheckIn!.Value.Date))
             .ToDictionary(g => g.Key, g => g.First());
 
+        // Scoped by the same date/branch/staff filters as shiftsQ rather than a shiftIds.Contains(...)
+        // list — the MySQL EF Core provider used here cannot assign a type mapping to a parameterized
+        // List<Guid> IN-list (see the identical note on BuildCashierSalesAsync above).
+        var ordersQ = db.Orders.Where(o => o.ShiftId != null && o.CreatedAt >= rangeFrom && o.CreatedAt < rangeToExclusive);
+        if (branchId.HasValue) ordersQ = ordersQ.Where(o => o.BranchId == branchId);
+        if (staffId.HasValue) ordersQ = ordersQ.Where(o => o.CashierId == staffId);
+        var orderCountByShift = await ordersQ
+            .GroupBy(o => o.ShiftId!.Value).Select(g => new { ShiftId = g.Key, Count = g.Count() }).ToDictionaryAsync(g => g.ShiftId, g => g.Count);
+
         var rows = shifts.Select(s =>
         {
             attendanceByUserDay.TryGetValue((s.CashierId, s.OpenedAt.Date), out var att);
@@ -1680,6 +1689,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 CheckInTime = att?.CheckIn, ShiftOpenTime = s.OpenedAt, ShiftCloseTime = s.ClosedAt, HoursWorked = hoursWorked,
                 OpeningFloat = s.OpeningAmount, ExpectedCash = s.OpeningAmount + s.CashSales, CountedCash = s.ClosingAmount,
                 Variance = s.Status == "closed" ? s.Variance : null, Status = s.Status,
+                Orders = orderCountByShift.GetValueOrDefault(s.Id), Sales = s.TotalSales,
             };
         }).ToList();
 
@@ -2861,6 +2871,8 @@ public sealed class AttendanceShiftRow
     public decimal? CountedCash { get; init; }
     public decimal? Variance { get; init; }
     public string Status { get; init; } = "";
+    public int Orders { get; init; }
+    public decimal Sales { get; init; }
 }
 
 public sealed class AttendanceShiftKpis

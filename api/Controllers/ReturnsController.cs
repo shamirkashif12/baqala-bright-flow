@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text.RegularExpressions;
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
@@ -13,17 +12,14 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class ReturnsController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
 {
-    // Reads the live "Manager approval — refund > SAR 100" Rules Engine threshold, mirroring
-    // ShiftsController.GetCashVarianceThresholdAsync, so this gate stays in sync with whatever
-    // a tenant admin configures there instead of a value baked into code. Falls back to 100 if
-    // the rule is missing/inactive or its condition text has no parseable number.
-    private async Task<decimal> GetManagerApprovalRefundThresholdAsync()
+    // Reads the real, tenant-editable "Manager approval above (SAR)" field from the Returns
+    // Policy tab (Settings → Policies & Conditions), so this gate stays in sync with whatever
+    // a manager configures there instead of a value baked into code. Falls back to the same
+    // 100 SAR default `PosSettings.ReturnManagerApprovalAboveSar` uses when no row exists yet.
+    private async Task<decimal> GetManagerApprovalRefundThresholdAsync(Guid branchId)
     {
-        var rule = await db.RulesEngine.FirstOrDefaultAsync(r =>
-            r.IsActive && r.RuleType == "approval" && r.RuleName.Contains("refund"));
-        if (rule is null) return 100m;
-        var match = Regex.Match(rule.RuleConfig ?? "", @"\d+(\.\d+)?");
-        return match.Success && decimal.TryParse(match.Value, out var v) ? v : 100m;
+        var settings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == branchId);
+        return settings?.ReturnManagerApprovalAboveSar ?? 100m;
     }
 
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's returns —
@@ -44,7 +40,7 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
             branchId = callerBranchId;
 
-        var query = db.CustomerReturns.Include(r => r.Customer).Include(r => r.Order).AsQueryable();
+        var query = db.CustomerReturns.Include(r => r.Customer).Include(r => r.Order).Include(r => r.Items).ThenInclude(i => i.Product).AsQueryable();
         if (branchId.HasValue) query = query.Where(r => r.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(r => r.Status == status);
         return Ok(await query.OrderByDescending(r => r.CreatedAt).ToListAsync());
@@ -96,7 +92,7 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
         if (ret is null) return NotFound();
 
         var role = User.FindFirst("role")?.Value;
-        var threshold = await GetManagerApprovalRefundThresholdAsync();
+        var threshold = await GetManagerApprovalRefundThresholdAsync(ret.BranchId);
         if (role == "cashier" && ret.RefundAmount > threshold)
             return StatusCode(403, new { message = $"Manager approval is required for refunds over SAR {threshold:F2}." });
 
