@@ -51,9 +51,21 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 
 // ─── ZATCA (Saudi e-invoicing Phase 2) ───────────────────────────────────────
+// The ZATCA private key/CSID secrets are encrypted at rest with this key ring. Defaulting to a
+// path under ContentRootPath is fine for local dev (this exact directory never moves), but is a
+// real production hazard: most deploy processes re-clone or recreate the app directory on every
+// release, silently destroying this folder and permanently bricking every already-onboarded
+// branch's stored ZATCA credentials (decrypt fails with a CryptographicException, invoices get
+// stuck "pending" with no error detail, and the branch needs the entire CSR/OTP/CSID onboarding
+// re-run — which should be a one-time-ever step, not a per-deploy chore). Set "ZatcaKeysPath" in
+// appsettings/environment to an absolute path OUTSIDE the deploy directory in any real deployment
+// (e.g. a mounted persistent volume) so this key ring survives every future redeploy.
+var zatcaKeysPath = builder.Configuration["ZatcaKeysPath"] is { Length: > 0 } configuredPath
+    ? configuredPath
+    : Path.Combine(builder.Environment.ContentRootPath, "zatca-keys");
 builder.Services.AddDataProtection()
     .SetApplicationName("BaqalaPOS")
-    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, "zatca-keys")));
+    .PersistKeysToFileSystem(new DirectoryInfo(zatcaKeysPath));
 builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
 builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
 builder.Services.AddScoped<IZatcaService, ZatcaService>();
