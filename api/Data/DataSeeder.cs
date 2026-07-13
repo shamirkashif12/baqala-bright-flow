@@ -2083,6 +2083,75 @@ public static class DataSeeder
         if (touchedAny) await db.SaveChangesAsync();
     }
 
+    // Before OrdersController.Create() started writing CashSales/CardSales/DigitalSales/TotalSales
+    // onto the cashier's active shift (commit 665a09b, 2026-07-10), every shift opened through the
+    // real app had those fields permanently frozen at 0 — even though the underlying orders/payments
+    // were correct — which fabricated a reconciliation variance at close-out. Recomputes every
+    // shift's rollups (and variance/requires_approval for already-closed ones) straight from
+    // order_payments rather than trusting stored state, so this is safe to re-run on every startup.
+    public static async Task PatchBackfillShiftRollupsAsync(BaqalaDbContext db)
+    {
+        var shifts = await db.CashierShifts.ToListAsync();
+        if (shifts.Count == 0) return;
+
+        var payments = await db.OrderPayments
+            .Where(p => p.Status == "completed" && p.Order!.ShiftId != null && p.Order.OrderStatus != "cancelled")
+            .Select(p => new { ShiftId = p.Order!.ShiftId!.Value, p.PaymentMethod, p.Amount })
+            .ToListAsync();
+        var paymentsByShift = payments.GroupBy(p => p.ShiftId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var settingsByBranch = await db.PosSettings.ToDictionaryAsync(s => s.BranchId);
+
+        var changed = false;
+        foreach (var shift in shifts)
+        {
+            decimal cash = 0, card = 0, digital = 0;
+            if (paymentsByShift.TryGetValue(shift.Id, out var shiftPayments))
+            {
+                foreach (var p in shiftPayments)
+                {
+                    switch (p.PaymentMethod)
+                    {
+                        case "cash": cash += p.Amount; break;
+                        case "card": card += p.Amount; break;
+                        default: digital += p.Amount; break;
+                    }
+                }
+            }
+            var total = cash + card + digital;
+
+            if (shift.CashSales != cash || shift.CardSales != card || shift.DigitalSales != digital || shift.TotalSales != total)
+            {
+                shift.CashSales = cash;
+                shift.CardSales = card;
+                shift.DigitalSales = digital;
+                shift.TotalSales = total;
+                changed = true;
+            }
+
+            if (shift.Status == "closed" && shift.ClosingAmount.HasValue)
+            {
+                var newVariance = shift.ClosingAmount.Value - (shift.OpeningAmount + cash);
+                // Mirrors ShiftsController.GetCashVarianceThresholdAsync exactly: no PosSettings
+                // row for the branch means the 20 SAR default always applies; a row that exists
+                // but has the approval gate switched off means no threshold is ever enforced.
+                decimal? threshold = !settingsByBranch.TryGetValue(shift.BranchId, out var settings)
+                    ? 20m
+                    : settings.RequireManagerApprovalAboveCashThreshold ? settings.CashVarianceThresholdSar : null;
+                var newRequiresApproval = threshold.HasValue && Math.Abs(newVariance) > threshold.Value;
+
+                if (shift.Variance != newVariance || shift.RequiresApproval != newRequiresApproval)
+                {
+                    shift.Variance = newVariance;
+                    shift.RequiresApproval = newRequiresApproval;
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed) await db.SaveChangesAsync();
+    }
+
     // ─── Backfill: Offers ────────────────────────────────────────────────────
     private static async Task SeedOffersAsync(BaqalaDbContext db)
     {

@@ -489,7 +489,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> VoidOrder(Guid id, [FromBody] OrderVoidRequest req)
     {
-        var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id);
+        var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound();
         if (order.OrderStatus == "cancelled") return BadRequest(new { message = "This order is already cancelled." });
 
@@ -527,6 +527,29 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 stock.UpdatedAt = DateTime.UtcNow;
             }
         }
+
+        // Reverse this order's contribution to its shift's running totals — otherwise a void
+        // leaves CashSales/CardSales/DigitalSales/TotalSales overstated relative to the real
+        // (now-cancelled) sale, the same class of reconciliation-variance bug as an order that
+        // was never counted in the first place.
+        if (order.ShiftId.HasValue)
+        {
+            var shift = await db.CashierShifts.FindAsync(order.ShiftId.Value);
+            if (shift is not null)
+            {
+                foreach (var pay in order.Payments)
+                {
+                    switch (pay.PaymentMethod)
+                    {
+                        case "cash": shift.CashSales -= pay.Amount; break;
+                        case "card": shift.CardSales -= pay.Amount; break;
+                        default: shift.DigitalSales -= pay.Amount; break;
+                    }
+                    shift.TotalSales -= pay.Amount;
+                }
+            }
+        }
+
         order.OrderStatus = "cancelled";
         order.VoidReason = reason;
         order.UpdatedAt = DateTime.UtcNow;
@@ -537,11 +560,30 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     [HttpPost("{id:guid}/payments")]
     public async Task<IActionResult> AddPayment(Guid id, [FromBody] OrderPayment payment)
     {
-        if (!await db.Orders.AnyAsync(o => o.Id == id)) return NotFound();
+        var order = await db.Orders.FindAsync(id);
+        if (order is null) return NotFound();
         payment.Id = Guid.NewGuid();
         payment.OrderId = id;
         payment.CreatedAt = DateTime.UtcNow;
         db.OrderPayments.Add(payment);
+
+        // Same rollup this order's initial payments got at Create() — a payment added after the
+        // fact (e.g. split/pay-later) must still count toward the shift's running totals.
+        if (order.ShiftId.HasValue)
+        {
+            var shift = await db.CashierShifts.FindAsync(order.ShiftId.Value);
+            if (shift is not null)
+            {
+                switch (payment.PaymentMethod)
+                {
+                    case "cash": shift.CashSales += payment.Amount; break;
+                    case "card": shift.CardSales += payment.Amount; break;
+                    default: shift.DigitalSales += payment.Amount; break;
+                }
+                shift.TotalSales += payment.Amount;
+            }
+        }
+
         await db.SaveChangesAsync();
         return Created($"/api/orders/{id}/payments/{payment.Id}", payment);
     }

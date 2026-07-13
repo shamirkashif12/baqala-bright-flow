@@ -148,6 +148,7 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchBackfillEmptyAuditSeverityAsync(db);
     await DataSeeder.PatchTrimExportAuditNoiseAsync(db);
     await DataSeeder.PatchBackfillMissingOrderTaxAsync(db);
+    await DataSeeder.PatchBackfillShiftRollupsAsync(db);
     await DataSeeder.PatchEnsureFreshDemoDataAsync(db);
     app.MapOpenApi();
 }
