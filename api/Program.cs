@@ -49,6 +49,7 @@ builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
+builder.Services.AddHostedService<UsbPrinterAutoInstallService>();
 
 // ─── ZATCA (Saudi e-invoicing Phase 2) ───────────────────────────────────────
 // The ZATCA private key/CSID secrets are encrypted at rest with this key ring. It used to persist
@@ -157,6 +158,7 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchBackfillEmptyAuditSeverityAsync(db);
     await DataSeeder.PatchTrimExportAuditNoiseAsync(db);
     await DataSeeder.PatchBackfillMissingOrderTaxAsync(db);
+    await DataSeeder.PatchBackfillShiftRollupsAsync(db);
     await DataSeeder.PatchEnsureFreshDemoDataAsync(db);
     app.MapOpenApi();
 }
