@@ -683,6 +683,8 @@ export const api = {
   setupInstallerUrl: () => `${BASE}/api/printer/setup-installer`,
   // Returns the Windows PowerShell one-liner install command (no download needed)
   setupPs1Url: () => `${BASE}/api/printer/setup-ps1`,
+  // Fixes the "Action Required" QZ Tray popup on Windows when QZ Tray is already installed
+  qzTrustPs1Url: () => `${BASE}/api/printer/qz-trust-ps1`,
   qzCertificateUrl: () => `${BASE}/api/printer/qz-certificate`,
   qzSign: (toSign: string) =>
     fetch(`${BASE}/api/printer/qz-sign`, {

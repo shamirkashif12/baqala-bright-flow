@@ -38,6 +38,26 @@ public class PrinterController(IConfiguration config) : ControllerBase
     private static bool IsSafe(string s) =>
         !string.IsNullOrWhiteSpace(s) && Regex.IsMatch(s, @"^[\w\-\.:/\?=&%@]+$");
 
+    // Loads the QZ Tray cert used for silent (dialog-free) trust. Returns the raw PEM, its
+    // base64 encoding (for embedding in scripts), and its real validity window in UTC —
+    // callers must use the cert's own dates, not guessed/hardcoded ones, when writing
+    // allowed.dat entries, or QZ Tray's saved-cert matching silently fails to apply.
+    private static (string Pem, string Base64, string ValidFromUtc, string ValidToUtc) LoadQzCertInfo()
+    {
+        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
+        if (!System.IO.File.Exists(certPath))
+            return ("", "", "", "");
+
+        var pem = System.IO.File.ReadAllText(certPath).Trim();
+        var base64 = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(pem));
+        using var cert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(pem);
+        var validFrom = cert.NotBefore.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss");
+        var validTo = cert.NotAfter.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss");
+        return (pem, base64, validFrom, validTo);
+    }
+
     // ── GET /api/printer/detect ───────────────────────────────────────────────
 
     [HttpGet("detect")]
@@ -529,7 +549,7 @@ public class PrinterController(IConfiguration config) : ControllerBase
     //   macOS   → .command (double-click runs in Terminal automatically)
 
     [HttpGet("setup-installer")]
-    public async Task<IActionResult> SetupInstaller()
+    public IActionResult SetupInstaller()
     {
         var posUrl = config["PosUrl"] ?? $"{Request.Scheme}://{Request.Host}";
         var ua     = Request.Headers.UserAgent.ToString().ToLower();
@@ -537,13 +557,7 @@ public class PrinterController(IConfiguration config) : ControllerBase
 
         // Embed the cert directly in the installer so cert trust works with zero
         // network dependency — no need to hit /api/printer/qz-certificate at install time.
-        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
-        if (!System.IO.File.Exists(certPath))
-            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
-        var embeddedCert = System.IO.File.Exists(certPath)
-            ? (await System.IO.File.ReadAllTextAsync(certPath)).Trim()
-            : "";
-        var embeddedCertBase64 = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(embeddedCert));
+        var (_, embeddedCertBase64, certValidFrom, certValidTo) = LoadQzCertInfo();
 
         // ── Windows ──────────────────────────────────────────────────────────
         // Note: $$ prefix means only {{expr}} interpolates; bare $, {, } are all literal.
@@ -609,17 +623,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObj
 reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
 
-:: ── Trust POS cert in QZ Tray — eliminates all "Action Required" dialogs ──
+:: ── Trust POS cert in QZ Tray — eliminates all "Action Required" dialogs.
+:: override.crt is the mechanism that actually suppresses the dialog (QZ Tray treats it as
+:: a pre-authorized identity); allowed.dat alone does NOT — verified empirically, QZ Tray
+:: still prompts on every connection even with a matching allowed.dat entry unless
+:: override.crt is also present. QZ Tray may still be finishing its own first-run file
+:: writes right after silent install, so poll for the install dir instead of assuming ── ──
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{embeddedCertBase64}}'));" ^
-  "$qzDir = @($env:ProgramFiles + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1;" ^
-  "if ($qzDir) { $cert | Set-Content -Path ($qzDir + '\override.crt') -Encoding ASCII };" ^
+  "$qzDir = $null;" ^
+  "for ($i = 0; $i -lt 20 -and -not $qzDir; $i++) {" ^
+  "  $qzDir = @($env:ProgramFiles + '\QZ Tray', ${env:ProgramFiles(x86)} + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1;" ^
+  "  if (-not $qzDir) { Start-Sleep -Seconds 1 };" ^
+  "};" ^
+  "if ($qzDir) { $cert | Set-Content -Path ($qzDir + '\override.crt') -Encoding ASCII; Write-Host ('   override.crt written to ' + $qzDir) } else { Write-Host '   WARNING: could not find QZ Tray install dir — dialogs may still appear.' };" ^
   "$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower();" ^
   "$allowedDir = $env:APPDATA + '\qz'; New-Item -ItemType Directory -Force $allowedDir | Out-Null;" ^
-  "$entry = $fp + \"`tQZ Tray Demo Cert`tQZ Industries, LLC`t2026-07-02 14:40:36`t2046-07-02 14:40:36`ttrue\";" ^
+  "$entry = $fp + \"`tQZ Tray Demo Cert`tQZ Industries, LLC`t{{certValidFrom}}`t{{certValidTo}}`ttrue\";" ^
   "$allowed = $allowedDir + '\allowed.dat';" ^
   "$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() };" ^
   "$lines += $entry; $lines | Set-Content -Path $allowed -Encoding ASCII;" ^
+  "Get-Process javaw -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ($qzDir + '*') } | Stop-Process -Force -ErrorAction SilentlyContinue;" ^
   "Write-Host '   QZ Tray trusted — no dialogs will appear.'"
 
 :: ── Auto-dismiss fallback: if the "Action Required" dialog ever appears anyway
@@ -830,7 +854,7 @@ if [ -n "$QZ_CERT" ]; then
   QZ_FP=$(echo "$QZ_CERT" | openssl x509 -noout -fingerprint -sha1 2>/dev/null | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
   mkdir -p ~/.qz
   grep -v "^$QZ_FP" ~/.qz/allowed.dat 2>/dev/null > /tmp/qz_allowed.tmp || true
-  printf "%s\tQZ Tray Demo Cert\tQZ Industries, LLC\t2026-07-02 14:40:36\t2046-07-02 14:40:36\ttrue\r\n" "$QZ_FP" >> /tmp/qz_allowed.tmp
+  printf "%s\tQZ Tray Demo Cert\tQZ Industries, LLC\t{{certValidFrom}}\t{{certValidTo}}\ttrue\r\n" "$QZ_FP" >> /tmp/qz_allowed.tmp
   mv /tmp/qz_allowed.tmp ~/.qz/allowed.dat
   echo "   QZ Tray trusted — no dialogs will appear."
 else
@@ -1102,17 +1126,11 @@ echo "First time: click Allow when QZ Tray asks about unsigned content."
     // User runs in Win+R:  powershell -c "iex(irm 'http://<server>/api/printer/setup-ps1')"
     // Script self-elevates to admin, installs QZ Tray, trusts cert, creates shortcut.
     [HttpGet("setup-ps1")]
-    public async Task<IActionResult> SetupPs1()
+    public IActionResult SetupPs1()
     {
         var posUrl = config["PosUrl"] ?? $"{Request.Scheme}://{Request.Host}";
 
-        var certPath = Path.Combine(AppContext.BaseDirectory, "qz-certs", "certificate.pem");
-        if (!System.IO.File.Exists(certPath))
-            certPath = Path.Combine(Directory.GetCurrentDirectory(), "qz-certs", "certificate.pem");
-        var embeddedCert = System.IO.File.Exists(certPath)
-            ? (await System.IO.File.ReadAllTextAsync(certPath)).Trim()
-            : "";
-        var certBase64 = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(embeddedCert));
+        var (_, certBase64, certValidFrom, certValidTo) = LoadQzCertInfo();
 
         var ps1 = $$"""
 # MiMony POS — Windows Setup Script
@@ -1144,17 +1162,26 @@ Start-Process "$env:TEMP\qz-tray-setup.exe" -ArgumentList '/S' -Wait
 Start-Sleep -Seconds 8
 Remove-Item "$env:TEMP\qz-tray-setup.exe" -Force -ErrorAction SilentlyContinue
 
-# ── Trust cert — eliminates all Action Required dialogs ──────────────────────
+# ── Trust cert — eliminates all Action Required dialogs. override.crt is the mechanism
+# that actually suppresses the dialog (verified empirically — allowed.dat alone does not,
+# QZ Tray still prompts on every connection even with a matching entry). QZ Tray may still
+# be finishing its own first-run writes right after silent install, so poll for the dir. ──
 Write-Host "[3/4] Trusting POS certificate..."
 $cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{certBase64}}'))
-$qzDir = @("$env:ProgramFiles\QZ Tray", "$env:LOCALAPPDATA\QZ Tray") | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($qzDir) { $cert | Set-Content -Path "$qzDir\override.crt" -Encoding ASCII }
+$qzDir = $null
+for ($i = 0; $i -lt 20 -and -not $qzDir; $i++) {
+    $qzDir = @("$env:ProgramFiles\QZ Tray", "${env:ProgramFiles(x86)}\QZ Tray", "$env:LOCALAPPDATA\QZ Tray") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $qzDir) { Start-Sleep -Seconds 1 }
+}
+if ($qzDir) { $cert | Set-Content -Path "$qzDir\override.crt" -Encoding ASCII; Write-Host "   override.crt written to $qzDir" }
+else { Write-Host "   WARNING: could not find QZ Tray install dir — dialogs may still appear." }
 $fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower()
 $allowedDir = "$env:APPDATA\qz"; New-Item -ItemType Directory -Force $allowedDir | Out-Null
-$entry = "$fp`tQZ Tray Demo Cert`tQZ Industries, LLC`t2026-07-02 14:40:36`t2046-07-02 14:40:36`ttrue"
+$entry = "$fp`tQZ Tray Demo Cert`tQZ Industries, LLC`t{{certValidFrom}}`t{{certValidTo}}`ttrue"
 $allowed = "$allowedDir\allowed.dat"
 $lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() }
 ($lines + $entry) | Set-Content -Path $allowed -Encoding ASCII
+Get-Process javaw -ErrorAction SilentlyContinue | Where-Object { $qzDir -and $_.Path -like "$qzDir*" } | Stop-Process -Force -ErrorAction SilentlyContinue
 
 # ── Desktop shortcut + Chrome policy ─────────────────────────────────────────
 Write-Host "[4/4] Creating POS shortcut..."
@@ -1179,6 +1206,103 @@ Write-Host "  ========================================"
 Write-Host "   Setup complete!"
 Write-Host "   QZ Tray is running. No dialogs will"
 Write-Host "   appear when printing."
+Write-Host "  ========================================"
+Write-Host ""
+Read-Host "Press Enter to close"
+""";
+        return Content(ps1, "text/plain");
+    }
+
+    // ── GET /api/printer/qz-trust-ps1 ────────────────────────────────────────
+    // For machines where QZ Tray was already installed manually (not via our installer) —
+    // the "Action Required / Untrusted website" popup keeps appearing because QZ Tray was
+    // never given override.crt, the one file that actually makes it skip the dialog.
+    // allowed.dat (written by the full installer above) is NOT sufficient on its own —
+    // verified against a live QZ Tray instance: even a byte-exact matching allowed.dat
+    // entry still prompts on every new connection. This script only fixes trust; it does
+    // not (re)install QZ Tray.
+    // Run via: powershell -c "iex(irm '{{posUrl}}/api/printer/qz-trust-ps1')"
+    [HttpGet("qz-trust-ps1")]
+    public IActionResult QzTrustPs1()
+    {
+        var posUrl = config["PosUrl"] ?? $"{Request.Scheme}://{Request.Host}";
+        var (_, certBase64, certValidFrom, certValidTo) = LoadQzCertInfo();
+
+        var ps1 = $$"""
+# MiMony POS — Fix "Action Required" / "Untrusted website" QZ Tray popup on Windows
+# Run via: powershell -c "iex(irm '{{posUrl}}/api/printer/qz-trust-ps1')"
+
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -Command `"iex(irm '{{posUrl}}/api/printer/qz-trust-ps1')`"" -Verb RunAs
+    exit
+}
+
+Write-Host ""
+Write-Host "  ========================================"
+Write-Host "   Fixing QZ Tray trust popup"
+Write-Host "  ========================================"
+Write-Host ""
+
+# Locate the install dir. Prefer the currently-running instance's own path (most reliable),
+# fall back to the usual install locations.
+$running = Get-Process qz-tray, javaw -ErrorAction SilentlyContinue | Where-Object { $_.Path -and (Split-Path $_.Path -Leaf) -match '^(qz-tray|javaw)\.exe$' -and (Test-Path (Join-Path (Split-Path $_.Path) 'qz-tray.properties')) } | Select-Object -First 1
+$qzDir = $null
+if ($running) { $qzDir = Split-Path $running.Path }
+if (-not $qzDir) {
+    $qzDir = @("$env:ProgramFiles\QZ Tray", "${env:ProgramFiles(x86)}\QZ Tray", "$env:LOCALAPPDATA\QZ Tray") | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+if (-not $qzDir) {
+    Write-Host "  Could not find a QZ Tray installation on this machine." -ForegroundColor Red
+    Write-Host "  Install QZ Tray first, then run this script again." -ForegroundColor Red
+    Read-Host "Press Enter to close"
+    exit 1
+}
+Write-Host "[1/4] Found QZ Tray at: $qzDir"
+
+Write-Host "[2/4] Stopping QZ Tray so it reloads trust settings..."
+Get-Process qz-tray, javaw -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$qzDir*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+# Give the OS time to release the listening ports — QZ Tray refuses to start a second
+# instance if it still sees another one holding them, and silently exits with no log line,
+# which looks identical to "the fix didn't work" from the outside.
+Start-Sleep -Seconds 3
+
+Write-Host "[3/4] Writing trust files..."
+$cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{certBase64}}'))
+$cert | Set-Content -Path "$qzDir\override.crt" -Encoding ASCII
+$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower()
+$allowedDir = "$env:APPDATA\qz"; New-Item -ItemType Directory -Force $allowedDir | Out-Null
+$entry = "$fp`tQZ Tray Demo Cert`tQZ Industries, LLC`t{{certValidFrom}}`t{{certValidTo}}`ttrue"
+$allowed = "$allowedDir\allowed.dat"
+$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() }
+($lines + $entry) | Set-Content -Path $allowed -Encoding ASCII
+
+if (-not (Test-Path "$qzDir\override.crt")) {
+    Write-Host "  Failed to write override.crt — check you approved the admin prompt." -ForegroundColor Red
+    Read-Host "Press Enter to close"
+    exit 1
+}
+
+Write-Host "[4/4] Restarting QZ Tray..."
+$qzExe = Join-Path $qzDir "qz-tray.exe"
+if (Test-Path $qzExe) {
+    $started = $false
+    for ($i = 0; $i -lt 3 -and -not $started; $i++) {
+        Start-Process $qzExe
+        for ($j = 0; $j -lt 10 -and -not $started; $j++) {
+            Start-Sleep -Seconds 1
+            if (Get-Process javaw -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$qzDir*" }) { $started = $true }
+        }
+    }
+    if (-not $started) { Write-Host "  WARNING: QZ Tray did not come back up — start it manually from the Start Menu." -ForegroundColor Yellow }
+} else {
+    Write-Host "  WARNING: qz-tray.exe not found in $qzDir — start QZ Tray manually." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "  ========================================"
+Write-Host "   Done! The popup should no longer appear."
+Write-Host "   Go back to the browser and try printing."
 Write-Host "  ========================================"
 Write-Host ""
 Read-Host "Press Enter to close"

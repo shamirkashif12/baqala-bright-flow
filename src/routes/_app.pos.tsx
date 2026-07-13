@@ -480,6 +480,25 @@ function PrinterSetupDialog() {
                 </div>
               )}
 
+              {/* Windows: fix popup on a machine that already has QZ Tray installed manually */}
+              {!qzConnected && (
+                <div className="rounded-lg border border-dashed px-4 py-3 space-y-1.5 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground text-sm">Windows: already have QZ Tray installed?</p>
+                  <p>If you get an "Action Required" / "Untrusted website" popup every time you print, run this once (as Admin) to make QZ Tray trust this POS permanently:</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <code className="flex-1 bg-muted px-2 py-1 rounded text-[10px] break-all select-all">
+                      powershell -c "iex(irm '{api.qzTrustPs1Url()}')"
+                    </code>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded px-2 py-1 bg-muted hover:bg-muted/70 text-xs"
+                      onClick={() => navigator.clipboard.writeText(`powershell -c "iex(irm '${api.qzTrustPs1Url()}')"`)}
+                    >Copy</button>
+                  </div>
+                  <p>Paste into Win+R or a terminal, press Enter, and accept the Admin prompt.</p>
+                </div>
+              )}
+
               {/* Printer list from QZ */}
               {qzConnected && qzPrinters.length > 0 && (
                 <div>
