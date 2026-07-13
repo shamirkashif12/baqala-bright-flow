@@ -1,10 +1,19 @@
 using BaqalaPOS.Api.Models;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace BaqalaPOS.Api.Data;
 
-public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbContext(options)
+// IDataProtectionKeyContext: stores the Data Protection key ring (which encrypts the ZATCA
+// private key/CSID secrets) in this same database instead of a file on disk. A file-based key
+// ring lives inside the deploy directory, which most deploy processes recreate on every release —
+// silently destroying it and permanently bricking every already-onboarded branch's ZATCA
+// credentials. The database survives redeploys by construction, so this removes that failure
+// mode entirely rather than just relocating it to "wherever someone remembered to mount a volume."
+public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbContext(options), IDataProtectionKeyContext
 {
+    public DbSet<DataProtectionKey> DataProtectionKeys { get; set; }
+
     // Core
     public DbSet<Branch> Branches { get; set; }
     public DbSet<Role> Roles { get; set; }
@@ -404,6 +413,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             ("finance_user",     "Finance User",           "مستخدم المالية"),
             ("marketing_user",   "Marketing User",         "مستخدم التسويق"),
             ("picker",           "Picker",                 "المرتب"),
+            ("self_checkout_kiosk", "Self-Checkout Kiosk",  "كشك الدفع الذاتي"),
         };
 
         foreach (var (name, displayName, displayNameAr) in systemRoles)

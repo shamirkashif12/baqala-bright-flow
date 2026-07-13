@@ -32,6 +32,17 @@ public class Terminal
     [Column("uptime_minutes")]
     public int UptimeMinutes { get; set; } = 0;
 
+    // Self-checkout kiosk pairing credential — set once by staff via
+    // TerminalsController's kiosk-pairing-code endpoint, never typed by a customer.
+    // Hashed the same way AuthController hashes user passwords.
+    [JsonIgnore, MaxLength(255), Column("pairing_secret_hash")]
+    public string? PairingSecretHash { get; set; }
+
+    // Not [JsonIgnore] — safe to expose (unlike the hash above): lets the Terminals admin
+    // page show whether/when a kiosk pairing code was issued, without revealing the secret.
+    [Column("pairing_secret_set_at")]
+    public DateTime? PairingSecretSetAt { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

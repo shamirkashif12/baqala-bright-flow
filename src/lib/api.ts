@@ -219,6 +219,10 @@ export const api = {
     request<Terminal>(`/api/terminals/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   updateTerminalStatus: (id: string, status: string) =>
     request<Terminal>(`/api/terminals/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  // Returns the plaintext pairing secret exactly once — only its hash is stored server-side,
+  // so there's no "view existing secret" endpoint, only regenerate (which invalidates the old one).
+  generateKioskPairingCode: (id: string) =>
+    request<{ terminalCode: string; pairingSecret: string }>(`/api/terminals/${id}/kiosk-pairing-code`, { method: "POST" }),
 
   // Suppliers
   getSuppliers: (params?: { status?: string; supplyType?: string }) => {
@@ -821,6 +825,7 @@ export interface CloseShiftPayload { closingAmount: number; notes?: string; reas
 export interface Terminal {
   id: string; terminalCode: string; name: string; branchId: string;
   assignedCashierId?: string; status: string; lastSync?: string; uptimeMinutes?: number;
+  pairingSecretSetAt?: string;
   branch?: { id: string; name: string };
   assignedCashier?: { id: string; fullName: string };
 }

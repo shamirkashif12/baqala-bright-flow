@@ -81,6 +81,44 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (order.Items.Count == 0)
             return BadRequest(new { message = "An order must have at least one line item." });
 
+        // Self-checkout kiosk orders: the caller is a device credential (see
+        // KioskAuthController), never a cashier, so every field that would normally come from
+        // the client or from a cashier's shift is instead forced from the kiosk's own JWT
+        // claims — a kiosk has no reason to ever send a different branch/terminal than the one
+        // it was paired to, and letting it do so would let a compromised kiosk token attribute
+        // sales to (and drain stock from) a branch it isn't physically in. This must happen
+        // BEFORE the expired-batch check below, which trusts order.BranchId.
+        if (User.FindFirst("role")?.Value == "kiosk")
+        {
+            if (!Guid.TryParse(User.FindFirst("branchId")?.Value, out var kioskBranchId))
+                return Unauthorized(new { message = "Kiosk token is missing a branch." });
+            order.Source = "kiosk";
+            order.CashierId = null;
+            order.ShiftId = null;
+            order.BranchId = kioskBranchId;
+            order.TerminalId = Guid.TryParse(User.FindFirst("terminalId")?.Value, out var kioskTerminalId)
+                ? kioskTerminalId : null;
+
+            var settings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == kioskBranchId);
+            var maxOrderValue = settings?.SelfCheckoutMaxOrderValueSar ?? 500m;
+            if (order.TotalAmount > maxOrderValue)
+                return BadRequest(new { message = $"This order exceeds the self-checkout limit of {maxOrderValue:0.##} SAR — please see an attendant." });
+
+            // Loop per item rather than a single Where(productIds.Contains(...)) query — the
+            // MySQL EF provider in use here fails to assign a type mapping to a List<Guid>
+            // parameter in a Contains() translation (same issue worked around in DataSeeder's
+            // PatchPermissionsAsync/PatchMarketingPermissionsAsync).
+            var ineligible = new List<string>();
+            foreach (var productId in order.Items.Select(i => i.ProductId).Distinct())
+            {
+                var product = await db.Products.FirstOrDefaultAsync(p => p.Id == productId);
+                if (product is not null && !product.AllowSelfCheckout)
+                    ineligible.Add(product.Name);
+            }
+            if (ineligible.Count > 0)
+                return BadRequest(new { message = $"These items require an attendant: {string.Join(", ", ineligible)}." });
+        }
+
         // Block sale of expired items: if a product's only tracked batches at this
         // branch are expired, it cannot be sold — mirrors the "Block sale of expired
         // items" Rules Engine rule, enforced here since checkout must not rely solely

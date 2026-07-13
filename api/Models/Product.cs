@@ -91,6 +91,11 @@ public class Product
     [Column("is_tobacco")]
     public bool IsTobacco { get; set; } = false;
 
+    // Staff can exclude specific items (weight-priced produce, high-shrink SKUs,
+    // age-restricted items) from the self-checkout kiosk catalog.
+    [Column("allow_self_checkout")]
+    public bool AllowSelfCheckout { get; set; } = true;
+
     [Column("discount")]
     public decimal? Discount { get; set; }
 

@@ -42,6 +42,12 @@ public class PosSettings
     [Column("send_sms_invoice")]
     public bool SendSmsInvoice { get; set; } = false;
 
+    // ── Self-checkout kiosk tab ──────────────────────────────────────────────
+    /// Real gate: read by `OrdersController.Create` to reject kiosk-sourced orders
+    /// above this value, since there's no cashier present to catch an anomaly.
+    [Column("self_checkout_max_order_value_sar")]
+    public decimal SelfCheckoutMaxOrderValueSar { get; set; } = 500m;
+
     // ── Permissions tab ──────────────────────────────────────────────────────
     [Column("cashier_can_discount")]
     public bool CashierCanDiscount { get; set; } = true;

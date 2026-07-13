@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut } from "lucide-react";
+import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut, KeyRound, Copy } from "lucide-react";
 import { api, type Terminal, type Branch, type User, type CashierShift } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -72,6 +72,30 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between border-b border-border/40 pb-2 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium">{value}</span>
+    </div>
+  );
+}
+
+function KioskCredentialField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      <div className="flex items-center gap-2">
+        <Input readOnly value={value} className={`h-9 ${mono ? "font-mono text-xs" : "font-mono"}`} onFocus={e => e.target.select()} />
+        <Button
+          size="icon"
+          variant="outline"
+          className="h-9 w-9 shrink-0"
+          onClick={() => {
+            navigator.clipboard.writeText(value);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+        >
+          {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -215,6 +239,9 @@ function Terminals() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<TerminalForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [kioskTerm, setKioskTerm] = useState<Terminal | null>(null);
+  const [kioskSecret, setKioskSecret] = useState<{ terminalCode: string; pairingSecret: string } | null>(null);
+  const [kioskGenerating, setKioskGenerating] = useState(false);
 
   // Load all terminals once (unfiltered) for the Session Logs dropdown
   useEffect(() => {
@@ -287,6 +314,16 @@ function Terminals() {
   const handleDeactivate = async (t: Terminal) => {
     await api.updateTerminalStatus(t.id, "inactive");
     load();
+  };
+
+  const handleGenerateKioskCode = async () => {
+    if (!kioskTerm) return;
+    setKioskGenerating(true);
+    try {
+      const res = await api.generateKioskPairingCode(kioskTerm.id);
+      setKioskSecret(res);
+      load();
+    } catch (e) { console.error(e); } finally { setKioskGenerating(false); }
   };
 
   const set = (k: keyof TerminalForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -373,7 +410,16 @@ function Terminals() {
                   <tbody>
                     {filtered.map((t) => (
                       <tr key={t.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
-                        <td className="px-3 py-3 font-mono text-xs font-bold">{t.terminalCode}</td>
+                        <td className="px-3 py-3 font-mono text-xs font-bold">
+                          <div className="flex items-center gap-1">
+                            {t.terminalCode}
+                            {t.pairingSecretSetAt && (
+                              <span title={`Self-checkout kiosk paired ${fmtDT(t.pairingSecretSetAt)}`}>
+                                <KeyRound className="h-3 w-3 text-success" />
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-3 py-3 font-medium">{t.name}</td>
                         <td className="px-3 py-3 text-xs">{t.branch?.name ?? "—"}</td>
                         <td className="px-3 py-3 text-xs">
@@ -411,6 +457,11 @@ function Terminals() {
                           <div className="flex gap-1 justify-end">
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTerm(t)}><Eye className="h-3.5 w-3.5" /></Button>
                             {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                            {canEdit && (
+                              <Button size="icon" variant="ghost" className="h-7 w-7" title="Self-checkout kiosk pairing" onClick={() => { setKioskTerm(t); setKioskSecret(null); }}>
+                                <KeyRound className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                             {t.status === "active" && (
                               <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => handleDeactivate(t)}><X className="h-3.5 w-3.5" /></Button>
                             )}
@@ -637,6 +688,41 @@ function Terminals() {
         <SheetContent>
           <SheetHeader><SheetTitle>Add Terminal</SheetTitle></SheetHeader>
           <TerminalFormFields form={form} set={set} setS={setS} branches={branches} users={cashiers} saving={saving} onSave={handleSave} />
+        </SheetContent>
+      </Sheet>
+
+      {/* Self-checkout kiosk pairing sheet */}
+      <Sheet open={!!kioskTerm} onOpenChange={v => { if (!v) { setKioskTerm(null); setKioskSecret(null); } }}>
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-primary" />
+              Self-Checkout Pairing — {kioskTerm?.terminalCode}
+            </SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-4">
+            {!kioskSecret && (
+              <p className="text-sm text-muted-foreground">
+                {kioskTerm?.pairingSecretSetAt
+                  ? `This terminal was last paired ${fmtDT(kioskTerm.pairingSecretSetAt)}. Generating a new code invalidates that one — the kiosk will need to be re-paired.`
+                  : "Generate a one-time terminal code and pairing secret, then enter both into the kiosk's setup screen."}
+              </p>
+            )}
+            {kioskSecret ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                  This secret is shown once and can't be retrieved again — enter it into the kiosk now, or generate a new one later if it's lost.
+                </div>
+                <KioskCredentialField label="Terminal Code" value={kioskSecret.terminalCode} />
+                <KioskCredentialField label="Pairing Secret" value={kioskSecret.pairingSecret} mono />
+                <Button variant="outline" className="w-full" onClick={() => setKioskTerm(null)}>Done</Button>
+              </div>
+            ) : (
+              <Button className="w-full gradient-primary text-primary-foreground border-0" disabled={kioskGenerating} onClick={handleGenerateKioskCode}>
+                {kioskGenerating ? "Generating…" : kioskTerm?.pairingSecretSetAt ? "Regenerate Pairing Code" : "Generate Pairing Code"}
+              </Button>
+            )}
+          </div>
         </SheetContent>
       </Sheet>
     </PageShell>

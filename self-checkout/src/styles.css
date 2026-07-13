@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+/* Brand tokens vendored from the main app's src/styles.css (light theme only —
+   a kiosk runs a single fixed theme, no dark-mode toggle). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --font-display: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+:root {
+  --radius: 0.875rem;
+
+  --background: oklch(0.985 0.005 290);
+  --foreground: oklch(0.22 0.04 290);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.04 290);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.04 290);
+
+  --primary: oklch(0.46 0.21 295);
+  --primary-foreground: oklch(0.99 0 0);
+
+  --secondary: oklch(0.96 0.02 295);
+  --secondary-foreground: oklch(0.32 0.15 295);
+
+  --muted: oklch(0.965 0.012 290);
+  --muted-foreground: oklch(0.5 0.04 290);
+
+  --accent: oklch(0.94 0.05 295);
+  --accent-foreground: oklch(0.35 0.15 295);
+
+  --success: oklch(0.68 0.17 155);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.78 0.17 70);
+  --warning-foreground: oklch(0.25 0.05 70);
+  --destructive: oklch(0.6 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.92 0.015 290);
+  --input: oklch(0.92 0.015 290);
+  --ring: oklch(0.46 0.21 295);
+
+  --gradient-primary: linear-gradient(135deg, oklch(0.46 0.21 295), oklch(0.62 0.22 295));
+  --shadow-card: 0 1px 3px oklch(0.46 0.21 295 / 0.06), 0 8px 24px -8px oklch(0.46 0.21 295 / 0.08);
+  --shadow-elegant: 0 10px 40px -12px oklch(0.46 0.21 295 / 0.25);
+  --shadow-glow: 0 0 32px oklch(0.62 0.22 295 / 0.35);
+}
+
+@layer utilities {
+  .gradient-primary {
+    background: var(--gradient-primary);
+  }
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  .shadow-elegant {
+    box-shadow: var(--shadow-elegant);
+  }
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  /* Kiosk runs full-screen in a locked-down browser — nothing should ever scroll or be selectable. */
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@keyframes blob-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(3%, 4%) scale(1.08); }
+  66% { transform: translate(-3%, -2%) scale(0.95); }
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 oklch(0.62 0.22 295 / 0.45); }
+  100% { box-shadow: 0 0 0 24px oklch(0.62 0.22 295 / 0); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@layer utilities {
+  .animate-blob-float {
+    animation: blob-float 14s ease-in-out infinite;
+  }
+  .animate-pulse-ring {
+    animation: pulse-ring 2.2s ease-out infinite;
+  }
+  .animate-fade-up {
+    animation: fade-up 0.6s ease-out both;
+  }
+}

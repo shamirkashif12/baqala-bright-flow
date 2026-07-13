@@ -87,4 +87,28 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
         return Ok(terminal);
     }
 
+    // Generates a one-time-display pairing secret for a self-checkout kiosk. Staff types this
+    // (plus the terminal's code) into the kiosk during setup; only its hash is stored here, so
+    // it can never be recovered afterwards — only rotated by calling this again.
+    [RequirePermission("Terminals", PermAction.Edit)]
+    [HttpPost("{id:guid}/kiosk-pairing-code")]
+    public async Task<IActionResult> GenerateKioskPairingCode(Guid id)
+    {
+        var terminal = await db.Terminals.FindAsync(id);
+        if (terminal is null) return NotFound();
+        if (string.IsNullOrWhiteSpace(terminal.TerminalCode))
+            return BadRequest(new { message = "Terminal must have a terminal code before it can be paired as a self-checkout kiosk." });
+
+        var secret = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+        terminal.PairingSecretHash = HashSecret(secret);
+        terminal.PairingSecretSetAt = DateTime.UtcNow;
+        terminal.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return Ok(new { terminalCode = terminal.TerminalCode, pairingSecret = secret });
+    }
+
+    private static string HashSecret(string plain) =>
+        Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(plain + "baqala_salt")));
 }

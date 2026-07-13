@@ -1504,6 +1504,18 @@ public static class DataSeeder
                 P(r, "Rules Engine",        false, false, false, false, false, false),
                 P(r, "Settings",            false, false, false, false, false, false),
             },
+            // Kiosk device credential (never a human login) — only permission it holds is
+            // creating orders. Everything else, including reading Orders/POS, stays false;
+            // read-only lookups it needs (products/coupons/stock) have no [RequirePermission]
+            // gate at all, so this role's only job is to satisfy the RequirePermission check
+            // on OrdersController.Create.
+            "Self-Checkout Kiosk" => new[]
+            {
+                P(r, "POS", false, true, false, false, false, false),
+                // Lets a customer optionally attach their loyalty account at checkout
+                // (phone lookup, or create-new if not found) — same as the staff POS.
+                P(r, "Customers", false, true, false, false, false, false),
+            },
             _ => Array.Empty<RolePermission>()
         };
     }

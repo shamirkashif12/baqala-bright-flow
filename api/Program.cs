@@ -51,21 +51,18 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 
 // ─── ZATCA (Saudi e-invoicing Phase 2) ───────────────────────────────────────
-// The ZATCA private key/CSID secrets are encrypted at rest with this key ring. Defaulting to a
-// path under ContentRootPath is fine for local dev (this exact directory never moves), but is a
+// The ZATCA private key/CSID secrets are encrypted at rest with this key ring. It used to persist
+// to a file under ContentRootPath — fine for local dev (this exact directory never moves), but a
 // real production hazard: most deploy processes re-clone or recreate the app directory on every
-// release, silently destroying this folder and permanently bricking every already-onboarded
+// release, silently destroying that folder and permanently bricking every already-onboarded
 // branch's stored ZATCA credentials (decrypt fails with a CryptographicException, invoices get
-// stuck "pending" with no error detail, and the branch needs the entire CSR/OTP/CSID onboarding
-// re-run — which should be a one-time-ever step, not a per-deploy chore). Set "ZatcaKeysPath" in
-// appsettings/environment to an absolute path OUTSIDE the deploy directory in any real deployment
-// (e.g. a mounted persistent volume) so this key ring survives every future redeploy.
-var zatcaKeysPath = builder.Configuration["ZatcaKeysPath"] is { Length: > 0 } configuredPath
-    ? configuredPath
-    : Path.Combine(builder.Environment.ContentRootPath, "zatca-keys");
+// stuck "pending" with no visible error, and the branch needs the entire CSR/OTP/CSID onboarding
+// re-run — which should be a one-time-ever step, not a per-deploy chore). Persisting to this same
+// database instead removes the failure mode entirely: the database already survives every
+// redeploy by construction, unlike a file sitting in the deploy directory.
 builder.Services.AddDataProtection()
     .SetApplicationName("BaqalaPOS")
-    .PersistKeysToFileSystem(new DirectoryInfo(zatcaKeysPath));
+    .PersistKeysToDbContext<BaqalaDbContext>();
 builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
 builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
 builder.Services.AddScoped<IZatcaService, ZatcaService>();
@@ -255,6 +252,40 @@ app.UseExceptionHandler(handler =>
 
 app.UseCors("FrontendPolicy");
 app.UseAuthentication();
+
+// A kiosk device credential (KioskAuthController) is a valid authenticated bearer token, so
+// without this it could reach any endpoint that relies only on the global fallback policy
+// below and has no [RequirePermission] of its own — e.g. GET /api/users, which returns staff
+// PII to anyone merely "authenticated". A device credential is far easier to extract from a
+// physical kiosk than a staff password is to phish, so it gets its own explicit allowlist on
+// top of the normal permission system rather than inheriting "any authenticated user" access.
+app.Use(async (context, next) =>
+{
+    if (context.User.FindFirst("role")?.Value == "kiosk")
+    {
+        var path = context.Request.Path.Value ?? "";
+        var method = context.Request.Method;
+        var allowed =
+            (method == "GET" && path.StartsWith("/api/products")) ||
+            (method == "GET" && path.StartsWith("/api/finance/coupons/validate/")) ||
+            (method == "GET" && path.StartsWith("/api/finance/tax-rules")) ||
+            (method == "GET" && path.StartsWith("/api/discounts")) ||
+            (method == "GET" && path.StartsWith("/api/offers")) ||
+            (method == "GET" && path.StartsWith("/api/compliance/zatca/settings/")) ||
+            (method == "GET" && path.StartsWith("/api/customers/by-phone/")) ||
+            (method == "POST" && path == "/api/customers") ||
+            (method == "POST" && path == "/api/orders");
+
+        if (!allowed)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { message = "This kiosk credential cannot access this endpoint." });
+            return;
+        }
+    }
+    await next();
+});
+
 app.UseAuthorization();
 app.MapControllers();
 

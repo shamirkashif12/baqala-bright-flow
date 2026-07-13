@@ -42,6 +42,10 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
         if (await db.Customers.AnyAsync(c => c.Phone == customer.Phone))
             return Conflict("Phone number already registered.");
         customer.Id = Guid.NewGuid();
+        // customer_code is NOT NULL + UNIQUE in the database but was never populated here —
+        // every create (staff POS's inline "save as new customer" and self-checkout's own
+        // equivalent) failed with a DB-level "column cannot be null" 500 until now.
+        customer.CustomerCode = $"CUST-{Guid.NewGuid().ToString()[..8].ToUpper()}";
         customer.CreatedAt = customer.UpdatedAt = DateTime.UtcNow;
         db.Customers.Add(customer);
         await db.SaveChangesAsync();
