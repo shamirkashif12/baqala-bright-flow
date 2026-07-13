@@ -71,6 +71,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     // Compliance (ZATCA)
     public DbSet<ZatcaInvoice> ZatcaInvoices { get; set; }
     public DbSet<ZatcaSettings> ZatcaSettings { get; set; }
+    public DbSet<ZatcaIdentity> ZatcaIdentities { get; set; }
 
     // Rules & Config
     public DbSet<RulesEngine> RulesEngine { get; set; }
@@ -114,12 +115,22 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
         modelBuilder.Entity<ZatcaSettings>()
             .HasIndex(z => z.BranchId).IsUnique();
-        modelBuilder.Entity<ZatcaSettings>()
+
+        // Singleton row: one shared ZATCA identity + invoice chain for the whole mart.
+        modelBuilder.Entity<ZatcaIdentity>()
             .Property(z => z.LastInvoiceHash)
             .HasDefaultValue("NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==");
-        modelBuilder.Entity<ZatcaSettings>()
+        modelBuilder.Entity<ZatcaIdentity>()
             .Property(z => z.OnboardingStatus)
             .HasDefaultValue("not_started");
+        // Fixed (not DateTime.UtcNow) timestamps — a non-deterministic HasData seed value would
+        // make EF detect a "pending model change" on every subsequent `migrations add`.
+        modelBuilder.Entity<ZatcaIdentity>().HasData(new ZatcaIdentity
+        {
+            Id = ZatcaIdentity.SingletonId,
+            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        });
 
         modelBuilder.Entity<PosSettings>()
             .HasIndex(p => p.BranchId).IsUnique();

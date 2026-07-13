@@ -111,6 +111,26 @@ public class ZatcaSettings
     [MaxLength(20), Column("postal_zone")]
     public string? PostalZone { get; set; }
 
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public Branch? Branch { get; set; }
+}
+
+// One shared ZATCA cryptographic identity + invoice chain for the whole mart (all branches share
+// one VAT registration and must sign under one certificate with one unbroken ICV/hash sequence —
+// see SplitZatcaIdentityFromSettings migration). Singleton row, fixed PK, seeded by migration.
+[Table("zatca_identity")]
+public class ZatcaIdentity
+{
+    public static readonly Guid SingletonId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
+    [Key, Column("id")]
+    public Guid Id { get; set; } = SingletonId;
+
     [Column("csid")]
     public string? Csid { get; set; }
 
@@ -167,6 +187,4 @@ public class ZatcaSettings
 
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-
-    public Branch? Branch { get; set; }
 }

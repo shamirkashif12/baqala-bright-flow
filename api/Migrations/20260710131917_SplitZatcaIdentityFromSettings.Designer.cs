@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260710131917_SplitZatcaIdentityFromSettings")]
+    partial class SplitZatcaIdentityFromSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -751,10 +754,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("end_date");
 
-                    b.Property<string>("ExcludedProductIdsJson")
-                        .HasColumnType("longtext")
-                        .HasColumnName("excluded_product_ids");
-
                     b.Property<bool>("IsActive")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("is_active");
@@ -1421,10 +1420,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("updated_at");
-
-                    b.Property<string>("VoidReason")
-                        .HasColumnType("longtext")
-                        .HasColumnName("void_reason");
 
                     b.HasKey("Id");
 
@@ -2533,108 +2528,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("staff_attendance");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.StockCount", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<Guid?>("CategoryId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("category_id");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("completed_at");
-
-                    b.Property<Guid?>("CompletedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("completed_by");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("longtext")
-                        .HasColumnName("notes");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("started_at");
-
-                    b.Property<Guid?>("StartedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("started_by");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("CategoryId");
-
-                    b.ToTable("stock_counts");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.StockCountItem", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime?>("CountedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("counted_at");
-
-                    b.Property<decimal?>("CountedQuantity")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("counted_quantity");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid>("ProductId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("product_id");
-
-                    b.Property<Guid>("StockCountId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("stock_count_id");
-
-                    b.Property<decimal>("SystemQuantity")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("system_quantity");
-
-                    b.Property<decimal?>("Variance")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("variance");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProductId");
-
-                    b.HasIndex("StockCountId");
-
-                    b.ToTable("stock_count_items");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockDiscrepancy", b =>
@@ -3782,13 +3675,13 @@ namespace BaqalaPOS.Api.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreatedAt = new DateTime(2026, 7, 10, 13, 19, 15, 923, DateTimeKind.Utc).AddTicks(7203),
                             Environment = "sandbox",
                             LastIcv = 0,
                             LastInvoiceHash = "NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==",
                             OnboardingStatus = "not_started",
                             Phase2Enabled = false,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                            UpdatedAt = new DateTime(2026, 7, 10, 13, 19, 15, 923, DateTimeKind.Utc).AddTicks(7203)
                         });
                 });
 
@@ -4574,42 +4467,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.StockCount", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.Category", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId");
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("Category");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.StockCountItem", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.StockCount", "StockCount")
-                        .WithMany("Items")
-                        .HasForeignKey("StockCountId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Product");
-
-                    b.Navigation("StockCount");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockDiscrepancy", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.PurchaseOrder", "PurchaseOrder")
@@ -5049,11 +4906,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Permissions");
 
                     b.Navigation("Users");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.StockCount", b =>
-                {
-                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockTransfer", b =>

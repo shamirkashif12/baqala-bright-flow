@@ -1712,7 +1712,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     // ───────────────────────────────────────────────────────────────────────
 
     // Sensitive entity types whose before/after JSON is masked in both the UI and exports, per FRD §6.1.
-    private static readonly string[] SensitiveAuditEntities = ["ZatcaSettings", "PosSettingsRecord", "TaxFeeRule", "User"];
+    private static readonly string[] SensitiveAuditEntities = ["ZatcaSettings", "ZatcaIdentity", "PosSettingsRecord", "TaxFeeRule", "User"];
 
     [HttpGet("audit-trail")]
     [RequirePermission("Reports", PermAction.View)]
