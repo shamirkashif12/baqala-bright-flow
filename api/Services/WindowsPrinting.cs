@@ -201,6 +201,60 @@ public static class WindowsPrinting
         return exit == 0 ? (true, "ok") : (false, string.IsNullOrWhiteSpace(err) ? "Could not clear queue." : err);
     }
 
+    // ── Auto-install unbound USB printers ───────────────────────────────────
+    // A USB thermal/receipt printer that Windows hasn't matched to a driver package
+    // enumerates as "USB Printing Support" (usbprint.sys) with a spooler port (USB001,
+    // USB002, ...) but no printer queue — Devices and Printers then buckets it under
+    // "Unspecified" instead of "Printers", and nothing prompts the user to fix it. This
+    // binds the inbox "Generic / Text Only" driver (always present, no internet needed;
+    // safe because PrintRaw sends pre-built ESC/POS bytes as a RAW job, bypassing the
+    // driver's own rendering entirely) to any such port that isn't already claimed by an
+    // installed printer. Called on a recurring timer by PrinterAutoInstallService so it
+    // keeps working after the one-time setup-installer script (which only catches a
+    // printer that's already plugged in at install time).
+    public static async Task<List<string>> AutoInstallUsbPrintersAsync()
+    {
+        const string script = """
+            $claimedPorts = @(Get-Printer | Select-Object -ExpandProperty PortName)
+            $unclaimed = @(Get-PrinterPort | Where-Object { $_.Name -match '^USB\d+$' -and ($claimedPorts -notcontains $_.Name) } | Select-Object -ExpandProperty Name)
+
+            $added = @()
+            if ($unclaimed.Count -gt 0) {
+                Add-PrinterDriver -Name 'Generic / Text Only' -ErrorAction SilentlyContinue
+                foreach ($port in $unclaimed) {
+                    $suffix = 1
+                    $name = 'Receipt Printer'
+                    while (Get-Printer -Name $name -ErrorAction SilentlyContinue) {
+                        $suffix++
+                        $name = "Receipt Printer $suffix"
+                    }
+                    try {
+                        Add-Printer -Name $name -DriverName 'Generic / Text Only' -PortName $port -ErrorAction Stop
+                        $added += $name
+                    } catch {}
+                }
+            }
+            $added | ConvertTo-Json -Compress
+            """;
+
+        var (stdout, _, _) = await RunPowerShell(script);
+        if (string.IsNullOrWhiteSpace(stdout)) return [];
+
+        try
+        {
+            using var doc = JsonDocument.Parse(stdout);
+            var elements = doc.RootElement.ValueKind == JsonValueKind.Array
+                ? doc.RootElement.EnumerateArray().ToList()
+                : [doc.RootElement];
+
+            return elements
+                .Select(el => el.GetString() ?? "")
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .ToList();
+        }
+        catch (JsonException) { return []; }
+    }
+
     // Best-effort kiosk launcher shortcut, mirroring the Chrome --kiosk-printing
     // .desktop launcher created on Linux in PrinterController.Activate.
     public static async Task CreateKioskShortcutAsync()

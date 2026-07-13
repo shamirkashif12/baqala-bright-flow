@@ -66,8 +66,12 @@ public class PrinterController(IConfiguration config) : ControllerBase
         if (OperatingSystem.IsWindows())
         {
             // Windows has no CUPS-style "raw unconfigured USB device" listing — a thermal
-            // printer needs its driver installed via Windows first. Surface installed
-            // printers here so the same setup UI can pick one and set it as default.
+            // printer needs its driver installed via Windows first. Run the same bind-unclaimed-
+            // USB-ports step the background UsbPrinterAutoInstallService does, so clicking
+            // "Re-scan" catches a printer plugged in seconds ago instead of waiting up to 10s
+            // for the next background tick. No-ops (near-instantly) if nothing new is unclaimed.
+            await WindowsPrinting.AutoInstallUsbPrintersAsync();
+
             var installedPrinters = await WindowsPrinting.ListPrintersAsync();
             var winPrinters = installedPrinters.Select(p => new
             {
