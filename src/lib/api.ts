@@ -683,11 +683,17 @@ export const api = {
   setupInstallerUrl: () => `${BASE}/api/printer/setup-installer`,
   // Returns the Windows PowerShell one-liner install command (no download needed)
   setupPs1Url: () => `${BASE}/api/printer/setup-ps1`,
-  // Fixes the "Action Required" QZ Tray popup on Windows when QZ Tray is already installed
-  qzTrustPs1Url: () => `${BASE}/api/printer/qz-trust-ps1`,
-  qzCertificateUrl: () => `${BASE}/api/printer/qz-certificate`,
+  // Fixes the "Action Required" QZ Tray popup on Windows when QZ Tray is already installed.
+  // Must read the cert from THIS machine's local agent, not the remote server — the cert
+  // embedded needs to match what's actually paired with the QZ Tray running on this machine.
+  qzTrustPs1Url: () => `${getPrinterBase()}/api/printer/qz-trust-ps1`,
+  // QZ Tray's cert/sign challenge must be answered by the local agent on this machine (same
+  // reasoning as above) — routing these through the remote server returns whatever cert that
+  // server happens to have on disk, which can silently mismatch what's trusted in this
+  // machine's QZ Tray allowed.dat/override.crt and leave every print request unsigned.
+  qzCertificateUrl: () => `${getPrinterBase()}/api/printer/qz-certificate`,
   qzSign: (toSign: string) =>
-    fetch(`${BASE}/api/printer/qz-sign`, {
+    fetch(`${getPrinterBase()}/api/printer/qz-sign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ toSign }),
