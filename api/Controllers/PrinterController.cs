@@ -627,6 +627,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObj
 reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
 
+:: ── Chrome/Edge Policy: "Local Network Access" blocks a page served from a public,
+:: non-localhost origin (e.g. a plain-HTTP IP:port like this POS) from opening a
+:: websocket to localhost — which is exactly how the browser talks to QZ Tray. This
+:: allowlists the POS origin so the connection isn't blocked (ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS).
+reg add "HKLM\SOFTWARE\Policies\Google\Chrome\LocalNetworkAccessAllowedForUrls" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\LocalNetworkAccessAllowedForUrls" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
+
 :: ── Trust POS cert in QZ Tray — eliminates all "Action Required" dialogs.
 :: override.crt is the mechanism that actually suppresses the dialog (QZ Tray treats it as
 :: a pre-authorized identity); allowed.dat alone does NOT — verified empirically, QZ Tray
@@ -1287,7 +1294,7 @@ if (-not (Test-Path "$qzDir\override.crt")) {
     exit 1
 }
 
-Write-Host "[4/4] Restarting QZ Tray..."
+Write-Host "[4/5] Restarting QZ Tray..."
 $qzExe = Join-Path $qzDir "qz-tray.exe"
 if (Test-Path $qzExe) {
     $started = $false
@@ -1303,10 +1310,23 @@ if (Test-Path $qzExe) {
     Write-Host "  WARNING: qz-tray.exe not found in $qzDir — start QZ Tray manually." -ForegroundColor Yellow
 }
 
+Write-Host "[5/5] Un-blocking Chrome/Edge 'Local Network Access' for this POS origin..."
+# Chrome/Edge blocks a page on a public, non-localhost origin (e.g. a plain-HTTP
+# IP:port POS URL) from opening a websocket to localhost/QZ Tray unless allowlisted —
+# shows as ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS in DevTools otherwise.
+foreach ($browserKey in @(
+    "HKLM:\SOFTWARE\Policies\Google\Chrome\LocalNetworkAccessAllowedForUrls",
+    "HKLM:\SOFTWARE\Policies\Microsoft\Edge\LocalNetworkAccessAllowedForUrls"
+)) {
+    New-Item -Path $browserKey -Force | Out-Null
+    Set-ItemProperty -Path $browserKey -Name "1" -Value "{{posUrl}}"
+}
+Write-Host "  Done — fully close and reopen Chrome/Edge for the policy to take effect."
+
 Write-Host ""
 Write-Host "  ========================================"
 Write-Host "   Done! The popup should no longer appear."
-Write-Host "   Go back to the browser and try printing."
+Write-Host "   Fully close and reopen Chrome/Edge, then try printing."
 Write-Host "  ========================================"
 Write-Host ""
 Read-Host "Press Enter to close"
