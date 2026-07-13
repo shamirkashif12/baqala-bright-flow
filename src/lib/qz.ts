@@ -39,8 +39,17 @@ export function qzIsConnected(): boolean {
 
 export async function qzListPrinters(): Promise<string[]> {
   await qzConnect();
-  const result = await qz.printers.find();
-  return Array.isArray(result) ? result : [result as string];
+  // QZ Tray's printer list comes from Java's PrintServiceLookup, which can return a
+  // stale/empty list on the first call right after the print spooler state changes
+  // (a printer added/removed, or QZ Tray itself just restarted) — retry briefly
+  // before concluding there really are no printers.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const result = await qz.printers.find();
+    const printers = Array.isArray(result) ? result : [result as string].filter(Boolean);
+    if (printers.length > 0 || attempt === 4) return printers;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return [];
 }
 
 export async function qzGetDefaultPrinter(): Promise<string> {
