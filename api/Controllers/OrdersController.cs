@@ -408,16 +408,27 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
+    // KSA tobacco excise: min 25 SAR OR 100% of base price per unit — mirrors calcTobaccoFee in
+    // src/routes/_app.pos.tsx. Recomputed here (rather than carried over) whenever items are
+    // edited, since quantities/lines/prices can all change including brand-new lines.
+    private static decimal CalcTobaccoFee(decimal unitPrice) => unitPrice <= 25 ? 25 : unitPrice;
+
     // Order Editing (FR: "Edit orders from dashboard" — manager corrects mistakes, editable order
     // with audit log). Permission-gated only — a cashier without Orders:Edit simply cannot edit.
+    // Scope: line items (qty/price/add/remove), notes, discount override, payment method (single-
+    // payment orders only — split payments must be corrected via void + re-sale), and which
+    // customer the order is attributed to.
     [RequirePermission("Orders", PermAction.Edit)]
     [HttpPatch("{id:guid}")]
     public async Task<IActionResult> EditOrder(Guid id, [FromBody] OrderEditRequest req)
     {
         if (req.Items.Count == 0) return BadRequest(new { message = "An order must have at least one line item." });
 
-        var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id);
+        var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound();
+
+        if (req.PaymentMethod is not null && order.Payments.Count > 1)
+            return BadRequest(new { message = "This order has split payments — payment method can't be edited here." });
 
         var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new
         {
@@ -426,6 +437,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             order.TaxAmount,
             order.TotalAmount,
             order.Notes,
+            order.CustomerId,
+            PaymentMethod = order.Payments.FirstOrDefault()?.PaymentMethod,
             Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
         });
 
@@ -462,11 +475,23 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         }
 
         // Replace line items wholesale rather than diffing individual rows — OrderItem has no
-        // dependents of its own besides Order, so this is safe and much simpler.
+        // dependents of its own besides Order, so this is safe and much simpler. This also covers
+        // "adding items"/"modifying prices": a line with a new ProductId or a UnitPrice different
+        // from the original is just another entry in req.Items, nothing special-cased.
+        //
+        // Looked up one product at a time rather than `productIds.Contains(p.Id)` — the MySQL EF
+        // Core provider used here cannot assign a type mapping to a parameterized List<Guid>
+        // IN-list (same constraint noted throughout ReportsController), which throws at query time.
+        var productIds = req.Items.Select(i => i.ProductId).Distinct().ToList();
+        var tobaccoFlags = new Dictionary<Guid, bool>();
+        foreach (var pid in productIds)
+            tobaccoFlags[pid] = await db.Products.Where(p => p.Id == pid).Select(p => p.IsTobacco).FirstOrDefaultAsync();
+
         db.OrderItems.RemoveRange(order.Items);
         var newItems = req.Items.Select(it =>
         {
             var totalPrice = it.Quantity * it.UnitPrice;
+            var isTobacco = tobaccoFlags.GetValueOrDefault(it.ProductId);
             return new OrderItem
             {
                 Id = Guid.NewGuid(),
@@ -475,23 +500,43 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 Quantity = it.Quantity,
                 UnitPrice = it.UnitPrice,
                 TotalPrice = totalPrice,
+                TobaccoFeeAmount = isTobacco ? it.Quantity * CalcTobaccoFee(it.UnitPrice) : 0,
                 CreatedAt = DateTime.UtcNow,
             };
         }).ToList();
         db.OrderItems.AddRange(newItems);
 
         // Recompute totals server-side from the new items — never trust a client-sent total.
-        // Discount carries over proportionally (capped to the new subtotal so it can't exceed it);
-        // tax is re-derived at the same effective rate the order was originally taxed at.
+        // Discount either carries over proportionally (capped to the new subtotal) or is replaced
+        // outright when the caller explicitly sends an override (req.DiscountAmount).
         var newSubtotal = newItems.Sum(i => i.TotalPrice);
-        var taxRate = order.Subtotal > 0 ? order.TaxAmount / order.Subtotal : 0m;
-        var newDiscount = Math.Min(order.DiscountAmount, newSubtotal);
+        var newTobaccoFee = newItems.Sum(i => i.TobaccoFeeAmount);
+        var newDiscount = req.DiscountAmount.HasValue
+            ? Math.Clamp(req.DiscountAmount.Value, 0, newSubtotal)
+            : Math.Min(order.DiscountAmount, newSubtotal);
+
+        // VAT is charged on (subtotal - discount + tobacco fee), not on subtotal alone (see
+        // Create()) — so the rate must be derived from that same taxable base, not just Subtotal,
+        // or a discounted/tobacco order's effective rate would be under/over-stated when re-applied
+        // to the new totals below.
+        var oldTaxableBase = order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount;
+        var taxRate = oldTaxableBase > 0 ? order.TaxAmount / oldTaxableBase : 0m;
+        var newTaxableBase = Math.Max(0, newSubtotal - newDiscount + newTobaccoFee);
+
         order.Subtotal = newSubtotal;
         order.DiscountAmount = newDiscount;
-        order.TaxAmount = Math.Round((newSubtotal - newDiscount) * taxRate, 2);
-        order.TotalAmount = newSubtotal - newDiscount + order.TaxAmount + order.CustomFeeAmount;
+        order.TobaccoFeeAmount = newTobaccoFee;
+        order.TaxAmount = Math.Round(newTaxableBase * taxRate, 2);
+        order.TotalAmount = newSubtotal - newDiscount + order.TobaccoFeeAmount + order.TaxAmount + order.CustomFeeAmount;
         order.Notes = req.Notes;
+        if (req.UpdateCustomer) order.CustomerId = req.CustomerId;
         order.UpdatedAt = DateTime.UtcNow;
+
+        if (req.PaymentMethod is not null)
+        {
+            var payment = order.Payments.FirstOrDefault();
+            if (payment is not null) payment.PaymentMethod = req.PaymentMethod;
+        }
 
         await db.SaveChangesAsync();
 
@@ -502,6 +547,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             order.TaxAmount,
             order.TotalAmount,
             order.Notes,
+            order.CustomerId,
+            PaymentMethod = order.Payments.FirstOrDefault()?.PaymentMethod,
             Items = newItems.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
         });
         await audit.LogAsync(
@@ -517,6 +564,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var updated = await db.Orders
             .Include(o => o.Items).ThenInclude(i => i.Product)
             .Include(o => o.Payments)
+            .Include(o => o.Customer)
             .FirstOrDefaultAsync(o => o.Id == id);
         return Ok(updated);
     }
@@ -635,5 +683,11 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
 public record UpdateStatusRequest(string Status);
 public record OrderEditItemRequest(Guid? Id, Guid ProductId, decimal Quantity, decimal UnitPrice);
-public record OrderEditRequest(List<OrderEditItemRequest> Items, string? Notes);
+public record OrderEditRequest(
+    List<OrderEditItemRequest> Items,
+    string? Notes,
+    string? PaymentMethod = null,
+    decimal? DiscountAmount = null,
+    bool UpdateCustomer = false,
+    Guid? CustomerId = null);
 public record OrderVoidRequest(string? Reason);

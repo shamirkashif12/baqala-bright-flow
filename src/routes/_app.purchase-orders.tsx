@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { MetricCard } from "@/components/metric-card";
 import { Card } from "@/components/ui/card";
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
+import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product, type SupplierCreditNote, type StockTransfer, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
@@ -836,6 +836,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 function PurchaseOrders() {
+  const { user } = useAuth();
   const { canCreate, canApprove, canDelete } = usePermission("Purchase Orders");
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [creditNotes, setCreditNotes] = useState<SupplierCreditNote[]>([]);
@@ -849,16 +850,24 @@ function PurchaseOrders() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [createdBy, setCreatedBy] = useState("all");
+  const [approvedBy, setApprovedBy] = useState("all");
+  const [users, setUsers] = useState<User[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
   const [viewPOGroup, setViewPOGroup] = useState<PurchaseOrder[]>([]);
   const [receiveTarget, setReceiveTarget] = useState<PurchaseOrder | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const load = () => {
+  // createdBy/approvedBy are sent as query params — filtered in the database, not client-side —
+  // so they cover the full dataset rather than whatever page happens to already be loaded.
+  const load = useCallback(() => {
     setLoading(true);
     Promise.allSettled([
-      api.getPurchaseOrders(),
+      api.getPurchaseOrders({
+        createdBy: createdBy !== "all" ? createdBy : undefined,
+        approvedBy: approvedBy !== "all" ? approvedBy : undefined,
+      }),
       api.getCreditNotes(),
       api.getStockTransfers({ transferType: "warehouse_to_supplier" }),
       api.getStockTransfers({ transferType: "supplier_to_warehouse" }),
@@ -871,15 +880,17 @@ function PurchaseOrders() {
         setSupplierTransfers(stRes.value.filter(t => !t.purchaseOrderId));
       }
     }).finally(() => setLoading(false));
-  };
+  }, [createdBy, approvedBy]);
 
   useEffect(() => {
-    load();
     api.getSuppliers().then(setSuppliers);
     api.getWarehouses().then(setWarehouses);
     api.getBranches().then(setBranches);
     api.getProducts().then(setProducts);
+    api.getUsers().then(setUsers).catch(() => {});
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -929,10 +940,12 @@ function PurchaseOrders() {
     }).reduce((s, p) => s + p.paidAmount, 0);
   })();
 
+  // Sending a draft PO is the approval step (gated by canApprove below) — record who did it,
+  // not just that it happened, so Approved By is actually populated instead of staying null forever.
   const handleSend = async (group: PurchaseOrder[]) => {
     setActionLoading(group[0].id + "_send");
     try {
-      for (const po of group) await api.updatePoStatus(po.id, "sent");
+      for (const po of group) await api.updatePoStatus(po.id, "sent", user?.id);
       load();
     } finally { setActionLoading(null); }
   };
@@ -983,6 +996,20 @@ function PurchaseOrders() {
           </TabsList>
           <div className="flex items-center gap-1">
             <Input className="h-9 w-48 bg-muted/50" placeholder="Search PO # or supplier…" value={search} onChange={e => setSearch(e.target.value)} />
+            <Select value={createdBy} onValueChange={setCreatedBy}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Created By" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Created By: Anyone</SelectItem>
+                {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={approvedBy} onValueChange={setApprovedBy}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Approved By" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Approved By: Anyone</SelectItem>
+                {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
             <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
             <span className="text-xs text-muted-foreground">–</span>
@@ -1012,15 +1039,16 @@ function PurchaseOrders() {
                     <th className="px-3 py-3 font-semibold">Total</th>
                     <th className="px-3 py-3 font-semibold">Payment</th>
                     <th className="px-3 py-3 font-semibold">Status</th>
-                    <th className="px-3 py-3 font-semibold">Approver</th>
+                    <th className="px-3 py-3 font-semibold">Created By</th>
+                    <th className="px-3 py-3 font-semibold">Approved By</th>
                     <th className="px-3 py-3 font-semibold"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={12} className="text-center py-12"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
+                    <tr><td colSpan={13} className="text-center py-12"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
                   ) : displayRows.length === 0 && filteredSupplierTransfers.length === 0 ? (
-                    <tr><td colSpan={12} className="text-center py-12 text-muted-foreground text-sm">No purchase orders found.</td></tr>
+                    <tr><td colSpan={13} className="text-center py-12 text-muted-foreground text-sm">No purchase orders found.</td></tr>
                   ) : displayRows.map(({ key, group, isBatch }) => {
                     const po = group[0];
                     const dest = isBatch
@@ -1048,7 +1076,8 @@ function PurchaseOrders() {
                         </td>
                         <td className="px-3 py-3"><PayBadge status={po.paymentStatus} /></td>
                         <td className="px-3 py-3"><StatusBadge status={po.status} /></td>
-                        <td className="px-3 py-3 text-xs text-muted-foreground">—</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{po.createdByUser?.fullName ?? "—"}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{po.approvedByUser?.fullName ?? "—"}</td>
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setViewPO(po); setViewPOGroup(group); }} title="View"><Eye className="h-3.5 w-3.5" /></Button>
@@ -1099,6 +1128,7 @@ function PurchaseOrders() {
                             "bg-muted text-muted-foreground border-border"
                           }`}>{t.status.replace(/_/g, " ")}</Badge>
                         </td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">—</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">—</td>
                         <td className="px-3 py-3" />
                       </tr>

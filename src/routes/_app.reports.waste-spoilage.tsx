@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type WasteSpoilageReport as WasteSpoilageData, type WasteSpoilageRow, type ReportExportFormat } from "@/lib/api";
+import { api, type WasteSpoilageReport as WasteSpoilageData, type WasteSpoilageRow, type ReportExportFormat, type Product, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -40,22 +40,36 @@ function WasteSpoilage() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [reason, setReason] = useState("all");
+  const [productId, setProductId] = useState("all");
+  const [adjustedBy, setAdjustedBy] = useState("all");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [data, setData] = useState<WasteSpoilageData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
+  useEffect(() => { api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then(setUsers).catch(() => {}); }, [branchId]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getWasteSpoilageReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, reason: reason !== "all" ? reason : undefined })
+    api.getWasteSpoilageReport({
+      from, to, branchId: branchId !== "all" ? branchId : undefined, reason: reason !== "all" ? reason : undefined,
+      productId: productId !== "all" ? productId : undefined, adjustedBy: adjustedBy !== "all" ? adjustedBy : undefined,
+    })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, reason]);
+  }, [from, to, branchId, reason, productId, adjustedBy]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportWasteSpoilageReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, reason: reason !== "all" ? reason : undefined, exportedBy: user?.id, includeCost: canViewCost, format });
+      const blob = await api.exportWasteSpoilageReport({
+        from, to, branchId: branchId !== "all" ? branchId : undefined, reason: reason !== "all" ? reason : undefined,
+        productId: productId !== "all" ? productId : undefined, adjustedBy: adjustedBy !== "all" ? adjustedBy : undefined,
+        exportedBy: user?.id, includeCost: canViewCost, format,
+      });
       downloadBlob(blob, `waste-spoilage-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -91,6 +105,20 @@ function WasteSpoilage() {
             <SelectItem value="all">All Reasons</SelectItem>
             <SelectItem value="waste">Waste</SelectItem>
             <SelectItem value="damage">Damage</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={productId} onValueChange={setProductId}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Products</SelectItem>
+            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={adjustedBy} onValueChange={setAdjustedBy}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>

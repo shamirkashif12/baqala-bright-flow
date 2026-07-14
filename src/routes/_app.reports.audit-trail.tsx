@@ -9,7 +9,8 @@ import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
-import { api, type AuditTrailReport as AuditTrailData, type AuditTrailRow, type ReportExportFormat } from "@/lib/api";
+import { api, type AuditTrailReport as AuditTrailData, type AuditTrailRow, type ReportExportFormat, type User } from "@/lib/api";
+import { useBranch } from "@/lib/branch-context";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
 import { ShieldAlert, KeyRound, Wrench, Settings, Download } from "lucide-react";
@@ -29,27 +30,41 @@ function todayStr() {
 function AuditTrail() {
   const { user } = useAuth();
   const { canExport } = usePermission("Reports");
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+  const { branches } = useBranch();
 
   const [from, setFrom] = useState(sevenDaysAgoStr());
   const [to, setTo] = useState(todayStr());
   const [severity, setSeverity] = useState("all");
   const [module, setModule] = useState("all");
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [userId, setUserId] = useState("all");
+  const [users, setUsers] = useState<User[]>([]);
   const [data, setData] = useState<AuditTrailData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => { api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then(setUsers).catch(() => {}); }, [branchId]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getAuditTrailReport({ from, to, severity: severity !== "all" ? severity : undefined, module: module !== "all" ? module : undefined })
+    api.getAuditTrailReport({
+      from, to, severity: severity !== "all" ? severity : undefined, module: module !== "all" ? module : undefined,
+      branchId: branchId !== "all" ? branchId : undefined, userId: userId !== "all" ? userId : undefined,
+    })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, severity, module]);
+  }, [from, to, severity, module, branchId, userId]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportAuditTrailReport({ from, to, severity: severity !== "all" ? severity : undefined, module: module !== "all" ? module : undefined, exportedBy: user?.id, format });
+      const blob = await api.exportAuditTrailReport({
+        from, to, severity: severity !== "all" ? severity : undefined, module: module !== "all" ? module : undefined,
+        branchId: branchId !== "all" ? branchId : undefined, userId: userId !== "all" ? userId : undefined,
+        exportedBy: user?.id, format,
+      });
       downloadBlob(blob, `audit-trail-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -88,6 +103,22 @@ function AuditTrail() {
             <SelectItem value="ZatcaSettings">ZATCA Settings</SelectItem>
             <SelectItem value="TaxFeeRule">Tax/Fee Rule</SelectItem>
             <SelectItem value="InventoryAdjustment">Inventory Adjustment</SelectItem>
+          </SelectContent>
+        </Select>
+        {!lockedBranchId && (
+          <Select value={branchId} onValueChange={setBranchId}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        <Select value={userId} onValueChange={setUserId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>

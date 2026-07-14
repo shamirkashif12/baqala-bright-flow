@@ -41,23 +41,30 @@ function BranchSales() {
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
   const [city, setCity] = useState("all");
+  const [branchId, setBranchId] = useState("all");
   const [customerType, setCustomerType] = useState("all");
   const [data, setData] = useState<BranchSalesReport | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getBranchSalesReport({ from, to, city: city !== "all" ? city : undefined, customerType: customerType !== "all" ? customerType : undefined })
+    api.getBranchSalesReport({
+      from, to, city: city !== "all" ? city : undefined, branchId: branchId !== "all" ? branchId : undefined,
+      customerType: customerType !== "all" ? customerType : undefined,
+    })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, city, customerType]);
+  }, [from, to, city, branchId, customerType]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportBranchSalesReport({ from, to, city: city !== "all" ? city : undefined, customerType: customerType !== "all" ? customerType : undefined, exportedBy: user?.id, includeMargin: canViewMargin, format });
+      const blob = await api.exportBranchSalesReport({
+        from, to, city: city !== "all" ? city : undefined, branchId: branchId !== "all" ? branchId : undefined,
+        customerType: customerType !== "all" ? customerType : undefined, exportedBy: user?.id, includeMargin: canViewMargin, format,
+      });
       downloadBlob(blob, `branch-sales-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -77,13 +84,22 @@ function BranchSales() {
           <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
         </div>
         {canFilterByCity && (
-          <Select value={city} onValueChange={setCity}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="City" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Cities</SelectItem>
-              {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <>
+            <Select value={city} onValueChange={setCity}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="City" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Cities</SelectItem>
+                {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={branchId} onValueChange={setBranchId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Branch" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </>
         )}
         <Select value={customerType} onValueChange={setCustomerType}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Customer Type" /></SelectTrigger>

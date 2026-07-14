@@ -284,6 +284,12 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasForeignKey(po => po.ApprovedBy)
             .OnDelete(DeleteBehavior.Restrict);
 
+        modelBuilder.Entity<PurchaseOrder>()
+            .HasOne(po => po.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(po => po.CreatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // ─── SupplierPayment: User FK ─────────────────────────────────────────
         modelBuilder.Entity<SupplierPayment>()
             .HasOne(sp => sp.RecordedByUser)

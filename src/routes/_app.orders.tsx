@@ -16,7 +16,7 @@ import {
   CheckCircle2, XCircle, Clock, Truck, AlertCircle, X, RotateCcw, Trash2, Ban,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Order, type Branch, type CustomerReturnItem } from "@/lib/api";
+import { api, type Order, type Branch, type CustomerReturnItem, type Product } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
@@ -358,10 +358,10 @@ function RefundDialog({ order, open, onClose, onDone }: {
 }
 
 // ─── Edit Order Dialog ────────────────────────────────────────────────────────
-// Order Editing (FR: "Edit orders from dashboard", "Editable order with audit log"). Scoped to
-// the fields that matter for correcting a mistake after the fact — line quantities, removing a
-// line, and notes — rather than a full re-run of the POS product search, keeping this a
-// correction tool rather than a second checkout flow.
+// Order Editing (FR: "Edit orders from dashboard", "Editable order with audit log"). Management-
+// level correction tool for urgent operational situations: quantities, prices, adding/removing
+// lines, discount override, payment method (single-payment orders), and which customer the order
+// is attributed to. Every change is recomputed and audit-logged server-side (OrdersController.EditOrder).
 function EditOrderDialog({ order, open, onClose, onDone }: {
   order: Order; open: boolean; onClose: () => void; onDone: () => void;
 }) {
@@ -375,25 +375,100 @@ function EditOrderDialog({ order, open, onClose, onDone }: {
     removed: false,
   })));
   const [notes, setNotes] = useState(order.notes ?? "");
+  const [discount, setDiscount] = useState(order.discountAmount);
+  const singlePayment = (order.payments ?? []).length === 1 ? order.payments![0] : null;
+  const [paymentMethod, setPaymentMethod] = useState(singlePayment?.paymentMethod ?? "cash");
+
+  const [customer, setCustomer] = useState(order.customer ?? null);
+  const [customerChanged, setCustomerChanged] = useState(false);
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerLookupError, setCustomerLookupError] = useState("");
+
+  const [productQuery, setProductQuery] = useState("");
+  const [productResults, setProductResults] = useState<Product[]>([]);
+  const [searchingProducts, setSearchingProducts] = useState(false);
+  const [hasSearchedProducts, setHasSearchedProducts] = useState(false);
+  const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Only products actually stocked at this order's branch can be added — an item with no stock
+  // here can't be picked, packed or handed to the customer at this location.
+  useEffect(() => {
+    api.getStock({ branchId: order.branchId }).then(stocks => {
+      const map = new Map<string, number>();
+      stocks.forEach(s => map.set(s.productId, Math.max(0, s.quantity - (s.reservedQuantity ?? 0))));
+      setStockMap(map);
+    }).catch(() => {});
+  }, [order.branchId]);
 
   const activeLines = lines.filter(l => !l.removed);
   const newSubtotal = activeLines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
 
   const setQty = (idx: number, d: number) =>
     setLines(ls => ls.map((l, i) => (i === idx ? { ...l, quantity: Math.max(1, l.quantity + d) } : l)));
+  const setPrice = (idx: number, price: number) =>
+    setLines(ls => ls.map((l, i) => (i === idx ? { ...l, unitPrice: Math.max(0, price) } : l)));
   const toggleRemove = (idx: number) =>
     setLines(ls => ls.map((l, i) => (i === idx ? { ...l, removed: !l.removed } : l)));
 
+  const searchProducts = async () => {
+    if (!productQuery.trim()) return;
+    setSearchingProducts(true);
+    try {
+      const results = await api.getProducts({ search: productQuery.trim(), status: "active" });
+      setProductResults(results.filter(p => (stockMap.get(p.id) ?? 0) > 0));
+    } catch {
+      setProductResults([]);
+    } finally {
+      setSearchingProducts(false);
+      setHasSearchedProducts(true);
+    }
+  };
+
+  const addProduct = (p: Product) => {
+    setLines(ls => {
+      const existing = ls.findIndex(l => l.productId === p.id && !l.removed);
+      if (existing >= 0) return ls.map((l, i) => (i === existing ? { ...l, quantity: l.quantity + 1 } : l));
+      return [...ls, { productId: p.id, name: p.name, unitPrice: p.basePrice, quantity: 1, removed: false }];
+    });
+    setProductQuery("");
+    setProductResults([]);
+    setHasSearchedProducts(false);
+  };
+
+  const lookupCustomer = async () => {
+    if (!customerPhone.trim()) return;
+    setCustomerLookupError("");
+    try {
+      const c = await api.getCustomerByPhone(customerPhone.trim());
+      setCustomer({ id: c.id, fullName: c.fullName, phone: c.phone, email: c.email });
+      setCustomerChanged(true);
+      setCustomerPhone("");
+    } catch {
+      setCustomerLookupError("No customer found with that phone number.");
+    }
+  };
+
+  const removeCustomer = () => {
+    setCustomer(null);
+    setCustomerChanged(true);
+  };
+
   const handleSave = async () => {
     if (activeLines.length === 0) { setError("An order must have at least one item."); return; }
+    if (discount > newSubtotal) { setError("Discount can't exceed the new subtotal."); return; }
     setSaving(true);
     setError("");
     try {
       await api.editOrder(order.id, {
         items: activeLines.map(l => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })),
         notes: notes || undefined,
+        discountAmount: discount,
+        paymentMethod: singlePayment && paymentMethod !== singlePayment.paymentMethod ? paymentMethod : undefined,
+        updateCustomer: customerChanged,
+        customerId: customerChanged ? (customer?.id ?? null) : undefined,
       });
       onDone();
     } catch (e) {
@@ -411,17 +486,29 @@ function EditOrderDialog({ order, open, onClose, onDone }: {
               <Pencil className="h-4 w-4" /> Edit Order — {order.orderNumber}
             </DTitle>
             <DialogDescription className="text-xs">
-              Adjust quantities, remove items, or update notes. Changes are recorded in the audit log.
+              Management-level correction tool. Every change here is recorded in the audit log with before/after values.
             </DialogDescription>
           </DHeader>
 
           <div className="overflow-y-auto flex-1 space-y-3 py-1 pr-1">
             <div className="space-y-2">
               {lines.map((l, i) => (
-                <div key={i} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors ${l.removed ? "border-border bg-muted/20 opacity-50" : "border-border/60"}`}>
+                <div key={i} className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 transition-colors ${l.removed ? "border-border bg-muted/20 opacity-50" : "border-border/60"}`}>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{l.name}</p>
-                    <p className="text-xs text-muted-foreground">SAR {l.unitPrice.toFixed(2)} × each</p>
+                    {!l.removed ? (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-xs text-muted-foreground">SAR</span>
+                        <Input
+                          type="number" min={0} step="0.01" value={l.unitPrice}
+                          onChange={e => setPrice(i, parseFloat(e.target.value) || 0)}
+                          className="h-6 w-20 text-xs px-1.5"
+                        />
+                        <span className="text-xs text-muted-foreground">× each</span>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">SAR {l.unitPrice.toFixed(2)} × each</p>
+                    )}
                   </div>
                   {!l.removed && (
                     <div className="flex items-center gap-1 shrink-0">
@@ -446,6 +533,92 @@ function EditOrderDialog({ order, open, onClose, onDone }: {
                   </Button>
                 </div>
               ))}
+            </div>
+
+            {/* Add item */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Add Item</p>
+              <div className="flex gap-1.5">
+                <Input
+                  value={productQuery} onChange={e => { setProductQuery(e.target.value); setHasSearchedProducts(false); }}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); searchProducts(); } }}
+                  placeholder="Search in-stock products by name or SKU…" className="h-9"
+                />
+                <Button variant="outline" className="h-9" onClick={searchProducts} disabled={searchingProducts}>
+                  {searchingProducts ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Search"}
+                </Button>
+              </div>
+              {productResults.length > 0 && (
+                <div className="mt-1.5 space-y-1 max-h-32 overflow-y-auto rounded-lg border p-1.5">
+                  {productResults.map(p => (
+                    <button
+                      key={p.id} onClick={() => addProduct(p)}
+                      className="w-full flex items-center justify-between text-xs rounded px-2 py-1.5 hover:bg-muted text-left"
+                    >
+                      <span className="truncate">{p.name}</span>
+                      <span className="flex items-center gap-2 shrink-0 ml-2 text-muted-foreground">
+                        <span className="text-[10px]">Stock: {stockMap.get(p.id) ?? 0}</span>
+                        <span><SARIcon />{p.basePrice.toFixed(2)}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {hasSearchedProducts && productResults.length === 0 && !searchingProducts && (
+                <p className="text-xs text-muted-foreground mt-1.5">No in-stock products match at this branch.</p>
+              )}
+            </div>
+
+            {/* Discount override */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Discount (SAR)</p>
+              <Input
+                type="number" min={0} step="0.01" value={discount}
+                onChange={e => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                className="h-9"
+              />
+            </div>
+
+            {/* Payment method */}
+            {singlePayment && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Payment Method</p>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
+                    <SelectItem value="wallet">Wallet</SelectItem>
+                    <SelectItem value="qr">QR</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Customer */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Customer</p>
+              {customer ? (
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
+                  <div>
+                    <p className="font-medium">{customer.fullName}</p>
+                    <p className="text-xs text-muted-foreground">{customer.phone}</p>
+                  </div>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={removeCustomer}>
+                    Remove
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-1.5">
+                  <Input
+                    value={customerPhone} onChange={e => { setCustomerPhone(e.target.value); setCustomerLookupError(""); }}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); lookupCustomer(); } }}
+                    placeholder="Customer phone number…" className="h-9"
+                  />
+                  <Button variant="outline" className="h-9" onClick={lookupCustomer}>Attach</Button>
+                </div>
+              )}
+              {customerLookupError && <p className="text-xs text-red-600 mt-1">{customerLookupError}</p>}
             </div>
 
             <div>

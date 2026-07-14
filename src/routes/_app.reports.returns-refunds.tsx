@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type ReturnsRefundsReport as ReturnsRefundsData, type ReturnRefundRow, type ReportExportFormat } from "@/lib/api";
+import { api, type ReturnsRefundsReport as ReturnsRefundsData, type ReturnRefundRow, type ReportExportFormat, type Product, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -42,8 +42,15 @@ function ReturnsRefunds() {
   const [status, setStatus] = useState("all");
   const [customerType, setCustomerType] = useState("all");
   const [reason, setReason] = useState("all");
+  const [productId, setProductId] = useState("all");
+  const [processedBy, setProcessedBy] = useState("all");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [data, setData] = useState<ReturnsRefundsData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
+  useEffect(() => { api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then(setUsers).catch(() => {}); }, [branchId]);
 
   const filterParams = {
     from, to, branchId: branchId !== "all" ? branchId : undefined,
@@ -51,6 +58,8 @@ function ReturnsRefunds() {
     status: status !== "all" ? status : undefined,
     customerType: customerType !== "all" ? customerType : undefined,
     reason: reason !== "all" ? reason : undefined,
+    productId: productId !== "all" ? productId : undefined,
+    processedBy: processedBy !== "all" ? processedBy : undefined,
   };
 
   const load = useCallback(() => {
@@ -60,7 +69,7 @@ function ReturnsRefunds() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, branchId, refundMethod, status, customerType, reason]);
+  }, [from, to, branchId, refundMethod, status, customerType, reason, productId, processedBy]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -138,6 +147,20 @@ function ReturnsRefunds() {
             <SelectItem value="Customer changed mind">Customer changed mind</SelectItem>
             <SelectItem value="Duplicate purchase">Duplicate purchase</SelectItem>
             <SelectItem value="Other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={productId} onValueChange={setProductId}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Products</SelectItem>
+            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={processedBy} onValueChange={setProcessedBy}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>

@@ -1396,17 +1396,22 @@ function POS() {
       // which read these as two separate figures, don't see fees miscounted as VAT.
       taxAmount: vatAmount,
       customFeeAmount: customFeeTotal,
+      tobaccoFeeAmount: tobaccoExcise,
       totalAmount: total,
       paymentStatus: "paid",
       orderStatus: "completed",
       // displayCart (not the raw paid cart) — bundle-bonus units physically leave the shelf too,
       // so they must be submitted as real line items for the server's stock decrement to be correct.
-      items: displayCart.map((item) => ({
-        productId: item.productId,
-        quantity: item.qty,
-        unitPrice: item.price,
-        totalPrice: item.qty * item.price,
-      })),
+      items: displayCart.map((item) => {
+        const prod = products.find((p) => p.id === item.productId);
+        return {
+          productId: item.productId,
+          quantity: item.qty,
+          unitPrice: item.price,
+          totalPrice: item.qty * item.price,
+          tobaccoFeeAmount: prod?.isTobacco && tobaccoFeeEnabled ? item.qty * calcTobaccoFee(item.price) : 0,
+        };
+      }),
       payments,
     });
 

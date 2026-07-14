@@ -283,7 +283,7 @@ public static class DataSeeder
         {
             Id = Guid.NewGuid(), PoNumber = "PO-2026-001",
             SupplierId = sup1.Id, WarehouseId = wh?.Id, BranchId = brOlaya.Id,
-            OrderedBy = user.Id, Status = "pending", PaymentStatus = "unpaid",
+            OrderedBy = user.Id, CreatedBy = user.Id, Status = "pending", PaymentStatus = "unpaid",
             PaymentTerms = "net_30", TotalAmount = 4800m, TaxAmount = 720m,
             ExpectedDeliveryDate = DateTime.UtcNow.AddDays(3),
             CreatedAt = DateTime.UtcNow.AddDays(-5), UpdatedAt = DateTime.UtcNow,
@@ -297,7 +297,7 @@ public static class DataSeeder
         {
             Id = Guid.NewGuid(), PoNumber = "PO-2026-002",
             SupplierId = sup2?.Id ?? sup1.Id, BranchId = brKhobar?.Id ?? brOlaya.Id,
-            OrderedBy = user.Id, Status = "partial_received", PaymentStatus = "partial",
+            OrderedBy = user.Id, CreatedBy = user.Id, Status = "partial_received", PaymentStatus = "partial",
             PaymentTerms = "on_delivery", TotalAmount = 2100m, TaxAmount = 315m, PaidAmount = 1050m,
             ExpectedDeliveryDate = DateTime.UtcNow.AddDays(-2),
             ReceivedDate = DateTime.UtcNow.AddDays(-1),
@@ -312,7 +312,7 @@ public static class DataSeeder
         {
             Id = Guid.NewGuid(), PoNumber = "PO-2026-003",
             SupplierId = sup1.Id, BranchId = brOlaya.Id,
-            OrderedBy = user.Id, Status = "fully_received", PaymentStatus = "paid",
+            OrderedBy = user.Id, CreatedBy = user.Id, Status = "fully_received", PaymentStatus = "paid",
             PaymentTerms = "net_30", TotalAmount = 1380m, TaxAmount = 207m, PaidAmount = 1380m,
             ExpectedDeliveryDate = DateTime.UtcNow.AddDays(-7),
             ReceivedDate = DateTime.UtcNow.AddDays(-6),

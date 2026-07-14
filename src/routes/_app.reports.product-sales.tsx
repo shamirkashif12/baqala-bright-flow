@@ -14,7 +14,8 @@ import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow,
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Tag, Boxes, Wallet, Percent, PackageX, RotateCcw } from "lucide-react";
+import { Tag, Boxes, Wallet, Percent, PackageX, RotateCcw, Cigarette } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/product-sales")({ component: ProductSales });
@@ -40,6 +41,7 @@ function ProductSales() {
   const [categoryId, setCategoryId] = useState("all");
   const [cashierId, setCashierId] = useState("all");
   const [search, setSearch] = useState("");
+  const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [cashiers, setCashiers] = useState<User[]>([]);
   const [data, setData] = useState<ProductSalesData | null>(null);
@@ -61,12 +63,12 @@ function ProductSales() {
     api.getProductSalesReport({
       from, to, branchId: branchId !== "all" ? branchId : undefined,
       categoryId: categoryId !== "all" ? categoryId : undefined, search: search || undefined,
-      cashierId: cashierId !== "all" ? cashierId : undefined,
+      cashierId: cashierId !== "all" ? cashierId : undefined, hasTobaccoFee: hasTobaccoFee || undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, categoryId, search, cashierId]);
+  }, [from, to, branchId, categoryId, search, cashierId, hasTobaccoFee]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -74,7 +76,7 @@ function ProductSales() {
     try {
       const blob = await api.exportProductSalesReport({
         from, to, branchId: branchId !== "all" ? branchId : undefined, categoryId: categoryId !== "all" ? categoryId : undefined,
-        search: search || undefined, cashierId: cashierId !== "all" ? cashierId : undefined,
+        search: search || undefined, cashierId: cashierId !== "all" ? cashierId : undefined, hasTobaccoFee: hasTobaccoFee || undefined,
         exportedBy: user?.id, includeMargin: canViewMargin, format,
       });
       downloadBlob(blob, `product-sales-${from}-to-${to}.${format}`);
@@ -119,16 +121,21 @@ function ProductSales() {
           </SelectContent>
         </Select>
         <Input placeholder="Search SKU, barcode or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />
+        <label className="flex items-center gap-1.5 text-sm px-2">
+          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+          Tobacco fee only
+        </label>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <MetricCard label="Top SKU" value={kpis?.topSku ?? "—"} icon={Tag} accent="primary" />
         <MetricCard label="Units Sold" value={String(kpis?.unitsSold ?? 0)} icon={Boxes} />
         <MetricCard label="Net Sales" value={<><SARIcon />{fmt(kpis?.netSales ?? 0)}</>} icon={Wallet} />
         {canViewMargin && <MetricCard label="Gross Margin %" value={kpis?.grossMarginPct != null ? `${kpis.grossMarginPct}%` : "N/A"} icon={Percent} accent="success" />}
         <MetricCard label="Dead Stock" value={String(kpis?.deadStockCount ?? 0)} icon={PackageX} accent="warning" />
         <MetricCard label="Return Rate %" value={`${kpis?.returnRatePct ?? 0}%`} icon={RotateCcw} accent="destructive" />
+        <MetricCard label="Tobacco Fees" value={<><SARIcon />{fmt(kpis?.totalTobaccoFees ?? 0)}</>} icon={Cigarette} accent="warning" />
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">
@@ -157,6 +164,7 @@ function ProductSales() {
             { key: "unitsSold", label: "Units Sold" },
             { key: "netSales", label: "Net Sales", render: (r: ProductSalesRow) => <span className="font-semibold"><SARIcon />{fmt(r.netSales)}</span> },
             { key: "discounts", label: "Discounts", render: (r: ProductSalesRow) => <><SARIcon />{fmt(r.discounts)}</> },
+            { key: "tobaccoFeeAmount", label: "Tobacco Fees", render: (r: ProductSalesRow) => r.tobaccoFeeAmount > 0 ? <span className="text-amber-600"><SARIcon />{fmt(r.tobaccoFeeAmount)}</span> : "—" },
             { key: "returnsQty", label: "Returns Qty" },
             { key: "returnRatePct", label: "Return Rate %", render: (r: ProductSalesRow) => `${r.returnRatePct}%` },
             ...(canViewMargin

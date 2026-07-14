@@ -18,6 +18,10 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? supplierId,
         [FromQuery] Guid? warehouseId,
+        [FromQuery] Guid? branchId,
+        [FromQuery] Guid? createdBy,
+        [FromQuery] Guid? approvedBy,
+        [FromQuery] Guid? productId,
         [FromQuery] string? status,
         [FromQuery] string? paymentStatus,
         [FromQuery] string? batchId)
@@ -26,11 +30,17 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             .Include(p => p.Supplier)
             .Include(p => p.Warehouse)
             .Include(p => p.Branch)
+            .Include(p => p.CreatedByUser)
+            .Include(p => p.ApprovedByUser)
             .Include(p => p.Items).ThenInclude(i => i.Product)
             .Include(p => p.Payments)
             .AsQueryable();
         if (supplierId.HasValue) query = query.Where(p => p.SupplierId == supplierId);
         if (warehouseId.HasValue) query = query.Where(p => p.WarehouseId == warehouseId);
+        if (branchId.HasValue) query = query.Where(p => p.BranchId == branchId);
+        if (createdBy.HasValue) query = query.Where(p => p.CreatedBy == createdBy);
+        if (approvedBy.HasValue) query = query.Where(p => p.ApprovedBy == approvedBy);
+        if (productId.HasValue) query = query.Where(p => p.Items.Any(i => i.ProductId == productId));
         if (!string.IsNullOrEmpty(status)) query = query.Where(p => p.Status == status);
         if (!string.IsNullOrEmpty(paymentStatus)) query = query.Where(p => p.PaymentStatus == paymentStatus);
         if (!string.IsNullOrEmpty(batchId)) query = query.Where(p => p.BatchId == batchId);
@@ -103,6 +113,7 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             WarehouseId = req.WarehouseId,
             BranchId = req.BranchId,
             OrderedBy = req.OrderedBy ?? Guid.Empty,
+            CreatedBy = CallerId() ?? req.OrderedBy ?? Guid.Empty,
             PaymentTerms = req.PaymentTerms,
             ExpectedDeliveryDate = req.ExpectedDeliveryDate,
             Notes = req.Notes,

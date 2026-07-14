@@ -29,6 +29,11 @@ public class PurchaseOrder
     [Column("approved_by")]
     public Guid? ApprovedBy { get; set; }
 
+    // Who actually created this PO record — distinct from OrderedBy (the requester it was placed
+    // on behalf of). Backfilled to OrderedBy for rows that predate this column.
+    [Required, Column("created_by")]
+    public Guid CreatedBy { get; set; }
+
     // draft | sent | partial_received | fully_received | cancelled
     [Required, MaxLength(25), Column("status")]
     public string Status { get; set; } = "draft";
@@ -78,6 +83,7 @@ public class PurchaseOrder
     public Branch? Branch { get; set; }
     public User? OrderedByUser { get; set; }
     public User? ApprovedByUser { get; set; }
+    public User? CreatedByUser { get; set; }
     public ICollection<PurchaseOrderItem> Items { get; set; } = [];
     public ICollection<SupplierPayment> Payments { get; set; } = [];
 }

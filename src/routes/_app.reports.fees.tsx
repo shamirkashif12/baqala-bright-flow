@@ -89,10 +89,11 @@ function FeeReportPage() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Total Fees Collected" value={<><SARIcon />{fmt(kpis?.totalFeesCollected ?? 0)}</>} icon={DollarSign} accent="primary" />
         <MetricCard label="Transactions with Fees" value={String(kpis?.transactionsWithFees ?? 0)} icon={Receipt} />
         <MetricCard label="Avg Fee per Transaction" value={<><SARIcon />{fmt(kpis?.averageFeePerTransaction ?? 0)}</>} icon={TrendingUp} accent="success" />
+        <MetricCard label="Tobacco Fees" value={<><SARIcon />{fmt(kpis?.totalTobaccoFees ?? 0)}</>} icon={DollarSign} accent="warning" />
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">

@@ -9,7 +9,8 @@ import { PaginatedDataTable } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
-import { api, type SupplierPerformanceReport as SupplierPerformanceData, type SupplierPerformanceRow, type ReportExportFormat, type Supplier } from "@/lib/api";
+import { api, type SupplierPerformanceReport as SupplierPerformanceData, type SupplierPerformanceRow, type ReportExportFormat, type Supplier, type Product, type User } from "@/lib/api";
+import { useBranch } from "@/lib/branch-context";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -30,29 +31,48 @@ function todayStr() {
 function SupplierPerformance() {
   const { user } = useAuth();
   const { canExport } = usePermission("Reports");
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+  const { branches } = useBranch();
 
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
   const [supplierId, setSupplierId] = useState("all");
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [productId, setProductId] = useState("all");
+  const [createdBy, setCreatedBy] = useState("all");
+  const [approvedBy, setApprovedBy] = useState("all");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [data, setData] = useState<SupplierPerformanceData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { api.getSuppliers().then(setSuppliers).catch(() => {}); }, []);
+  useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
+  useEffect(() => { api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then(setUsers).catch(() => {}); }, [branchId]);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getSupplierPerformanceReport({ from, to, supplierId: supplierId !== "all" ? supplierId : undefined })
+    api.getSupplierPerformanceReport({
+      from, to, supplierId: supplierId !== "all" ? supplierId : undefined,
+      branchId: branchId !== "all" ? branchId : undefined, productId: productId !== "all" ? productId : undefined,
+      createdBy: createdBy !== "all" ? createdBy : undefined, approvedBy: approvedBy !== "all" ? approvedBy : undefined,
+    })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, supplierId]);
+  }, [from, to, supplierId, branchId, productId, createdBy, approvedBy]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportSupplierPerformanceReport({ from, to, supplierId: supplierId !== "all" ? supplierId : undefined, exportedBy: user?.id, format });
+      const blob = await api.exportSupplierPerformanceReport({
+        from, to, supplierId: supplierId !== "all" ? supplierId : undefined,
+        branchId: branchId !== "all" ? branchId : undefined, productId: productId !== "all" ? productId : undefined,
+        createdBy: createdBy !== "all" ? createdBy : undefined, approvedBy: approvedBy !== "all" ? approvedBy : undefined,
+        exportedBy: user?.id, format,
+      });
       downloadBlob(blob, `supplier-performance-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -77,6 +97,36 @@ function SupplierPerformance() {
           <SelectContent>
             <SelectItem value="all">All Suppliers</SelectItem>
             {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {!lockedBranchId && (
+          <Select value={branchId} onValueChange={setBranchId}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        <Select value={productId} onValueChange={setProductId}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Products</SelectItem>
+            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={createdBy} onValueChange={setCreatedBy}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Created By" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Created By: Anyone</SelectItem>
+            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={approvedBy} onValueChange={setApprovedBy}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Approved By" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Approved By: Anyone</SelectItem>
+            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>

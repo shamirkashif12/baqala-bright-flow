@@ -35,7 +35,6 @@ function DailySales() {
   const [terminalId, setTerminalId] = useState("all");
   const [cashierId, setCashierId] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState("all");
-  const [orderStatus, setOrderStatus] = useState("all");
   const [customerType, setCustomerType] = useState("all");
   const [data, setData] = useState<DailySalesReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,13 +57,12 @@ function DailySales() {
       terminalId: terminalId !== "all" ? terminalId : undefined,
       cashierId: cashierId !== "all" ? cashierId : undefined,
       paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
-      orderStatus: orderStatus !== "all" ? orderStatus : undefined,
       customerType: customerType !== "all" ? customerType : undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [date, branchId, terminalId, cashierId, paymentMethod, orderStatus, customerType]);
+  }, [date, branchId, terminalId, cashierId, paymentMethod, customerType]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -75,7 +73,6 @@ function DailySales() {
         terminalId: terminalId !== "all" ? terminalId : undefined,
         cashierId: cashierId !== "all" ? cashierId : undefined,
         paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
-        orderStatus: orderStatus !== "all" ? orderStatus : undefined,
         customerType: customerType !== "all" ? customerType : undefined,
         exportedBy: user?.id, format,
       });
@@ -132,15 +129,6 @@ function DailySales() {
             <SelectItem value="qr">QR</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={orderStatus} onValueChange={setOrderStatus}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Order Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Any Status</SelectItem>
-            <SelectItem value="delivered">Delivered</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
         <Select value={customerType} onValueChange={setCustomerType}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Customer Type" /></SelectTrigger>
           <SelectContent>
@@ -152,12 +140,13 @@ function DailySales() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
         <MetricCard label="Gross Sales" value={<><SARIcon />{fmt(kpis?.grossSales ?? 0)}</>} icon={Wallet} accent="primary" />
         <MetricCard label="Net Sales" value={<><SARIcon />{fmt(kpis?.netSales ?? 0)}</>} icon={Wallet} />
         <MetricCard label="Transactions" value={String(kpis?.transactions ?? 0)} icon={Receipt} />
         <MetricCard label="Avg Basket" value={<><SARIcon />{fmt(kpis?.avgBasket ?? 0)}</>} icon={Percent} />
         <MetricCard label="VAT Collected" value={<><SARIcon />{fmt(kpis?.vatCollected ?? 0)}</>} icon={Wallet} accent="success" />
+        <MetricCard label="Tobacco Fees" value={<><SARIcon />{fmt(kpis?.tobaccoFees ?? 0)}</>} icon={Percent} accent="warning" />
         <MetricCard label="Returns / Refunds" value={<><SARIcon />{fmt(kpis?.returnsRefunds ?? 0)}</>} icon={RotateCcw} accent="destructive" />
       </div>
 

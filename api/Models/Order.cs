@@ -46,6 +46,12 @@ public class Order
     [Column("custom_fee_amount")]
     public decimal CustomFeeAmount { get; set; } = 0;
 
+    // Sum of Items[].TobaccoFeeAmount — KSA tobacco excise (min 25 SAR or 100% of base price per
+    // unit), persisted at checkout instead of being recomputed at report time from a generic
+    // TaxFeeRule rate, so the Tobacco Excise/Fee reports reflect exactly what was charged.
+    [Column("tobacco_fee_amount")]
+    public decimal TobaccoFeeAmount { get; set; } = 0;
+
     [Column("total_amount")]
     public decimal TotalAmount { get; set; }
 
@@ -119,6 +125,9 @@ public class OrderItem
 
     [Column("custom_fee_amount")]
     public decimal CustomFeeAmount { get; set; } = 0;
+
+    [Column("tobacco_fee_amount")]
+    public decimal TobaccoFeeAmount { get; set; } = 0;
 
     [Column("total_price")]
     public decimal TotalPrice { get; set; }
