@@ -11,8 +11,9 @@ mart-ecr:
   script:
     - cd /www/wwwroot/ECR/ecr-mart
     - git pull origin main
+    - ./migrate.sh
     - ./redeploy.sh
-    - echo "Mart ECR updated and container deployed successfully"
+    - echo "Mart ECR updated, migrated and deployed successfully"
 
   only:
     - main
