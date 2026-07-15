@@ -684,6 +684,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$allowed = $allowedDir + '\allowed.dat';" ^
   "$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() };" ^
   "$lines += $entry; $lines | Set-Content -Path $allowed -Encoding ASCII;" ^
+  "if ($qzDir) {" ^
+  "  $propsPath = Join-Path $qzDir 'qz-tray.properties';" ^
+  "  $propLines = if (Test-Path $propsPath) { Get-Content $propsPath | Where-Object { $_ -notmatch '^authcert\.override=' } } else { @() };" ^
+  "  $propLines += 'authcert.override=override.crt'; $propLines | Set-Content -Path $propsPath -Encoding ASCII;" ^
+  "};" ^
   "Get-Process javaw -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ($qzDir + '*') } | Stop-Process -Force -ErrorAction SilentlyContinue;" ^
   "Write-Host '   QZ Tray trusted — no dialogs will appear.'"
 
@@ -911,6 +916,12 @@ if [ -n "$QZ_CERT" ]; then
   grep -v "^$QZ_FP" ~/.qz/allowed.dat 2>/dev/null > /tmp/qz_allowed.tmp || true
   printf "%s\tQZ Tray Demo Cert\tQZ Industries, LLC\t{{certValidFrom}}\t{{certValidTo}}\ttrue\r\n" "$QZ_FP" >> /tmp/qz_allowed.tmp
   mv /tmp/qz_allowed.tmp ~/.qz/allowed.dat
+  # override.crt alone does NOT get used unless qz-tray.properties explicitly points at it —
+  # verified empirically against a live instance: the file existed with the right cert and a
+  # matching allowed.dat entry, yet QZ Tray still showed "Action Required" until this property
+  # was added. QZ Tray's own installer creates this file, so append/replace rather than assume.
+  sudo sed -i '/^authcert\.override=/d' /opt/qz-tray/qz-tray.properties 2>/dev/null || true
+  echo "authcert.override=override.crt" | sudo tee -a /opt/qz-tray/qz-tray.properties >/dev/null
   echo "   QZ Tray trusted — no dialogs will appear."
 else
   echo "   Could not embed cert — connect printer manually later."
