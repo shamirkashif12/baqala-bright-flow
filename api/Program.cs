@@ -122,12 +122,18 @@ builder.Services.AddAuthorization(options =>
 
 var app = builder.Build();
 
-// ─── Auto-migrate on startup (development only) ───────────────────────────────
-if (app.Environment.IsDevelopment())
+// ─── Auto-migrate on startup (all environments) ───────────────────────────────
+// Must run regardless of IsDevelopment(): the GitLab CI pipeline's separate `migrate.sh` step
+// was removed from .gitlab-ci.yml the same day this bypass landed, on the assumption the app
+// would now self-migrate in production — but this block used to be gated behind
+// IsDevelopment(), so on the live (Production-environment) server nothing applied migrations
+// at all, and the missing-tobacco_fee_amount/created_by error kept recurring even after the
+// fix migration and this bypass were both deployed. Pulled out of the dev-only block below so
+// it always runs; the demo-data seeders/patches stay dev-only.
+using (var migrationScope = app.Services.CreateScope())
 {
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
-    var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    var db = migrationScope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
+    var startupLogger = migrationScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     try
     {
         var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
@@ -161,6 +167,12 @@ if (app.Environment.IsDevelopment())
     {
         startupLogger.LogError(migEx, "Database migration failed — check migration SQL and schema.");
     }
+}
+
+if (app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
     await DataSeeder.SeedAsync(db);
     await RenameRoles(db);
     await RenamePermissionModules(db);
