@@ -134,6 +134,7 @@ using (var migrationScope = app.Services.CreateScope())
 {
     var db = migrationScope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
     var startupLogger = migrationScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    string? attemptingMigrationId = null;
     try
     {
         var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
@@ -177,6 +178,7 @@ using (var migrationScope = app.Services.CreateScope())
                     checkpoint = migrationId;
                     continue;
                 }
+                attemptingMigrationId = migrationId;
                 var script = migrator.GenerateScript(checkpoint, migrationId);
                 await db.Database.ExecuteSqlRawAsync(script);
                 checkpoint = migrationId;
@@ -186,6 +188,11 @@ using (var migrationScope = app.Services.CreateScope())
     catch (Exception migEx)
     {
         startupLogger.LogError(migEx, "Database migration failed — check migration SQL and schema.");
+        // No SSH/log access to the live server during the outage that made this necessary — surface
+        // the failure via the authenticated /api/diagnostics/migrations endpoint instead. Remove
+        // once migrations are confirmed stable again.
+        BaqalaPOS.Api.Diagnostics.MigrationStartupStatus.LastErrorMigration = attemptingMigrationId;
+        BaqalaPOS.Api.Diagnostics.MigrationStartupStatus.LastErrorMessage = migEx.ToString();
     }
 }
 
