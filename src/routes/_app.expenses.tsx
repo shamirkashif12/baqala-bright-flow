@@ -129,7 +129,9 @@ function EntriesTab() {
       }
       setSheetOpen(false);
       load();
-    } catch (e) { console.error(e); } finally { setSaving(false); }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save expense.");
+    } finally { setSaving(false); }
   };
 
   const handleDelete = async () => {
@@ -140,8 +142,12 @@ function EntriesTab() {
   };
 
   const handleApprove = async (id: string, approved: boolean) => {
-    await api.approveExpense(id, approved, "00000000-0000-0000-0000-000000000000");
-    load();
+    try {
+      await api.approveExpense(id, approved, user?.id ?? "");
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update expense approval.");
+    }
   };
 
   const set = (k: keyof ExpenseForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -379,10 +385,13 @@ function TypesTab() {
       else await api.createExpenseType(form);
       setSheetOpen(false);
       loadTypes();
-    } catch (e) { console.error(e); } finally { setSaving(false); }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save expense type.");
+    } finally { setSaving(false); }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Deactivate expense type "${name}"?`)) return;
     setDeleting(id);
     try {
       await api.deleteExpenseType(id);
@@ -437,7 +446,7 @@ function TypesTab() {
                       <div className="flex gap-1 justify-end">
                         {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>}
                         {canDelete && (
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" disabled={deleting === t.id} onClick={() => handleDelete(t.id)}>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" disabled={deleting === t.id} onClick={() => handleDelete(t.id, t.name)}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         )}

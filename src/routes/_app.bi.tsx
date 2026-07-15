@@ -70,7 +70,7 @@ function BI() {
               <h3 className="text-base font-semibold">Sales Trends</h3>
               <p className="text-xs text-muted-foreground">Last 14 days · all branches</p>
             </div>
-            <Badge className="bg-success/15 text-success border-success/30" variant="outline"><TrendingUp className="h-3 w-3 mr-1" />+18% WoW</Badge>
+            <Badge className="bg-muted text-muted-foreground border-border" variant="outline">Sample data</Badge>
           </div>
           <Sparkline data={trend} />
         </Card>
@@ -98,7 +98,8 @@ function BI() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-6 border-border/60 shadow-card">
-          <h3 className="text-base font-semibold mb-3">Best Selling Products</h3>
+          <h3 className="text-base font-semibold mb-1">Best Selling Products</h3>
+          <p className="text-xs text-muted-foreground mb-3">Sample data — see Reports → Product Sales for live figures</p>
           <div className="space-y-3">
             {[
               { n: "Almarai Laban 1L", u: 1842, pct: 92 },
@@ -115,7 +116,8 @@ function BI() {
           </div>
         </Card>
         <Card className="p-6 border-border/60 shadow-card">
-          <h3 className="text-base font-semibold mb-3">Slow Moving SKUs</h3>
+          <h3 className="text-base font-semibold mb-1">Slow Moving SKUs</h3>
+          <p className="text-xs text-muted-foreground mb-3">Sample data — no slow-mover report is wired up yet</p>
           <div className="space-y-3">
             {[
               { n: "Tide Detergent 3kg", u: 14, age: "42d" },
@@ -135,23 +137,27 @@ function BI() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="p-6 border-border/60 shadow-card">
           <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" />Branch Performance (today)</h3>
-          {(branchPerf.length > 0
-            ? branchPerf
-            : [{ branch: "Olaya", orders: 0, sales: 92 }, { branch: "Khobar", orders: 0, sales: 85 }, { branch: "Jeddah", orders: 0, sales: 80 }, { branch: "Madinah", orders: 0, sales: 68 }]
-          ).map(b => (
-            <div key={b.branch} className="mb-3">
-              <div className="flex justify-between text-sm mb-1">
-                <span>{b.branch}</span>
-                <span className="font-semibold">{branchPerf.length > 0 ? <><SARIcon />{fmt(b.sales)}</> : `${b.sales}%`}</span>
+          {branchPerf.length > 0 ? (
+            branchPerf.map(b => (
+              <div key={b.branch} className="mb-3">
+                <div className="flex justify-between text-sm mb-1">
+                  <span>{b.branch}</span>
+                  <span className="font-semibold"><SARIcon />{fmt(b.sales)}</span>
+                </div>
+                <Progress value={Math.round(b.sales / maxBranchSales * 100)} className="h-1.5" />
               </div>
-              <Progress value={Math.round(b.sales / maxBranchSales * 100)} className="h-1.5" />
-            </div>
-          ))}
+            ))
+          ) : (
+            // Previously substituted fabricated branch names/percentages here — actively
+            // misleading (looks like real data for branches that may not even exist for this
+            // tenant) rather than just blank. A real empty state is safer than a fake one.
+            <p className="text-sm text-muted-foreground">No branch sales recorded yet today.</p>
+          )}
         </Card>
         <Card className="p-6 border-border/60 shadow-card">
           <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Package className="h-4 w-4 text-warning-foreground" />Expiry Loss (month)</h3>
           <p className="text-3xl font-bold"><SARIcon />4,820</p>
-          <p className="text-xs text-muted-foreground mt-1">From 142 expired SKU units</p>
+          <p className="text-xs text-muted-foreground mt-1">Sample data — see Reports → Waste & Spoilage for live figures</p>
           <div className="mt-4 space-y-2 text-sm">
             <div className="flex justify-between"><span>Dairy</span><span className="font-semibold"><SARIcon />2,180</span></div>
             <div className="flex justify-between"><span>Bakery</span><span className="font-semibold"><SARIcon />1,420</span></div>
@@ -160,7 +166,8 @@ function BI() {
           </div>
         </Card>
         <Card className="p-6 border-border/60 shadow-card">
-          <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Truck className="h-4 w-4 text-success" />Warehouse Insights</h3>
+          <h3 className="text-base font-semibold mb-1 flex items-center gap-2"><Truck className="h-4 w-4 text-success" />Warehouse Insights</h3>
+          <p className="text-xs text-muted-foreground mb-3">Sample data — no warehouse-turnover report is wired up yet</p>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between"><span>Stock turnover</span><span className="font-bold">4.2x / mo</span></div>
             <div className="flex justify-between"><span>Inbound (week)</span><span className="font-bold">12,840 units</span></div>

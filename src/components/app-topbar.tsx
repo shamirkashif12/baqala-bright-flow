@@ -1,4 +1,4 @@
-import { Bell, Search, HelpCircle, ChevronDown, Building2, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock } from "lucide-react";
+import { Bell, Search, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,14 +9,6 @@ import { useBranch } from "@/lib/branch-context";
 import { useState, useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { api, NOTIFICATION_CREATED_EVENT } from "@/lib/api";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
@@ -284,58 +276,30 @@ function HelpPopover() {
   );
 }
 
-// ── Branch dropdown (tenant_admin only) ────────────────────────────────────────
+// ── Branch indicator ────────────────────────────────────────────────────────────
+// Each page now owns its own branch filter, so this is no longer a global switcher.
+// Admins get no branch control here at all; everyone else sees their fixed branch,
+// rendered as a visibly disabled control rather than a plain badge.
 function BranchDropdown() {
   const { user } = useAuth();
-  const { branches, selectedBranch, setSelectedBranch } = useBranch();
+  const { branches } = useBranch();
 
-  // Non-admin users see a read-only badge of their assigned branch
-  if (user?.role !== "tenant_admin") {
-    if (!selectedBranch) return null;
-    return (
-      <div className="hidden md:flex items-center gap-2 h-9 px-3 rounded-md border border-border/60 bg-background text-sm">
-        <span className="h-2 w-2 rounded-full bg-success animate-pulse shrink-0" />
-        <span className="max-w-[140px] truncate">{selectedBranch.name}</span>
-      </div>
-    );
-  }
+  if (user?.role === "tenant_admin") return null;
+
+  const myBranch = branches.find((b) => b.id === user?.branchId);
+  if (!myBranch) return null;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2 h-9 hidden md:inline-flex max-w-[200px]">
-          <span className="h-2 w-2 rounded-full bg-success animate-pulse shrink-0" />
-          <span className="truncate">{selectedBranch?.name ?? "Select branch"}</span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel className="flex items-center gap-2">
-          <Building2 className="h-3.5 w-3.5 text-primary" /> Switch Branch
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {branches.length === 0 && (
-          <div className="px-3 py-2 text-xs text-muted-foreground">No branches found</div>
-        )}
-        {branches.map((branch) => (
-          <DropdownMenuItem
-            key={branch.id}
-            onSelect={() => setSelectedBranch(branch)}
-            className="flex items-center gap-2 cursor-pointer"
-          >
-            <span
-              className={`h-2 w-2 rounded-full shrink-0 ${
-                branch.status === "active" ? "bg-success" : "bg-muted-foreground"
-              }`}
-            />
-            <span className="flex-1 truncate">{branch.name}</span>
-            {selectedBranch?.id === branch.id && (
-              <span className="text-[10px] text-primary font-semibold">Active</span>
-            )}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Button
+      variant="outline"
+      size="sm"
+      disabled
+      className="gap-2 h-9 hidden md:inline-flex max-w-[200px]"
+    >
+      <span className="h-2 w-2 rounded-full bg-success shrink-0" />
+      <span className="truncate">{myBranch.name}</span>
+      <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+    </Button>
   );
 }
 

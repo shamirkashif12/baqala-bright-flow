@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut, KeyRound, Copy } from "lucide-react";
+import { toast } from "sonner";
 import { api, type Terminal, type Branch, type User, type CashierShift } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -308,12 +309,17 @@ function Terminals() {
         setCreateOpen(false);
       }
       load();
-    } catch (e) { console.error(e); } finally { setSaving(false); }
+    } catch (e: any) { console.error(e); toast.error(e?.message || "Failed to save terminal."); } finally { setSaving(false); }
   };
 
   const handleDeactivate = async (t: Terminal) => {
-    await api.updateTerminalStatus(t.id, "inactive");
-    load();
+    if (!confirm(`Deactivate terminal "${t.name}"?`)) return;
+    try {
+      await api.updateTerminalStatus(t.id, "inactive");
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to deactivate terminal.");
+    }
   };
 
   const handleGenerateKioskCode = async () => {
@@ -323,7 +329,7 @@ function Terminals() {
       const res = await api.generateKioskPairingCode(kioskTerm.id);
       setKioskSecret(res);
       load();
-    } catch (e) { console.error(e); } finally { setKioskGenerating(false); }
+    } catch (e: any) { console.error(e); toast.error(e?.message || "Failed to generate kiosk pairing code."); } finally { setKioskGenerating(false); }
   };
 
   const set = (k: keyof TerminalForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -462,7 +468,7 @@ function Terminals() {
                                 <KeyRound className="h-3.5 w-3.5" />
                               </Button>
                             )}
-                            {t.status === "active" && (
+                            {canEdit && t.status === "active" && (
                               <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => handleDeactivate(t)}><X className="h-3.5 w-3.5" /></Button>
                             )}
                           </div>

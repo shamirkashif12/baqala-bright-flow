@@ -14,6 +14,31 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
+    // Rejects moving more than the source location currently has on hand. Shared by
+    // ReceiveTransfer and UpdateStatus's "completed" branch, since both move stock the same way.
+    // Previously neither checked this — source deduction was silently clamped to 0 while the
+    // destination was still credited the FULL requested quantity, manufacturing stock out of
+    // nothing whenever the source had been depleted (e.g. by a sale) between the transfer's
+    // creation and its receipt.
+    private async Task<string?> ValidateSourceStockAsync(StockTransfer transfer, IEnumerable<(Guid ProductId, decimal Quantity)> lines)
+    {
+        foreach (var (productId, qty) in lines)
+        {
+            if (qty <= 0) continue;
+            if (transfer.SourceBranchId.HasValue)
+            {
+                var srcQty = (await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.SourceBranchId && s.ProductId == productId))?.Quantity ?? 0;
+                if (qty > srcQty) return $"Cannot move {qty} unit(s) — only {srcQty} available at the source branch right now.";
+            }
+            else if (transfer.SourceWarehouseId.HasValue)
+            {
+                var srcQty = (await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.SourceWarehouseId && s.ProductId == productId))?.Quantity ?? 0;
+                if (qty > srcQty) return $"Cannot move {qty} unit(s) — only {srcQty} available at the source warehouse right now.";
+            }
+        }
+        return null;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? transferType,
@@ -202,6 +227,13 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 return BadRequest(new { message = $"Expiry date for transfer item {recv.ItemId} cannot be in the past — provide a damagedOrReturnReason to log it as damaged/return stock instead of resalable inventory." });
         }
 
+        var receiveLines = (req.Items ?? [])
+            .Select(recv => (ProductId: transfer.Items.FirstOrDefault(i => i.Id == recv.ItemId)?.ProductId, recv.ReceivedQuantity))
+            .Where(l => l.ProductId.HasValue)
+            .Select(l => (l.ProductId!.Value, l.ReceivedQuantity));
+        var stockError = await ValidateSourceStockAsync(transfer, receiveLines);
+        if (stockError != null) return BadRequest(new { message = stockError });
+
         // Update per-item received quantities
         foreach (var recv in req.Items ?? [])
         {
@@ -367,6 +399,10 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         // When completed: move stock
         if (req.Status == "completed" && prev != "completed")
         {
+            var lines = transfer.Items.Select(item => (item.ProductId, Quantity: item.ReceivedQuantity ?? item.ApprovedQuantity ?? item.RequestedQuantity));
+            var stockError = await ValidateSourceStockAsync(transfer, lines);
+            if (stockError != null) return BadRequest(new { message = stockError });
+
             transfer.CompletedDate = DateTime.UtcNow;
             foreach (var item in transfer.Items)
             {

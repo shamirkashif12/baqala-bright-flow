@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -40,6 +41,7 @@ public class OffersController(BaqalaDbContext db) : ControllerBase
         return o is null ? NotFound() : Ok(o);
     }
 
+    [RequirePermission("Coupons", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] OfferRequest req)
     {
@@ -71,6 +73,7 @@ public class OffersController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = offer.Id }, offer);
     }
 
+    [RequirePermission("Coupons", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] OfferRequest req)
     {
@@ -97,6 +100,7 @@ public class OffersController(BaqalaDbContext db) : ControllerBase
         return Ok(o);
     }
 
+    [RequirePermission("Coupons", PermAction.Edit)]
     [HttpPatch("{id:guid}/toggle")]
     public async Task<IActionResult> Toggle(Guid id)
     {
@@ -108,6 +112,7 @@ public class OffersController(BaqalaDbContext db) : ControllerBase
         return Ok(o);
     }
 
+    [RequirePermission("Coupons", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

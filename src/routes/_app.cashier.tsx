@@ -10,6 +10,7 @@ import {
   Clock, Loader2, CheckCircle2, AlertCircle, RefreshCw,
   type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { api, type CashierShift, type Order } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
@@ -105,9 +106,13 @@ function CashierWorkspace() {
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
 
-  // Held orders count from POS localStorage
+  // Held orders count for the branch this cashier is actually working at right now — the
+  // active shift's own branchId, not a page-level filter (POS no longer shares one globally).
+  // Falls back to the user's assigned branch before the shift finishes loading.
+  const heldBranchId = shift?.branchId ?? (user?.role !== "tenant_admin" ? user?.branchId : undefined);
   const heldCount = (() => {
-    try { return (JSON.parse(localStorage.getItem("pos_holds") ?? "[]") as unknown[]).length; }
+    if (!heldBranchId) return 0;
+    try { return (JSON.parse(sessionStorage.getItem(`pos_holds_${heldBranchId}`) ?? "[]") as unknown[]).length; }
     catch { return 0; }
   })();
 
@@ -124,7 +129,7 @@ function CashierWorkspace() {
         setShift(shifts[0] ?? null);
         setTodayOrders(orders);
       })
-      .catch(() => {})
+      .catch(() => toast.error("Failed to load cashier workspace data."))
       .finally(() => setLoading(false));
   }, [branchIdFilter]);
 

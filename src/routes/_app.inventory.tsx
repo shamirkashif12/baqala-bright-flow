@@ -118,32 +118,29 @@ function ProductImagePicker({ value, onChange }: { value: string; onChange: (dat
 
 // ─── Receive Batch Dialog ─────────────────────────────────────────────────────
 
-function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppliers, onDone, lockedBranchId }: {
+function ReceiveBatchDialog({ open, onClose, stock, branches, suppliers, onDone, lockedBranchId }: {
   open: boolean; onClose: () => void;
-  stock: StockItem[]; branches: Branch[]; warehouses: Warehouse[]; suppliers: Supplier[];
+  stock: StockItem[]; branches: Branch[]; suppliers: Supplier[];
   onDone: () => void; lockedBranchId: string | null;
 }) {
   const [form, setForm] = useState({
     batchNumber: "", supplierId: "", productId: "", quantity: "",
     expiryDate: "", purchaseCost: "", vatPct: "15", customFee: "0.00",
-    destType: "branch" as "branch" | "warehouse", branchId: lockedBranchId ?? "", warehouseId: "", notes: "",
+    branchId: lockedBranchId ?? "", notes: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const set = (k: keyof typeof form) => (v: string) => setForm(p => ({ ...p, [k]: v }));
 
-  const reset = () => setForm({ batchNumber: "", supplierId: "", productId: "", quantity: "", expiryDate: "", purchaseCost: "", vatPct: "15", customFee: "0.00", destType: "branch", branchId: lockedBranchId ?? "", warehouseId: "", notes: "" });
+  const reset = () => setForm({ batchNumber: "", supplierId: "", productId: "", quantity: "", expiryDate: "", purchaseCost: "", vatPct: "15", customFee: "0.00", branchId: lockedBranchId ?? "", notes: "" });
 
   const handleSubmit = async () => {
     if (!form.productId || !form.quantity) return setError("Product and quantity are required.");
-    const destBranchId = form.destType === "branch" ? form.branchId : "";
-    if (!destBranchId && form.destType === "branch") return setError("Please select a branch.");
-    if (!form.warehouseId && form.destType === "warehouse") return setError("Please select a warehouse.");
-    if (lockedBranchId && form.destType === "branch" && destBranchId !== lockedBranchId) return setError("You can only receive stock into your own branch.");
+    if (!form.branchId) return setError("Please select a branch.");
+    if (lockedBranchId && form.branchId !== lockedBranchId) return setError("You can only receive stock into your own branch.");
     if (form.expiryDate && form.expiryDate < todayStr) return setError("Expiry date cannot be in the past for a batch received today.");
-    // For warehouse batches, find the branch that owns that warehouse
-    const branchId = destBranchId || lockedBranchId || (branches[0]?.id ?? "");
+    const branchId = form.branchId;
     setSaving(true); setError("");
     try {
       await api.receiveBatch({
@@ -209,28 +206,16 @@ function ReceiveBatchDialog({ open, onClose, stock, branches, warehouses, suppli
             <Input type="number" step="0.01" className="h-9" placeholder="0.00" value={form.customFee} onChange={e => set("customFee")(e.target.value)} />
           </FieldRow>
           <div className="col-span-2">
-            <FieldRow label="Receiving branch / WH">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex rounded-lg border border-border/60 overflow-hidden col-span-2">
-                  {(["branch", "warehouse"] as const).map(t => (
-                    <button key={t} onClick={() => set("destType")(t)}
-                      className={`flex-1 py-1.5 text-xs capitalize transition-colors ${form.destType === t ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted/50"}`}>
-                      {t === "branch" ? "Branch (Mart)" : "Warehouse"}
-                    </button>
-                  ))}
-                </div>
-                {form.destType === "branch" ? (
-                  <Select value={form.branchId} onValueChange={set("branchId")} disabled={!!lockedBranchId}>
-                    <SelectTrigger className="h-9 col-span-2"><SelectValue placeholder="Select branch" /></SelectTrigger>
-                    <SelectContent>{(lockedBranchId ? branches.filter(b => b.id === lockedBranchId) : branches).map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-                  </Select>
-                ) : (
-                  <Select value={form.warehouseId} onValueChange={set("warehouseId")}>
-                    <SelectTrigger className="h-9 col-span-2"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
-                    <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name} ({w.code})</SelectItem>)}</SelectContent>
-                  </Select>
-                )}
-              </div>
+            {/* Warehouse stock is received via Purchase Orders/Stock Transfers, which write to
+                WarehouseStock — batches here are always branch stock (InventoryBatch has no
+                warehouse concept). A "Warehouse" option previously existed but had no real
+                destination field to write to, so the received quantity silently landed on
+                whichever branch happened to be first in the list. */}
+            <FieldRow label="Receiving branch">
+              <Select value={form.branchId} onValueChange={set("branchId")} disabled={!!lockedBranchId}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+                <SelectContent>{(lockedBranchId ? branches.filter(b => b.id === lockedBranchId) : branches).map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+              </Select>
             </FieldRow>
           </div>
           <div className="col-span-2">
@@ -533,6 +518,7 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
     vatPct: "15", customFee: "0.00", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
     discount: "", imageUrl: "",
+    status: "active", weightBased: false,
   });
 
   useEffect(() => {
@@ -551,6 +537,11 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
       discountType: (p.discountType as "percentage" | "fixed") ?? "percentage",
       discount: p.discount != null ? String(p.discount) : "",
       imageUrl: p.imageUrl ?? "",
+      // Carried through unchanged — this dialog has no controls for either, so it must not
+      // clobber them. Previously hardcoded to "active"/false on every save, which silently
+      // un-discontinued products and reset weight-based (kg-priced) items to unit pricing.
+      status: p.status ?? "active",
+      weightBased: p.weightBased ?? false,
     });
     setError("");
   }, [item]);
@@ -573,8 +564,8 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
         discount: form.discount ? Number(form.discount) : undefined,
         discountType: form.discount ? form.discountType : undefined,
         imageUrl: form.imageUrl || undefined,
-        status: "active",
-        weightBased: false,
+        status: form.status,
+        weightBased: form.weightBased,
         reorderLevel: item.reorderLevel ?? 10,
       });
       onDone(); onClose();
@@ -1114,7 +1105,7 @@ function Inventory() {
         </Card>
       )}
 
-      <ReceiveBatchDialog open={batchOpen} onClose={() => setBatchOpen(false)} stock={stock} branches={branches} warehouses={warehouses} suppliers={suppliers} onDone={load} lockedBranchId={lockedBranchId} />
+      <ReceiveBatchDialog open={batchOpen} onClose={() => setBatchOpen(false)} stock={stock} branches={branches} suppliers={suppliers} onDone={load} lockedBranchId={lockedBranchId} />
       <AddProductDialog open={addOpen} onClose={() => setAddOpen(false)} categories={categories} branches={branches} onDone={load} />
       <EditProductDialog item={editItem} onClose={() => setEditItem(null)} categories={categories} onDone={load} />
       <ViewSheet item={viewItem} suppliers={suppliers} onClose={() => setViewItem(null)} />

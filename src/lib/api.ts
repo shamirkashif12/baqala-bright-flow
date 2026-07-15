@@ -590,12 +590,18 @@ export const api = {
     requestBlob(`/api/reports/profit-margin/export${toQuery(params)}`),
 
   // Compliance rules
-  getComplianceRules: (params?: { ruleType?: string }) => {
-    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
+  getComplianceRules: (params?: { ruleType?: string; includeInactive?: boolean }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "").map(([k, v]) => [k, String(v)]))).toString();
     return request<ComplianceRule[]>(`/api/compliance/rules${q ? `?${q}` : ""}`);
   },
   createComplianceRule: (data: Partial<ComplianceRule>) =>
     request<ComplianceRule>("/api/compliance/rules", { method: "POST", body: JSON.stringify(data) }),
+  updateComplianceRule: (id: string, data: Partial<ComplianceRule>) =>
+    request<ComplianceRule>(`/api/compliance/rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  toggleComplianceRule: (id: string) =>
+    request<ComplianceRule>(`/api/compliance/rules/${id}/toggle`, { method: "PATCH" }),
+  deleteComplianceRule: (id: string) =>
+    request<void>(`/api/compliance/rules/${id}`, { method: "DELETE" }),
 
   // Devices
   getDevices: (params?: { branchId?: string; status?: string }) => {
@@ -800,6 +806,10 @@ export interface Order {
   zatcaInvoiceStatus?: string;
   notes?: string;
   voidReason?: string;
+  // Set by the caller once per checkout attempt and re-sent unchanged on retry, so a request
+  // that succeeded server-side but whose response was lost to a timeout returns the SAME order
+  // on retry instead of creating a duplicate paid order (backend dedupes on this).
+  clientRequestId?: string;
 }
 
 export interface OrderItem {
@@ -1018,7 +1028,7 @@ export interface PosSettingsRecord {
 export interface ComplianceRule {
   id: string; ruleName: string; ruleType: string; appliesTo: string;
   appliesToId?: string; branchId?: string; ruleConfig: string;
-  priority: number; isActive: boolean; createdAt: string;
+  priority: number; isActive: boolean; createdBy?: string; createdAt: string;
 }
 
 export interface DeviceRecord {

@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { RotateCcw, Loader2, Plus, Search, ChevronDown, Check, X, CheckCircle, Truck } from "lucide-react";
+import { toast } from "sonner";
 import { api, type StockTransfer, type Warehouse, type Supplier, type StockTransferItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -316,8 +317,8 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
       onCreated();
       onOpenChange(false);
       resetForm();
-    } catch {
-      setError("Failed to create return transfer. Please try again.");
+    } catch (e: any) {
+      setError(e?.message || "Failed to create return transfer. Please try again.");
     } finally { setSaving(false); }
   };
 
@@ -607,6 +608,8 @@ function SupplierReturns() {
     try {
       for (const t of group) await api.updateTransferStatus(t.id, newStatus, user?.id);
       load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update one or more transfers.");
     } finally {
       setActionLoading(null);
     }

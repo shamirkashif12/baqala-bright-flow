@@ -100,17 +100,26 @@ function AdminHome() {
   const apiRps = useTicker(312, 240, 480, 900);
   const uptime = useTicker(99.98, 99.9, 100, 4000);
 
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  // null = still loading; [] = loaded and genuinely empty. Previously both states used the same
+  // [] default, so an empty result read identically to "still fetching" and the "Loading
+  // activity…"/"Loading operators…" placeholders never went away once a fetch actually resolved
+  // empty.
+  const [auditLogs, setAuditLogs] = useState<AuditLog[] | null>(null);
   const [dashboard, setDashboard] = useState<DashboardMetrics | null>(null);
-  const [activeUsers, setActiveUsers] = useState<import("@/lib/api").User[]>([]);
+  const [activeUsers, setActiveUsers] = useState<import("@/lib/api").User[] | null>(null);
+  const [tenantCounts, setTenantCounts] = useState<{ branches: number; terminals: number; suppliers: number } | null>(null);
 
   useEffect(() => {
-    api.getAuditLogs({ page: 1 }).then((res) => setAuditLogs(res.items)).catch(() => {});
+    api.getAuditLogs({ page: 1 }).then((res) => setAuditLogs(res.items)).catch(() => setAuditLogs([]));
     api.getDashboard().then(setDashboard).catch(() => {});
-    api.getUsers({ status: "active" }).then(setActiveUsers).catch(() => {});
+    api.getUsers({ status: "active" }).then(setActiveUsers).catch(() => setActiveUsers([]));
+    Promise.all([api.getBranches(), api.getTerminals(), api.getSuppliers()])
+      .then(([branches, terminals, suppliers]) =>
+        setTenantCounts({ branches: branches.length, terminals: terminals.length, suppliers: suppliers.length }))
+      .catch(() => {});
   }, []);
 
-  const feed = useMemo(() => auditLogs.slice(0, 6), [auditLogs]);
+  const feed = useMemo(() => (auditLogs ?? []).slice(0, 6), [auditLogs]);
 
   const salesValue = dashboard?.sales.totalToday ?? 0;
   const ordersValue = dashboard?.orders.totalToday ?? 0;
@@ -136,7 +145,7 @@ function AdminHome() {
               Run every baqala from <span className="italic text-white/95">one</span> elegant cockpit.
             </h2>
             <p className="text-primary-foreground/85 max-w-xl">
-              Real-time visibility across 4 branches, 12 terminals, 38 suppliers and the ZATCA gateway —
+              Real-time visibility across {tenantCounts ? `${tenantCounts.branches} branch${tenantCounts.branches === 1 ? "" : "es"}, ${tenantCounts.terminals} terminal${tenantCounts.terminals === 1 ? "" : "s"}, ${tenantCounts.suppliers} supplier${tenantCounts.suppliers === 1 ? "" : "s"}` : "your branches, terminals and suppliers"} and the ZATCA gateway —
               built for owners who don't have time to babysit a POS.
             </p>
             <div className="flex flex-wrap gap-2 pt-2">
@@ -170,8 +179,8 @@ function AdminHome() {
           delta={dashboard ? `${dashboard.orders.deliveredDeltaPct > 0 ? "+" : ""}${dashboard.orders.deliveredDeltaPct}%` : undefined}
           trend={dashboard ? (dashboard.orders.deliveredDeltaPct >= 0 ? "up" : "down") : undefined}
           hint="total" icon={ReceiptText} />
-        <MetricCard label="API Throughput" value={`${Math.round(apiRps)} rps`} delta="healthy" trend="flat" icon={Activity} accent="success" />
-        <MetricCard label="Platform Uptime" value={`${uptime.toFixed(2)}%`} delta="30d" trend="up" icon={ShieldCheck} accent="success" />
+        <MetricCard label="API Throughput (simulated)" value={`${Math.round(apiRps)} rps`} delta="no live telemetry" trend="flat" icon={Activity} accent="success" />
+        <MetricCard label="Platform Uptime (simulated)" value={`${uptime.toFixed(2)}%`} delta="no live telemetry" trend="up" icon={ShieldCheck} accent="success" />
       </div>
 
       {/* Middle row */}
@@ -184,7 +193,7 @@ function AdminHome() {
                 <h3 className="text-base font-semibold">Live Transaction Throughput</h3>
                 <PulseDot />
               </div>
-              <p className="text-xs text-muted-foreground">Refreshes every 1.2s · last 24 buckets</p>
+              <p className="text-xs text-muted-foreground">Simulated — no real-time transaction feed is connected yet</p>
             </div>
             <Button variant="ghost" size="sm" className="gap-1.5"><RefreshCw className="h-3.5 w-3.5" />Snapshot</Button>
           </div>
@@ -214,8 +223,10 @@ function AdminHome() {
             <Badge variant="outline" className="text-xs">streaming</Badge>
           </div>
           <div className="space-y-3">
-            {feed.length === 0 ? (
+            {auditLogs === null ? (
               <p className="text-xs text-muted-foreground">Loading activity…</p>
+            ) : feed.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No activity recorded yet.</p>
             ) : (
               feed.map((log, i) => (
                 <div
@@ -277,6 +288,7 @@ function AdminHome() {
             <Cpu className="h-4 w-4 text-primary" />
             <h3 className="text-base font-semibold">System Health</h3>
           </div>
+          <p className="text-xs text-muted-foreground -mt-2 mb-3">Simulated — no infrastructure monitoring is connected yet</p>
           {[
             { l: "API Gateway", v: 99, i: Globe },
             { l: "Database", v: 96, i: Database },
@@ -300,12 +312,14 @@ function AdminHome() {
               <p className="text-xs text-muted-foreground">Signed in across all terminals right now</p>
             </div>
             <Badge className="bg-success/15 text-success border-0">
-              {activeUsers.length > 0 ? `${activeUsers.length} online` : "—"}
+              {activeUsers && activeUsers.length > 0 ? `${activeUsers.length} online` : "—"}
             </Badge>
           </div>
           <div className="space-y-2.5">
-            {activeUsers.length === 0 ? (
+            {activeUsers === null ? (
               <p className="text-xs text-muted-foreground">Loading operators…</p>
+            ) : activeUsers.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No active operators right now.</p>
             ) : (
               activeUsers.slice(0, 6).map((u) => (
                 <div key={u.id} className="flex items-center gap-3 rounded-xl p-2.5 hover:bg-muted/60 transition-colors">

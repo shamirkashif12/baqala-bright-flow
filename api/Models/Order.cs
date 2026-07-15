@@ -66,6 +66,13 @@ public class Order
     [Column("notes")]
     public string? Notes { get; set; }
 
+    // Client-generated once per checkout attempt (see _app.pos.tsx) and re-sent unchanged on
+    // retry, so a request that succeeded server-side but whose response was lost to a timeout
+    // doesn't create a second paid order when the cashier clicks Confirm again. Null for any
+    // order created outside that flow (seed data, other callers).
+    [Column("client_request_id")]
+    public Guid? ClientRequestId { get; set; }
+
     // Set when this order was voided/cancelled — PosSettings.RequireReasonForVoid gates whether
     // a reason is mandatory.
     [Column("void_reason")]

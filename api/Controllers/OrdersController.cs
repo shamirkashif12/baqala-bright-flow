@@ -76,6 +76,18 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Order order)
     {
+        // Idempotency: if the client already successfully created an order for this exact
+        // checkout attempt (its response was lost to a network drop/timeout and it's retrying
+        // the same Confirm click), return the existing order instead of creating a duplicate —
+        // double stock decrement and double shift total for one real sale otherwise.
+        if (order.ClientRequestId.HasValue)
+        {
+            var existing = await db.Orders
+                .Include(o => o.Items).Include(o => o.Payments)
+                .FirstOrDefaultAsync(o => o.ClientRequestId == order.ClientRequestId);
+            if (existing is not null) return Ok(existing);
+        }
+
         // An order with a total but no line items is unauditable and fails ZATCA
         // itemised-invoice requirements — reject at the source rather than persist it.
         if (order.Items.Count == 0)

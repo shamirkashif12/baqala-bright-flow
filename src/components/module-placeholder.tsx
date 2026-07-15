@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 export type Column = { key: string; label: string; className?: string; render?: (row: any) => React.ReactNode };
 
-export function DataTable({ columns, rows }: { columns: Column[]; rows: any[] }) {
+export function DataTable({ columns, rows, emptyMessage = "No records match the current filters." }: { columns: Column[]; rows: any[]; emptyMessage?: string }) {
   return (
     <Card className="overflow-hidden border-border/60 shadow-card">
       <div className="overflow-x-auto">
@@ -24,15 +24,25 @@ export function DataTable({ columns, rows }: { columns: Column[]; rows: any[] })
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="border-b border-border/40 hover:bg-muted/30 transition-colors last:border-0">
-                {columns.map((c) => (
-                  <td key={c.key} className={cn("px-4 py-3.5 align-middle", c.className)}>
-                    {c.render ? c.render(r) : r[c.key]}
-                  </td>
-                ))}
+            {rows.length === 0 ? (
+              // Previously an empty result rendered only the header with a blank body — reads as
+              // a stuck/broken table rather than "no data for this filter."
+              <tr>
+                <td colSpan={columns.length} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                  {emptyMessage}
+                </td>
               </tr>
-            ))}
+            ) : (
+              rows.map((r, i) => (
+                <tr key={i} className="border-b border-border/40 hover:bg-muted/30 transition-colors last:border-0">
+                  {columns.map((c) => (
+                    <td key={c.key} className={cn("px-4 py-3.5 align-middle", c.className)}>
+                      {c.render ? c.render(r) : r[c.key]}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -45,7 +55,7 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 500];
 /** DataTable with client-side pagination (25/50/100/500, default 25) — used by report detail pages
  * per the Reports FRD's pagination rule. Kept separate from DataTable so unrelated list pages that
  * already render DataTable directly keep showing their full row set unchanged. */
-export function PaginatedDataTable({ columns, rows }: { columns: Column[]; rows: any[] }) {
+export function PaginatedDataTable({ columns, rows, emptyMessage }: { columns: Column[]; rows: any[]; emptyMessage?: string }) {
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(0);
 
@@ -58,7 +68,7 @@ export function PaginatedDataTable({ columns, rows }: { columns: Column[]; rows:
 
   return (
     <div className="space-y-3">
-      <DataTable columns={columns} rows={pageRows} />
+      <DataTable columns={columns} rows={pageRows} emptyMessage={emptyMessage} />
       {rows.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
@@ -137,14 +147,15 @@ export function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export function Toolbar({ placeholder = "Search…", primaryLabel, primaryIcon: PIcon = Plus, extra }: {
+export function Toolbar({ placeholder = "Search…", primaryLabel, primaryIcon: PIcon = Plus, extra, value, onChange }: {
   placeholder?: string; primaryLabel?: string; primaryIcon?: LucideIcon; extra?: React.ReactNode;
+  value?: string; onChange?: React.ChangeEventHandler<HTMLInputElement>;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative flex-1 min-w-[200px] max-w-md">
         <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder={placeholder} className="pl-9 h-10 bg-card" />
+        <Input placeholder={placeholder} className="pl-9 h-10 bg-card" value={value} onChange={onChange} />
       </div>
       <Button variant="outline" size="sm" className="h-10 gap-1.5"><Filter className="h-4 w-4" /> Filters</Button>
       <Button variant="outline" size="sm" className="h-10 gap-1.5"><Download className="h-4 w-4" /> Export</Button>

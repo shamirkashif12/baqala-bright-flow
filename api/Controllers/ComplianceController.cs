@@ -82,12 +82,17 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
             db.ZatcaSettings.Add(settings);
         }
 
-        settings.VatRegistrationNumber = updated.VatRegistrationNumber;
-        settings.SellerName = updated.SellerName;
-        settings.StreetName = updated.StreetName;
-        settings.BuildingNumber = updated.BuildingNumber;
-        settings.CitySubdivisionName = updated.CitySubdivisionName;
-        settings.PostalZone = updated.PostalZone;
+        // Each field merges onto the existing value instead of overwriting unconditionally — a
+        // caller that only knows about a subset of these fields (e.g. the simpler "Tax & ZATCA"
+        // panel on /settings, which never touches the four address fields) must not silently
+        // null out the rest of a branch's ZATCA configuration. A field is only cleared when the
+        // caller explicitly sends "" (not null/absent) for it.
+        settings.VatRegistrationNumber = updated.VatRegistrationNumber ?? settings.VatRegistrationNumber;
+        settings.SellerName = updated.SellerName ?? settings.SellerName;
+        settings.StreetName = updated.StreetName ?? settings.StreetName;
+        settings.BuildingNumber = updated.BuildingNumber ?? settings.BuildingNumber;
+        settings.CitySubdivisionName = updated.CitySubdivisionName ?? settings.CitySubdivisionName;
+        settings.PostalZone = updated.PostalZone ?? settings.PostalZone;
         settings.UpdatedAt = DateTime.UtcNow;
 
         // Phase2Enabled/Environment are shared mart-wide — one certificate, one flag, no per-branch sync needed.
@@ -179,9 +184,10 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
 
     // ─── Rules Engine ─────────────────────────────────────────────────────────
     [HttpGet("rules")]
-    public async Task<IActionResult> GetRules([FromQuery] string? ruleType, [FromQuery] Guid? branchId)
+    public async Task<IActionResult> GetRules([FromQuery] string? ruleType, [FromQuery] Guid? branchId, [FromQuery] bool includeInactive = false)
     {
-        var query = db.RulesEngine.Where(r => r.IsActive).AsQueryable();
+        var query = db.RulesEngine.AsQueryable();
+        if (!includeInactive) query = query.Where(r => r.IsActive);
         if (!string.IsNullOrEmpty(ruleType)) query = query.Where(r => r.RuleType == ruleType);
         if (branchId.HasValue) query = query.Where(r => r.BranchId == null || r.BranchId == branchId);
         return Ok(await query.OrderByDescending(r => r.Priority).ToListAsync());
@@ -205,12 +211,38 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         var rule = await db.RulesEngine.FindAsync(id);
         if (rule is null) return NotFound();
         rule.RuleName = updated.RuleName;
+        rule.RuleType = updated.RuleType;
+        rule.AppliesTo = updated.AppliesTo;
+        rule.BranchId = updated.BranchId;
         rule.RuleConfig = updated.RuleConfig;
         rule.Priority = updated.Priority;
         rule.IsActive = updated.IsActive;
         rule.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(rule);
+    }
+
+    [RequirePermission("Rules Engine", PermAction.Edit)]
+    [HttpPatch("rules/{id:guid}/toggle")]
+    public async Task<IActionResult> ToggleRule(Guid id)
+    {
+        var rule = await db.RulesEngine.FindAsync(id);
+        if (rule is null) return NotFound();
+        rule.IsActive = !rule.IsActive;
+        rule.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Ok(rule);
+    }
+
+    [RequirePermission("Rules Engine", PermAction.Delete)]
+    [HttpDelete("rules/{id:guid}")]
+    public async Task<IActionResult> DeleteRule(Guid id)
+    {
+        var rule = await db.RulesEngine.FindAsync(id);
+        if (rule is null) return NotFound();
+        db.RulesEngine.Remove(rule);
+        await db.SaveChangesAsync();
+        return NoContent();
     }
 }
 

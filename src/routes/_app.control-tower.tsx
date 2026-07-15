@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { api, type Branch, type Terminal, type User, type CashierShift } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
-import { useBranch } from "@/lib/branch-context";
+import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app/control-tower")({ component: ControlTower });
@@ -71,7 +71,6 @@ function ControlTower() {
   const { user } = useAuth();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
 
-  const { selectedBranch: globalSelectedBranch } = useBranch();
   const [tab, setTab] = useState("map");
   const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -254,15 +253,7 @@ function ControlTower() {
             <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search user, terminal, branch…"
               className="pl-9 h-9 bg-muted/40 border-transparent focus-visible:bg-card" />
           </div>
-          {tab !== "map" && !lockedBranchId && (
-            <Select value={branchFilter} onValueChange={setBranchFilter}>
-              <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Branch" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          )}
+          <BranchFilter branches={branches} value={branchFilter} onChange={setBranchFilter} locked={!!lockedBranchId} allowAll />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="h-9 w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
@@ -307,13 +298,13 @@ function ControlTower() {
 
         {/* ── MAP ── */}
         <TabsContent value="map" className="space-y-6">
-          {!globalSelectedBranch ? (
+          {branchFilter === "all" ? (
             <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/10 py-16 gap-3">
               <Building2 className="h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground font-medium">Select a branch from the header to view its live map</p>
+              <p className="text-sm text-muted-foreground font-medium">Select a branch above to view its live map</p>
             </div>
           ) : (() => {
-            const mapBranch = branches.find(b => b.id === globalSelectedBranch.id) ?? null;
+            const mapBranch = branches.find(b => b.id === branchFilter) ?? null;
             if (!mapBranch) return null;
             const mapTerminals = terminals.filter(t => t.branchId === mapBranch.id);
             const mapShifts = activeShifts.filter(s => s.branchId === mapBranch.id);
@@ -648,7 +639,7 @@ function ControlTower() {
 
         {/* ── ALERTS ── */}
         <TabsContent value="alerts">
-          <AlertsPanel terminals={terminals} branches={branches} />
+          <AlertsPanel terminals={filteredTerminals} branches={filteredBranches} />
         </TabsContent>
       </Tabs>
     </PageShell>

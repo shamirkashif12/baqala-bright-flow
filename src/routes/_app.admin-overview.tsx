@@ -9,6 +9,7 @@ import {
   Warehouse, Building2, Package, AlertTriangle, CalendarClock,
   Boxes, TrendingDown, CheckCircle2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { api, type Branch, type Warehouse as WarehouseType, type InventoryStock, type Category } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { RoleGate } from "@/components/role-gate";
@@ -100,6 +101,7 @@ function AdminOverview() {
         setStock(s.map(item => ({ ...item, expiryDate: expiryMap.get(`${item.productId}:${item.branchId}`) })) as StockItem[]);
         setCategories(c);
       })
+      .catch(() => toast.error("Failed to load some dashboard data."))
       .finally(() => setLoading(false));
   }, []);
 
