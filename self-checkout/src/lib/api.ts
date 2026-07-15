@@ -18,6 +18,45 @@ export function setReceiptPrinter(name: string) {
   localStorage.setItem(RECEIPT_PRINTER_KEY, name);
 }
 
+const PRINT_MODE_KEY = "selfcheckout_print_mode";
+
+export function getPrintMode(): "qz" | "local" {
+  return (localStorage.getItem(PRINT_MODE_KEY) as "qz" | "local") ?? "local";
+}
+
+export function setPrintMode(mode: "qz" | "local") {
+  localStorage.setItem(PRINT_MODE_KEY, mode);
+}
+
+// Returns the direct URL to download the OS-specific one-click setup installer (installs QZ
+// Tray + creates a kiosk shortcut) — same installer/endpoint the staff POS uses.
+export function setupInstallerUrl(): string {
+  return `${BASE}/api/printer/setup-installer`;
+}
+
+// Fixes the "Action Required" QZ Tray popup on Windows when QZ Tray is already installed
+// manually. Must read from THIS terminal's local agent, not the remote server — the cert
+// embedded needs to match what's actually paired with the QZ Tray running on this machine.
+export function qzTrustPs1Url(): string {
+  return `${getPrinterBase()}/api/printer/qz-trust-ps1`;
+}
+
+// QZ Tray's cert/sign challenge must be answered by the local agent on this machine (same
+// reasoning as above) — routing these through the remote server would return whatever cert
+// that server happens to have on disk, which can silently mismatch what's trusted in this
+// machine's QZ Tray allowed.dat and leave every print request unsigned.
+export function qzCertificateUrl(): string {
+  return `${getPrinterBase()}/api/printer/qz-certificate`;
+}
+
+export function qzSign(toSign: string): Promise<string> {
+  return fetch(`${getPrinterBase()}/api/printer/qz-sign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ toSign }),
+  }).then((r) => r.text());
+}
+
 async function printerRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getPrinterBase()}${path}`, {
     headers: { "Content-Type": "application/json", ...init?.headers },

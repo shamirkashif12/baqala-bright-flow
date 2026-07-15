@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { buildZatcaTlv } from "../lib/zatca";
-import { printReceipt } from "../lib/api";
+import { printReceipt, getPrintMode, getReceiptPrinter } from "../lib/api";
+import { qzPrintReceipt } from "../lib/qz";
 import type { CartLine } from "../lib/cart";
 
 export interface InvoiceSnapshot {
@@ -29,7 +30,7 @@ export function getZatcaQr(invoice: InvoiceSnapshot): string {
 
 export function printInvoice(invoice: InvoiceSnapshot, zatcaQr: string, onPrinted?: () => void) {
   const printId = toast.loading("Printing receipt…");
-  printReceipt({
+  const receipt = {
     orderNumber: invoice.orderNumber,
     createdAt: invoice.createdAt,
     sellerName: invoice.sellerName,
@@ -44,7 +45,17 @@ export function printInvoice(invoice: InvoiceSnapshot, zatcaQr: string, onPrinte
     total: invoice.total,
     taxLabel: invoice.taxLabel,
     zatcaQrCode: zatcaQr,
-  })
+  };
+
+  // QZ Tray prints client-side from raw ESC/POS bytes built in the browser; the local agent
+  // instead ships this same structured data to the terminal's own API, which builds the bytes
+  // and prints server-side — see Printer Setup for which mode this terminal is configured for.
+  const printerName = getReceiptPrinter() ?? undefined;
+  const doPrint = getPrintMode() === "qz"
+    ? qzPrintReceipt(receipt, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` }))
+    : printReceipt({ ...receipt, printerName });
+
+  doPrint
     .then((res) => {
       toast.success(res.message, { id: printId });
       onPrinted?.();
