@@ -9,25 +9,34 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api, type ZatcaInvoice } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
+import { BranchFilter } from "@/components/branch-filter";
+import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/zatca")({ component: Zatca });
 
 function Zatca() {
-  const { selectedBranch } = useBranch();
+  const { user } = useAuth();
+  const { branches } = useBranch();
+  const isAdmin = user?.role === "tenant_admin";
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
+  useEffect(() => {
+    if (lockedBranchId) setBranchFilter(lockedBranchId);
+  }, [lockedBranchId]);
   const [invoices, setInvoices] = useState<ZatcaInvoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
-    api.getZatcaInvoices(selectedBranch?.id ? { branchId: selectedBranch.id } : undefined)
+    api.getZatcaInvoices(branchFilter !== "all" ? { branchId: branchFilter } : undefined)
       .then(setInvoices)
       .catch(() => setInvoices([]))
       .finally(() => setLoading(false));
   }
 
-  useEffect(load, [selectedBranch?.id]);
+  useEffect(load, [branchFilter]);
 
   async function retrySubmit(id: string) {
     setSubmittingId(id);
@@ -55,8 +64,9 @@ function Zatca() {
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2"><h3 className="font-semibold">ZATCA</h3><Badge className="bg-success text-success-foreground border-0">Connected</Badge></div>
-            <p className="text-sm text-muted-foreground mt-0.5">Showing invoices reported/cleared for {selectedBranch?.name ?? "all branches"}</p>
+            <p className="text-sm text-muted-foreground mt-0.5">Showing invoices reported/cleared for {branchFilter !== "all" ? (branches.find(b => b.id === branchFilter)?.name ?? "—") : "all branches"}</p>
           </div>
+          <BranchFilter branches={branches} value={branchFilter} onChange={setBranchFilter} locked={!!lockedBranchId} allowAll />
           <Button variant="outline" className="gap-2" onClick={load} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh
           </Button>

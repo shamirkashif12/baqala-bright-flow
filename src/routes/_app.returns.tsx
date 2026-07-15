@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, ScanLine, Loader2 } from "lucide-react";
-import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type Branch, type OrderItem } from "@/lib/api";
+import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type OrderItem } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
@@ -199,7 +199,6 @@ function Returns() {
   const [returns, setReturns] = useState<CustomerReturn[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [branchFilter, setBranchFilter] = useState("all");
@@ -228,9 +227,6 @@ function Returns() {
   }, [branchFilter, statusFilter]);
   useEffect(() => { load(); }, [load]);
 
-  useEffect(() => {
-    api.getBranches().then(setBranches).catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (!sheetOpen) return;
@@ -283,6 +279,18 @@ function Returns() {
   const updateRow = (i: number, patch: Partial<ItemRow>) =>
     setItemRows(rows => rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
 
+  // Every row defaulted to condition "good" / restock true regardless of the selected reason —
+  // a cashier picking "Damaged packaging" or "Expired product" had to remember to separately
+  // flip the restock toggle, or that stock silently went back to sellable inventory. Re-derive
+  // the sensible default whenever the reason changes; the restock toggle below can still
+  // override it per return (e.g. only the outer packaging was damaged).
+  useEffect(() => {
+    const nonSellable = form.reason === "Damaged packaging" || form.reason === "Expired product" || form.reason === "Quality issue";
+    const condition = form.reason === "Expired product" ? "expired" : nonSellable ? "damaged" : "good";
+    setItemRows(rows => rows.map(r => ({ ...r, condition, restock: !nonSellable })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.reason]);
+
   const selectedItems = itemRows.filter(r => r.selected);
   const totalRefund = selectedItems.reduce((s, r) => s + r.qty * r.unitPrice, 0);
 
@@ -309,7 +317,6 @@ function Returns() {
       const branchName =
         order.branch?.name ??
         allBranches.find(b => b.id === order!.branchId)?.name ??
-        branches.find(b => b.id === order!.branchId)?.name ??
         "Unknown branch";
       setMatchedBranchName(branchName);
       setForm(p => ({ ...p, orderId: order!.id, branchId: order!.branchId, customerId: order!.customerId ?? p.customerId }));
@@ -398,7 +405,7 @@ function Returns() {
           <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            {allBranches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -601,7 +608,7 @@ function Returns() {
                     <td className="px-3 py-3 font-mono text-xs font-bold">{r.returnNumber}</td>
                     <td className="px-3 py-3 font-mono text-xs">{r.order?.orderNumber ?? "—"}</td>
                     <td className="px-3 py-3">{r.customer?.fullName ?? "—"}</td>
-                    <td className="px-3 py-3 text-xs">{branches.find(b => b.id === r.branchId)?.name ?? "—"}</td>
+                    <td className="px-3 py-3 text-xs">{allBranches.find(b => b.id === r.branchId)?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs max-w-[130px] truncate">{r.reason ?? "—"}</td>
                     <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{r.refundAmount.toFixed(2)}</td>
                     <td className="px-3 py-3 text-xs capitalize">{r.refundMethod?.replace(/_/g, " ") ?? "—"}</td>

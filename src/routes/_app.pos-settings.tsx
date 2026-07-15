@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { RoleGate } from "@/components/role-gate";
+import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -12,12 +12,14 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type PosSettingsRecord } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
+import { BranchFilter } from "@/components/branch-filter";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app/pos-settings")({
   component: () => (
-    <RoleGate allow={["tenant_admin", "branch_manager"]}>
+    <ModuleGate module="Settings">
       <PosSettings />
-    </RoleGate>
+    </ModuleGate>
   ),
 });
 
@@ -75,15 +77,28 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 function PosSettings() {
-  const { selectedBranch } = useBranch();
+  const { user } = useAuth();
+  const { branches } = useBranch();
+  const isAdmin = user?.role === "tenant_admin";
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "");
+  useEffect(() => {
+    if (lockedBranchId) setBranchId(lockedBranchId);
+  }, [lockedBranchId]);
+  useEffect(() => {
+    if (!branchId && branches.length) {
+      setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id);
+    }
+  }, [branches, branchId]);
+
   const [s, setS] = useState<S>(DEFAULTS);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!selectedBranch?.id) return;
+    if (!branchId) return;
     setLoading(true);
-    api.getPosSettings(selectedBranch.id)
+    api.getPosSettings(branchId)
       .then((data: PosSettingsRecord) => {
         setS({
           requireShiftOpen:               data.requireShiftOpen              ?? DEFAULTS.requireShiftOpen,
@@ -112,17 +127,17 @@ function PosSettings() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [selectedBranch?.id]);
+  }, [branchId]);
 
   function t(key: keyof S) {
     return (v: boolean) => setS(prev => ({ ...prev, [key]: v }));
   }
 
   async function handleSave() {
-    if (!selectedBranch?.id) return;
+    if (!branchId) return;
     setSaving(true);
     try {
-      await api.updatePosSettings(selectedBranch.id, { ...s, branchId: selectedBranch.id });
+      await api.updatePosSettings(branchId, { ...s, branchId });
       toast.success("POS settings saved", { description: "All changes applied to this branch." });
     } catch {
       toast.error("Failed to save POS settings", { description: "Please try again." });
@@ -132,7 +147,11 @@ function PosSettings() {
   }
 
   return (
-    <PageShell title="POS Settings" subtitle="Configure cashier, terminal, payments, printing and permissions">
+    <PageShell
+      title="POS Settings"
+      subtitle="Configure cashier, terminal, payments, printing and permissions"
+      actions={<BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />}
+    >
       {loading && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading settings…

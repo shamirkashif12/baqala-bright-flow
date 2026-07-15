@@ -59,7 +59,9 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
         var customer = await db.Customers.FindAsync(id);
         if (customer is null) return NotFound();
         customer.FullName = updated.FullName;
+        customer.Phone = updated.Phone;
         customer.Email = updated.Email;
+        customer.Tier = updated.Tier;
         customer.Status = updated.Status;
         customer.PreferredBranchId = updated.PreferredBranchId;
         customer.UpdatedAt = DateTime.UtcNow;

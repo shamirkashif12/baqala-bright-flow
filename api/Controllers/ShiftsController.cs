@@ -16,6 +16,17 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
 
     private string? CallerRole() => User.FindFirst("role")?.Value;
 
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's shift
+    // data — same fix as BranchesController/ReportsController/TerminalsController. branchId was
+    // only an optional query param; a call with none (e.g. the KPI page's Cashier tab) returned
+    // every branch's cash totals, cashier identity, and terminal assignment regardless of role.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     // Reads the real, tenant-editable "Cash variance threshold" field from the
     // Opening/Closing Cash Policy tab (Settings → Policies & Conditions), so this
     // gate stays in sync with whatever a manager configures there. Only applied
@@ -37,6 +48,10 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         [FromQuery] DateTime? dateFrom,
         [FromQuery] DateTime? dateTo)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            branchId = callerBranchId;
+
         var query = db.CashierShifts.Include(s => s.Cashier).Include(s => s.Terminal).AsQueryable();
         if (branchId.HasValue)   query = query.Where(s => s.BranchId == branchId);
         if (cashierId.HasValue)  query = query.Where(s => s.CashierId == cashierId);
@@ -50,6 +65,10 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
     [HttpGet("active")]
     public async Task<IActionResult> GetActiveShifts([FromQuery] Guid? branchId)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            branchId = callerBranchId;
+
         var query = db.CashierShifts.Where(s => s.Status == "open").Include(s => s.Cashier).AsQueryable();
         if (branchId.HasValue) query = query.Where(s => s.BranchId == branchId);
         return Ok(await query.ToListAsync());
@@ -175,6 +194,16 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         if (CallerRole() == "cashier" && actorId != shift.CashierId) return Forbid();
 
         var isManagerOverride = actorId.HasValue && actorId.Value != shift.CashierId;
+
+        // Closing someone ELSE's shift is a managerial action — requires the same "Cashier
+        // Shifts" Approve permission the variance sign-off below already requires, not just
+        // "any authenticated role that isn't a cashier." Previously this endpoint had no
+        // permission check at all, so e.g. a Storekeeper (who can view this page but has no
+        // Cashier-Shifts authority in the seeded matrix) could check out any other cashier's
+        // shift. Closing your OWN shift (the common case) is unaffected.
+        if (isManagerOverride && !await PermissionCheck.HasPermissionAsync(User, db, "Cashier Shifts", PermAction.Approve))
+            return Forbid();
+
         if (isManagerOverride && string.IsNullOrWhiteSpace(req.Reason))
             return BadRequest(new { message = "A reason is required to close another cashier's shift." });
 

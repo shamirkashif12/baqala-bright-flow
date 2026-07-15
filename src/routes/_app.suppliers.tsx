@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusBadge } from "@/components/module-placeholder";
 import { Truck, Eye, Pencil, Plus, Trash2, Package, CheckCircle, Clock, ShoppingCart } from "lucide-react";
 import { SARIcon } from "@/lib/currency";
+import { toast } from "sonner";
 import { api, type Supplier, type PurchaseOrder, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 
@@ -460,8 +461,9 @@ function SuppliersTab() {
         setCreateOpen(false);
       }
       load();
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      toast.error(e?.message || "Failed to save supplier.");
     } finally {
       setSaving(false);
     }
@@ -469,8 +471,12 @@ function SuppliersTab() {
 
   const handleDelete = async (s: Supplier) => {
     if (!confirm(`Deactivate supplier "${s.name}"?`)) return;
-    await api.deleteSupplier(s.id);
-    load();
+    try {
+      await api.deleteSupplier(s.id);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to delete supplier.");
+    }
   };
 
   const totalSuppliers = suppliers.length;

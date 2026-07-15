@@ -734,6 +734,8 @@ function OrderDetail({ orderId, onStatusChanged }: {
       setOrder(o => o ? { ...o, orderStatus: newStatus } : o);
       setEditing(false);
       onStatusChanged();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update order status.");
     } finally { setSaving(false); }
   };
 

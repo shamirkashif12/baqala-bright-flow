@@ -14,9 +14,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ShieldCheck, Cigarette, Receipt, Calculator, Plus, Link as LinkIcon, Pencil } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { api, type TaxFeeRule, type Product } from "@/lib/api";
+import { api, type TaxFeeRule, type Product, type ZatcaSettings } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
+import { useBranch } from "@/lib/branch-context";
+import { BranchFilter } from "@/components/branch-filter";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/tax-fees")({ component: TaxFees });
@@ -29,6 +31,7 @@ type FeeForm = {
   status: string;
 };
 const emptyFeeForm: FeeForm = { ruleName: "", feeType: "fixed", value: "0.00", applicableTo: "all_products", status: "active" };
+const defaultZatcaSettings: ZatcaSettings = { branchId: "", phase2Enabled: false, environment: "sandbox" };
 
 // KSA tobacco excise formula: minimum 25 SAR rule
 function tobaccoFee(base: number): number {
@@ -58,12 +61,28 @@ function feeTypeDisplay(r: TaxFeeRule): { type: string; value: React.ReactNode }
 
 function TaxFees() {
   const { canCreate, canEdit } = usePermission("Tax & Fees");
-  const { canViewModule } = useAuth();
+  const { canEdit: canEditZatca } = usePermission("Compliance");
+  const { user, canViewModule } = useAuth();
+  const { branches } = useBranch();
+  // Only the ZATCA tab below is branch-scoped (Custom Fees/Tobacco Tax apply tenant-wide).
+  const isAdmin = user?.role === "tenant_admin";
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "");
+  useEffect(() => {
+    if (lockedBranchId) setBranchId(lockedBranchId);
+  }, [lockedBranchId]);
+  useEffect(() => {
+    if (!branchId && branches.length) {
+      setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id);
+    }
+  }, [branches, branchId]);
+  const branch = branches.find((b) => b.id === branchId) ?? null;
   const [rules, setRules] = useState<TaxFeeRule[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
-  const [zatca, setZatca] = useState(true);
-  const [phase2, setPhase2] = useState(true);
+  const [zatca, setZatca] = useState<ZatcaSettings>(defaultZatcaSettings);
+  const [zatcaSaving, setZatcaSaving] = useState(false);
+  const [credSaving, setCredSaving] = useState(false);
   const [feeDialogOpen, setFeeDialogOpen] = useState(false);
   const [editRule, setEditRule] = useState<TaxFeeRule | null>(null);
   const [form, setForm] = useState<FeeForm>(emptyFeeForm);
@@ -80,6 +99,13 @@ function TaxFees() {
       setStockMap(map);
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!branchId) return;
+    api.getZatcaSettings(branchId)
+      .then(data => setZatca({ ...defaultZatcaSettings, ...data }))
+      .catch(() => setZatca({ ...defaultZatcaSettings, branchId }));
+  }, [branchId]);
 
   const customFees = rules.filter(r => r.ruleType === "custom_fee");
   const tobaccoRule = rules.find(r => r.ruleType === "tobacco_excise");
@@ -107,6 +133,38 @@ function TaxFees() {
       toast.success(`Fee ${newStatus === "active" ? "activated" : "deactivated"}`);
       load();
     } catch { toast.error("Failed to update status"); }
+  };
+
+  const toggleZatcaEnabled = async (v: boolean) => {
+    if (!branchId || !canEditZatca) return;
+    const previous = zatca;
+    const next = { ...zatca, phase2Enabled: v };
+    setZatca(next);
+    setZatcaSaving(true);
+    try {
+      const updated = await api.updateZatcaSettings(branchId, next);
+      setZatca(updated);
+      toast.success(v ? "ZATCA e-Invoicing enabled" : "ZATCA e-Invoicing disabled");
+    } catch {
+      setZatca(previous);
+      toast.error("Failed to update ZATCA e-Invoicing status");
+    } finally {
+      setZatcaSaving(false);
+    }
+  };
+
+  const saveZatcaCredentials = async () => {
+    if (!branchId || !canEditZatca) return;
+    setCredSaving(true);
+    try {
+      const updated = await api.updateZatcaSettings(branchId, { vatRegistrationNumber: zatca.vatRegistrationNumber });
+      setZatca(updated);
+      toast.success("ZATCA credentials saved");
+    } catch {
+      toast.error("Failed to save ZATCA credentials");
+    } finally {
+      setCredSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -149,7 +207,7 @@ function TaxFees() {
     <PageShell title="Tax, Fees & Tobacco" subtitle="ZATCA-2 enablement, custom fees and tobacco excise">
       {/* ─── Metric cards ─────────────────────────────────────────────────── */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="ZATCA Status" value={zatca ? "Enabled" : "Disabled"} icon={ShieldCheck} accent={zatca ? "success" : "warning"} />
+        <MetricCard label="ZATCA Status" value={zatca.phase2Enabled ? "Enabled" : "Disabled"} icon={ShieldCheck} accent={zatca.phase2Enabled ? "success" : "warning"} />
         <MetricCard label="Active Custom Fees" value={String(activeCustomFeesCount)} icon={Receipt} accent="primary" />
         <MetricCard label="Tobacco SKUs" value={String(tobaccoProducts.length)} icon={Cigarette} accent="warning" />
         <MetricCard label="Excise Collected (MO)" value={<><SARIcon />18,420</>} icon={Calculator} accent="primary" />
@@ -205,6 +263,9 @@ function TaxFees() {
 
         {/* ── ZATCA 2 ── */}
         <TabsContent value="zatca" className="space-y-3 mt-4">
+          <div className="flex justify-end">
+            <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
+          </div>
           <Card className="p-6 border-success/30 bg-success/5 shadow-card">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -214,12 +275,18 @@ function TaxFees() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold">ZATCA e-Invoicing</h3>
-                    <Badge className="bg-success text-success-foreground border-0">Live</Badge>
+                    <Badge className={zatca.phase2Enabled ? "bg-success text-success-foreground border-0" : "bg-warning text-warning-foreground border-0"}>
+                      {zatca.phase2Enabled ? "Live" : "Disabled"}
+                    </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">Applied automatically on every billing &amp; order</p>
                 </div>
               </div>
-              <Switch checked={zatca} onCheckedChange={setZatca} />
+              <Switch
+                checked={zatca.phase2Enabled}
+                onCheckedChange={toggleZatcaEnabled}
+                disabled={zatcaSaving || !canEditZatca || !branch}
+              />
             </div>
           </Card>
 
@@ -231,28 +298,56 @@ function TaxFees() {
               </p>
               <div className="flex items-center justify-between rounded-xl border border-border/60 p-3">
                 <span className="text-sm">Auto-attach QR to every invoice</span>
-                <Switch checked={phase2} onCheckedChange={setPhase2} />
+                <Switch defaultChecked disabled={!canEditZatca} />
               </div>
               <div className="flex items-center justify-between rounded-xl border border-border/60 p-3">
                 <span className="text-sm">Print bilingual (AR/EN) receipts</span>
-                <Switch defaultChecked />
+                <Switch defaultChecked disabled={!canEditZatca} />
               </div>
             </Card>
             <Card className="p-5 space-y-3">
               <h4 className="font-semibold text-sm">Credentials</h4>
               <div className="space-y-1">
                 <Label className="text-xs">VAT Registration No.</Label>
-                <Input className="h-9" defaultValue="300012345600003" />
+                <Input
+                  className="h-9"
+                  value={zatca.vatRegistrationNumber ?? ""}
+                  onChange={e => setZatca(p => ({ ...p, vatRegistrationNumber: e.target.value }))}
+                  placeholder="300012345600003"
+                  disabled={!canEditZatca}
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">CR Number</Label>
-                <Input className="h-9" defaultValue="1010123456" />
+                <Input className="h-9" value={branch?.commercialRegistration ?? ""} disabled title="Edit on the Branches page" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">CSID Certificate</Label>
-                <Input className="h-9" defaultValue="•••••••• valid until Sep 2027" />
+                <Input
+                  className="h-9"
+                  value={
+                    zatca.hasProductionCsid ? "Production CSID issued"
+                      : zatca.hasComplianceCsid ? "Compliance CSID issued (sandbox)"
+                      : zatca.hasCsr ? "CSR generated — awaiting OTP"
+                      : "Not issued yet"
+                  }
+                  disabled
+                  title="Managed via the ZATCA onboarding flow"
+                />
               </div>
-              <Button size="sm" variant="outline">Re-onboard with ZATCA</Button>
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={saveZatcaCredentials}
+                  disabled={credSaving || !canEditZatca || !branch}
+                >
+                  {credSaving ? "Saving…" : "Save credentials"}
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <Link to="/zatca-settings">Re-onboard with ZATCA</Link>
+                </Button>
+              </div>
             </Card>
           </div>
         </TabsContent>

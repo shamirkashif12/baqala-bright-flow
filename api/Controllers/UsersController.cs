@@ -16,10 +16,50 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
 
     private string? CallerRole() => User.FindFirst("role")?.Value;
 
+    // Branch-scoped roles (anything but tenant_admin) may only see their own branch's staff —
+    // same fix as BranchesController/TerminalsController/DevicesController. branchId was only
+    // an optional query param; a call with none (e.g. Control Tower's Staff tab, or the
+    // cashier-check-in cashier picker) returned every branch's users, including name/email,
+    // regardless of caller role.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
+    // Real-world mart org chart, lower number = more authority. Mirrors ROLE_RANK in
+    // src/lib/role-hierarchy.ts and the role slugs AuthController.ToAppRole assigns.
+    private static readonly Dictionary<string, int> RoleRank = new()
+    {
+        ["tenant_admin"] = 1, ["branch_manager"] = 2, ["supervisor"] = 3,
+        ["cashier"] = 4, ["storekeeper"] = 4, ["finance_user"] = 4, ["marketing_user"] = 4, ["picker"] = 4,
+    };
+
+    // Mirrors AuthController.ToAppRole / src/lib/role-hierarchy.ts roleNameToSlug, so a
+    // Role.Name from the DB can be ranked the same way the frontend ranks it.
+    private static string RoleSlug(string? roleName) => roleName switch
+    {
+        "Tenant Administrator" or "Admin" => "tenant_admin",
+        "Branch Manager" or "Manager" => "branch_manager",
+        "Cashier" => "cashier",
+        "Storekeeper" or "Inventory Staff" => "storekeeper",
+        "Supervisor" => "supervisor",
+        "Finance User" or "Accountant" => "finance_user",
+        "Marketing User" or "Auditor" => "marketing_user",
+        "Picker" or "Warehouse Staff" => "picker",
+        _ => (roleName ?? "").ToLower().Replace(' ', '_'),
+    };
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
         var query = db.Users.Include(u => u.Role).Include(u => u.Branch).AsQueryable();
+
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            branchId = callerBranchId;
+
         if (branchId.HasValue) query = query.Where(u => u.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(u => u.Status == status);
         var users = await query.Select(u => new
@@ -131,8 +171,27 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUserRequest req)
     {
-        var user = await db.Users.FindAsync(id);
+        var user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == id);
         if (user is null) return NotFound();
+
+        // Changing role or status is privilege-affecting (can self-promote to tenant_admin, or
+        // deactivate/reactivate a peer). Mirrors canManageUser (src/lib/role-hierarchy.ts): never
+        // yourself, and only a strictly higher-ranked caller may do it to anyone else. This was
+        // previously enforced only in the UI (hiding the button) — a direct PUT could bypass it
+        // entirely, including a caller promoting their own account to Tenant Administrator.
+        var changingRoleOrStatus = (req.RoleId.HasValue && req.RoleId.Value != user.RoleId)
+            || (req.Status is not null && req.Status != user.Status);
+        if (changingRoleOrStatus)
+        {
+            if (CallerId() == id)
+                return BadRequest(new { message = "You cannot change your own role or status." });
+
+            var callerRank = RoleRank.GetValueOrDefault(CallerRole() ?? "", int.MaxValue);
+            var targetRank = RoleRank.GetValueOrDefault(RoleSlug(user.Role?.Name), int.MaxValue);
+            if (callerRank >= targetRank)
+                return Forbid();
+        }
+
         user.FullName = req.FullName ?? user.FullName;
         user.FullNameAr = req.FullNameAr ?? user.FullNameAr;
         user.RoleId = req.RoleId ?? user.RoleId;

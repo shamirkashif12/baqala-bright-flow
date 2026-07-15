@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter, type InventoryBatch } from "@/lib/api";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
+import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
@@ -636,9 +637,21 @@ function PrinterSetupDialog() {
 }
 
 function POS() {
-  // ─── Branch from global context ───────────────────────────────────────────────
-  const { selectedBranch: branch } = useBranch();
+  // ─── Branch: page-local filter, not the header ────────────────────────────────
   const { user } = useAuth();
+  const { branches } = useBranch();
+  const isAdmin = user?.role === "tenant_admin";
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "");
+  useEffect(() => {
+    if (lockedBranchId) setBranchId(lockedBranchId);
+  }, [lockedBranchId]);
+  useEffect(() => {
+    if (!branchId && branches.length) {
+      setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id);
+    }
+  }, [branches, branchId]);
+  const branch = branches.find((b) => b.id === branchId) ?? null;
 
   // ─── Data ─────────────────────────────────────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([]);
@@ -658,6 +671,14 @@ function POS() {
   const [flashSku, setFlashSku] = useState<string | null>(null);
   const [scanFlash, setScanFlash] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const pausedOrdersRef = useRef<HTMLDivElement>(null);
+
+  // Stable per-checkout-attempt id: generated on the first Confirm click and re-sent unchanged
+  // on any retry (e.g. after a network timeout), so the backend can recognize a retried request
+  // as the same attempt instead of creating a second paid order. Cleared once the sale actually
+  // succeeds so the next, genuinely new sale gets its own id.
+  const checkoutRequestIdRef = useRef<string | null>(null);
 
   // Refs so the global scanner listener always sees fresh values without re-registering
   const productsRef = useRef<Product[]>([]);
@@ -682,6 +703,13 @@ function POS() {
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
+
+  // Branch-configurable cashier permissions (POS Settings → Permissions tab). Cashier role only
+  // — Branch Manager/Supervisor/tenant_admin covering a register aren't restricted by these.
+  // Defaults match PosSettings.cs so the UI behaves the same as an unconfigured branch until the
+  // real settings load.
+  const [posPerms, setPosPerms] = useState({ cashierCanCoupon: true, cashierCanHoldOrder: true });
+  const isRestrictedCashier = user?.role === "cashier";
 
   // ─── Active Offers & Discounts ────────────────────────────────────────────────
   const [activeOffers, setActiveOffers] = useState<Offer[]>([]);
@@ -763,6 +791,14 @@ function POS() {
       } catch { setCart([]); }
     }
 
+    // Held orders are parked sales for THIS branch — restore them whenever the branch changes
+    // (switch or initial mount) rather than clearing them, so a tab reload or branch switch
+    // doesn't lose bills a cashier put on hold earlier in the day.
+    try {
+      const savedHolds = sessionStorage.getItem(`pos_holds_${branch.id}`);
+      setHolds(savedHolds ? (JSON.parse(savedHolds) as typeof holds) : []);
+    } catch { setHolds([]); }
+
     // Always reload stock, active shift, and ZATCA for the (new) branch
     api.getStock({ branchId: branch.id })
       .then((stocks) => {
@@ -816,6 +852,14 @@ function POS() {
         if (z.sellerName) setSellerName(z.sellerName);
       })
       .catch(() => {});
+
+    // POS Settings' "cashier can apply coupon"/"cashier can hold order" toggles previously had
+    // no effect on this screen at all — it hardcoded both as always-on regardless of what an
+    // admin configured. Missing settings row (new branch) keeps the PosSettings.cs defaults set
+    // above rather than resetting to some other value.
+    api.getPosSettings(branch.id)
+      .then((s) => setPosPerms({ cashierCanCoupon: s.cashierCanCoupon, cashierCanHoldOrder: s.cashierCanHoldOrder }))
+      .catch(() => {});
   }, [branch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Persist cart to session storage (survives tab navigation) ───────────────
@@ -823,6 +867,16 @@ function POS() {
     if (!branch) return;
     sessionStorage.setItem(`pos_cart_${branch.id}`, JSON.stringify(cart));
   }, [cart]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Persist held orders to session storage (survives tab navigation/reload) ─
+  // Previously held only in React state — a reload or crash silently lost every
+  // parked bill with no warning. Also read by the Cashier Workspace dashboard's
+  // "Held Orders" tile (see _app.cashier.tsx) instead of the dead `pos_holds`
+  // localStorage key nothing used to write.
+  useEffect(() => {
+    if (!branch) return;
+    sessionStorage.setItem(`pos_holds_${branch.id}`, JSON.stringify(holds));
+  }, [holds]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // Keep refs fresh so the scanner listener never has stale closures
@@ -1352,6 +1406,7 @@ function POS() {
 
   const resetSale = () => {
     api.notify("Sales / Checkout", "New Sale Started", "New Sale Started", "New sale started");
+    checkoutRequestIdRef.current = null;
     setCart([]);
     setAppliedCoupon(null);
     setCouponCode("");
@@ -1385,6 +1440,8 @@ function POS() {
           .map((p) => ({ paymentMethod: p.method, amount: p.amount, status: "completed" }))
       : [{ paymentMethod, amount: total, status: "completed" }];
 
+    if (!checkoutRequestIdRef.current) checkoutRequestIdRef.current = crypto.randomUUID();
+
     const order: Order = await api.createOrder({
       source: "pos",
       branchId: branch.id,
@@ -1413,7 +1470,11 @@ function POS() {
         };
       }),
       payments,
+      clientRequestId: checkoutRequestIdRef.current,
     });
+
+    // Sale confirmed — free the id so the next, genuinely new sale gets its own.
+    checkoutRequestIdRef.current = null;
 
     api.notify("Payment", "Payment Successful", "Payment Successful", `Payment successful for Invoice ${order.orderNumber}`,
       { entityType: "Order", entityId: order.id });
@@ -1491,7 +1552,12 @@ function POS() {
     <PageShell
       title="POS Checkout"
       subtitle={`${branch?.name ?? "Loading…"} · ${activeShift ? `Cashier: ${activeShift.cashier?.fullName ?? "Active shift"}` : "No active shift"}`}
-      actions={<PrinterSetupDialog />}
+      actions={
+        <>
+          <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
+          <PrinterSetupDialog />
+        </>
+      }
     >
       {/* Two-column split starts at md (tablet) so the order panel + Charge button stay
           reachable without scrolling past the whole cart on tablet-sized POS hardware —
@@ -1672,7 +1738,7 @@ function POS() {
 
           {/* ─── Paused Orders ────────────────────────────────────────────────── */}
           {holds.length > 0 && (
-            <Card className="border-border/60 shadow-card overflow-hidden">
+            <Card ref={pausedOrdersRef} className="border-border/60 shadow-card overflow-hidden">
               <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/60 bg-muted/30">
                 <RotateCcw className="h-3.5 w-3.5 text-primary" />
                 <span className="text-sm font-semibold">Paused Orders</span>
@@ -1836,7 +1902,7 @@ function POS() {
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
-            ) : (
+            ) : isRestrictedCashier && !posPerms.cashierCanCoupon ? null : (
               <div className="flex gap-1.5">
                 <div className="relative flex-1">
                   <Tag className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -2020,10 +2086,22 @@ function POS() {
           {/* Action buttons — always pinned */}
           <div className="px-3 pb-2 shrink-0">
             <div className="grid grid-cols-4 gap-1">
-              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={hold} disabled={cart.length === 0}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs gap-1"
+                onClick={hold}
+                disabled={cart.length === 0 || (isRestrictedCashier && !posPerms.cashierCanHoldOrder)}
+              >
                 <Pause className="h-3 w-3" />Hold
               </Button>
-              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={hold} disabled={holds.length === 0}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs gap-1"
+                onClick={() => pausedOrdersRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                disabled={holds.length === 0}
+              >
                 <RotateCcw className="h-3 w-3" />Held
                 {holds.length > 0 && (
                   <span className="ml-0.5 h-4 min-w-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">

@@ -20,94 +20,99 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
 
     [RequirePermission("Settings", PermAction.Edit)]
     [HttpPut("pos/{branchId:guid}")]
-    public async Task<IActionResult> UpsertPosSettings(Guid branchId, [FromBody] PosSettings updated)
+    public async Task<IActionResult> UpsertPosSettings(Guid branchId, [FromBody] PosSettingsPatchRequest updated)
     {
         var settings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == branchId);
         if (settings is null)
         {
-            updated.Id = Guid.NewGuid();
-            updated.BranchId = branchId;
-            updated.CreatedAt = updated.UpdatedAt = DateTime.UtcNow;
-            db.PosSettings.Add(updated);
-            settings = updated;
+            settings = new PosSettings { Id = Guid.NewGuid(), BranchId = branchId, CreatedAt = DateTime.UtcNow };
+            db.PosSettings.Add(settings);
         }
-        else
-        {
-            // Cashier tab
-            settings.RequireShiftOpen                 = updated.RequireShiftOpen;
-            settings.RequireOpeningCashCount          = updated.RequireOpeningCashCount;
-            settings.AutoLockIdle                     = updated.AutoLockIdle;
-            settings.AllowCustomerViewPaidShifts      = updated.AllowCustomerViewPaidShifts;
-            // Terminal tab
-            settings.AllowTerminalSwitching           = updated.AllowTerminalSwitching;
-            settings.PreserveHeldOrders               = updated.PreserveHeldOrders;
-            settings.OfflineModeEnabled               = updated.OfflineModeEnabled;
-            // Invoice tab
-            settings.AutoPrintReceipt                 = updated.AutoPrintReceipt;
-            settings.SendSmsInvoice                   = updated.SendSmsInvoice;
-            // Permissions tab
-            settings.CashierCanDiscount               = updated.CashierCanDiscount;
-            settings.CashierCanCoupon                 = updated.CashierCanCoupon;
-            settings.CashierCanRefund                 = updated.CashierCanRefund;
-            settings.CashierCanHoldOrder              = updated.CashierCanHoldOrder;
-            settings.CashierCanEditOrder              = updated.CashierCanEditOrder;
-            settings.RequireReasonForVoid             = updated.RequireReasonForVoid;
-            settings.RequireManagerApprovalForRefund  = updated.RequireManagerApprovalForRefund;
-            settings.AllowNegativeStock               = updated.AllowNegativeStock;
-            // Scan tab
-            settings.BeepOnScan                       = updated.BeepOnScan;
-            settings.WarnNearExpiry                   = updated.WarnNearExpiry;
-            settings.AllowNearExpirySale              = updated.AllowNearExpirySale;
-            settings.BlockExpiredItems                = updated.BlockExpiredItems;
-            settings.BlockNonpermissibleItems         = updated.BlockNonpermissibleItems;
-            // Expiry policy tab
-            settings.CloseToExpiryAlertDays           = updated.CloseToExpiryAlertDays;
-            settings.AllowExpiryManagerOverride       = updated.AllowExpiryManagerOverride;
-            settings.AutoMoveExpiredToBlockedList     = updated.AutoMoveExpiredToBlockedList;
-            settings.ExpiryNotificationFrequencyHours = updated.ExpiryNotificationFrequencyHours;
-            // Permissible items policy tab
-            settings.TobaccoAgeRestricted             = updated.TobaccoAgeRestricted;
-            settings.TobaccoRequireManagerApproval    = updated.TobaccoRequireManagerApproval;
-            settings.BlockAgeRestrictedAtCashier      = updated.BlockAgeRestrictedAtCashier;
-            settings.MinCustomerAge                   = updated.MinCustomerAge;
-            // Returns policy tab
-            settings.ReturnWindowDays                 = updated.ReturnWindowDays;
-            settings.ReturnRequireReceiptOnly         = updated.ReturnRequireReceiptOnly;
-            settings.AllowReturnsWithoutReceipt       = updated.AllowReturnsWithoutReceipt;
-            settings.ReturnManagerApprovalAboveSar    = updated.ReturnManagerApprovalAboveSar;
-            settings.RefundableCash                   = updated.RefundableCash;
-            settings.RefundableCard                   = updated.RefundableCard;
-            settings.RefundableWallet                 = updated.RefundableWallet;
-            settings.IssueStoreCreditForDamagedItems  = updated.IssueStoreCreditForDamagedItems;
-            settings.AllowExpiredItemReturn           = updated.AllowExpiredItemReturn;
-            // Refund policy tab
-            settings.MaxRefundPerCashierSar           = updated.MaxRefundPerCashierSar;
-            settings.RefundManagerApprovalAboveSar    = updated.RefundManagerApprovalAboveSar;
-            settings.AllowRefundReversalWithin24h     = updated.AllowRefundReversalWithin24h;
-            settings.AutoPrintRefundReceipt           = updated.AutoPrintRefundReceipt;
-            // Discount policy tab
-            settings.CashierMaxDiscountPct            = updated.CashierMaxDiscountPct;
-            settings.ManagerMaxDiscountPct            = updated.ManagerMaxDiscountPct;
-            settings.RequireReasonForDiscount         = updated.RequireReasonForDiscount;
-            // Coupon policy tab
-            settings.CombineMultipleCoupons           = updated.CombineMultipleCoupons;
-            settings.MaxCouponValueSar                = updated.MaxCouponValueSar;
-            // Cashier shift policy tab
-            settings.MaxShiftDurationHours            = updated.MaxShiftDurationHours;
-            settings.RequireBreakAfter4h              = updated.RequireBreakAfter4h;
-            settings.AutoCheckoutOnShiftEnd           = updated.AutoCheckoutOnShiftEnd;
-            // Opening/closing cash policy tab
-            settings.MinOpeningCashSar                = updated.MinOpeningCashSar;
-            settings.MaxOpeningCashSar                = updated.MaxOpeningCashSar;
-            settings.CashVarianceThresholdSar         = updated.CashVarianceThresholdSar;
-            settings.RequireManagerApprovalAboveCashThreshold = updated.RequireManagerApprovalAboveCashThreshold;
-            // Inventory adjustment policy tab
-            settings.RequireReasonForAdjustments      = updated.RequireReasonForAdjustments;
-            settings.AdjustmentCapPerDayUnits         = updated.AdjustmentCapPerDayUnits;
-            settings.ManagerApprovalForDamagedItems   = updated.ManagerApprovalForDamagedItems;
 
-            settings.UpdatedAt = DateTime.UtcNow;
-        }
+        // Every field is optional on the request and merges onto the existing value instead of
+        // overwriting unconditionally — several different screens (Compliance's 4 toggles, POS
+        // Settings' full form, more added over time) each only know about a subset of this
+        // ~55-field record, and a caller omitting a field must not silently reset it to the
+        // PosSettings class default. This previously bound directly to the PosSettings entity
+        // with non-nullable bool/decimal/int fields, so an absent JSON field was indistinguishable
+        // from an explicit false/0 — any save from any one screen wiped out every field the other
+        // screens manage.
+        // Cashier tab
+        settings.RequireShiftOpen                 = updated.RequireShiftOpen                 ?? settings.RequireShiftOpen;
+        settings.RequireOpeningCashCount          = updated.RequireOpeningCashCount          ?? settings.RequireOpeningCashCount;
+        settings.AutoLockIdle                     = updated.AutoLockIdle                     ?? settings.AutoLockIdle;
+        settings.AllowCustomerViewPaidShifts      = updated.AllowCustomerViewPaidShifts      ?? settings.AllowCustomerViewPaidShifts;
+        // Terminal tab
+        settings.AllowTerminalSwitching           = updated.AllowTerminalSwitching           ?? settings.AllowTerminalSwitching;
+        settings.PreserveHeldOrders                = updated.PreserveHeldOrders               ?? settings.PreserveHeldOrders;
+        settings.OfflineModeEnabled                = updated.OfflineModeEnabled               ?? settings.OfflineModeEnabled;
+        // Invoice tab
+        settings.AutoPrintReceipt                  = updated.AutoPrintReceipt                 ?? settings.AutoPrintReceipt;
+        settings.SendSmsInvoice                    = updated.SendSmsInvoice                   ?? settings.SendSmsInvoice;
+        // Self-checkout kiosk tab
+        settings.SelfCheckoutMaxOrderValueSar      = updated.SelfCheckoutMaxOrderValueSar      ?? settings.SelfCheckoutMaxOrderValueSar;
+        // Permissions tab
+        settings.CashierCanDiscount                = updated.CashierCanDiscount               ?? settings.CashierCanDiscount;
+        settings.CashierCanCoupon                   = updated.CashierCanCoupon                 ?? settings.CashierCanCoupon;
+        settings.CashierCanRefund                   = updated.CashierCanRefund                 ?? settings.CashierCanRefund;
+        settings.CashierCanHoldOrder                = updated.CashierCanHoldOrder              ?? settings.CashierCanHoldOrder;
+        settings.CashierCanEditOrder                = updated.CashierCanEditOrder              ?? settings.CashierCanEditOrder;
+        settings.RequireReasonForVoid               = updated.RequireReasonForVoid             ?? settings.RequireReasonForVoid;
+        settings.RequireManagerApprovalForRefund    = updated.RequireManagerApprovalForRefund   ?? settings.RequireManagerApprovalForRefund;
+        settings.AllowNegativeStock                 = updated.AllowNegativeStock                ?? settings.AllowNegativeStock;
+        // Scan tab
+        settings.BeepOnScan                         = updated.BeepOnScan                        ?? settings.BeepOnScan;
+        settings.WarnNearExpiry                     = updated.WarnNearExpiry                    ?? settings.WarnNearExpiry;
+        settings.AllowNearExpirySale                = updated.AllowNearExpirySale               ?? settings.AllowNearExpirySale;
+        settings.BlockExpiredItems                  = updated.BlockExpiredItems                 ?? settings.BlockExpiredItems;
+        settings.BlockNonpermissibleItems           = updated.BlockNonpermissibleItems          ?? settings.BlockNonpermissibleItems;
+        // Expiry policy tab
+        settings.CloseToExpiryAlertDays             = updated.CloseToExpiryAlertDays            ?? settings.CloseToExpiryAlertDays;
+        settings.AllowExpiryManagerOverride         = updated.AllowExpiryManagerOverride        ?? settings.AllowExpiryManagerOverride;
+        settings.AutoMoveExpiredToBlockedList       = updated.AutoMoveExpiredToBlockedList      ?? settings.AutoMoveExpiredToBlockedList;
+        settings.ExpiryNotificationFrequencyHours   = updated.ExpiryNotificationFrequencyHours  ?? settings.ExpiryNotificationFrequencyHours;
+        // Permissible items policy tab
+        settings.TobaccoAgeRestricted               = updated.TobaccoAgeRestricted             ?? settings.TobaccoAgeRestricted;
+        settings.TobaccoRequireManagerApproval       = updated.TobaccoRequireManagerApproval     ?? settings.TobaccoRequireManagerApproval;
+        settings.BlockAgeRestrictedAtCashier         = updated.BlockAgeRestrictedAtCashier       ?? settings.BlockAgeRestrictedAtCashier;
+        settings.MinCustomerAge                      = updated.MinCustomerAge                    ?? settings.MinCustomerAge;
+        // Returns policy tab
+        settings.ReturnWindowDays                    = updated.ReturnWindowDays                  ?? settings.ReturnWindowDays;
+        settings.ReturnRequireReceiptOnly            = updated.ReturnRequireReceiptOnly          ?? settings.ReturnRequireReceiptOnly;
+        settings.AllowReturnsWithoutReceipt          = updated.AllowReturnsWithoutReceipt        ?? settings.AllowReturnsWithoutReceipt;
+        settings.ReturnManagerApprovalAboveSar       = updated.ReturnManagerApprovalAboveSar     ?? settings.ReturnManagerApprovalAboveSar;
+        settings.RefundableCash                      = updated.RefundableCash                    ?? settings.RefundableCash;
+        settings.RefundableCard                      = updated.RefundableCard                    ?? settings.RefundableCard;
+        settings.RefundableWallet                    = updated.RefundableWallet                  ?? settings.RefundableWallet;
+        settings.IssueStoreCreditForDamagedItems     = updated.IssueStoreCreditForDamagedItems   ?? settings.IssueStoreCreditForDamagedItems;
+        settings.AllowExpiredItemReturn              = updated.AllowExpiredItemReturn            ?? settings.AllowExpiredItemReturn;
+        // Refund policy tab
+        settings.MaxRefundPerCashierSar              = updated.MaxRefundPerCashierSar            ?? settings.MaxRefundPerCashierSar;
+        settings.RefundManagerApprovalAboveSar       = updated.RefundManagerApprovalAboveSar     ?? settings.RefundManagerApprovalAboveSar;
+        settings.AllowRefundReversalWithin24h        = updated.AllowRefundReversalWithin24h      ?? settings.AllowRefundReversalWithin24h;
+        settings.AutoPrintRefundReceipt              = updated.AutoPrintRefundReceipt            ?? settings.AutoPrintRefundReceipt;
+        // Discount policy tab
+        settings.CashierMaxDiscountPct               = updated.CashierMaxDiscountPct             ?? settings.CashierMaxDiscountPct;
+        settings.ManagerMaxDiscountPct               = updated.ManagerMaxDiscountPct             ?? settings.ManagerMaxDiscountPct;
+        settings.RequireReasonForDiscount            = updated.RequireReasonForDiscount         ?? settings.RequireReasonForDiscount;
+        // Coupon policy tab
+        settings.CombineMultipleCoupons              = updated.CombineMultipleCoupons           ?? settings.CombineMultipleCoupons;
+        settings.MaxCouponValueSar                   = updated.MaxCouponValueSar                ?? settings.MaxCouponValueSar;
+        // Cashier shift policy tab
+        settings.MaxShiftDurationHours               = updated.MaxShiftDurationHours            ?? settings.MaxShiftDurationHours;
+        settings.RequireBreakAfter4h                 = updated.RequireBreakAfter4h               ?? settings.RequireBreakAfter4h;
+        settings.AutoCheckoutOnShiftEnd              = updated.AutoCheckoutOnShiftEnd            ?? settings.AutoCheckoutOnShiftEnd;
+        // Opening/closing cash policy tab
+        settings.MinOpeningCashSar                   = updated.MinOpeningCashSar                ?? settings.MinOpeningCashSar;
+        settings.MaxOpeningCashSar                   = updated.MaxOpeningCashSar                ?? settings.MaxOpeningCashSar;
+        settings.CashVarianceThresholdSar            = updated.CashVarianceThresholdSar         ?? settings.CashVarianceThresholdSar;
+        settings.RequireManagerApprovalAboveCashThreshold = updated.RequireManagerApprovalAboveCashThreshold ?? settings.RequireManagerApprovalAboveCashThreshold;
+        // Inventory adjustment policy tab
+        settings.RequireReasonForAdjustments         = updated.RequireReasonForAdjustments       ?? settings.RequireReasonForAdjustments;
+        settings.AdjustmentCapPerDayUnits            = updated.AdjustmentCapPerDayUnits          ?? settings.AdjustmentCapPerDayUnits;
+        settings.ManagerApprovalForDamagedItems      = updated.ManagerApprovalForDamagedItems    ?? settings.ManagerApprovalForDamagedItems;
+
+        settings.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
         await audit.LogAsync(
@@ -206,3 +211,68 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
         return Ok(attendance);
     }
 }
+
+// Every field nullable/optional so PUT pos/{branchId} can merge a partial payload onto the
+// existing PosSettings row instead of overwriting the ~50 fields the caller doesn't know about.
+// Mirrors PosSettings.cs field-for-field — keep both in sync when adding a setting.
+public record PosSettingsPatchRequest(
+    bool? RequireShiftOpen,
+    bool? RequireOpeningCashCount,
+    bool? AutoLockIdle,
+    bool? AllowCustomerViewPaidShifts,
+    bool? AllowTerminalSwitching,
+    bool? PreserveHeldOrders,
+    bool? OfflineModeEnabled,
+    bool? AutoPrintReceipt,
+    bool? SendSmsInvoice,
+    decimal? SelfCheckoutMaxOrderValueSar,
+    bool? CashierCanDiscount,
+    bool? CashierCanCoupon,
+    bool? CashierCanRefund,
+    bool? CashierCanHoldOrder,
+    bool? CashierCanEditOrder,
+    bool? RequireReasonForVoid,
+    bool? RequireManagerApprovalForRefund,
+    bool? AllowNegativeStock,
+    bool? BeepOnScan,
+    bool? WarnNearExpiry,
+    bool? AllowNearExpirySale,
+    bool? BlockExpiredItems,
+    bool? BlockNonpermissibleItems,
+    int? CloseToExpiryAlertDays,
+    bool? AllowExpiryManagerOverride,
+    bool? AutoMoveExpiredToBlockedList,
+    int? ExpiryNotificationFrequencyHours,
+    bool? TobaccoAgeRestricted,
+    bool? TobaccoRequireManagerApproval,
+    bool? BlockAgeRestrictedAtCashier,
+    int? MinCustomerAge,
+    int? ReturnWindowDays,
+    bool? ReturnRequireReceiptOnly,
+    bool? AllowReturnsWithoutReceipt,
+    decimal? ReturnManagerApprovalAboveSar,
+    bool? RefundableCash,
+    bool? RefundableCard,
+    bool? RefundableWallet,
+    bool? IssueStoreCreditForDamagedItems,
+    bool? AllowExpiredItemReturn,
+    decimal? MaxRefundPerCashierSar,
+    decimal? RefundManagerApprovalAboveSar,
+    bool? AllowRefundReversalWithin24h,
+    bool? AutoPrintRefundReceipt,
+    decimal? CashierMaxDiscountPct,
+    decimal? ManagerMaxDiscountPct,
+    bool? RequireReasonForDiscount,
+    bool? CombineMultipleCoupons,
+    decimal? MaxCouponValueSar,
+    int? MaxShiftDurationHours,
+    bool? RequireBreakAfter4h,
+    bool? AutoCheckoutOnShiftEnd,
+    decimal? MinOpeningCashSar,
+    decimal? MaxOpeningCashSar,
+    decimal? CashVarianceThresholdSar,
+    bool? RequireManagerApprovalAboveCashThreshold,
+    bool? RequireReasonForAdjustments,
+    int? AdjustmentCapPerDayUnits,
+    bool? ManagerApprovalForDamagedItems
+);

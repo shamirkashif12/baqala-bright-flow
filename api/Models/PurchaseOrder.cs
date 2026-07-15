@@ -126,6 +126,10 @@ public class PurchaseOrderItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
+    // Without this, EF's convention can't match the "PurchaseOrder" navigation to the "PoId"
+    // column (it looks for "PurchaseOrderId" by convention) and silently adds a second, unused
+    // shadow FK column instead of reusing PoId.
+    [ForeignKey(nameof(PoId))]
     [JsonIgnore] public PurchaseOrder? PurchaseOrder { get; set; }
     public Product? Product { get; set; }
 }
@@ -169,6 +173,11 @@ public class SupplierPayment
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
+    // Same fix as PurchaseOrderItem below: pin the FK to the real PoId column instead of
+    // letting EF create a second "PurchaseOrderId" shadow column for the same relationship —
+    // that shadow column is NOT NULL in the actual database and never gets a value, so every
+    // payment insert failed with "Column 'PurchaseOrderId' cannot be null".
+    [ForeignKey(nameof(PoId))]
     [JsonIgnore] public PurchaseOrder? PurchaseOrder { get; set; }
     public Supplier? Supplier { get; set; }
     public User? RecordedByUser { get; set; }

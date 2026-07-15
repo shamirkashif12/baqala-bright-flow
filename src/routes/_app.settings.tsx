@@ -16,6 +16,8 @@ import { api, type ZatcaSettings } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { useI18n } from "@/lib/i18n";
 import { isLang } from "@/locales/languages";
+import { BranchFilter } from "@/components/branch-filter";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app/settings")({
   component: () => (
@@ -48,8 +50,22 @@ function kstr(kv: Record<string, string | null>, key: string, def: string): stri
 function b(val: boolean): string { return val ? "1" : "0"; }
 
 function Settings() {
-  const { selectedBranch } = useBranch();
+  const { user } = useAuth();
+  const { branches } = useBranch();
   const { lang, setLang, languages } = useI18n();
+  // Business Profile / ZATCA sections here save to one specific branch's own record server-side.
+  const isAdmin = user?.role === "tenant_admin";
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "");
+  useEffect(() => {
+    if (lockedBranchId) setBranchId(lockedBranchId);
+  }, [lockedBranchId]);
+  useEffect(() => {
+    if (!branchId && branches.length) {
+      setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id);
+    }
+  }, [branches, branchId]);
+  const branch = branches.find((b) => b.id === branchId) ?? null;
   const [activeSection, setActiveSection] = useState("Business Profile");
 
   // ── Key-value store (tenant_settings) ────────────────────────────────────
@@ -57,21 +73,21 @@ function Settings() {
   const [kvLoading, setKvLoading] = useState(false);
 
   const loadKv = useCallback(() => {
-    if (!selectedBranch?.id) return;
+    if (!branchId) return;
     setKvLoading(true);
-    api.getTenantSettings(selectedBranch.id)
+    api.getTenantSettings(branchId)
       .then(setKv)
       .catch(() => {})
       .finally(() => setKvLoading(false));
-  }, [selectedBranch?.id]);
+  }, [branchId]);
 
   useEffect(() => { loadKv(); }, [loadKv]);
 
   async function saveKv(patch: Record<string, string | null>, successMsg: string) {
-    if (!selectedBranch?.id) return;
+    if (!branchId) return;
     const merged = { ...patch };
     try {
-      await api.updateTenantSettings(selectedBranch.id, merged);
+      await api.updateTenantSettings(branchId, merged);
       setKv(prev => ({ ...prev, ...merged }));
       toast.success(successMsg);
     } catch {
@@ -84,22 +100,22 @@ function Settings() {
   const [bizSaving, setBizSaving] = useState(false);
 
   useEffect(() => {
-    if (!selectedBranch) return;
+    if (!branch) return;
     setBiz({
-      nameEn: selectedBranch.name ?? "",
-      nameAr: selectedBranch.nameAr ?? "",
-      cr: selectedBranch.commercialRegistration ?? "",
+      nameEn: branch.name ?? "",
+      nameAr: branch.nameAr ?? "",
+      cr: branch.commercialRegistration ?? "",
       vat: "",
-      phone: selectedBranch.contactNumber ?? "",
-      email: selectedBranch.email ?? "",
+      phone: branch.contactNumber ?? "",
+      email: branch.email ?? "",
     });
-  }, [selectedBranch]);
+  }, [branch]);
 
   async function saveBiz() {
-    if (!selectedBranch?.id) return;
+    if (!branchId) return;
     setBizSaving(true);
     try {
-      await api.updateBranch(selectedBranch.id, {
+      await api.updateBranch(branchId, {
         name: biz.nameEn,
         nameAr: biz.nameAr,
         contactNumber: biz.phone,
@@ -120,9 +136,9 @@ function Settings() {
   const [zatcaSaving, setZatcaSaving] = useState(false);
 
   useEffect(() => {
-    if (!selectedBranch?.id || activeSection !== "Tax & ZATCA") return;
+    if (!branchId || activeSection !== "Tax & ZATCA") return;
     setZatcaLoading(true);
-    api.getZatcaSettings(selectedBranch.id)
+    api.getZatcaSettings(branchId)
       .then((data: ZatcaSettings) => setZatca({
         vatRegistrationNumber: data.vatRegistrationNumber ?? "",
         sellerName: data.sellerName ?? "",
@@ -131,13 +147,13 @@ function Settings() {
       }))
       .catch(() => {})
       .finally(() => setZatcaLoading(false));
-  }, [selectedBranch?.id, activeSection]);
+  }, [branchId, activeSection]);
 
   async function saveZatca() {
-    if (!selectedBranch?.id) return;
+    if (!branchId) return;
     setZatcaSaving(true);
     try {
-      await api.updateZatcaSettings(selectedBranch.id, zatca);
+      await api.updateZatcaSettings(branchId, zatca);
       toast.success("ZATCA settings saved");
     } catch {
       toast.error("Failed to save ZATCA settings");
@@ -165,7 +181,11 @@ function Settings() {
   }
 
   return (
-    <PageShell title="Settings" subtitle="Business · tax · operations · security">
+    <PageShell
+      title="Settings"
+      subtitle="Business · tax · operations · security"
+      actions={<BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />}
+    >
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
 
         {/* Sidebar */}

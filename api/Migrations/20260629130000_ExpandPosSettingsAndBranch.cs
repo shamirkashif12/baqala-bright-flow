@@ -1,17 +1,31 @@
+using BaqalaPOS.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace BaqalaPOS.Api.Migrations
 {
+    [DbContext(typeof(BaqalaDbContext))]
+    [Migration("20260629130000_ExpandPosSettingsAndBranch")]
     public partial class ExpandPosSettingsAndBranch : Migration
     {
-        // NOTE: Columns were applied directly to the DB via ALTER TABLE on 2026-06-29.
-        // This migration file records that history so EF won't try to re-apply it.
-        // The Up() uses raw SQL matching exactly what was run.
-
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS tenant_settings (
+                  id CHAR(36) NOT NULL,
+                  branch_id CHAR(36) NOT NULL,
+                  setting_key VARCHAR(100) NOT NULL,
+                  setting_value TEXT NULL,
+                  created_at DATETIME(6) NOT NULL,
+                  updated_at DATETIME(6) NOT NULL,
+                  PRIMARY KEY (id),
+                  UNIQUE KEY uq_branch_key (branch_id, setting_key)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+            ");
+
             migrationBuilder.Sql(@"
                 ALTER TABLE pos_settings
                   ADD COLUMN auto_lock_idle              TINYINT(1) NOT NULL DEFAULT 1,
@@ -62,6 +76,8 @@ namespace BaqalaPOS.Api.Migrations
                   DROP COLUMN commercial_registration,
                   DROP COLUMN email;
             ");
+
+            migrationBuilder.Sql("DROP TABLE IF EXISTS tenant_settings;");
         }
     }
 }

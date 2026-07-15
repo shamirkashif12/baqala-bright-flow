@@ -27,16 +27,22 @@ import {
 } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
+import { useAuth } from "@/lib/auth";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/warehouses")({ component: Warehouses });
 
 // ─── Shared Badge helpers ─────────────────────────────────────────────────────
 
-const APPROVAL_LABEL: Record<string, string> = { pending: "Request Generated", approved: "Approved", rejected: "Unapproved" };
+// Matches the real values WarehouseController writes (request_generated / approved / unapproved)
+// — this previously used "pending"/"rejected", which no request from this API ever actually has,
+// so the Pending Approval metric, the approval filter, and the Approve/Reject actions never
+// matched anything for a freshly created request.
+const APPROVAL_LABEL: Record<string, string> = { request_generated: "Request Generated", approved: "Approved", unapproved: "Unapproved" };
 const APPROVAL_CLASS: Record<string, string> = {
-  pending: "bg-warning/20 text-warning-foreground border-warning/30",
+  request_generated: "bg-warning/20 text-warning-foreground border-warning/30",
   approved: "bg-success/15 text-success border-success/30",
-  rejected: "bg-destructive/15 text-destructive border-destructive/30",
+  unapproved: "bg-destructive/15 text-destructive border-destructive/30",
 };
 const DELIVERY_LABEL: Record<string, string> = { pending: "Pending", in_transit: "On Way", delivered: "Delivered", failed: "Failed" };
 const DELIVERY_CLASS: Record<string, string> = {
@@ -1011,6 +1017,11 @@ function NewRequestSheet({
 }
 
 function StockRequestsTab() {
+  const { user } = useAuth();
+  // Enforced server-side under "Stock Transfers" (WarehouseController.Approve/CreateRequest/
+  // UpdateDelivery), not "Warehouses" — gate the actions here to match, so a view-only user
+  // doesn't see interactive-looking buttons that just 403 with no explanation.
+  const { canCreate, canApprove } = usePermission("Stock Transfers");
   const [requests, setRequests] = useState<WarehouseRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -1038,14 +1049,18 @@ function StockRequestsTab() {
     return mq && mdf && mdt;
   });
 
-  const pendingCount = requests.filter(r => r.approvalStatus === "pending").length;
+  const pendingCount = requests.filter(r => r.approvalStatus === "request_generated").length;
   const approvedCount = requests.filter(r => r.approvalStatus === "approved").length;
   const onWayCount = requests.filter(r => r.deliveryStatus === "in_transit").length;
   const deliveredCount = requests.filter(r => r.deliveryStatus === "delivered").length;
 
   const handleApprove = async (id: string, approved: boolean) => {
-    await api.approveWarehouseRequest(id, approved, "current-user");
-    load();
+    try {
+      await api.approveWarehouseRequest(id, approved, user?.id ?? "");
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update request.");
+    }
   };
 
   return (
@@ -1063,9 +1078,9 @@ function StockRequestsTab() {
           <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Statuses" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Approvals</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="request_generated">Pending</SelectItem>
             <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
+            <SelectItem value="unapproved">Rejected</SelectItem>
           </SelectContent>
         </Select>
         <Select value={deliveryFilter} onValueChange={setDeliveryFilter}>
@@ -1089,9 +1104,11 @@ function StockRequestsTab() {
           )}
         </div>
         <div className="flex-1" />
-        <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setNewOpen(true)}>
-          + New Request
-        </Button>
+        {canCreate && (
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setNewOpen(true)}>
+            + New Request
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -1133,7 +1150,7 @@ function StockRequestsTab() {
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewReq(r)}>
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
-                        {r.approvalStatus === "pending" && (
+                        {r.approvalStatus === "request_generated" && canApprove && (
                           <>
                             <Button size="icon" variant="ghost" className="h-7 w-7 text-success" onClick={() => handleApprove(r.id, true)}><CheckCircle className="h-3.5 w-3.5" /></Button>
                             <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleApprove(r.id, false)}><XCircle className="h-3.5 w-3.5" /></Button>
@@ -1215,7 +1232,7 @@ function StockRequestsTab() {
                       <span className={step.done ? "font-medium" : "text-muted-foreground"}>{step.label}</span>
                     </div>
                   ))}
-                  {viewReq.approvalStatus === "pending" && (
+                  {viewReq.approvalStatus === "request_generated" && canApprove && (
                     <div className="flex gap-2 pt-4 border-t border-border/40">
                       <Button size="sm" className="gradient-primary text-primary-foreground border-0 flex-1" onClick={() => { handleApprove(viewReq.id, true); setViewReq(null); }}>
                         <CheckCircle className="h-3.5 w-3.5 mr-1.5" />Approve

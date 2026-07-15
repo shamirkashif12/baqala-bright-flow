@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Mail, Phone, Pencil, ShieldCheck, Power, Plus, Search, Calendar, X } from "lucide-react";
+import { toast } from "sonner";
 import { api, type User, type Branch, type Role } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -89,8 +90,9 @@ function RegisteredUsers() {
       }
       setDlgOpen(false);
       load();
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      toast.error(e?.message || "Failed to save user.");
     } finally {
       setSaving(false);
     }

@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Lock, Plus, Shield, UserCog, Trash2, Loader2, Users, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 import { api, type Role, type RolePermission, type User, type UserPermissionOverride } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/roles")({
@@ -353,7 +354,10 @@ function UserPermDialog({ user, rolePerms, onClose, onSaved }: { user: User; rol
       await api.updateUserPermissions(user.id, perms);
       onSaved();
       onClose();
-    } catch (e) { console.error("Save permissions failed", e); }
+    } catch (e: any) {
+      console.error("Save permissions failed", e);
+      toast.error(e?.message || "Failed to save permissions.");
+    }
     finally { setSaving(false); }
   };
 
@@ -363,7 +367,10 @@ function UserPermDialog({ user, rolePerms, onClose, onSaved }: { user: User; rol
       await api.resetUserPermissions(user.id);
       setPerms(rolePerms);
       onSaved();
-    } catch (e) { console.error("Reset permissions failed", e); }
+    } catch (e: any) {
+      console.error("Reset permissions failed", e);
+      toast.error(e?.message || "Failed to reset permissions.");
+    }
     finally { setResetting(false); }
   };
 
@@ -455,7 +462,10 @@ function Roles() {
       const data = await loadAll();
       setActive(data.find(r => r.id === active.id) ?? null);
       setDirty(false);
-    } catch (e) { console.error("Save failed", e); }
+    } catch (e: any) {
+      console.error("Save failed", e);
+      toast.error(e?.message || "Failed to save role.");
+    }
     finally { setSaving(false); }
   };
 
@@ -466,7 +476,10 @@ function Roles() {
       await api.deleteRole(roleId);
       const data = await loadAll();
       if (active?.id === roleId) setActive(data[0] ?? null);
-    } catch (e) { console.error("Delete failed", e); }
+    } catch (e: any) {
+      console.error("Delete failed", e);
+      toast.error(e?.message || "Failed to delete role — it may still have users assigned to it.");
+    }
     finally { setDeleting(null); }
   };
 

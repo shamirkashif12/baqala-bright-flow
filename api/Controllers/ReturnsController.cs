@@ -63,6 +63,25 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CustomerReturn ret)
     {
+        // Cap each line to what's actually still returnable on the original order item — the
+        // ordered quantity minus whatever's already been claimed by a prior non-rejected return
+        // for that same order item. Without this, the same invoice line could be fully returned
+        // (refund + restock) more than once through this same endpoint.
+        foreach (var item in ret.Items)
+        {
+            if (!item.OrderItemId.HasValue) continue;
+            var orderItem = await db.OrderItems.FindAsync(item.OrderItemId.Value);
+            if (orderItem is null) continue;
+
+            var alreadyReturned = await db.CustomerReturnItems
+                .Where(i => i.OrderItemId == item.OrderItemId && i.Return!.Status != "rejected")
+                .SumAsync(i => i.Quantity);
+
+            var remaining = orderItem.Quantity - alreadyReturned;
+            if (item.Quantity > remaining)
+                return BadRequest(new { message = $"Only {remaining} unit(s) of this item can still be returned ({alreadyReturned} already claimed by a prior return)." });
+        }
+
         ret.Id = Guid.NewGuid();
         ret.ReturnNumber = $"RET-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
         ret.Status = "pending";

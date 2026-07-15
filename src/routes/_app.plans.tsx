@@ -54,14 +54,14 @@ function handlePlanAction(plan: Plan, cycle: Cycle) {
     return;
   }
   if (plan.status === "contact") {
-    toast.success("Request sent to sales team", { description: "Our team will contact you within 1 business day to discuss your Enterprise needs." });
+    toast.info("Contact sales", { description: "Please contact support or your account manager to discuss your Enterprise needs." });
     return;
   }
   // upgrade
   const discount = cycle === "Annual (−15%)" ? 0.85 : cycle === "Quarterly (−5%)" ? 0.95 : 1;
   const effective = Math.round(plan.price * discount);
-  toast.success(`Upgrade to ${plan.name} initiated`, {
-    description: `${cycle} billing · SAR ${effective}/mo. Redirecting to payment…`,
+  toast.info(`Upgrade to ${plan.name}`, {
+    description: `${cycle} billing · SAR ${effective}/mo. Please contact support or your account manager to complete this upgrade.`,
   });
 }
 
@@ -180,7 +180,7 @@ function Plans() {
             <p className="text-sm text-muted-foreground mt-0.5">Next billing date: Jul 29, 2026 · SAR 349/month · Monthly</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => toast.info("Billing history", { description: "Opening invoice history…" })}>View invoices</Button>
+            <Button variant="outline" size="sm" onClick={() => toast.info("Billing history", { description: "Please contact support or your account manager for your invoice history." })}>View invoices</Button>
             <Button variant="outline" size="sm" onClick={() => toast.info("Cancel subscription", { description: "Please contact support to cancel your subscription." })}>Cancel plan</Button>
           </div>
         </div>

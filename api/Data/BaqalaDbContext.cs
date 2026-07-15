@@ -112,6 +112,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
         modelBuilder.Entity<Coupon>().HasIndex(c => c.Code).IsUnique();
         modelBuilder.Entity<WarehouseRequest>().HasIndex(w => w.RequestNumber).IsUnique();
         modelBuilder.Entity<Order>().HasIndex(o => o.OrderNumber).IsUnique();
+        modelBuilder.Entity<Order>().HasIndex(o => o.ClientRequestId).IsUnique();
 
         modelBuilder.Entity<InventoryStock>()
             .HasIndex(i => new { i.ProductId, i.BranchId }).IsUnique();

@@ -2313,6 +2313,12 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     private async Task<ProfitMarginResult> BuildProfitMarginAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, string groupBy)
     {
+        // Missing from this one builder (every sibling — daily/monthly/cashier-sales etc. —
+        // already does this): without it, a branch-scoped caller could pass a different
+        // branchId (or omit it) and read another branch's COGS/gross-margin figures.
+        var (scopeRole, scopeBranchId) = GetCallerContext();
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+
         var itemsQ = db.OrderItems.Include(i => i.Order).ThenInclude(o => o!.Branch).Include(i => i.Product).ThenInclude(p => p!.Category)
             .Where(i => i.Order != null && i.Order.CreatedAt >= rangeFrom && i.Order.CreatedAt < rangeToExclusive && i.Order.PaymentStatus == "paid");
         if (branchId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.BranchId == branchId);

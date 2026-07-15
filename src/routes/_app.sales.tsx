@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { Wallet, Receipt, Percent, RotateCcw, X } from "lucide-react";
+import { toast } from "sonner";
 import { api, type Order, type Branch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { SARIcon, fmtSAR } from "@/lib/currency";
@@ -46,7 +47,7 @@ function Sales() {
       to: dateTo || undefined,
     })
       .then(setOrders)
-      .catch(console.error)
+      .catch(e => { console.error(e); toast.error("Failed to load sales data."); })
       .finally(() => setLoading(false));
   }, [branchId, payFilter, dateFrom, dateTo]);
 

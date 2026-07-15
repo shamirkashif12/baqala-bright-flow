@@ -14,8 +14,11 @@ import {
   Clock, Banknote, CreditCard, Smartphone, LogIn, LogOut,
   RefreshCw, CheckCircle2, XCircle, Loader2, UserCheck,
 } from "lucide-react";
+import { toast } from "sonner";
 import { api, type CashierShift, type User, type Branch, type Terminal } from "@/lib/api";
 import { useAuth, type AuthUser } from "@/lib/auth";
+import { useBranch } from "@/lib/branch-context";
+import { BranchFilter } from "@/components/branch-filter";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/cashier-shift")({ component: Shift });
@@ -34,8 +37,15 @@ function elapsed(openedAt: string) {
 function Shift() {
   const { user } = useAuth();
   const isCashier = user?.role === "cashier";
-  // Non-admins locked to their branch; cashiers additionally locked to their own shifts
-  const effectiveBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? undefined) : undefined;
+  const isAdmin = user?.role === "tenant_admin";
+  // Page-local branch filter — locked to the caller's own branch for every non-admin role.
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+  const { branches } = useBranch();
+  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
+  useEffect(() => {
+    if (lockedBranchId) setBranchFilter(lockedBranchId);
+  }, [lockedBranchId]);
+  const effectiveBranchId = branchFilter !== "all" ? branchFilter : undefined;
   const effectiveCashierId = isCashier ? (user?.id ?? undefined) : undefined;
 
   const [shifts, setShifts] = useState<CashierShift[]>([]);
@@ -52,7 +62,7 @@ function Shift() {
   useEffect(() => { refetch(); }, [refetch]);
 
   const approveVariance = (id: string) => {
-    api.approveVariance(id).then(refetch).catch(() => {});
+    api.approveVariance(id).then(refetch).catch((e: any) => toast.error(e?.message || "Failed to approve variance."));
   };
 
   const activeShifts = shifts.filter(s => s.status === "open");
@@ -120,6 +130,7 @@ function Shift() {
           {activeShifts.length} open shift{activeShifts.length !== 1 ? "s" : ""} · {shifts.length} total today
         </p>
         <div className="flex gap-2">
+          <BranchFilter branches={branches} value={branchFilter} onChange={setBranchFilter} locked={!!lockedBranchId} allowAll />
           <Button variant="outline" size="sm" onClick={refetch} className="gap-1.5">
             <RefreshCw className="h-3.5 w-3.5" />Refresh
           </Button>

@@ -140,8 +140,12 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
     public async Task<IActionResult> ValidateCoupon(string code)
     {
         var now = DateTime.UtcNow;
+        // Codes are always stored uppercase (CreateCoupon/UpdateCoupon UI uppercases on save) —
+        // normalize the lookup too instead of relying on the database column's collation to be
+        // case-insensitive, which is environment-dependent and not guaranteed.
+        var codeNorm = code.Trim().ToUpper();
         var coupon = await db.Coupons.FirstOrDefaultAsync(c =>
-            c.Code == code && c.Status == "active" &&
+            c.Code == codeNorm && c.Status == "active" &&
             c.StartDate <= now &&
             c.EndDate >= now &&
             (c.UsageLimit == null || c.UsedCount < c.UsageLimit));

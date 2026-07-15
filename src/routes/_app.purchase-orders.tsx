@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { toast } from "sonner";
 import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product, type SupplierCreditNote, type StockTransfer, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -105,8 +106,20 @@ function MultiSelect({
 
 // ─── 5-Step Create PO Wizard ─────────────────────────────────────────────────
 
-interface POItemDraft { productId: string; productName: string; quantity: number; unitCost: number; }
-const emptyItem = (): POItemDraft => ({ productId: "", productName: "", quantity: 1, unitCost: 0 });
+interface POItemDraft { productId: string; productName: string; qtyByWarehouse: Record<string, number>; unitCost: number; }
+
+// Splits `total` units across `ids` as evenly as possible; any remainder (from non-divisible
+// totals) goes to the first warehouses in the list rather than silently dropping units.
+function evenSplit(total: number, ids: string[]): Record<string, number> {
+  if (ids.length === 0) return {};
+  const base = Math.floor(total / ids.length);
+  const remainder = total - base * ids.length;
+  const out: Record<string, number> = {};
+  ids.forEach((id, idx) => { out[id] = base + (idx < remainder ? 1 : 0); });
+  return out;
+}
+
+const emptyItem = (warehouseIds: string[]): POItemDraft => ({ productId: "", productName: "", qtyByWarehouse: evenSplit(1, warehouseIds), unitCost: 0 });
 
 const TOTAL_STEPS = 5;
 
@@ -140,7 +153,7 @@ function CreatePOWizard({
   const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
   // Step 3
-  const [items, setItems] = useState<POItemDraft[]>([emptyItem()]);
+  const [items, setItems] = useState<POItemDraft[]>([emptyItem([])]);
   // Step 4 notes
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -148,27 +161,60 @@ function CreatePOWizard({
 
   const reset = () => {
     setStep(1); setSupplierId(""); setSupplierType("Direct Supplier"); setPaymentTerms("Net 30");
-    setWarehouseIds([]); setExpectedDeliveryDate(""); setItems([emptyItem()]); setNotes(""); setError("");
+    setWarehouseIds([]); setExpectedDeliveryDate(""); setItems([emptyItem([])]); setNotes(""); setError("");
   };
 
   const handleClose = () => { reset(); onClose(); };
 
-  const addItem = () => setItems(p => [...p, emptyItem()]);
+  // Keep every item's warehouse split in sync with the current delivery-location selection —
+  // redistributing its existing total evenly across whichever warehouses are now selected —
+  // so switching warehouses in Step 2 never leaves stale/missing allocations for Step 3.
+  useEffect(() => {
+    setItems(prev => prev.map(it => {
+      const keys = Object.keys(it.qtyByWarehouse);
+      const sameSet = keys.length === warehouseIds.length && warehouseIds.every(id => id in it.qtyByWarehouse);
+      if (sameSet) return it;
+      const total = keys.reduce((s, k) => s + (it.qtyByWarehouse[k] || 0), 0) || (keys.length === 0 ? 1 : 0);
+      return { ...it, qtyByWarehouse: evenSplit(total, warehouseIds) };
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [warehouseIds.join(",")]);
+
+  const addItem = () => setItems(p => [...p, emptyItem(warehouseIds)]);
   const removeItem = (i: number) => setItems(p => p.filter((_, idx) => idx !== i));
-  const setItemField = (i: number, key: keyof POItemDraft, val: string | number) =>
+  const setItemField = (i: number, key: "productId" | "productName" | "unitCost", val: string | number) =>
     setItems(p => p.map((row, idx) => idx === i ? { ...row, [key]: val } : row));
+  const setItemQty = (i: number, whId: string, val: number) =>
+    setItems(p => p.map((row, idx) => idx === i ? { ...row, qtyByWarehouse: { ...row.qtyByWarehouse, [whId]: Math.max(0, val) } } : row));
+  const splitEvenly = (i: number) =>
+    setItems(p => p.map((row, idx) => {
+      if (idx !== i) return row;
+      const total = Object.values(row.qtyByWarehouse).reduce((s, v) => s + (v || 0), 0);
+      return { ...row, qtyByWarehouse: evenSplit(total, warehouseIds) };
+    }));
+
+  const totalQty = (it: POItemDraft) => Object.values(it.qtyByWarehouse).reduce((s, v) => s + (v || 0), 0);
+  const subtotalForWarehouse = (whId: string) => items.reduce((s, it) => s + (it.qtyByWarehouse[whId] || 0) * it.unitCost, 0);
 
   const selectedSupplier = suppliers.find(s => s.id === supplierId);
   const selectedWarehouses = warehouses.filter(w => warehouseIds.includes(w.id));
-  const total = items.reduce((s, it) => s + it.quantity * it.unitCost, 0);
-  const grandTotal = total * Math.max(warehouseIds.length, 1);
+  const grandTotal = items.reduce((s, it) => s + totalQty(it) * it.unitCost, 0);
+  // Warehouses that will actually receive a PO — one with zero units allocated across every
+  // item is skipped rather than sent an empty order.
+  const plannedWarehouseIds = warehouseIds.filter(whId => items.some(it => it.productId && (it.qtyByWarehouse[whId] || 0) > 0));
 
   const validateStep = () => {
     if (step === 1 && !supplierId) { setError("Please select a supplier."); return false; }
     if (step === 2 && warehouseIds.length === 0) { setError("Please select at least one delivery location."); return false; }
     if (step === 3) {
-      const valid = items.filter(it => it.productId && it.quantity > 0);
+      const valid = items.filter(it => it.productId && totalQty(it) > 0);
       if (!valid.length) { setError("Add at least one item with a product selected."); return false; }
+      const emptyWarehouse = warehouseIds.find(whId => !valid.some(it => (it.qtyByWarehouse[whId] || 0) > 0));
+      if (emptyWarehouse) {
+        const name = warehouses.find(w => w.id === emptyWarehouse)?.name ?? "a selected warehouse";
+        setError(`${name} has no quantity allocated — split at least one item to it, or remove it in Step 2.`);
+        return false;
+      }
     }
     setError("");
     return true;
@@ -181,9 +227,12 @@ function CreatePOWizard({
     setSaving(true);
     setError("");
     try {
-      const validItems = items.filter(it => it.productId && it.quantity > 0);
-      const batchId = warehouseIds.length > 1 ? crypto.randomUUID() : undefined;
-      for (const whId of warehouseIds) {
+      const validItems = items.filter(it => it.productId && totalQty(it) > 0);
+      const batchId = plannedWarehouseIds.length > 1 ? crypto.randomUUID() : undefined;
+      for (const whId of plannedWarehouseIds) {
+        const whItems = validItems
+          .map(it => ({ productId: it.productId, orderedQuantity: it.qtyByWarehouse[whId] || 0, unitCost: it.unitCost }))
+          .filter(it => it.orderedQuantity > 0);
         await api.createPurchaseOrder({
           supplierId,
           warehouseId: whId,
@@ -192,11 +241,7 @@ function CreatePOWizard({
           notes: notes || undefined,
           batchId,
           orderedBy: user?.id,
-          items: validItems.map(it => ({
-            productId: it.productId,
-            orderedQuantity: it.quantity,
-            unitCost: it.unitCost,
-          })) as unknown as PurchaseOrderItem[],
+          items: whItems as unknown as PurchaseOrderItem[],
         });
       }
       onCreated();
@@ -288,7 +333,7 @@ function CreatePOWizard({
                 )}
                 {warehouseIds.length > 1 && (
                   <p className="text-xs text-primary mt-1">
-                    {warehouseIds.length} separate POs will be created — one per warehouse.
+                    {warehouseIds.length} POs will be created — next step lets you split each item's quantity across them.
                   </p>
                 )}
               </FieldRow>
@@ -306,11 +351,11 @@ function CreatePOWizard({
           {/* ── Step 3: Items ── */}
           {step === 3 && (
             <div className="space-y-3">
-              <div className="grid grid-cols-[1fr_64px_80px_28px] gap-1.5 text-xs font-semibold text-muted-foreground uppercase px-1">
+              <div className={`grid gap-1.5 text-xs font-semibold text-muted-foreground uppercase px-1 ${warehouseIds.length > 1 ? "grid-cols-[1fr_72px_80px_28px]" : "grid-cols-[1fr_64px_80px_28px]"}`}>
                 <span>Item</span><span className="text-right">Qty</span><span className="text-right">Unit Cost (SAR)</span><span />
               </div>
               {items.map((it, i) => (
-                <div key={i} className="grid grid-cols-[1fr_64px_80px_28px] gap-1.5 items-center">
+                <div key={i} className={`grid gap-1.5 items-center ${warehouseIds.length > 1 ? "grid-cols-[1fr_72px_80px_28px]" : "grid-cols-[1fr_64px_80px_28px]"}`}>
                   <Select
                     value={it.productId}
                     onValueChange={v => {
@@ -325,12 +370,42 @@ function CreatePOWizard({
                       {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <Input
-                    type="number" min={1}
-                    className="h-9 text-xs text-right"
-                    value={it.quantity}
-                    onChange={e => setItemField(i, "quantity", Number(e.target.value))}
-                  />
+                  {warehouseIds.length > 1 ? (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button type="button" className="h-9 rounded-md border border-input bg-background text-xs font-medium text-right px-1.5 hover:bg-muted">
+                          {totalQty(it)}
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-64 p-3 space-y-2" align="end">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-muted-foreground">Split across warehouses</p>
+                          <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => splitEvenly(i)}>Split evenly</button>
+                        </div>
+                        {warehouseIds.map(whId => (
+                          <div key={whId} className="flex items-center justify-between gap-2">
+                            <span className="text-xs truncate">{warehouses.find(w => w.id === whId)?.name ?? whId}</span>
+                            <Input
+                              type="number" min={0}
+                              className="h-7 w-16 text-xs text-right"
+                              value={it.qtyByWarehouse[whId] ?? 0}
+                              onChange={e => setItemQty(i, whId, Number(e.target.value))}
+                            />
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between border-t border-border/40 pt-1.5 text-xs font-semibold">
+                          <span>Total</span><span>{totalQty(it)}</span>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  ) : (
+                    <Input
+                      type="number" min={0}
+                      className="h-9 text-xs text-right"
+                      value={it.qtyByWarehouse[warehouseIds[0] ?? ""] ?? 0}
+                      onChange={e => setItemQty(i, warehouseIds[0] ?? "", Number(e.target.value))}
+                    />
+                  )}
                   <Input
                     type="number" min={0} step="0.01"
                     className="h-9 text-xs text-right"
@@ -349,14 +424,14 @@ function CreatePOWizard({
                 <Plus className="h-3.5 w-3.5" /> Add Row
               </Button>
               <div className="pt-1 border-t border-border/40 space-y-1">
-                {warehouseIds.length > 1 && (
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Per warehouse</span>
-                    <span className="flex items-center gap-0.5"><SARIcon />{fmt(total)}</span>
+                {warehouseIds.length > 1 && selectedWarehouses.map(w => (
+                  <div key={w.id} className="flex justify-between text-xs text-muted-foreground">
+                    <span>{w.name}</span>
+                    <span className="flex items-center gap-0.5"><SARIcon />{fmt(subtotalForWarehouse(w.id))}</span>
                   </div>
-                )}
+                ))}
                 <div className="flex justify-between text-sm font-bold">
-                  <span>{warehouseIds.length > 1 ? `${warehouseIds.length} warehouses — Grand Total` : "Total"}</span>
+                  <span>{warehouseIds.length > 1 ? "Grand Total" : "Total"}</span>
                   <span className={`flex items-center gap-0.5 ${warehouseIds.length > 1 ? "text-primary" : ""}`}><SARIcon />{fmt(grandTotal)}</span>
                 </div>
               </div>
@@ -386,28 +461,46 @@ function CreatePOWizard({
                   {selectedWarehouses.length === 0 ? "—"
                     : selectedWarehouses.length === 1 ? selectedWarehouses[0].name
                     : selectedWarehouses.map(w => w.name).join(", ")}
-                  {selectedWarehouses.length > 1 && <span className="block text-xs text-primary">{selectedWarehouses.length} POs will be created</span>}
+                  {plannedWarehouseIds.length > 1 && <span className="block text-xs text-primary">{plannedWarehouseIds.length} POs will be created</span>}
                 </span>
               </div>
-              <div className="pt-1 space-y-1.5">
+              <div className="pt-1 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Items</p>
-                {items.filter(it => it.productId).map((it, i) => {
-                  const name = products.find(p => p.id === it.productId)?.name ?? it.productName;
-                  return (
-                    <div key={i} className="flex justify-between text-sm border-b border-border/30 pb-1.5">
-                      <span>{name} × {it.quantity}</span>
-                      <span className="font-medium"><SARIcon />{fmt(it.quantity * it.unitCost)}</span>
-                    </div>
-                  );
-                })}
+                {warehouseIds.length > 1 ? (
+                  selectedWarehouses.map(w => {
+                    const rows = items.filter(it => it.productId && (it.qtyByWarehouse[w.id] || 0) > 0);
+                    if (!rows.length) return null;
+                    return (
+                      <div key={w.id} className="space-y-1 border-b border-border/30 pb-1.5">
+                        <p className="text-xs font-semibold text-primary">{w.name}</p>
+                        {rows.map((it, i) => {
+                          const name = products.find(p => p.id === it.productId)?.name ?? it.productName;
+                          const q = it.qtyByWarehouse[w.id] || 0;
+                          return (
+                            <div key={i} className="flex justify-between text-sm pl-1.5">
+                              <span>{name} × {q}</span>
+                              <span className="font-medium"><SARIcon />{fmt(q * it.unitCost)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })
+                ) : (
+                  items.filter(it => it.productId).map((it, i) => {
+                    const name = products.find(p => p.id === it.productId)?.name ?? it.productName;
+                    const q = totalQty(it);
+                    return (
+                      <div key={i} className="flex justify-between text-sm border-b border-border/30 pb-1.5">
+                        <span>{name} × {q}</span>
+                        <span className="font-medium"><SARIcon />{fmt(q * it.unitCost)}</span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
-              {warehouseIds.length > 1 && (
-                <div className="flex justify-between text-sm text-muted-foreground pt-2">
-                  <span>Per warehouse</span><span className="flex items-center gap-0.5"><SARIcon />{fmt(total)}</span>
-                </div>
-              )}
               <div className="flex justify-between font-bold text-base pt-1">
-                <span>{warehouseIds.length > 1 ? `Grand Total (×${warehouseIds.length})` : "Total"}</span>
+                <span>{warehouseIds.length > 1 ? "Grand Total" : "Total"}</span>
                 <span className={`flex items-center gap-0.5 ${warehouseIds.length > 1 ? "text-primary" : ""}`}><SARIcon />{fmt(grandTotal)}</span>
               </div>
             </div>
@@ -429,12 +522,12 @@ function CreatePOWizard({
                 <div className="flex justify-between"><span className="text-muted-foreground">Supplier</span><span className="font-medium">{selectedSupplier?.name ?? "—"}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Warehouses</span><span className="font-medium text-right">{selectedWarehouses.map(w => w.name).join(", ") || "—"}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Items</span><span className="font-medium">{items.filter(it => it.productId).length} product(s)</span></div>
-                {warehouseIds.length > 1 && (
-                  <div className="flex justify-between"><span className="text-muted-foreground">Per warehouse</span><span className="font-medium flex items-center gap-0.5"><SARIcon />{fmt(total)}</span></div>
-                )}
+                {plannedWarehouseIds.length > 1 && selectedWarehouses.map(w => (
+                  <div key={w.id} className="flex justify-between text-xs"><span className="text-muted-foreground">{w.name}</span><span className="font-medium flex items-center gap-0.5"><SARIcon />{fmt(subtotalForWarehouse(w.id))}</span></div>
+                ))}
                 <div className="flex justify-between border-t border-border/40 pt-2">
-                  <span className="text-muted-foreground">{warehouseIds.length > 1 ? `Grand Total (${warehouseIds.length} POs)` : "Order Total"}</span>
-                  <span className={`font-bold text-base flex items-center gap-0.5 ${warehouseIds.length > 1 ? "text-primary" : ""}`}><SARIcon />{fmt(grandTotal)}</span>
+                  <span className="text-muted-foreground">{plannedWarehouseIds.length > 1 ? `Grand Total (${plannedWarehouseIds.length} POs)` : "Order Total"}</span>
+                  <span className={`font-bold text-base flex items-center gap-0.5 ${plannedWarehouseIds.length > 1 ? "text-primary" : ""}`}><SARIcon />{fmt(grandTotal)}</span>
                 </div>
               </div>
             </div>
@@ -566,6 +659,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
 }) {
   const { user } = useAuth();
   const [receiveOpen, setReceiveOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("bank_transfer");
   const [payRef, setPayRef] = useState("");
@@ -576,15 +670,23 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
   const [raisedDns, setRaisedDns] = useState<Set<string>>(new Set());
   const [raisingDn, setRaisingDn] = useState<string | null>(null);
 
-  // Reset raised-DN tracking when switching POs
-  useEffect(() => { if (!open) setRaisedDns(new Set()); }, [open, po?.id]);
+  // Reset raised-DN tracking and the warehouse switcher when opening a different PO/batch
+  useEffect(() => { if (!open) setRaisedDns(new Set()); setActiveIdx(0); }, [open, po?.id]);
+
+  if (!po) return null;
+
+  const isBatch = batchGroup.length > 1;
+  // The warehouse currently selected in the switcher below — items, payments, receiving and
+  // status all act on this specific PO, since a batch order is really N independent per-warehouse
+  // POs that each progress (and get received) on their own schedule.
+  const activePo = (isBatch ? batchGroup[activeIdx] : null) ?? po;
 
   const handleRaiseShortage = async (item: PurchaseOrderItem) => {
     const key = item.productId;
     setRaisingDn(key);
     try {
       await api.raiseShortageDebitNote({
-        poId: po!.id,
+        poId: activePo.id,
         productId: item.productId,
         expectedQuantity: item.orderedQuantity,
         receivedQuantity: item.receivedQuantity,
@@ -595,29 +697,22 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
     finally { setRaisingDn(null); }
   };
 
-  if (!po) return null;
-
-  const isBatch = batchGroup.length > 1;
   const batchTotal = isBatch ? batchGroup.reduce((s, p) => s + p.totalAmount, 0) : po.totalAmount;
   const batchPaid = isBatch ? batchGroup.reduce((s, p) => s + p.paidAmount, 0) : po.paidAmount;
-  const allDestinations = isBatch
-    ? batchGroup.map(p => p.warehouse?.name ?? p.branch?.name).filter(Boolean).join(", ")
-    : (po.warehouse?.name ?? po.branch?.name ?? "—");
 
   const handleAddPayment = async () => {
     const amount = parseFloat(payAmount);
     if (!amount || amount <= 0) return setPayError("Enter a valid amount.");
     setPayLoading(true); setPayError("");
     try {
-      await api.addSupplierPayment(po.id, { amount, paymentMethod: payMethod, referenceNumber: payRef || undefined, paymentDate: payDate, notes: payNotes || undefined, recordedBy: user?.id });
+      await api.addSupplierPayment(activePo.id, { amount, paymentMethod: payMethod, referenceNumber: payRef || undefined, paymentDate: payDate, notes: payNotes || undefined, recordedBy: user?.id });
       setPayAmount(""); setPayRef(""); setPayNotes(""); onRefresh();
     } catch (e) { setPayError(e instanceof Error ? e.message : "Failed."); }
     finally { setPayLoading(false); }
   };
 
-  const destName = po.warehouse?.name ?? po.branch?.name ?? "—";
   const statusOrder = ["draft", "sent", "partial_received", "fully_received"];
-  const currentStep = statusOrder.indexOf(po.status);
+  const currentStep = statusOrder.indexOf(activePo.status);
 
   return (
     <>
@@ -625,11 +720,32 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
         <SheetContent style={{ width: 560, maxWidth: "100vw" }} className="overflow-y-auto">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
-              {po.poNumber}
-              <StatusBadge status={po.status} />
-              <PayBadge status={po.paymentStatus} />
+              {activePo.poNumber}
+              <StatusBadge status={activePo.status} />
+              <PayBadge status={activePo.paymentStatus} />
             </SheetTitle>
           </SheetHeader>
+
+          {isBatch && (
+            <div className="mt-3 space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">
+                {batchGroup.length} warehouses in this batch — select one to view/receive its items
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {batchGroup.map((p, idx) => {
+                  const label = p.warehouse?.name ?? p.branch?.name ?? p.poNumber;
+                  const active = idx === activeIdx;
+                  return (
+                    <button key={p.id} type="button" onClick={() => setActiveIdx(idx)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${active ? "border-primary bg-primary/10 text-primary" : "border-border/60 text-muted-foreground hover:bg-muted"}`}>
+                      {label}
+                      <span className="opacity-70">· {STATUS_MAP[p.status]?.label ?? p.status}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <Tabs defaultValue="overview" className="mt-4">
             <TabsList className="grid grid-cols-4 h-8 text-xs">
@@ -642,42 +758,41 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
             <TabsContent value="overview" className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
-                  ["PO Number", isBatch ? `${po.poNumber} (+${batchGroup.length - 1} more)` : po.poNumber],
-                  ["Created", formatDate(po.createdAt)],
-                  ["Supplier", po.supplier?.name ?? "—"],
-                  ["Supplier Code", po.supplier?.supplierCode ?? "—"],
-                  ["Payment Terms", po.paymentTerms?.replace(/_/g, " ") ?? "—"],
-                  ["Expected Delivery", formatDate(po.expectedDeliveryDate)],
-                  ["Received Date", formatDate(po.receivedDate)],
+                  ["PO Number", activePo.poNumber],
+                  ["Created", formatDate(activePo.createdAt)],
+                  ["Supplier", activePo.supplier?.name ?? "—"],
+                  ["Supplier Code", activePo.supplier?.supplierCode ?? "—"],
+                  ["Payment Terms", activePo.paymentTerms?.replace(/_/g, " ") ?? "—"],
+                  ["Expected Delivery", formatDate(activePo.expectedDeliveryDate)],
+                  ["Received Date", formatDate(activePo.receivedDate)],
                 ].map(([k, v]) => (
                   <div key={k}><p className="text-xs text-muted-foreground">{k}</p><p className="font-medium">{v}</p></div>
                 ))}
-                <div className={isBatch ? "col-span-2" : ""}>
-                  <p className="text-xs text-muted-foreground">Destination{isBatch ? "s" : ""}</p>
-                  <p className="font-medium">{allDestinations}</p>
-                  {isBatch && <p className="text-xs text-primary mt-0.5">{batchGroup.length} warehouses — batch order</p>}
+                <div>
+                  <p className="text-xs text-muted-foreground">Destination</p>
+                  <p className="font-medium">{activePo.warehouse?.name ?? activePo.branch?.name ?? "—"}</p>
                 </div>
               </div>
               <div className="rounded-lg border border-border/60 p-3 space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Total Amount</span>
+                  <span className="font-semibold"><SARIcon />{fmt(activePo.totalAmount)}</span>
+                </div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Paid Amount</span><span className="font-semibold text-success"><SARIcon />{fmt(activePo.paidAmount)}</span></div>
+                <div className="flex justify-between text-sm border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Balance Due</span><span className="font-bold text-destructive"><SARIcon />{fmt(activePo.totalAmount - activePo.paidAmount)}</span></div>
                 {isBatch && (
-                  <div className="flex justify-between text-xs text-muted-foreground pb-1.5 border-b border-border/30">
-                    <span>Per warehouse</span><span className="flex items-center gap-0.5"><SARIcon />{fmt(po.totalAmount)}</span>
+                  <div className="flex justify-between text-xs text-muted-foreground border-t border-border/30 pt-1.5">
+                    <span>Batch grand total ({batchGroup.length} POs)</span><span className="flex items-center gap-0.5"><SARIcon />{fmt(batchTotal)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{isBatch ? `Grand Total (×${batchGroup.length})` : "Total Amount"}</span>
-                  <span className={`font-semibold ${isBatch ? "text-primary" : ""}`}><SARIcon />{fmt(batchTotal)}</span>
-                </div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Paid Amount</span><span className="font-semibold text-success"><SARIcon />{fmt(batchPaid)}</span></div>
-                <div className="flex justify-between text-sm border-t border-border/40 pt-1.5"><span className="text-muted-foreground">Balance Due</span><span className="font-bold text-destructive"><SARIcon />{fmt(batchTotal - batchPaid)}</span></div>
               </div>
-              {po.notes && <div><p className="text-xs text-muted-foreground mb-1">Notes</p><p className="text-sm bg-muted/30 rounded-lg px-3 py-2">{po.notes}</p></div>}
+              {activePo.notes && <div><p className="text-xs text-muted-foreground mb-1">Notes</p><p className="text-sm bg-muted/30 rounded-lg px-3 py-2">{activePo.notes}</p></div>}
             </TabsContent>
 
             <TabsContent value="items" className="mt-4 space-y-3">
               {/* Shortage banners — derived directly from PO item data, no DB fetch needed */}
               {(() => {
-                const shortfalls = (po.items ?? []).filter(it => it.orderedQuantity > it.receivedQuantity);
+                const shortfalls = (activePo.items ?? []).filter(it => it.orderedQuantity > it.receivedQuantity);
                 if (!shortfalls.length) return null;
                 return (
                   <div className="space-y-1.5">
@@ -725,7 +840,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                     </tr>
                   </thead>
                   <tbody>
-                    {(po.items ?? []).map(it => {
+                    {(activePo.items ?? []).map(it => {
                       const delta = it.receivedQuantity - it.orderedQuantity;
                       const hasDiscrepancy = it.receivedQuantity > 0 && it.receivedQuantity < it.orderedQuantity;
                       return (
@@ -748,19 +863,19 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                   </tbody>
                 </table>
               </div>
-              {(po.status === "sent" || po.status === "partial_received") && (
+              {(activePo.status === "sent" || activePo.status === "partial_received") && (
                 <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setReceiveOpen(true)}>
-                  <Truck className="h-4 w-4 mr-2" />{po.status === "partial_received" ? "Receive More" : "Receive Goods"}
+                  <Truck className="h-4 w-4 mr-2" />{activePo.status === "partial_received" ? "Receive More" : "Receive Goods"}
                 </Button>
               )}
             </TabsContent>
 
             <TabsContent value="payments" className="mt-4 space-y-4">
               <div className="space-y-2">
-                {(po.payments ?? []).length === 0 ? (
+                {(activePo.payments ?? []).length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">No payments recorded.</p>
                 ) : (
-                  (po.payments ?? []).map(pay => (
+                  (activePo.payments ?? []).map(pay => (
                     <div key={pay.id} className="rounded-lg border border-border/60 px-3 py-2.5">
                       <div className="flex items-center justify-between">
                         <div>
@@ -775,7 +890,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                   ))
                 )}
               </div>
-              {po.status !== "cancelled" && (
+              {activePo.status !== "cancelled" && (
                 <div className="rounded-lg border border-border/60 p-3 space-y-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Add Payment</p>
                   <div className="grid grid-cols-2 gap-2">
@@ -806,7 +921,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
               <div className="relative pl-4">
                 {statusOrder.map((step, idx) => {
                   const reached = currentStep >= idx;
-                  const isCurrent = currentStep === idx && po.status !== "cancelled";
+                  const isCurrent = currentStep === idx && activePo.status !== "cancelled";
                   const label: Record<string, string> = { draft: "Draft Created", sent: "Sent to Supplier", partial_received: "Partial Receipt", fully_received: "Fully Received" };
                   return (
                     <div key={step} className="relative flex gap-3 pb-6 last:pb-0">
@@ -816,8 +931,8 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                       </div>
                       <div className="pt-0.5">
                         <p className={`text-sm font-medium ${reached ? "text-foreground" : "text-muted-foreground"}`}>{label[step]}</p>
-                        {step === "draft" && reached && <p className="text-xs text-muted-foreground">{formatDate(po.createdAt)}</p>}
-                        {step === "fully_received" && po.receivedDate && <p className="text-xs text-muted-foreground">{formatDate(po.receivedDate)}</p>}
+                        {step === "draft" && reached && <p className="text-xs text-muted-foreground">{formatDate(activePo.createdAt)}</p>}
+                        {step === "fully_received" && activePo.receivedDate && <p className="text-xs text-muted-foreground">{formatDate(activePo.receivedDate)}</p>}
                       </div>
                     </div>
                   );
@@ -828,7 +943,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
         </SheetContent>
       </Sheet>
 
-      <ReceiveSheet open={receiveOpen} onClose={() => setReceiveOpen(false)} po={po} onReceived={() => { setReceiveOpen(false); onRefresh(); }} />
+      <ReceiveSheet open={receiveOpen} onClose={() => setReceiveOpen(false)} po={activePo} onReceived={() => { setReceiveOpen(false); onRefresh(); }} />
     </>
   );
 }
@@ -945,8 +1060,12 @@ function PurchaseOrders() {
   const handleSend = async (group: PurchaseOrder[]) => {
     setActionLoading(group[0].id + "_send");
     try {
-      for (const po of group) await api.updatePoStatus(po.id, "sent", user?.id);
+      // Only advance members still in draft — a batch's warehouses can diverge in status once
+      // some have started receiving, and resending them would wrongly reset that progress.
+      for (const po of group) if (po.status === "draft") await api.updatePoStatus(po.id, "sent", user?.id);
       load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update purchase order(s).");
     } finally { setActionLoading(null); }
   };
 
@@ -955,17 +1074,35 @@ function PurchaseOrders() {
     if (!confirm(msg)) return;
     setActionLoading(group[0].id + "_cancel");
     try {
-      for (const po of group) await api.updatePoStatus(po.id, "cancelled");
+      // Skip members already fully received (or already cancelled) — cancelling a completed
+      // delivery for one warehouse just because another warehouse in the batch is still pending
+      // would incorrectly wipe out its finished status.
+      for (const po of group) if (po.status !== "fully_received" && po.status !== "cancelled") await api.updatePoStatus(po.id, "cancelled");
       load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update purchase order(s).");
     } finally { setActionLoading(null); }
   };
 
   const refreshView = () => {
     load();
-    if (viewPO) api.getPurchaseOrder(viewPO.id).then(updated => {
-      setViewPO(updated);
-      setViewPOGroup(g => g.map(p => p.id === updated.id ? updated : p));
-    }).catch(() => {});
+    if (!viewPO) return;
+    // Refetch the WHOLE batch, not just viewPO itself — receiving/paying against whichever
+    // warehouse is active in the sheet's switcher only ever updated viewPO's own id before,
+    // so switching to a different warehouse in the batch and receiving against it left that
+    // warehouse's card showing stale (pre-receipt) data, and its Receive button never hid.
+    if (viewPO.batchId) {
+      api.getPurchaseOrdersByBatch(viewPO.batchId).then(group => {
+        if (!group.length) return;
+        setViewPOGroup(group);
+        setViewPO(prev => group.find(p => p.id === prev?.id) ?? group[0]);
+      }).catch(() => {});
+    } else {
+      api.getPurchaseOrder(viewPO.id).then(updated => {
+        setViewPO(updated);
+        setViewPOGroup([updated]);
+      }).catch(() => {});
+    }
   };
 
   return (
@@ -1075,23 +1212,37 @@ function PurchaseOrders() {
                           {isBatch && <span className="text-[10px] text-muted-foreground ml-1">(×{group.length})</span>}
                         </td>
                         <td className="px-3 py-3"><PayBadge status={po.paymentStatus} /></td>
-                        <td className="px-3 py-3"><StatusBadge status={po.status} /></td>
+                        <td className="px-3 py-3">
+                          <StatusBadge status={po.status} />
+                          {isBatch && group.some(p => p.status !== po.status) && (
+                            <span className="ml-1 text-[10px] text-muted-foreground">mixed</span>
+                          )}
+                        </td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{po.createdByUser?.fullName ?? "—"}</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{po.approvedByUser?.fullName ?? "—"}</td>
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setViewPO(po); setViewPOGroup(group); }} title="View"><Eye className="h-3.5 w-3.5" /></Button>
-                            {po.status === "draft" && canApprove && (
+                            {group.some(p => p.status === "draft") && canApprove && (
                               <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleSend(group)} disabled={isSending}>
                                 {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}Send
                               </Button>
                             )}
-                            {(po.status === "sent" || po.status === "partial_received") && canApprove && (
-                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setReceiveTarget(po)}>
-                                <Package className="h-3 w-3" />{po.status === "partial_received" ? "More" : "Receive"}
-                              </Button>
+                            {group.some(p => p.status === "sent" || p.status === "partial_received") && canApprove && (
+                              // A batch spans several warehouses that can each be at a different stage —
+                              // open the viewer's warehouse switcher to receive against the right one,
+                              // instead of assuming it's always this row's first (group[0]) PO.
+                              isBatch ? (
+                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setViewPO(po); setViewPOGroup(group); }}>
+                                  <Package className="h-3 w-3" />Receive
+                                </Button>
+                              ) : (
+                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setReceiveTarget(po)}>
+                                  <Package className="h-3 w-3" />{po.status === "partial_received" ? "More" : "Receive"}
+                                </Button>
+                              )
                             )}
-                            {po.status !== "cancelled" && po.status !== "fully_received" && canDelete && (
+                            {group.some(p => p.status !== "cancelled" && p.status !== "fully_received") && canDelete && (
                               <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleCancel(group)} disabled={isCancelling}>
                                 {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : null}Cancel
                               </Button>

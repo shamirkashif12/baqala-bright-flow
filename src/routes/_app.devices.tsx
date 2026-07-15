@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { HardDrive, Activity, Power, Wifi, Plus, Eye, Pencil, Battery, Thermometer, Signal } from "lucide-react";
+import { toast } from "sonner";
 import { api, type DeviceRecord, type Branch, type Terminal } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 
@@ -103,7 +104,7 @@ function Devices() {
     setLoading(true);
     Promise.all([api.getDevices(), api.getBranches(), api.getTerminals()])
       .then(([d, b, t]) => { setDevices(d); setBranches(b); setTerminals(t); })
-      .catch(console.error)
+      .catch(() => toast.error("Failed to load devices."))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -137,7 +138,7 @@ function Devices() {
         setCreateOpen(false);
       }
       load();
-    } catch (e) { console.error(e); } finally { setSaving(false); }
+    } catch (e: any) { console.error(e); toast.error(e?.message || "Failed to save device."); } finally { setSaving(false); }
   };
 
   const set = (k: keyof DeviceForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));

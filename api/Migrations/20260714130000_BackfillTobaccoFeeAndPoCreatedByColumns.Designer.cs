@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260714130000_BackfillTobaccoFeeAndPoCreatedByColumns")]
+    partial class BackfillTobaccoFeeAndPoCreatedByColumns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -82,7 +85,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("audit_logs");
+                    b.ToTable("audit_logs", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Branch", b =>
@@ -151,7 +154,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("BranchCode")
                         .IsUnique();
 
-                    b.ToTable("branches");
+                    b.ToTable("branches", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.BranchWarehouse", b =>
@@ -179,7 +182,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("branch_warehouses");
+                    b.ToTable("branch_warehouses", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.CashierShift", b =>
@@ -275,7 +278,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("cashier_shifts");
+                    b.ToTable("cashier_shifts", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Category", b =>
@@ -329,7 +332,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ParentId");
 
-                    b.ToTable("categories");
+                    b.ToTable("categories", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Coupon", b =>
@@ -425,7 +428,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("CreatedBy");
 
-                    b.ToTable("coupons");
+                    b.ToTable("coupons", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Customer", b =>
@@ -503,7 +506,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("PreferredBranchId");
 
-                    b.ToTable("customers");
+                    b.ToTable("customers", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.CustomerReturn", b =>
@@ -590,7 +593,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ProcessedBy");
 
-                    b.ToTable("customer_returns");
+                    b.ToTable("customer_returns", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.CustomerReturnItem", b =>
@@ -643,7 +646,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ReturnId");
 
-                    b.ToTable("customer_return_items");
+                    b.ToTable("customer_return_items", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Device", b =>
@@ -713,7 +716,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("devices");
+                    b.ToTable("devices", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Discount", b =>
@@ -801,7 +804,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("discounts");
+                    b.ToTable("discounts", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Expense", b =>
@@ -877,7 +880,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("RecordedBy");
 
-                    b.ToTable("expenses");
+                    b.ToTable("expenses", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ExpenseType", b =>
@@ -916,7 +919,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("expense_types");
+                    b.ToTable("expense_types", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.InventoryAdjustment", b =>
@@ -976,7 +979,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("inventory_adjustments");
+                    b.ToTable("inventory_adjustments", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.InventoryBatch", b =>
@@ -1054,7 +1057,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("SupplierId");
 
-                    b.ToTable("inventory_batches");
+                    b.ToTable("inventory_batches", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.InventoryStock", b =>
@@ -1103,7 +1106,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("ProductId", "BranchId")
                         .IsUnique();
 
-                    b.ToTable("inventory_stock");
+                    b.ToTable("inventory_stock", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.LoyaltyTransaction", b =>
@@ -1160,7 +1163,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("loyalty_transactions");
+                    b.ToTable("loyalty_transactions", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Notification", b =>
@@ -1234,7 +1237,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("UserId", "IsRead", "CreatedAt");
 
-                    b.ToTable("notifications");
+                    b.ToTable("notifications", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Offer", b =>
@@ -1332,7 +1335,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("TriggerProductId");
 
-                    b.ToTable("offers");
+                    b.ToTable("offers", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Order", b =>
@@ -1454,7 +1457,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("orders");
+                    b.ToTable("orders", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.OrderItem", b =>
@@ -1516,7 +1519,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("order_items");
+                    b.ToTable("order_items", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.OrderPayment", b =>
@@ -1559,7 +1562,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("order_payments");
+                    b.ToTable("order_payments", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PosSettings", b =>
@@ -1822,7 +1825,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("BranchId")
                         .IsUnique();
 
-                    b.ToTable("pos_settings");
+                    b.ToTable("pos_settings", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Product", b =>
@@ -1942,7 +1945,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("Sku")
                         .IsUnique();
 
-                    b.ToTable("products");
+                    b.ToTable("products", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ProductPriceList", b =>
@@ -1992,7 +1995,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("product_price_lists");
+                    b.ToTable("product_price_lists", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ProductVariant", b =>
@@ -2050,7 +2053,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("product_variants");
+                    b.ToTable("product_variants", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PurchaseOrder", b =>
@@ -2164,7 +2167,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("purchase_orders");
+                    b.ToTable("purchase_orders", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PurchaseOrderItem", b =>
@@ -2198,6 +2201,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("product_id");
 
+                    b.Property<Guid?>("PurchaseOrderId")
+                        .HasColumnType("char(36)");
+
                     b.Property<decimal>("ReceivedQuantity")
                         .HasColumnType("decimal(18,4)")
                         .HasColumnName("received_quantity");
@@ -2218,11 +2224,11 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PoId");
-
                     b.HasIndex("ProductId");
 
-                    b.ToTable("purchase_order_items");
+                    b.HasIndex("PurchaseOrderId");
+
+                    b.ToTable("purchase_order_items", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Role", b =>
@@ -2261,7 +2267,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("roles");
+                    b.ToTable("roles", (string)null);
 
                     b.HasData(
                         new
@@ -2401,7 +2407,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("RoleId");
 
-                    b.ToTable("role_permissions");
+                    b.ToTable("role_permissions", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.RulesEngine", b =>
@@ -2468,7 +2474,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("CreatedBy");
 
-                    b.ToTable("rules_engine");
+                    b.ToTable("rules_engine", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ShiftCashMovement", b =>
@@ -2512,7 +2518,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("ShiftId");
 
-                    b.ToTable("shift_cash_movements");
+                    b.ToTable("shift_cash_movements", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StaffAttendance", b =>
@@ -2568,7 +2574,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("staff_attendance");
+                    b.ToTable("staff_attendance", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockCount", b =>
@@ -2626,7 +2632,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("CategoryId");
 
-                    b.ToTable("stock_counts");
+                    b.ToTable("stock_counts", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockCountItem", b =>
@@ -2670,7 +2676,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("StockCountId");
 
-                    b.ToTable("stock_count_items");
+                    b.ToTable("stock_count_items", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockDiscrepancy", b =>
@@ -2750,7 +2756,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("TransferId");
 
-                    b.ToTable("stock_discrepancies");
+                    b.ToTable("stock_discrepancies", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockTransfer", b =>
@@ -2866,7 +2872,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("TransferNumber")
                         .IsUnique();
 
-                    b.ToTable("stock_transfers");
+                    b.ToTable("stock_transfers", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockTransferItem", b =>
@@ -2929,7 +2935,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("TransferId");
 
-                    b.ToTable("stock_transfer_items");
+                    b.ToTable("stock_transfer_items", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Supplier", b =>
@@ -3009,7 +3015,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("SupplierCode")
                         .IsUnique();
 
-                    b.ToTable("suppliers");
+                    b.ToTable("suppliers", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.SupplierCreditNote", b =>
@@ -3082,7 +3088,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("TransferId");
 
-                    b.ToTable("supplier_credit_notes");
+                    b.ToTable("supplier_credit_notes", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.SupplierPayment", b =>
@@ -3118,6 +3124,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("po_id");
 
+                    b.Property<Guid?>("PurchaseOrderId")
+                        .HasColumnType("char(36)");
+
                     b.Property<Guid>("RecordedBy")
                         .HasColumnType("char(36)")
                         .HasColumnName("recorded_by");
@@ -3139,13 +3148,13 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PoId");
+                    b.HasIndex("PurchaseOrderId");
 
                     b.HasIndex("RecordedBy");
 
                     b.HasIndex("SupplierId");
 
-                    b.ToTable("supplier_payments");
+                    b.ToTable("supplier_payments", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.TaxFeeRule", b =>
@@ -3233,7 +3242,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("CreatedBy");
 
-                    b.ToTable("tax_fee_rules");
+                    b.ToTable("tax_fee_rules", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.TenantSetting", b =>
@@ -3270,7 +3279,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("BranchId", "SettingKey")
                         .IsUnique();
 
-                    b.ToTable("tenant_settings");
+                    b.ToTable("tenant_settings", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Terminal", b =>
@@ -3339,7 +3348,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("TerminalCode")
                         .IsUnique();
 
-                    b.ToTable("terminals");
+                    b.ToTable("terminals", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.User", b =>
@@ -3426,7 +3435,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("Username")
                         .IsUnique();
 
-                    b.ToTable("users");
+                    b.ToTable("users", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.UserPermission", b =>
@@ -3474,7 +3483,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("user_permissions");
+                    b.ToTable("user_permissions", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Warehouse", b =>
@@ -3544,7 +3553,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("warehouses");
+                    b.ToTable("warehouses", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.WarehouseRequest", b =>
@@ -3618,7 +3627,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("SupplierId");
 
-                    b.ToTable("warehouse_requests");
+                    b.ToTable("warehouse_requests", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.WarehouseRequestItem", b =>
@@ -3672,7 +3681,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("RequestId");
 
-                    b.ToTable("warehouse_request_items");
+                    b.ToTable("warehouse_request_items", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.WarehouseStock", b =>
@@ -3721,7 +3730,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("WarehouseId", "ProductId")
                         .IsUnique();
 
-                    b.ToTable("warehouse_stock");
+                    b.ToTable("warehouse_stock", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ZatcaIdentity", b =>
@@ -3818,7 +3827,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("zatca_identity");
+                    b.ToTable("zatca_identity", (string)null);
 
                     b.HasData(
                         new
@@ -3947,7 +3956,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("zatca_invoices");
+                    b.ToTable("zatca_invoices", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ZatcaSettings", b =>
@@ -4004,7 +4013,7 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("BranchId")
                         .IsUnique();
 
-                    b.ToTable("zatca_settings");
+                    b.ToTable("zatca_settings", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
@@ -4021,7 +4030,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DataProtectionKeys");
+                    b.ToTable("DataProtectionKeys", (string)null);
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.AuditLog", b =>
@@ -4553,17 +4562,15 @@ namespace BaqalaPOS.Api.Migrations
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PurchaseOrderItem", b =>
                 {
-                    b.HasOne("BaqalaPOS.Api.Models.PurchaseOrder", "PurchaseOrder")
-                        .WithMany("Items")
-                        .HasForeignKey("PoId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("BaqalaPOS.Api.Models.Product", "Product")
                         .WithMany()
                         .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("BaqalaPOS.Api.Models.PurchaseOrder", "PurchaseOrder")
+                        .WithMany("Items")
+                        .HasForeignKey("PurchaseOrderId");
 
                     b.Navigation("Product");
 
@@ -4834,9 +4841,7 @@ namespace BaqalaPOS.Api.Migrations
                 {
                     b.HasOne("BaqalaPOS.Api.Models.PurchaseOrder", "PurchaseOrder")
                         .WithMany("Payments")
-                        .HasForeignKey("PoId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("PurchaseOrderId");
 
                     b.HasOne("BaqalaPOS.Api.Models.User", "RecordedByUser")
                         .WithMany()

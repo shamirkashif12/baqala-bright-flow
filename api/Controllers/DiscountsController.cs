@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -27,6 +28,7 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
         return d is null ? NotFound() : Ok(d);
     }
 
+    [RequirePermission("Coupons", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] DiscountRequest req)
     {
@@ -55,6 +57,7 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = discount.Id }, discount);
     }
 
+    [RequirePermission("Coupons", PermAction.Edit)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] DiscountRequest req)
     {
@@ -82,6 +85,7 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
     private static string? SerializeExclusions(List<Guid>? ids) =>
         ids is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(ids) : null;
 
+    [RequirePermission("Coupons", PermAction.Edit)]
     [HttpPatch("{id:guid}/toggle")]
     public async Task<IActionResult> Toggle(Guid id)
     {
@@ -93,6 +97,7 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
         return Ok(d);
     }
 
+    [RequirePermission("Coupons", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

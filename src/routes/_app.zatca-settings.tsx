@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/select";
 import { api, type ZatcaSettings } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
+import { BranchFilter } from "@/components/branch-filter";
+import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
 
@@ -62,7 +64,21 @@ const defaultZatca: ZatcaSettings = {
 };
 
 function ZatcaSettings() {
-  const { selectedBranch } = useBranch();
+  const { user } = useAuth();
+  const { branches } = useBranch();
+  // This whole page configures one branch's own CR/CSID registration server-side.
+  const isAdmin = user?.role === "tenant_admin";
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "");
+  useEffect(() => {
+    if (lockedBranchId) setBranchId(lockedBranchId);
+  }, [lockedBranchId]);
+  useEffect(() => {
+    if (!branchId && branches.length) {
+      setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id);
+    }
+  }, [branches, branchId]);
+  const branch = branches.find((b) => b.id === branchId) ?? null;
   const { canEdit } = usePermission("Compliance");
   const [zatca, setZatca] = useState<ZatcaSettings>(defaultZatca);
   const [loading, setLoading] = useState(false);
@@ -77,21 +93,21 @@ function ZatcaSettings() {
   const [complianceTests, setComplianceTests] = useState<{ documentType: string; passed: boolean; apiStatus?: string }[]>([]);
 
   function loadSettings() {
-    if (!selectedBranch?.id) return;
+    if (!branch?.id) return;
     setLoading(true);
-    api.getZatcaSettings(selectedBranch.id)
+    api.getZatcaSettings(branch.id)
       .then((data) => setZatca({ ...defaultZatca, ...data }))
-      .catch(() => setZatca({ ...defaultZatca, branchId: selectedBranch.id }))
+      .catch(() => setZatca({ ...defaultZatca, branchId: branch.id }))
       .finally(() => setLoading(false));
   }
 
-  useEffect(loadSettings, [selectedBranch?.id]);
+  useEffect(loadSettings, [branch?.id]);
 
   async function saveZatca() {
-    if (!selectedBranch?.id || !canEdit) return;
+    if (!branch?.id || !canEdit) return;
     setSaving(true);
     try {
-      const updated = await api.updateZatcaSettings(selectedBranch.id, zatca);
+      const updated = await api.updateZatcaSettings(branch.id, zatca);
       setZatca(updated);
       toast.success("ZATCA settings saved");
     } catch {
@@ -102,13 +118,13 @@ function ZatcaSettings() {
   }
 
   async function togglePhase2(v: boolean) {
-    if (!selectedBranch?.id) return;
+    if (!branch?.id) return;
     const previous = zatca;
     const next = { ...zatca, phase2Enabled: v };
     setZatca(next);
     setSaving(true);
     try {
-      const updated = await api.updateZatcaSettings(selectedBranch.id, next);
+      const updated = await api.updateZatcaSettings(branch.id, next);
       setZatca(updated);
       toast.success(v ? "ZATCA Phase 2 enabled — applied to all branches" : "ZATCA Phase 2 disabled — applied to all branches");
     } catch {
@@ -120,10 +136,10 @@ function ZatcaSettings() {
   }
 
   async function handleGenerateCsr() {
-    if (!selectedBranch?.id || !canEdit) return;
+    if (!branch?.id || !canEdit) return;
     setCsrBusy(true);
     try {
-      const result = await api.generateZatcaCsr(selectedBranch.id);
+      const result = await api.generateZatcaCsr(branch.id);
       setCsr(result.csr);
       toast.success("CSR generated — paste it into the ZATCA Fatoora portal to get an OTP");
       loadSettings();
@@ -135,10 +151,10 @@ function ZatcaSettings() {
   }
 
   async function handleComplianceCsid() {
-    if (!selectedBranch?.id || !otp || !canEdit) return;
+    if (!branch?.id || !otp || !canEdit) return;
     setOtpBusy(true);
     try {
-      const result = await api.getZatcaComplianceCsid(selectedBranch.id, otp);
+      const result = await api.getZatcaComplianceCsid(branch.id, otp);
       if (result.success) {
         toast.success("Compliance CSID obtained");
         setOtp("");
@@ -154,10 +170,10 @@ function ZatcaSettings() {
   }
 
   async function handleProductionCsid() {
-    if (!selectedBranch?.id || !canEdit) return;
+    if (!branch?.id || !canEdit) return;
     setProdBusy(true);
     try {
-      const result = await api.getZatcaProductionCsid(selectedBranch.id);
+      const result = await api.getZatcaProductionCsid(branch.id);
       setComplianceTests(result.complianceTests ?? []);
       if (result.success) {
         toast.success("Production CSID obtained — ZATCA onboarding complete");
@@ -203,7 +219,7 @@ function ZatcaSettings() {
                 <div className="h-12 w-12 rounded-xl bg-success/15 text-success flex items-center justify-center shrink-0"><ShieldCheck className="h-6 w-6" /></div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold truncate">ZATCA Phase 2 — {selectedBranch?.name ?? "Select a branch"}</h3>
+                    <h3 className="font-semibold truncate">ZATCA Phase 2 — {branch?.name ?? "No branch available"}</h3>
                     <Badge className={zatca.onboardingStatus === "production_ready" ? "bg-success text-success-foreground border-0" : "bg-warning text-warning-foreground border-0"}>
                       {onboardingLabel(zatca.onboardingStatus)}
                     </Badge>
@@ -211,26 +227,29 @@ function ZatcaSettings() {
                   <p className="text-sm text-muted-foreground">Applied automatically on every billing & order issued from POS / MPOS / Web</p>
                 </div>
               </div>
-              <Switch checked={enabled} disabled={saving || !selectedBranch} onCheckedChange={togglePhase2} />
+              <div className="flex items-center gap-3 shrink-0">
+                <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
+                <Switch checked={enabled} disabled={saving || !branch} onCheckedChange={togglePhase2} />
+              </div>
             </div>
           </Card>
 
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading ZATCA settings…</div>
-          ) : !selectedBranch ? (
-            <p className="text-sm text-muted-foreground">Select a branch to configure ZATCA.</p>
+          ) : !branch ? (
+            <p className="text-sm text-muted-foreground">No branch available to configure ZATCA for.</p>
           ) : (
             <>
               <div className="grid gap-4 md:grid-cols-2">
                 <Card className="p-5 space-y-3">
                   <h4 className="font-semibold text-sm">Company information</h4>
                   <div className="space-y-1"><Label className="text-xs">Seller name (as registered with ZATCA)</Label>
-                    <Input className="h-9" value={zatca.sellerName ?? ""} onChange={e => setZatca(p => ({ ...p, sellerName: e.target.value }))} placeholder={selectedBranch.name} /></div>
+                    <Input className="h-9" value={zatca.sellerName ?? ""} onChange={e => setZatca(p => ({ ...p, sellerName: e.target.value }))} placeholder={branch.name} /></div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1"><Label className="text-xs">VAT Number</Label>
                       <Input className="h-9" value={zatca.vatRegistrationNumber ?? ""} onChange={e => setZatca(p => ({ ...p, vatRegistrationNumber: e.target.value }))} placeholder="300012345600003" /></div>
                     <div className="space-y-1"><Label className="text-xs">CR Number (branch)</Label>
-                      <Input className="h-9" value={selectedBranch.commercialRegistration ?? ""} disabled title="Edit on the Branches page" /></div>
+                      <Input className="h-9" value={branch.commercialRegistration ?? ""} disabled title="Edit on the Branches page" /></div>
                   </div>
                   <div className="space-y-1"><Label className="text-xs">Environment</Label>
                     <select value={zatca.environment} onChange={e => setZatca(p => ({ ...p, environment: e.target.value }))}
@@ -260,7 +279,7 @@ function ZatcaSettings() {
                       <Input className="h-9" value={zatca.postalZone ?? ""} onChange={e => setZatca(p => ({ ...p, postalZone: e.target.value }))} /></div>
                   </div>
                   <div className="space-y-1"><Label className="text-xs">City</Label>
-                    <Input className="h-9" value={selectedBranch.city ?? ""} disabled title="Edit on the Branches page" /></div>
+                    <Input className="h-9" value={branch.city ?? ""} disabled title="Edit on the Branches page" /></div>
                   <div className="flex justify-end">
                     <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={saveZatca} disabled={saving || !canEdit}>
                       {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save address"}

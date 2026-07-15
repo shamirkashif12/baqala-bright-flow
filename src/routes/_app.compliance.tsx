@@ -10,6 +10,8 @@ import { MetricCard } from "@/components/metric-card";
 import { api, type TaxFeeRule, type PosSettingsRecord } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useBranch } from "@/lib/branch-context";
+import { BranchFilter } from "@/components/branch-filter";
+import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
 
@@ -30,7 +32,20 @@ const TOGGLE_DEFAULTS: Toggles = {
 };
 
 function Compliance() {
-  const { selectedBranch } = useBranch();
+  const { user } = useAuth();
+  const { branches } = useBranch();
+  // Toggles apply to one branch server-side (same POS-settings row as _app.pos-settings.tsx).
+  const isAdmin = user?.role === "tenant_admin";
+  const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+  const [branchId, setBranchId] = useState(lockedBranchId ?? "");
+  useEffect(() => {
+    if (lockedBranchId) setBranchId(lockedBranchId);
+  }, [lockedBranchId]);
+  useEffect(() => {
+    if (!branchId && branches.length) {
+      setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id);
+    }
+  }, [branches, branchId]);
   // Toggles are persisted through SettingsController (RequirePermission("Settings", Edit)),
   // so both that AND Compliance:Edit are required — otherwise a role with Settings:Edit
   // for /pos-settings (e.g. Branch Manager) would also get editable controls here, even
@@ -49,9 +64,9 @@ function Compliance() {
   }, []);
 
   useEffect(() => {
-    if (!selectedBranch?.id) return;
+    if (!branchId) return;
     setLoading(true);
-    api.getPosSettings(selectedBranch.id)
+    api.getPosSettings(branchId)
       .then((data: PosSettingsRecord) => {
         setSettingsId(data.id);
         setToggles({
@@ -63,17 +78,17 @@ function Compliance() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [selectedBranch?.id]);
+  }, [branchId]);
 
   function toggle(key: keyof Toggles) {
     return (v: boolean) => setToggles(prev => ({ ...prev, [key]: v }));
   }
 
   async function saveToggles() {
-    if (!selectedBranch?.id || !canEditToggles) return;
+    if (!branchId || !canEditToggles) return;
     setSaving(true);
     try {
-      await api.updatePosSettings(selectedBranch.id, { ...toggles, branchId: selectedBranch.id });
+      await api.updatePosSettings(branchId, { ...toggles, branchId });
       toast.success("Compliance settings saved", { description: "Global toggles updated for this branch." });
     } catch {
       toast.error("Failed to save compliance settings");
@@ -95,9 +110,12 @@ function Compliance() {
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <h3 className="font-semibold">Global toggles</h3>
-          {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          <div className="flex items-center gap-2">
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
+          </div>
         </div>
         <div className="grid sm:grid-cols-2 gap-3">
           <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">

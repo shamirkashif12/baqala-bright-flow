@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { RoleGate } from "@/components/role-gate";
+import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
@@ -10,9 +10,9 @@ import { api, type User } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/staff")({
   component: () => (
-    <RoleGate allow={["tenant_admin", "branch_manager"]}>
+    <ModuleGate module="Users">
       <Staff />
-    </RoleGate>
+    </ModuleGate>
   ),
 });
 

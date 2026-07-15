@@ -277,13 +277,24 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         var supplier = await db.Suppliers.FindAsync(po.SupplierId);
         if (supplier != null) supplier.LastSupplyDate = DateTime.UtcNow;
 
-        // Create discrepancy records for any shortfalls / excess
+        // Create discrepancy records only for genuine EXCESS — the portion of THIS receipt that
+        // pushes the item's cumulative received quantity beyond what was ordered. Previously this
+        // compared just-this-receipt's quantity against the FULL ordered quantity, which flagged
+        // a bogus "shortage" on every ordinary partial delivery (e.g. 60 of 100 received looked
+        // like a 40-unit shortage even though the rest was still expected) and double-counted
+        // overages across multiple receipts. A true shortfall — nothing more is coming — isn't
+        // knowable at receive-time; that's a deliberate "close PO short" decision, not something
+        // to infer from an in-progress partial receipt.
         foreach (var recv in items)
         {
             var item = po.Items.FirstOrDefault(i => i.ProductId == recv.ProductId);
             if (item is null) continue;
-            var diff = recv.Quantity - item.OrderedQuantity;
-            if (diff == 0) continue;
+
+            var receivedAfter = item.ReceivedQuantity;
+            var receivedBefore = receivedAfter - recv.Quantity;
+            var excessThisReceipt = Math.Max(0, receivedAfter - item.OrderedQuantity) - Math.Max(0, receivedBefore - item.OrderedQuantity);
+            if (excessThisReceipt <= 0) continue;
+
             db.StockDiscrepancies.Add(new StockDiscrepancy
             {
                 Id = Guid.NewGuid(),
@@ -291,11 +302,11 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                 SupplierId = po.SupplierId,
                 ProductId = recv.ProductId,
                 ExpectedQuantity = item.OrderedQuantity,
-                ReceivedQuantity = recv.Quantity,
-                DiscrepancyQuantity = diff,
+                ReceivedQuantity = receivedAfter,
+                DiscrepancyQuantity = excessThisReceipt,
                 UnitCost = item.UnitCost,
-                DiscrepancyValue = Math.Abs(diff) * item.UnitCost,
-                DiscrepancyType = diff < 0 ? "shortage" : "excess",
+                DiscrepancyValue = excessThisReceipt * item.UnitCost,
+                DiscrepancyType = "excess",
                 Status = "open",
                 Notes = $"Auto-detected on PO {po.PoNumber} receive",
                 CreatedAt = DateTime.UtcNow,
