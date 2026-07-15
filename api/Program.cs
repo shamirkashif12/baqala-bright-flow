@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.IdentityModel.Tokens;
+using System.Linq;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -128,13 +130,32 @@ if (app.Environment.IsDevelopment())
     var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     try
     {
-        db.Database.Migrate();
-    }
-    catch (InvalidCastException lockEx) when (lockEx.StackTrace?.Contains("AcquireDatabaseLock") == true)
-    {
-        // MariaDB returns NULL for GET_LOCK() in some versions — known bug in
-        // MySql.EntityFrameworkCore. Safe to ignore: migrations were applied manually.
-        startupLogger.LogWarning("Skipping migration lock check (MariaDB GET_LOCK compatibility issue).");
+        var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+        if (pending.Count > 0)
+        {
+            // db.Database.Migrate() would normally apply these, but doing so first acquires an
+            // exclusive lock via MariaDB's GET_LOCK() — which returns NULL on this server instead
+            // of the expected integer, a documented MySql.EntityFrameworkCore incompatibility. The
+            // library can't parse that NULL and throws InvalidCastException *before running any
+            // migration SQL at all*. This used to be caught and silently ignored on the (false)
+            // assumption that migrations must have been applied some other way — in reality every
+            // migration since whenever that assumption was written has been silently skipped, and
+            // the app has been running against a stale schema until each gap was eventually
+            // noticed and patched by hand (see git history for this block).
+            //
+            // Generate the plain (non-idempotent) SQL for just the pending migrations and execute
+            // it directly instead, which is exactly what Migrate() does internally minus the
+            // broken lock acquisition. Skipping the lock is safe here — this app only ever
+            // migrates from a single instance at startup, never multiple replicas racing to
+            // migrate concurrently.
+            var applied = await db.Database.GetAppliedMigrationsAsync();
+            var fromMigration = applied.LastOrDefault() ?? Microsoft.EntityFrameworkCore.Migrations.Migration.InitialDatabase;
+            var migrator = db.GetInfrastructure().GetRequiredService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+            var script = migrator.GenerateScript(fromMigration, toMigration: null);
+            startupLogger.LogInformation("Applying {Count} pending migration(s) directly (bypassing MariaDB's broken migration lock): {Migrations}",
+                pending.Count, string.Join(", ", pending));
+            await db.Database.ExecuteSqlRawAsync(script);
+        }
     }
     catch (Exception migEx)
     {
