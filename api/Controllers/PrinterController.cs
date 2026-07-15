@@ -566,9 +566,24 @@ public class PrinterController(IConfiguration config) : ControllerBase
         // local-network-access override it actually needs, and QZ Tray connections from that
         // app would then fail with no indication why. The caller now passes its own
         // window.location.origin explicitly rather than this endpoint guessing at it.
-        var chromeOrigins = new List<string> { posUrl };
-        if (!string.IsNullOrWhiteSpace(origin) && !chromeOrigins.Contains(origin))
+        //
+        // Chrome's OverrideSecurityRestrictionsOnInsecureOrigin/LocalNetworkAccessAllowedForUrls
+        // patterns don't support a port wildcard against a literal IP address (only against a
+        // real hostname) — https://chromeenterprise.google/policies/url-patterns/ — so every
+        // known app's origin on this server has to be listed explicitly rather than covered by
+        // one "all ports" entry. Hardcode the three known ones (API, self-checkout, POS) so
+        // every installer run whitelists all of them regardless of which app downloaded it,
+        // on top of whatever posUrl/origin resolves to for this particular request.
+        var chromeOrigins = new List<string>
+        {
+            posUrl,
+            "http://65.108.31.172:5008",
+            "http://65.108.31.172:5107",
+            "http://65.108.31.172:8088",
+        };
+        if (!string.IsNullOrWhiteSpace(origin))
             chromeOrigins.Add(origin);
+        chromeOrigins = chromeOrigins.Distinct().ToList();
         var chromeOriginsJson = string.Join(", ", chromeOrigins.Select(o => $"\"{o}\""));
         var winChromePolicyLines = string.Join("\n", chromeOrigins.Select((o, i) => $"""
 reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "{i + 1}" /t REG_SZ /d "{o}" /f >nul 2>&1
