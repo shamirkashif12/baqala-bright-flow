@@ -29,9 +29,12 @@ export function setPrintMode(mode: "qz" | "local") {
 }
 
 // Returns the direct URL to download the OS-specific one-click setup installer (installs QZ
-// Tray + creates a kiosk shortcut) — same installer/endpoint the staff POS uses.
+// Tray + creates a kiosk shortcut) — same installer/endpoint the staff POS uses. Passes this
+// page's own origin explicitly so the installer's Chrome policy (which lifts the insecure-
+// origin/local-network-access restrictions QZ Tray needs) covers self-checkout's actual
+// origin, not just the POS app's configured URL the endpoint otherwise defaults to.
 export function setupInstallerUrl(): string {
-  return `${BASE}/api/printer/setup-installer`;
+  return `${BASE}/api/printer/setup-installer?origin=${encodeURIComponent(window.location.origin)}`;
 }
 
 // Fixes the "Action Required" QZ Tray popup on Windows when QZ Tray is already installed

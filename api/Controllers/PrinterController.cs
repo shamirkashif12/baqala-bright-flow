@@ -553,11 +553,29 @@ public class PrinterController(IConfiguration config) : ControllerBase
     //   macOS   → .command (double-click runs in Terminal automatically)
 
     [HttpGet("setup-installer")]
-    public IActionResult SetupInstaller()
+    public IActionResult SetupInstaller([FromQuery] string? origin)
     {
         var posUrl = config["PosUrl"] ?? $"{Request.Scheme}://{Request.Host}";
         var ua     = Request.Headers.UserAgent.ToString().ToLower();
         var appName = "MiMony POS";
+
+        // Every caller of this endpoint used to get the Chrome policy written for `posUrl` only
+        // (the staff POS's own configured origin) — fine when POS itself downloads the
+        // installer, silently wrong for any other app (self-checkout, or any future one) that
+        // reuses this same one-click setup: its own origin never got the insecure-origin/
+        // local-network-access override it actually needs, and QZ Tray connections from that
+        // app would then fail with no indication why. The caller now passes its own
+        // window.location.origin explicitly rather than this endpoint guessing at it.
+        var chromeOrigins = new List<string> { posUrl };
+        if (!string.IsNullOrWhiteSpace(origin) && !chromeOrigins.Contains(origin))
+            chromeOrigins.Add(origin);
+        var chromeOriginsJson = string.Join(", ", chromeOrigins.Select(o => $"\"{o}\""));
+        var winChromePolicyLines = string.Join("\n", chromeOrigins.Select((o, i) => $"""
+reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "{i + 1}" /t REG_SZ /d "{o}" /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin" /v "{i + 1}" /t REG_SZ /d "{o}" /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Policies\Google\Chrome\LocalNetworkAccessAllowedForUrls" /v "{i + 1}" /t REG_SZ /d "{o}" /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\LocalNetworkAccessAllowedForUrls" /v "{i + 1}" /t REG_SZ /d "{o}" /f >nul 2>&1
+"""));
 
         // Embed the cert directly in the installer so cert trust works with zero
         // network dependency — no need to hit /api/printer/qz-certificate at install time.
@@ -623,16 +641,13 @@ del "%TEMP%\qz-tray-setup.exe" 2>nul
 echo [3/3] Creating POS shortcut on Desktop...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($env:PUBLIC + '\Desktop\{{appName}}.lnk'); $chromePaths = @($env:ProgramFiles + '\Google\Chrome\Application\chrome.exe',$env:ProgramFiles + '\Microsoft\Edge\Application\msedge.exe'); $browser = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($browser) { $sc.TargetPath = $browser; $sc.Arguments = '--kiosk {{posUrl}}/pos --disable-infobars --no-first-run --unsafely-treat-insecure-origin-as-secure={{posUrl}}' } else { $sc.TargetPath = 'C:\Windows\explorer.exe'; $sc.Arguments = '{{posUrl}}/pos' }; $sc.Description = '{{appName}} Checkout'; $sc.Save()"
 
-:: ── Chrome Policy: allow QZ Tray from this origin in ALL Chrome windows ────
-reg add "HKLM\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
-
-:: ── Chrome/Edge Policy: "Local Network Access" blocks a page served from a public,
-:: non-localhost origin (e.g. a plain-HTTP IP:port like this POS) from opening a
-:: websocket to localhost — which is exactly how the browser talks to QZ Tray. This
-:: allowlists the POS origin so the connection isn't blocked (ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS).
-reg add "HKLM\SOFTWARE\Policies\Google\Chrome\LocalNetworkAccessAllowedForUrls" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Edge\LocalNetworkAccessAllowedForUrls" /v "1" /t REG_SZ /d "{{posUrl}}" /f >nul 2>&1
+:: ── Chrome/Edge Policy: allow QZ Tray from this origin in ALL Chrome windows, and lift
+:: "Local Network Access" restrictions that otherwise block a page served from a public,
+:: non-localhost origin (e.g. a plain-HTTP IP:port) from reaching localhost — which is
+:: exactly how the browser talks to QZ Tray and the local print agent. Covers whichever
+:: app's own origin downloaded this installer (self-checkout, POS, or any other), not
+:: just the configured POS URL — ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS otherwise.
+{{winChromePolicyLines}}
 
 :: ── Trust POS cert in QZ Tray — eliminates all "Action Required" dialogs.
 :: override.crt is the mechanism that actually suppresses the dialog (QZ Tray treats it as
@@ -689,6 +704,10 @@ echo.
 echo   QZ Tray is running in the system tray.
 echo   POS shortcut is on the Desktop.
 echo   No security dialogs will appear.
+echo.
+echo   IMPORTANT: fully close every open Chrome/Edge window now, then
+echo   reopen it — the browser policy changes above only take effect
+echo   on a fresh browser start, not in windows already open.
 echo  ========================================
 echo.
 pause
@@ -738,9 +757,12 @@ open -a "Safari" {{posUrl}}/pos
 ENDOFSHORTCUT
 chmod +x ~/Desktop/"{{appName}}.command"
 
-# Chrome Policy: allow QZ Tray from this origin in ALL Chrome windows
+# Chrome Policy: allow QZ Tray from this origin in ALL Chrome windows, and lift "Local
+# Network Access" restrictions that otherwise block a page on a public, non-localhost
+# origin from reaching localhost (how the browser talks to QZ Tray/the local print agent).
+# Covers whichever app's own origin downloaded this installer, not just the POS URL.
 sudo mkdir -p "/Library/Application Support/Google/Chrome/policies/managed" 2>/dev/null
-echo '{"OverrideSecurityRestrictionsOnInsecureOrigin": ["{{posUrl}}"]}' | sudo tee "/Library/Application Support/Google/Chrome/policies/managed/mimony-pos.json" >/dev/null 2>&1 || true
+echo '{"OverrideSecurityRestrictionsOnInsecureOrigin": [{{chromeOriginsJson}}], "LocalNetworkAccessAllowedForUrls": [{{chromeOriginsJson}}]}' | sudo tee "/Library/Application Support/Google/Chrome/policies/managed/mimony-pos.json" >/dev/null 2>&1 || true
 
 # 3. Launch QZ Tray and add to login items
 open -a "QZ Tray" 2>/dev/null || true
@@ -755,6 +777,10 @@ echo "  POS shortcut added to Desktop."
 echo ""
 echo "  First time: QZ Tray may ask to Allow"
 echo "  unsigned content — click Allow."
+echo ""
+echo "  IMPORTANT: fully quit Chrome (Cmd+Q, not just close the window),"
+echo "  then reopen it — the browser policy changes above only take"
+echo "  effect on a fresh browser start, not in windows already open."
 echo " ========================================"
 """;
             return File(System.Text.Encoding.UTF8.GetBytes(cmd),
@@ -808,9 +834,12 @@ POSSHORTCUT
 chmod +x ~/Desktop/"{{appName}}.desktop"
 gio set ~/Desktop/"{{appName}}.desktop" metadata::trusted true 2>/dev/null || true
 
-# Chrome Policy: allow QZ Tray from this origin in ALL Chrome windows
+# Chrome Policy: allow QZ Tray from this origin in ALL Chrome windows, and lift "Local
+# Network Access" restrictions that otherwise block a page on a public, non-localhost
+# origin from reaching localhost (how the browser talks to QZ Tray/the local print agent).
+# Covers whichever app's own origin downloaded this installer, not just the POS URL.
 sudo mkdir -p /etc/opt/chrome/policies/managed /etc/chromium/policies/managed 2>/dev/null
-echo '{"OverrideSecurityRestrictionsOnInsecureOrigin": ["{{posUrl}}"]}' | sudo tee /etc/opt/chrome/policies/managed/mimony-pos.json /etc/chromium/policies/managed/mimony-pos.json >/dev/null 2>&1 || true
+echo '{"OverrideSecurityRestrictionsOnInsecureOrigin": [{{chromeOriginsJson}}], "LocalNetworkAccessAllowedForUrls": [{{chromeOriginsJson}}]}' | sudo tee /etc/opt/chrome/policies/managed/mimony-pos.json /etc/chromium/policies/managed/mimony-pos.json >/dev/null 2>&1 || true
 
 # CUPS: set up thermal printer as raw queue
 echo ""
@@ -927,6 +956,11 @@ echo "  POS shortcut is on your Desktop."
 echo ""
 echo "  QZ Tray dialogs close automatically."
 echo "  Just open the POS and start printing."
+echo ""
+echo "  IMPORTANT: fully quit Chrome now (close every window, then run"
+echo "  'pkill -f chrome' if it's still running), then reopen it — the"
+echo "  browser policy changes above only take effect on a fresh start,"
+echo "  not in windows already open."
 echo " ========================================"
 echo ""
 echo "Press Enter to close..."

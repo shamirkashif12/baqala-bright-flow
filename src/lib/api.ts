@@ -692,8 +692,10 @@ export const api = {
     printerRequest<{ message: string }>(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`, { method: "DELETE" }),
   // Returns the direct URL to download the OS-specific QZ Tray install script
   qzInstallScriptUrl: () => `${BASE}/api/printer/qz-install-script`,
-  // Returns the direct URL to download the one-click POS Setup installer (OS-specific)
-  setupInstallerUrl: () => `${BASE}/api/printer/setup-installer`,
+  // Returns the direct URL to download the one-click POS Setup installer (OS-specific). Passes
+  // this page's own origin explicitly — the endpoint otherwise falls back to the configured
+  // PosUrl, which silently drifts out of sync if this app is ever served from elsewhere.
+  setupInstallerUrl: () => `${BASE}/api/printer/setup-installer?origin=${encodeURIComponent(window.location.origin)}`,
   // Returns the Windows PowerShell one-liner install command (no download needed)
   setupPs1Url: () => `${BASE}/api/printer/setup-ps1`,
   // Fixes the "Action Required" QZ Tray popup on Windows when QZ Tray is already installed.
