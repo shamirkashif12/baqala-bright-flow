@@ -149,18 +149,38 @@ using (var migrationScope = app.Services.CreateScope())
             // the app has been running against a stale schema until each gap was eventually
             // noticed and patched by hand (see git history for this block).
             //
-            // Generate the plain (non-idempotent) SQL for just the pending migrations and execute
-            // it directly instead, which is exactly what Migrate() does internally minus the
-            // broken lock acquisition. Skipping the lock is safe here — this app only ever
-            // migrates from a single instance at startup, never multiple replicas racing to
-            // migrate concurrently.
-            var applied = await db.Database.GetAppliedMigrationsAsync();
-            var fromMigration = applied.LastOrDefault() ?? Microsoft.EntityFrameworkCore.Migrations.Migration.InitialDatabase;
+            // Generate the plain (non-idempotent) SQL for each pending migration individually and
+            // execute it directly instead, which is what Migrate() does internally minus the broken
+            // lock acquisition. This must walk migrations one at a time rather than generating one
+            // script from "the last applied migration" to the end: migration IDs are timestamps, and
+            // this codebase has repeatedly merged/authored migrations out of chronological order
+            // (e.g. BackfillTobaccoFeeAndPoCreatedByColumns is dated before
+            // FixMissingTobaccoFeeAndCreatedByColumns but was added to the repo after it already
+            // ran). A single from-last-applied-to-null script silently drops any pending migration
+            // whose ID sorts earlier than one already applied — GenerateScript slices the full
+            // ordered migration list by position, not by "not yet applied" — which is exactly how
+            // three migrations (AddIsTobaccoToProducts, AddOrderClientRequestId,
+            // BackfillTobaccoFeeAndPoCreatedByColumns) ended up permanently stuck pending on this
+            // dev database despite this same startup code running on every restart. Skipping the
+            // lock is safe here — this app only ever migrates from a single instance at startup,
+            // never multiple replicas racing to migrate concurrently.
+            var applied = (await db.Database.GetAppliedMigrationsAsync()).ToHashSet();
+            var orderedMigrations = applied.Concat(pending).OrderBy(id => id, StringComparer.Ordinal);
             var migrator = db.GetInfrastructure().GetRequiredService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
-            var script = migrator.GenerateScript(fromMigration, toMigration: null);
+            var checkpoint = Microsoft.EntityFrameworkCore.Migrations.Migration.InitialDatabase;
             startupLogger.LogInformation("Applying {Count} pending migration(s) directly (bypassing MariaDB's broken migration lock): {Migrations}",
                 pending.Count, string.Join(", ", pending));
-            await db.Database.ExecuteSqlRawAsync(script);
+            foreach (var migrationId in orderedMigrations)
+            {
+                if (applied.Contains(migrationId))
+                {
+                    checkpoint = migrationId;
+                    continue;
+                }
+                var script = migrator.GenerateScript(checkpoint, migrationId);
+                await db.Database.ExecuteSqlRawAsync(script);
+                checkpoint = migrationId;
+            }
         }
     }
     catch (Exception migEx)
