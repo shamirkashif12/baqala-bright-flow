@@ -96,7 +96,15 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             order.CashierId = null;
             order.ShiftId = null;
             order.BranchId = kioskBranchId;
+
+            // The kiosk's terminalId claim is minted once at pairing time and lives for 24h —
+            // if that terminal row gets deleted/recreated in the meantime (demo-data reset, or
+            // staff removing/re-adding the kiosk in Terminals admin), a stale-but-well-formed
+            // GUID here would otherwise blow up the INSERT below with a foreign-key violation
+            // and fail the entire sale for a reason the customer/kiosk has no way to fix. There is
+            // no real payment terminal to protect by hard-failing here, so just drop the link.
             order.TerminalId = Guid.TryParse(User.FindFirst("terminalId")?.Value, out var kioskTerminalId)
+                && await db.Terminals.AnyAsync(t => t.Id == kioskTerminalId)
                 ? kioskTerminalId : null;
 
             var settings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == kioskBranchId);
