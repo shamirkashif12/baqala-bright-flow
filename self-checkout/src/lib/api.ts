@@ -329,4 +329,31 @@ export function getPrinterStatus(): Promise<PrinterStatus> {
   return printerRequest("/api/printer/status");
 }
 
+export interface DetectedPrinter {
+  uri: string;
+  model: string;
+  type: "usb" | "network";
+  suggestedName: string;
+}
+
+export function detectPrinters(): Promise<{ printers: DetectedPrinter[] }> {
+  return printerRequest("/api/printer/detect");
+}
+
+export function activatePrinter(data: { uri: string; name: string }): Promise<{ message: string; name: string; kioskReady: boolean }> {
+  return printerRequest("/api/printer/activate", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function removePrinter(name: string): Promise<{ message: string }> {
+  return printerRequest(`/api/printer/${name}`, { method: "DELETE" });
+}
+
+export function getPrintJobs(printer?: string): Promise<{ jobs: string[] }> {
+  return printerRequest(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`);
+}
+
+export function cancelAllJobs(printer?: string): Promise<{ message: string }> {
+  return printerRequest(`/api/printer/jobs${printer ? `?printer=${encodeURIComponent(printer)}` : ""}`, { method: "DELETE" });
+}
+
 export { ApiError };
