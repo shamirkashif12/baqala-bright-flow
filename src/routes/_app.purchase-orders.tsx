@@ -1086,10 +1086,23 @@ function PurchaseOrders() {
 
   const refreshView = () => {
     load();
-    if (viewPO) api.getPurchaseOrder(viewPO.id).then(updated => {
-      setViewPO(updated);
-      setViewPOGroup(g => g.map(p => p.id === updated.id ? updated : p));
-    }).catch(() => {});
+    if (!viewPO) return;
+    // Refetch the WHOLE batch, not just viewPO itself — receiving/paying against whichever
+    // warehouse is active in the sheet's switcher only ever updated viewPO's own id before,
+    // so switching to a different warehouse in the batch and receiving against it left that
+    // warehouse's card showing stale (pre-receipt) data, and its Receive button never hid.
+    if (viewPO.batchId) {
+      api.getPurchaseOrdersByBatch(viewPO.batchId).then(group => {
+        if (!group.length) return;
+        setViewPOGroup(group);
+        setViewPO(prev => group.find(p => p.id === prev?.id) ?? group[0]);
+      }).catch(() => {});
+    } else {
+      api.getPurchaseOrder(viewPO.id).then(updated => {
+        setViewPO(updated);
+        setViewPOGroup([updated]);
+      }).catch(() => {});
+    }
   };
 
   return (
