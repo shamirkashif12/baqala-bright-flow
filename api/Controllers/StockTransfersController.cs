@@ -11,6 +11,9 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/stock-transfers")]
 public class StockTransfersController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? transferType,
@@ -442,17 +445,25 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
         }
 
-        if ((req.Status == "approved" || req.Status == "rejected") && prev != req.Status && transfer.CreatedBy != Guid.Empty)
+        if ((req.Status == "approved" || req.Status == "rejected") && prev != req.Status)
         {
             var approved = req.Status == "approved";
-            await notifications.NotifyUserAsync(transfer.CreatedBy,
-                "Admin / Security", approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                approved
-                    ? $"Transfer {transfer.TransferNumber} was approved"
-                    : $"Transfer {transfer.TransferNumber} was rejected",
-                severity: approved ? "info" : "warning",
-                entityType: "StockTransfer", entityId: transfer.Id);
+            // Notify both the transfer's creator and the manager who acted. Previously only
+            // CreatedBy was notified and only when set, so an approval could surface to no one.
+            var recipients = new List<Guid>();
+            if (transfer.CreatedBy != Guid.Empty) recipients.Add(transfer.CreatedBy);
+            if (CallerId() is { } caller) recipients.Add(caller);
+            if (recipients.Count > 0)
+            {
+                await notifications.NotifyUsersAsync(recipients,
+                    "Admin / Security", approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                    approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                    approved
+                        ? $"Transfer {transfer.TransferNumber} was approved"
+                        : $"Transfer {transfer.TransferNumber} was rejected",
+                    severity: approved ? "info" : "warning",
+                    entityType: "StockTransfer", entityId: transfer.Id, branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
+            }
         }
 
         return Ok(transfer);

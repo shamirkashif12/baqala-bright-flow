@@ -130,21 +130,14 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
 
         // No branch to scope by for a warehouse-only PO — notify admins only rather than every
         // branch manager tenant-wide (NotifyRoleAsync treats a null branchId as unscoped).
+        // alsoUserId guarantees the orderer is reached (even as Inventory Staff) exactly once —
+        // it used to also get a separate NotifyUserAsync, double-notifying Manager/Admin orderers.
         var poRoles = po.BranchId.HasValue ? new[] { "Manager", "Admin" } : new[] { "Admin" };
         await notifications.NotifyRoleAsync(poRoles, po.BranchId,
             "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
             $"Purchase Order {po.PoNumber} created",
-            entityType: "PurchaseOrder", entityId: po.Id);
-
-        // Confirmation to whoever placed the order — NotifyRoleAsync above only reaches them if
-        // they happen to hold the Manager/Admin role; an Inventory Staff orderer wouldn't.
-        if (po.OrderedBy != Guid.Empty)
-        {
-            await notifications.NotifyUserAsync(po.OrderedBy,
-                "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
-                $"Purchase Order {po.PoNumber} created",
-                entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId);
-        }
+            entityType: "PurchaseOrder", entityId: po.Id,
+            alsoUserId: po.OrderedBy != Guid.Empty ? po.OrderedBy : null);
 
         return CreatedAtAction(nameof(GetById), new { id = po.Id }, po);
     }
@@ -161,17 +154,26 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         po.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
-        if ((req.Status == "approved" || req.Status == "rejected") && prevStatus != req.Status && po.OrderedBy != Guid.Empty)
+        if ((req.Status == "approved" || req.Status == "rejected") && prevStatus != req.Status)
         {
             var approved = req.Status == "approved";
-            await notifications.NotifyUserAsync(po.OrderedBy,
-                "Admin / Security", approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                approved
-                    ? $"Purchase Order {po.PoNumber} was approved"
-                    : $"Purchase Order {po.PoNumber} was rejected",
-                severity: approved ? "info" : "warning",
-                entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId);
+            // Notify both the orderer and the manager who acted. Previously only OrderedBy was
+            // notified and only when it was set, so a PO with no orderer (or approved by the same
+            // manager who has no personal orderer link) surfaced no approval notification at all.
+            var recipients = new List<Guid>();
+            if (po.OrderedBy != Guid.Empty) recipients.Add(po.OrderedBy);
+            if (CallerId() is { } caller) recipients.Add(caller);
+            if (recipients.Count > 0)
+            {
+                await notifications.NotifyUsersAsync(recipients,
+                    "Admin / Security", approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                    approved ? "Manager Approval Granted" : "Manager Approval Rejected",
+                    approved
+                        ? $"Purchase Order {po.PoNumber} was approved"
+                        : $"Purchase Order {po.PoNumber} was rejected",
+                    severity: approved ? "info" : "warning",
+                    entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId);
+            }
         }
 
         return Ok(po);
@@ -303,20 +305,14 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
 
         await db.SaveChangesAsync();
 
+        // Single fan-out to branch managers/admins plus the user who received it — alsoUserId
+        // folds the receiving caller in without the duplicate row a Manager/Admin caller used to get.
         var deliveryRoles = po.BranchId.HasValue ? new[] { "Manager", "Admin" } : new[] { "Admin" };
         await notifications.NotifyRoleAsync(deliveryRoles, po.BranchId,
             "Suppliers / Purchase Orders", "Supplier Delivery Received", "Supplier Delivery Received",
             $"Supplier delivery received for PO {po.PoNumber}",
-            entityType: "PurchaseOrder", entityId: po.Id);
-
-        var callerId = CallerId();
-        if (callerId.HasValue)
-        {
-            await notifications.NotifyUserAsync(callerId.Value,
-                "Suppliers / Purchase Orders", "Supplier Delivery Received", "Supplier Delivery Received",
-                $"Supplier delivery received for PO {po.PoNumber}",
-                entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId);
-        }
+            entityType: "PurchaseOrder", entityId: po.Id,
+            alsoUserId: CallerId());
 
         return Ok(po);
     }

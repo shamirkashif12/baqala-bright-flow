@@ -12,7 +12,7 @@ namespace BaqalaPOS.Api.Controllers;
 // through the existing InventoryAdjustment pipeline, rather than a parallel one.
 [ApiController]
 [Route("api/stock-counts")]
-public class StockCountsController(BaqalaDbContext db, IAuditService audit) : ControllerBase
+public class StockCountsController(BaqalaDbContext db, IAuditService audit, IStockAlertService stockAlerts, ILogger<StockCountsController> logger) : ControllerBase
 {
     private (string? Role, Guid? BranchId) GetCallerContext()
     {
@@ -134,11 +134,13 @@ public class StockCountsController(BaqalaDbContext db, IAuditService audit) : Co
         if (count.Status != "draft") return BadRequest(new { message = "This count session is already closed." });
 
         var adjustments = new List<InventoryAdjustment>();
+        var reducedProductIds = new List<Guid>();
         foreach (var item in count.Items.Where(i => i.CountedQuantity.HasValue && i.Variance != 0))
         {
             var variance = item.Variance!.Value;
             var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == count.BranchId);
             if (stock is null) continue;
+            if (variance < 0) reducedProductIds.Add(item.ProductId);
 
             adjustments.Add(new InventoryAdjustment
             {
@@ -165,6 +167,14 @@ public class StockCountsController(BaqalaDbContext db, IAuditService audit) : Co
         await audit.LogAsync("complete_stock_count", "StockCount", count.Id, req.CompletedBy, count.BranchId,
             $"{{\"itemsCounted\":{count.Items.Count(i => i.CountedQuantity.HasValue)},\"adjustments\":{adjustments.Count}}}",
             adjustments.Count > 0 ? "warning" : "info");
+
+        // A physical count that revised on-hand downward can drop a product below its reorder
+        // point — fire the low-stock alert now rather than waiting for the background sweep.
+        foreach (var productId in reducedProductIds)
+        {
+            try { await stockAlerts.CheckStockLevelAsync(productId, count.BranchId); }
+            catch (Exception ex) { logger.LogError(ex, "Low-stock check failed after stock count for product {ProductId}", productId); }
+        }
 
         // Re-fetch with the same Includes GetById uses — the tracked `count` above has no
         // Branch/Product loaded, which rendered as "Unknown" products in the completed view.

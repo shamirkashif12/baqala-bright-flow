@@ -33,6 +33,9 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
         return (role, branchId);
     }
 
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
@@ -102,9 +105,15 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
         ret.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
-        if (ret.ProcessedBy.HasValue)
+        // Notify both the cashier who raised the return and the manager who acted on it.
+        // Previously only ProcessedBy was notified (and only when set), so approving a return that
+        // had no ProcessedBy surfaced no "Manager Approval Granted/Rejected" notification at all.
+        var approvalRecipients = new List<Guid>();
+        if (ret.ProcessedBy.HasValue) approvalRecipients.Add(ret.ProcessedBy.Value);
+        if (CallerId() is { } approvalCaller) approvalRecipients.Add(approvalCaller);
+        if (approvalRecipients.Count > 0)
         {
-            await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
+            await notifications.NotifyUsersAsync(approvalRecipients,
                 "Admin / Security",
                 req.Approved ? "Manager Approval Granted" : "Manager Approval Rejected",
                 req.Approved ? "Manager Approval Granted" : "Manager Approval Rejected",
@@ -155,13 +164,20 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
         ret.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
-        if (ret.ProcessedBy.HasValue)
+        // Notify whoever completed the return (the caller who clicked Complete) as well as the
+        // cashier who originally processed it. Previously only ProcessedBy was notified, so a
+        // return created without a ProcessedBy (or completed by a different manager) surfaced no
+        // "Return Completed"/"Refund Processed" notification to anyone — the reported gap.
+        var recipients = new List<Guid>();
+        if (CallerId() is { } caller) recipients.Add(caller);
+        if (ret.ProcessedBy.HasValue) recipients.Add(ret.ProcessedBy.Value);
+        if (recipients.Count > 0)
         {
-            await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
+            await notifications.NotifyUsersAsync(recipients,
                 "Returns", "Return Completed", "Return Completed",
                 $"Return {ret.ReturnNumber} completed successfully",
                 entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
-            await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
+            await notifications.NotifyUsersAsync(recipients,
                 "Payment", "Refund Processed", "Refund Processed",
                 $"Refund completed for Invoice {ret.ReturnNumber}",
                 entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);

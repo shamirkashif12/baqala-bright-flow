@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class InventoryController(BaqalaDbContext db) : ControllerBase
+public class InventoryController(BaqalaDbContext db, IStockAlertService stockAlerts, ILogger<InventoryController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see/write their own branch's
     // batches — mirrors the scoping the frontend already applies to the plain stock list.
@@ -159,9 +160,27 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Adjustment quantity must be greater than zero." });
 
+        // Recording wastage/damage (or any adjustment) against a product that has no stock row in
+        // the chosen branch used to 404 with "Stock record not found", surfacing to the user as the
+        // reported "Failed to record wastage". A write-off is a legitimate event to log even when
+        // the system shows nothing on hand, so create a zero row and let the removal clamp at zero
+        // rather than rejecting the whole action. Mirrors the upsert the PO-receive path already does.
         var stock = await db.InventoryStocks
             .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
-        if (stock is null) return NotFound("Stock record not found.");
+        if (stock is null)
+        {
+            stock = new InventoryStock
+            {
+                Id = Guid.NewGuid(),
+                ProductId = req.ProductId,
+                BranchId = req.BranchId,
+                Quantity = 0,
+                LastUpdated = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.InventoryStocks.Add(stock);
+        }
 
         var adjustment = new InventoryAdjustment
         {
@@ -185,6 +204,16 @@ public class InventoryController(BaqalaDbContext db) : ControllerBase
 
         db.InventoryAdjustments.Add(adjustment);
         await db.SaveChangesAsync();
+
+        // Removal adjustments (wastage, damage, stock-out, transfer-out) can push on-hand below the
+        // reorder threshold — check immediately so the Low Stock / Out of Stock alert fires now
+        // instead of waiting for the 15-minute background sweep. Best-effort: never fail the write.
+        if (req.AdjustmentType is not ("addition" or "return_to_supplier" or "transfer_in"))
+        {
+            try { await stockAlerts.CheckStockLevelAsync(req.ProductId, req.BranchId); }
+            catch (Exception ex) { logger.LogError(ex, "Low-stock check failed after adjustment for product {ProductId}", req.ProductId); }
+        }
+
         return Created($"/api/inventory/adjustments/{adjustment.Id}", adjustment);
     }
 }

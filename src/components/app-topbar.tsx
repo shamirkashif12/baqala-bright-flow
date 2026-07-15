@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { useState, useEffect } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { api, NOTIFICATION_CREATED_EVENT } from "@/lib/api";
 import {
   DropdownMenu,
@@ -36,6 +37,8 @@ type NotifItem = {
   body: string;
   relTime: string;
   isRead: boolean;
+  type: string;
+  entityType?: string;
 };
 
 const TONE_DOT: Record<NotifItem["tone"], string> = {
@@ -62,6 +65,52 @@ const CATEGORY_ICON: Record<string, React.FC<{ className?: string }>> = {
   "Admin / Security": ShieldCheck,
 };
 
+// Which notifications are "obvious" enough to jump to a screen when clicked. Keyed by the
+// notification `type` (the specific event), so purely informational/ephemeral POS toasts
+// (Payment Successful, Item Added to Cart, Coupon Applied, Loyalty Points Earned, …) stay
+// non-navigating — there is no useful tab for them and jumping away would be jarring.
+const TYPE_ROUTE: Record<string, string> = {
+  // Returns / refunds
+  "Return Started": "/returns",
+  "Return Approval Required": "/returns",
+  "Return Completed": "/returns",
+  "Refund Processed": "/returns",
+  // Suppliers / purchase orders
+  "Purchase Order Created": "/purchase-orders",
+  "Supplier Delivery Received": "/purchase-orders",
+  "Supplier Return Created": "/supplier-returns",
+  // Inventory / stock
+  "Low Stock Alert": "/inventory",
+  "Out of Stock": "/inventory",
+  "Stock Transfer Pending Acceptance": "/stock-transfers",
+  "Stock Transfer Received": "/stock-transfers",
+  "Wastage Recorded": "/stocks",
+  "Expired Stock Write-Off": "/stocks",
+  // Expiry / perishable
+  "Product Near Expiry": "/batches",
+  "Product Expired": "/batches",
+  // Terminals / shifts
+  "Terminal Offline": "/terminals",
+  "Terminal Shift Conflict": "/terminals",
+  "Shift Opened": "/cashier-shift",
+  "Cash Variance Alert": "/cashier-shift",
+  // Compliance
+  "ZATCA Submission Failed": "/zatca",
+  "ZATCA Invoice Generated": "/zatca",
+  "ZATCA Pending Queue": "/zatca",
+};
+
+// "Manager Approval Granted"/"Rejected" is reused for both PO and Return approvals — the entity
+// it points at decides where clicking should land.
+function routeForNotification(n: { type: string; entityType?: string }): string | undefined {
+  if (n.type === "Manager Approval Granted" || n.type === "Manager Approval Rejected") {
+    if (n.entityType === "PurchaseOrder") return "/purchase-orders";
+    if (n.entityType === "CustomerReturn") return "/returns";
+    return undefined;
+  }
+  return TYPE_ROUTE[n.type];
+}
+
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
@@ -75,6 +124,7 @@ function relativeTime(iso: string): string {
 function NotificationsPopover() {
   const [open, setOpen] = useState(false);
   const [persisted, setPersisted] = useState<NotifItem[]>([]);
+  const navigate = useNavigate();
 
   const loadPersisted = () => {
     api.getNotifications({ pageSize: 20 }).then(res => {
@@ -87,6 +137,8 @@ function NotificationsPopover() {
         relTime: relativeTime(n.createdAt),
         persisted: true,
         isRead: n.isRead,
+        type: n.type,
+        entityType: n.entityType,
       })));
     }).catch(() => {});
   };
@@ -120,6 +172,17 @@ function NotificationsPopover() {
     api.markNotificationRead(item.id).catch(() => {});
   };
 
+  // Clicking a notification marks it read and, for the "obvious" ones (an order/return/PO/stock
+  // event with a home screen), navigates there. Ephemeral POS notices without a route just clear.
+  const handleClick = (item: NotifItem) => {
+    markOneRead(item);
+    const to = routeForNotification(item);
+    if (to) {
+      setOpen(false);
+      navigate({ to });
+    }
+  };
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -146,8 +209,8 @@ function NotificationsPopover() {
             notifications.map(n => (
               <button
                 key={n.id}
-                onClick={() => markOneRead(n)}
-                title="Click to mark as read"
+                onClick={() => handleClick(n)}
+                title={routeForNotification(n) ? "Click to open" : "Click to mark as read"}
                 className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
               >
                 <div className={`h-2 w-2 rounded-full mt-2 shrink-0 ${TONE_DOT[n.tone]}`} />

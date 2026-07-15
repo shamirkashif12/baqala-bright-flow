@@ -707,7 +707,7 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
       setOpen(false);
       setForm({ productId: "", branchId: "", quantity: "", reason: "" });
       onDone();
-    } catch { toast.error("Failed to record wastage"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to record wastage"); }
     finally { setSaving(false); }
   }
 

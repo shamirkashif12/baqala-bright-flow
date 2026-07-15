@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, ILogger<OrdersController> logger) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, ILogger<OrdersController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's orders —
     // mirrors ReportsController.GetCallerContext. Previously branchId was just an optional query
@@ -248,6 +248,15 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         }
 
         await db.SaveChangesAsync();
+
+        // A sale that drops on-hand to/under the reorder point should surface a Low Stock / Out of
+        // Stock alert immediately, not up to 15 minutes later on the next background sweep. Best-
+        // effort per product — a notification hiccup must never fail an otherwise-completed sale.
+        foreach (var productId in order.Items.Select(i => i.ProductId).Distinct())
+        {
+            try { await stockAlerts.CheckStockLevelAsync(productId, order.BranchId); }
+            catch (Exception ex) { logger.LogError(ex, "Low-stock check failed after sale for product {ProductId}", productId); }
+        }
 
         if (checkoutWithoutShiftRole is not null)
         {
