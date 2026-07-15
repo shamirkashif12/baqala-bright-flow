@@ -167,7 +167,7 @@ export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const { t } = useI18n();
+  const { t, dir } = useI18n();
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(navGroups.map((g) => [g.label, true])),
   );
@@ -188,7 +188,7 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r-0">
+    <Sidebar collapsible="icon" side={dir === "rtl" ? "right" : "left"} className="border-r-0">
       <SidebarHeader className="p-4 border-b border-sidebar-border/50">
         {collapsed ? <BaqalaLogo showText={false} /> : <BaqalaLogo />}
       </SidebarHeader>

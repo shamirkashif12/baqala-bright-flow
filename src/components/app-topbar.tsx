@@ -1,7 +1,8 @@
-import { Bell, Search, Languages, HelpCircle, ChevronDown, Building2, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock } from "lucide-react";
+import { Bell, Search, HelpCircle, ChevronDown, Building2, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -277,7 +278,8 @@ function BranchDropdown() {
 
 // ── Topbar ─────────────────────────────────────────────────────────────────────
 export function AppTopbar({ title, subtitle }: { title: string; subtitle?: string }) {
-  const { lang, toggle, t } = useI18n();
+  const { dir, t } = useI18n();
+  const rtl = dir === "rtl";
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/80 backdrop-blur-xl px-4 md:px-6">
@@ -287,26 +289,13 @@ export function AppTopbar({ title, subtitle }: { title: string; subtitle?: strin
         {subtitle && <p className="text-xs text-muted-foreground truncate">{t(subtitle)}</p>}
       </div>
       <div className="hidden md:flex items-center gap-2 relative w-72">
-        <Search className={`h-4 w-4 absolute ${lang === "ar" ? "right-3" : "left-3"} text-muted-foreground pointer-events-none`} />
+        <Search className={`h-4 w-4 absolute ${rtl ? "right-3" : "left-3"} text-muted-foreground pointer-events-none`} />
         <Input
           placeholder={t("Search products, SKU, invoices…")}
-          className={`h-9 bg-muted/50 border-transparent focus-visible:bg-card focus-visible:border-border/60 ${lang === "ar" ? "pr-9 text-right" : "pl-9"}`}
+          className={`h-9 bg-muted/50 border-transparent focus-visible:bg-card focus-visible:border-border/60 ${rtl ? "pr-9 text-right" : "pl-9"}`}
         />
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="gap-1.5 h-9"
-        onClick={toggle}
-        aria-label="Toggle language"
-        title={lang === "en" ? "العربية" : "English"}
-      >
-        <Languages className="h-4 w-4" />
-        <span className="hidden sm:inline font-semibold">{lang === "en" ? "EN" : "AR"}</span>
-        <span className="hidden md:inline text-xs text-muted-foreground">
-          {lang === "en" ? "· العربية" : "· English"}
-        </span>
-      </Button>
+      <LanguageSwitcher />
       <NotificationsPopover />
       <HelpPopover />
       <BranchDropdown />

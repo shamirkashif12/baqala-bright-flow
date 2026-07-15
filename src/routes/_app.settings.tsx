@@ -14,6 +14,8 @@ import {
 import { toast } from "sonner";
 import { api, type ZatcaSettings } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
+import { useI18n } from "@/lib/i18n";
+import { isLang } from "@/locales/languages";
 
 export const Route = createFileRoute("/_app/settings")({
   component: () => (
@@ -47,6 +49,7 @@ function b(val: boolean): string { return val ? "1" : "0"; }
 
 function Settings() {
   const { selectedBranch } = useBranch();
+  const { lang, setLang, languages } = useI18n();
   const [activeSection, setActiveSection] = useState("Business Profile");
 
   // ── Key-value store (tenant_settings) ────────────────────────────────────
@@ -317,10 +320,13 @@ function Settings() {
               <h3 className="font-semibold text-lg">Language & Currency</h3>
               <div className="grid sm:grid-cols-2 gap-4 mt-6">
                 <div><Label>Interface Language</Label>
-                  <select value={kstr(kv, "lang.interface", "english")} onChange={e => setKv(p => ({ ...p, "lang.interface": e.target.value }))}
+                  <select
+                    value={lang}
+                    onChange={e => { if (isLang(e.target.value)) { setLang(e.target.value); setKv(p => ({ ...p, "lang.interface": e.target.value })); } }}
                     className="mt-1.5 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm">
-                    <option value="english">English</option>
-                    <option value="arabic">Arabic</option>
+                    {languages.map(l => (
+                      <option key={l.code} value={l.code}>{l.label}{l.nativeLabel !== l.label ? ` — ${l.nativeLabel}` : ""}</option>
+                    ))}
                   </select></div>
                 <div><Label>Currency</Label>
                   <Input value="SAR — Saudi Riyal" className="mt-1.5" readOnly /></div>
