@@ -21,6 +21,14 @@ const ROLE_DEFAULT_ROUTES: Record<AppRole, string> = {
   finance_user:   "/sales",
   marketing_user: "/customers",
   picker:         "/stocks",
+  // Added when AppRole gained these three roles — Record<AppRole, string> is exhaustive, so the
+  // type broke without them. "/dashboard" is deliberate rather than a guess at intent: the lookup
+  // below already falls back to "/dashboard" for any unmapped role, so these entries preserve the
+  // exact behaviour these roles have today. Point them somewhere better (e.g. auditor →
+  // /audit-logs, warehouse_* → /warehouses) once their module permissions are settled.
+  auditor:           "/dashboard",
+  warehouse_staff:   "/dashboard",
+  warehouse_manager: "/dashboard",
 };
 
 // Maps each URL prefix to the module permission or role restriction that controls access.
