@@ -6,11 +6,14 @@ export const ROLE_RANK: Record<AppRole, number> = {
   tenant_admin: 1,
   branch_manager: 2,
   supervisor: 3,
+  warehouse_manager: 3,
   cashier: 4,
   storekeeper: 4,
   finance_user: 4,
   marketing_user: 4,
   picker: 4,
+  auditor: 4,
+  warehouse_staff: 4,
 };
 
 // Mirrors AuthController.ToAppRole (api/Controllers/AuthController.cs) so a
@@ -34,11 +37,15 @@ export function roleNameToSlug(roleName: string): AppRole {
     case "Accountant":
       return "finance_user";
     case "Marketing User":
-    case "Auditor":
       return "marketing_user";
     case "Picker":
-    case "Warehouse Staff":
       return "picker";
+    case "Auditor":
+      return "auditor";
+    case "Warehouse Staff":
+      return "warehouse_staff";
+    case "Warehouse Manager":
+      return "warehouse_manager";
     default:
       return roleName.toLowerCase().replace(/ /g, "_") as AppRole;
   }

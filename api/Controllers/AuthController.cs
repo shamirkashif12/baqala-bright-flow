@@ -102,8 +102,16 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         "Storekeeper"          or "Inventory Staff"  => "storekeeper",
         "Supervisor"                                 => "supervisor",
         "Finance User"         or "Accountant"       => "finance_user",
-        "Marketing User"       or "Auditor"          => "marketing_user",
-        "Picker"               or "Warehouse Staff"  => "picker",
+        "Marketing User"                             => "marketing_user",
+        "Picker"                                     => "picker",
+        // Previously collapsed into marketing_user/picker respectively — two
+        // real, distinct roles (with their own real permission rows) getting
+        // mislabeled as unrelated ones, which silently broke every isManager/
+        // role-gated check for them and showed the wrong label throughout the
+        // app (an Auditor's own dashboard called them a "Marketing User").
+        "Auditor"                                    => "auditor",
+        "Warehouse Staff"                             => "warehouse_staff",
+        "Warehouse Manager"                          => "warehouse_manager",
         _                                            => roleName.ToLower().Replace(' ', '_')
     };
 
