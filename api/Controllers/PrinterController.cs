@@ -630,12 +630,15 @@ while ($true) {
             // THEN stop QZ, write override.crt + authcert.override + allowed.dat, and let the later
             // "Start QZ Tray" step launch it fresh so it reads our line. Verified against the failure
             // mode seen live: full SSL config present, but no authcert.override and no override.crt.
+            // The $qzDir candidates MUST use string interpolation, not `+`. PowerShell binds `,` tighter
+            // than `+`, so @($a + '\QZ Tray', $b + '\QZ Tray') concatenates into ONE space-joined string
+            // instead of a 3-element array -> Test-Path always false -> $qzDir always null on every machine.
             var trustPs = $$"""
 $ErrorActionPreference = 'Continue'
 $cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{embeddedCertBase64}}'))
-$qzDir = $null; $ready = $false
+$qzDir = $null; $ready = $false; $trusted = $false
 for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
-  $qzDir = @($env:ProgramFiles + '\QZ Tray', ${env:ProgramFiles(x86)} + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1
+  $qzDir = @("$env:ProgramFiles\QZ Tray", "${env:ProgramFiles(x86)}\QZ Tray", "$env:LOCALAPPDATA\QZ Tray") | Where-Object { Test-Path $_ } | Select-Object -First 1
   if ($qzDir) { $p = Join-Path $qzDir 'qz-tray.properties'; if ((Test-Path $p) -and (Select-String -Path $p -Pattern 'wss.keystore' -Quiet)) { $ready = $true } }
   if (-not $ready) { Start-Sleep -Seconds 1 }
 }
@@ -649,6 +652,7 @@ if ($qzDir) {
   $propLines += 'authcert.override=override.crt'
   Set-Content -Path $propsPath -Value $propLines -Encoding ASCII
   Write-Host ('   override.crt written: ' + (Test-Path (Join-Path $qzDir 'override.crt')))
+  $trusted = Test-Path (Join-Path $qzDir 'override.crt')
 } else { Write-Host '   WARNING: QZ Tray install dir not found - the Allow dialog may still appear.' }
 $fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower()
 $allowedDir = Join-Path $env:APPDATA 'qz'; New-Item -ItemType Directory -Force $allowedDir | Out-Null
@@ -657,7 +661,8 @@ $allowed = Join-Path $allowedDir 'allowed.dat'
 $lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() }
 $lines += $entry
 Set-Content -Path $allowed -Value $lines -Encoding ASCII
-Write-Host '   QZ Tray trusted - no Allow dialog will appear.'
+if ($trusted) { Write-Host '   QZ Tray trusted - no Allow dialog will appear.' }
+else { Write-Host '   WARNING: cert allow-listed but override.crt was NOT written - the Allow dialog WILL appear.' }
 """;
             // UTF-8 (not UTF-16) so the base64 stays well under cmd.exe's 8191-char line limit when
             // embedded in the batch. The script is pure ASCII, so a UTF-8/no-BOM temp file reads
