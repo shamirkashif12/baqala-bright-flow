@@ -622,6 +622,48 @@ while ($true) {
 """;
             var autoAllowPs1Base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(autoAllowPs1));
 
+            // QZ Tray cert-trust step, run via -EncodedCommand to sidestep batch quoting entirely.
+            // The critical ordering fix: QZ Tray's silent install regenerates qz-tray.properties on
+            // its first-run certgen, which OVERWRITES the file and silently wipes any authcert.override
+            // we add too early — so override.crt sits on disk unused and the "Allow" dialog returns.
+            // We therefore poll until qz-tray.properties has finished generating (contains wss.keystore),
+            // THEN stop QZ, write override.crt + authcert.override + allowed.dat, and let the later
+            // "Start QZ Tray" step launch it fresh so it reads our line. Verified against the failure
+            // mode seen live: full SSL config present, but no authcert.override and no override.crt.
+            var trustPs = $$"""
+$ErrorActionPreference = 'Continue'
+$cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{embeddedCertBase64}}'))
+$qzDir = $null; $ready = $false
+for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
+  $qzDir = @($env:ProgramFiles + '\QZ Tray', ${env:ProgramFiles(x86)} + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($qzDir) { $p = Join-Path $qzDir 'qz-tray.properties'; if ((Test-Path $p) -and (Select-String -Path $p -Pattern 'wss.keystore' -Quiet)) { $ready = $true } }
+  if (-not $ready) { Start-Sleep -Seconds 1 }
+}
+Get-Process qz-tray,qz-tray-console -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+if ($qzDir) { Get-Process javaw,java -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ($qzDir + '*') } | Stop-Process -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+if ($qzDir) {
+  Set-Content -Path (Join-Path $qzDir 'override.crt') -Value $cert -Encoding ASCII
+  $propsPath = Join-Path $qzDir 'qz-tray.properties'
+  $propLines = if (Test-Path $propsPath) { Get-Content $propsPath | Where-Object { $_ -notmatch '^authcert\.override=' } } else { @() }
+  $propLines += 'authcert.override=override.crt'
+  Set-Content -Path $propsPath -Value $propLines -Encoding ASCII
+  Write-Host ('   override.crt written: ' + (Test-Path (Join-Path $qzDir 'override.crt')))
+} else { Write-Host '   WARNING: QZ Tray install dir not found - the Allow dialog may still appear.' }
+$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower()
+$allowedDir = Join-Path $env:APPDATA 'qz'; New-Item -ItemType Directory -Force $allowedDir | Out-Null
+$entry = $fp + "`tQZ Tray Demo Cert`tQZ Industries, LLC`t{{certValidFrom}}`t{{certValidTo}}`ttrue"
+$allowed = Join-Path $allowedDir 'allowed.dat'
+$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() }
+$lines += $entry
+Set-Content -Path $allowed -Value $lines -Encoding ASCII
+Write-Host '   QZ Tray trusted - no Allow dialog will appear.'
+""";
+            // UTF-8 (not UTF-16) so the base64 stays well under cmd.exe's 8191-char line limit when
+            // embedded in the batch. The script is pure ASCII, so a UTF-8/no-BOM temp file reads
+            // correctly even under Windows PowerShell 5.1's ANSI default.
+            var trustPsBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(trustPs));
+
             var bat = $$"""
 @echo off
 setlocal EnableDelayedExpansion
@@ -664,33 +706,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObj
 :: just the configured POS URL — ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS otherwise.
 {{winChromePolicyLines}}
 
-:: ── Trust POS cert in QZ Tray — eliminates all "Action Required" dialogs.
-:: override.crt is the mechanism that actually suppresses the dialog (QZ Tray treats it as
-:: a pre-authorized identity); allowed.dat alone does NOT — verified empirically, QZ Tray
-:: still prompts on every connection even with a matching allowed.dat entry unless
-:: override.crt is also present. QZ Tray may still be finishing its own first-run file
-:: writes right after silent install, so poll for the install dir instead of assuming ── ──
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$cert = [System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('{{embeddedCertBase64}}'));" ^
-  "$qzDir = $null;" ^
-  "for ($i = 0; $i -lt 20 -and -not $qzDir; $i++) {" ^
-  "  $qzDir = @($env:ProgramFiles + '\QZ Tray', ${env:ProgramFiles(x86)} + '\QZ Tray', $env:LOCALAPPDATA + '\QZ Tray') | Where-Object { Test-Path $_ } | Select-Object -First 1;" ^
-  "  if (-not $qzDir) { Start-Sleep -Seconds 1 };" ^
-  "};" ^
-  "if ($qzDir) { $cert | Set-Content -Path ($qzDir + '\override.crt') -Encoding ASCII; Write-Host ('   override.crt written to ' + $qzDir) } else { Write-Host '   WARNING: could not find QZ Tray install dir — dialogs may still appear.' };" ^
-  "$fp = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::ASCII.GetBytes($cert)).GetCertHashString('SHA1').ToLower();" ^
-  "$allowedDir = $env:APPDATA + '\qz'; New-Item -ItemType Directory -Force $allowedDir | Out-Null;" ^
-  "$entry = $fp + \"`tQZ Tray Demo Cert`tQZ Industries, LLC`t{{certValidFrom}}`t{{certValidTo}}`ttrue\";" ^
-  "$allowed = $allowedDir + '\allowed.dat';" ^
-  "$lines = if (Test-Path $allowed) { Get-Content $allowed | Where-Object { $_ -notmatch $fp } } else { @() };" ^
-  "$lines += $entry; $lines | Set-Content -Path $allowed -Encoding ASCII;" ^
-  "if ($qzDir) {" ^
-  "  $propsPath = Join-Path $qzDir 'qz-tray.properties';" ^
-  "  $propLines = if (Test-Path $propsPath) { Get-Content $propsPath | Where-Object { $_ -notmatch '^authcert\.override=' } } else { @() };" ^
-  "  $propLines += 'authcert.override=override.crt'; $propLines | Set-Content -Path $propsPath -Encoding ASCII;" ^
-  "};" ^
-  "Get-Process javaw -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ($qzDir + '*') } | Stop-Process -Force -ErrorAction SilentlyContinue;" ^
-  "Write-Host '   QZ Tray trusted — no dialogs will appear.'"
+:: -- Trust POS cert in QZ Tray so no "Action Required" / "Allow" dialog ever appears.
+:: Runs a base64-encoded PowerShell step (built server-side) that waits for QZ Tray's
+:: first-run config to finish generating (so its certgen cannot wipe our authcert.override),
+:: then writes override.crt + authcert.override + allowed.dat. The later "Start QZ Tray"
+:: step launches it fresh so it reads our line. Base64 avoids all batch quoting issues.
+echo Trusting POS certificate in QZ Tray...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$tp = Join-Path $env:TEMP 'qz-trust-step.ps1'; [System.IO.File]::WriteAllBytes($tp, [Convert]::FromBase64String('{{trustPsBase64}}')); powershell -NoProfile -ExecutionPolicy Bypass -File $tp; Remove-Item $tp -Force -ErrorAction SilentlyContinue"
 
 :: ── Auto-dismiss fallback: if the "Action Required" dialog ever appears anyway
 :: (e.g. QZ Tray was already running before this install and hasn't reloaded
