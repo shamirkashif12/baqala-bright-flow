@@ -265,6 +265,18 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         if (purchaseOrderId.HasValue) query = query.Where(t => t.PurchaseOrderId == purchaseOrderId);
         if (sourceSupplierId.HasValue) query = query.Where(t => t.SourceSupplierId == sourceSupplierId);
 
+        // RTS (warehouse_to_supplier) rows are governed by the "Supplier Returns" module — a
+        // separate matrix row from "Stock Transfers" (Storekeeper/Supervisor hold Stock Transfers
+        // view but are fully denied Supplier Returns), so a static [RequirePermission] on this
+        // action can't express it. Explicitly requesting RTS data without that permission is
+        // refused; broader queries silently exclude RTS rows instead of failing the whole call.
+        if (!await PermissionCheck.HasPermissionAsync(User, db, "Supplier Returns", PermAction.View))
+        {
+            if (transferType == "warehouse_to_supplier")
+                return StatusCode(403, new { message = "You do not have permission to view Supplier Returns." });
+            query = query.Where(t => t.TransferType != "warehouse_to_supplier");
+        }
+
         var (role, callerBranchId) = GetCallerContext();
         if (role is not null && role != "tenant_admin" && callerBranchId.HasValue)
             query = query.Where(t => t.SourceBranchId == callerBranchId || t.DestBranchId == callerBranchId);

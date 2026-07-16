@@ -122,7 +122,7 @@ const navGroups: NavGroup[] = [
     label: "Suppliers",
     items: [
       { title: "Suppliers",              url: "/suppliers",         icon: Truck,       module: "Suppliers" },
-      { title: "Supplier Returns (RTS)", url: "/supplier-returns",  icon: RotateCcw,   module: "Suppliers" },
+      { title: "Supplier Returns (RTS)", url: "/supplier-returns",  icon: RotateCcw,   module: "Supplier Returns" },
     ],
   },
   {
