@@ -12,12 +12,12 @@ import {
   Search, ScanBarcode, Pause, RotateCcw, Printer,
   Plus, Minus, Trash2, CreditCard, Banknote, Split,
   Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode,
-  Building2, PrinterCheck, Usb, Wifi, RefreshCw, AlertCircle, Trash,
+  Building2, PrinterCheck, Usb, Wifi, RefreshCw, AlertCircle, Trash, Cable,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter, type InventoryBatch } from "@/lib/api";
-import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt } from "@/lib/qz";
+import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, getUsbPrinter, setUsbPrinter, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter, type InventoryBatch, type UsbPrinterSelection } from "@/lib/api";
+import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb, qzListUsbDevices, qzResolveUsbEndpoint, qzUsbTestPrint, type UsbDeviceInfo } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
@@ -320,6 +320,68 @@ function PrinterSetupDialog() {
     } finally { setConnectingQz(false); }
   }
 
+  // ── Direct USB (qz.usb.*) ──────────────────────────────────────────────────
+  const [usbDevices, setUsbDevices] = useState<UsbDeviceInfo[]>([]);
+  const [scanningUsb, setScanningUsb] = useState(false);
+  const [usbSelected, setUsbSelected] = useState<UsbPrinterSelection | null>(() => getUsbPrinter());
+  const [busyUsb, setBusyUsb] = useState<string | null>(null);
+  const usbKey = (d: { vendorId: string; productId: string }) => `${d.vendorId}:${d.productId}`;
+
+  async function handleScanUsb() {
+    setScanningUsb(true);
+    try {
+      await qzConnect();
+      setQzConnected(true);
+      const devices = await qzListUsbDevices();
+      setUsbDevices(devices);
+      toast[devices.length ? "success" : "info"](
+        devices.length ? `${devices.length} USB device(s) found` : "No USB devices found",
+      );
+    } catch {
+      toast.error("Cannot scan USB — is QZ Tray running?");
+    } finally { setScanningUsb(false); }
+  }
+
+  async function handleUseUsb(d: UsbDeviceInfo) {
+    setBusyUsb(usbKey(d));
+    try {
+      const target = await qzResolveUsbEndpoint(d.vendorId, d.productId);
+      if (!target) {
+        toast.error("This device exposes no writable endpoint — is it really a printer?");
+        return;
+      }
+      const sel: UsbPrinterSelection = {
+        ...target,
+        label: d.product || d.manufacturer || `USB ${d.vendorId}:${d.productId}`,
+      };
+      setUsbPrinter(sel);
+      setUsbSelected(sel);
+      // USB-direct takes precedence in QZ mode; clear any named selection so the
+      // routing is unambiguous and the UI reflects a single active target.
+      setSelectedPrinter("");
+      toast.success(`Direct USB printer set: ${sel.label}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to claim USB device");
+    } finally { setBusyUsb(null); }
+  }
+
+  function clearUsb() {
+    setUsbPrinter(null);
+    setUsbSelected(null);
+    toast.success("Direct USB printer cleared");
+  }
+
+  async function handleTestUsb() {
+    if (!usbSelected) return;
+    setBusyUsb("test");
+    try {
+      await qzUsbTestPrint(usbSelected);
+      toast.success("Test sent to USB printer");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Test print failed");
+    } finally { setBusyUsb(null); }
+  }
+
   function saveAgentUrl(url: string) {
     const clean = url.trim().replace(/\/$/, "");
     localStorage.setItem(PRINTER_API_KEY, clean);
@@ -524,6 +586,63 @@ function PrinterSetupDialog() {
               {qzConnected && qzPrinters.length === 0 && (
                 <p className="text-xs text-muted-foreground px-1">No printers found. Make sure the printer driver is installed on this machine.</p>
               )}
+
+              {/* ── Direct USB (driverless) ── */}
+              <div className="pt-2 mt-1 border-t space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <Cable className="h-3.5 w-3.5" /> Direct USB <span className="normal-case tracking-normal text-[10px] bg-amber-100 text-amber-700 px-1 rounded">driverless</span>
+                  </p>
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleScanUsb} disabled={scanningUsb}>
+                    {scanningUsb ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                    Scan USB
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Use this only when the printer refuses to show up above. Sends receipts straight to the
+                  printer's raw USB endpoint. On Windows the device first needs a WinUSB driver bound with Zadig.
+                </p>
+
+                {usbSelected && (
+                  <div className="flex items-center gap-2 rounded-lg border border-green-300 bg-green-50/60 px-3 py-2 text-sm">
+                    <PrinterCheck className="h-4 w-4 flex-shrink-0 text-green-600" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{usbSelected.label}</p>
+                      <p className="text-[11px] text-muted-foreground font-mono truncate">
+                        {usbSelected.vendorId}:{usbSelected.productId} · iface {usbSelected.interface} · ep {usbSelected.endpoint}
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0" onClick={handleTestUsb} disabled={busyUsb === "test"}>
+                      {busyUsb === "test" ? <Loader2 className="h-3 w-3 animate-spin" /> : "Test print"}
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive shrink-0" onClick={clearUsb}>
+                      <Trash className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+
+                {usbDevices.length > 0 && (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {usbDevices.map((d) => {
+                      const isSel = usbSelected?.vendorId === d.vendorId && usbSelected?.productId === d.productId;
+                      return (
+                        <div key={usbKey(d)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isSel ? "border-green-300 bg-green-50/40" : "border-border"}`}>
+                          <Usb className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{d.product || d.manufacturer || "Unknown USB device"}</p>
+                            <p className="text-[11px] text-muted-foreground font-mono truncate">{d.vendorId}:{d.productId}</p>
+                          </div>
+                          {isSel
+                            ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">Receipt Printer</span>
+                            : <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0" disabled={busyUsb === usbKey(d)} onClick={() => handleUseUsb(d)}>
+                                {busyUsb === usbKey(d) ? <Loader2 className="h-3 w-3 animate-spin" /> : "Use for receipts"}
+                              </Button>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </TabsContent>
 
             {/* ── Local Agent tab ── */}
@@ -1534,9 +1653,12 @@ function POS() {
     const printId = toast.loading("Printing receipt…");
     const printerName = localStorage.getItem("baqala_receipt_printer") || undefined;
     const mode = localStorage.getItem("baqala_print_mode") ?? "local";
+    const usbPrinter = getUsbPrinter();
 
     const doPrint = mode === "qz"
-      ? qzPrintReceipt(invoice, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` }))
+      ? (usbPrinter
+          ? qzPrintReceiptUsb(invoice, usbPrinter).then(() => ({ message: `Receipt sent to ${usbPrinter.label}.` }))
+          : qzPrintReceipt(invoice, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` })))
       : api.printReceipt({ ...invoice, printerName });
 
     doPrint
@@ -2226,9 +2348,12 @@ function POS() {
                 if (!invoice) return;
                 const printerName = localStorage.getItem("baqala_receipt_printer") || undefined;
                 const mode = localStorage.getItem("baqala_print_mode") ?? "local";
+                const usbPrinter = getUsbPrinter();
                 const printId = toast.loading("Printing receipt…");
                 const doPrint = mode === "qz"
-                  ? qzPrintReceipt(invoice, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` }))
+                  ? (usbPrinter
+                      ? qzPrintReceiptUsb(invoice, usbPrinter).then(() => ({ message: `Receipt sent to ${usbPrinter.label}.` }))
+                      : qzPrintReceipt(invoice, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` })))
                   : api.printReceipt({ ...invoice, printerName });
                 doPrint
                   .then((res) => toast.success(res.message, { id: printId }))

@@ -9,6 +9,36 @@ export function getPrinterBase(): string {
   return (typeof window !== "undefined" ? localStorage.getItem(PRINTER_API_KEY) : null) ?? DEFAULT_PRINTER_AGENT;
 }
 
+// Direct-USB printer selection (QZ Tray qz.usb.* path). When set, it takes
+// precedence over the named printer in QZ mode — used for thermal printers that
+// won't show up as a named OS printer. Stores the resolved vendor/product/
+// interface/endpoint plus a human label. See qz.ts qzPrintReceiptUsb.
+const USB_PRINTER_KEY = "baqala_usb_printer";
+
+export interface UsbPrinterSelection {
+  vendorId: string;
+  productId: string;
+  interface: string;
+  endpoint: string;
+  label: string;
+}
+
+export function getUsbPrinter(): UsbPrinterSelection | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(USB_PRINTER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as UsbPrinterSelection;
+  } catch {
+    return null;
+  }
+}
+
+export function setUsbPrinter(sel: UsbPrinterSelection | null) {
+  if (sel) localStorage.setItem(USB_PRINTER_KEY, JSON.stringify(sel));
+  else localStorage.removeItem(USB_PRINTER_KEY);
+}
+
 async function printerRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const base = getPrinterBase();
   const res = await fetch(`${base}${path}`, {

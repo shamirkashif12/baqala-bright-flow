@@ -24,6 +24,15 @@ declare module "qz-tray" {
       create(printer: string, options?: Record<string, unknown>): QZConfig;
     };
     print(config: QZConfig, data: PrintData[]): Promise<void>;
+    usb: {
+      listDevices(includeHubs: boolean): Promise<Array<{ vendorId: string; productId: string; hub: boolean; manufacturer?: string; product?: string }>>;
+      listInterfaces(info: { vendorId: string; productId: string }): Promise<string[]>;
+      listEndpoints(info: { vendorId: string; productId: string; interface: string }): Promise<string[]>;
+      claimDevice(info: { vendorId: string; productId: string; interface: string }): Promise<void>;
+      releaseDevice(info: { vendorId: string; productId: string }): Promise<void>;
+      isClaimed(info: { vendorId: string; productId: string }): Promise<boolean>;
+      sendData(info: { vendorId: string; productId: string; endpoint: string; data: string | { data: string; type: "PLAIN" | "HEX" | "BASE64" | "FILE" } }): Promise<void>;
+    };
     security: {
       setCertificatePromise(cb: (resolve: (cert: string | null) => void, reject: (err: unknown) => void) => void): void;
       setSignaturePromise(cb: (toSign: string) => (resolve: (sig: string | null) => void, reject: (err: unknown) => void) => void): void;

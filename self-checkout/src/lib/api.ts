@@ -28,6 +28,35 @@ export function setPrintMode(mode: "qz" | "local") {
   localStorage.setItem(PRINT_MODE_KEY, mode);
 }
 
+// Direct-USB printer selection (QZ Tray qz.usb.* path). When set, it takes
+// precedence over the named printer in QZ mode — used for thermal printers that
+// won't show up as a named OS printer. Stores the resolved vendor/product/
+// interface/endpoint plus a human label. See qz.ts qzPrintReceiptUsb.
+const USB_PRINTER_KEY = "selfcheckout_usb_printer";
+
+export interface UsbPrinterSelection {
+  vendorId: string;
+  productId: string;
+  interface: string;
+  endpoint: string;
+  label: string;
+}
+
+export function getUsbPrinter(): UsbPrinterSelection | null {
+  const raw = localStorage.getItem(USB_PRINTER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as UsbPrinterSelection;
+  } catch {
+    return null;
+  }
+}
+
+export function setUsbPrinter(sel: UsbPrinterSelection | null) {
+  if (sel) localStorage.setItem(USB_PRINTER_KEY, JSON.stringify(sel));
+  else localStorage.removeItem(USB_PRINTER_KEY);
+}
+
 // Returns the direct URL to download the OS-specific one-click setup installer (installs QZ
 // Tray + creates a kiosk shortcut) — same installer/endpoint the staff POS uses. Passes this
 // page's own origin explicitly so the installer's Chrome policy (which lifts the insecure-

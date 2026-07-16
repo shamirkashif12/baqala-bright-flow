@@ -4,8 +4,8 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { buildZatcaTlv } from "../lib/zatca";
-import { printReceipt, getPrintMode, getReceiptPrinter } from "../lib/api";
-import { qzPrintReceipt } from "../lib/qz";
+import { printReceipt, getPrintMode, getReceiptPrinter, getUsbPrinter } from "../lib/api";
+import { qzPrintReceipt, qzPrintReceiptUsb } from "../lib/qz";
 import type { CartLine } from "../lib/cart";
 
 export interface InvoiceSnapshot {
@@ -51,8 +51,11 @@ export function printInvoice(invoice: InvoiceSnapshot, zatcaQr: string, onPrinte
   // instead ships this same structured data to the terminal's own API, which builds the bytes
   // and prints server-side — see Printer Setup for which mode this terminal is configured for.
   const printerName = getReceiptPrinter() ?? undefined;
+  const usbPrinter = getUsbPrinter();
   const doPrint = getPrintMode() === "qz"
-    ? qzPrintReceipt(receipt, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` }))
+    ? (usbPrinter
+        ? qzPrintReceiptUsb(receipt, usbPrinter).then(() => ({ message: `Receipt sent to ${usbPrinter.label}.` }))
+        : qzPrintReceipt(receipt, printerName).then(() => ({ message: `Receipt sent to ${printerName ?? "printer"}.` })))
     : printReceipt({ ...receipt, printerName });
 
   doPrint
