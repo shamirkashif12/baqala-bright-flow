@@ -831,7 +831,7 @@ function POS() {
   const isRestrictedCashier = user?.role === "cashier";
 
   // ─── Active Offers & Discounts ────────────────────────────────────────────────
-  const [activeOffers, setActiveOffers] = useState<Offer[]>([]);
+  const [allActiveOffers, setActiveOffers] = useState<Offer[]>([]);
   const [activeDiscounts, setActiveDiscounts] = useState<Discount[]>([]);
   const [customFees, setCustomFees] = useState<TaxFeeRule[]>([]);
   const [tobaccoFeeEnabled, setTobaccoFeeEnabled] = useState(true);
@@ -1086,6 +1086,18 @@ function POS() {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, []); // stable — all mutable state accessed through refs
+
+  // ─── Barcode-specific offers ──────────────────────────────────────────────────
+  // An offer may be keyed to an exact barcode (Offer.triggerBarcode) rather than to every unit of
+  // the trigger product — e.g. only the re-barcoded promo run of a SKU is on offer, not the regular
+  // stock. Gated once here, at the source, so the bundle engine, the triggered-offer list and the
+  // discount maths all agree instead of each re-deriving the rule. An offer whose barcode doesn't
+  // match the product on file simply never fires.
+  const activeOffers = useMemo(() => allActiveOffers.filter(o => {
+    if (!o.triggerBarcode) return true;
+    if (!o.triggerProductId) return false; // barcode named but no product to match it against
+    return products.find(p => p.id === o.triggerProductId)?.barcode === o.triggerBarcode;
+  }), [allActiveOffers, products]);
 
   // ─── Bundle / multi-buy engine (bogo, buy_a_get_b) ────────────────────────────
   // Trigger thresholds are always evaluated against `cart` (the cashier's actual scanned/paid

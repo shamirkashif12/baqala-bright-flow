@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,10 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type WasteSpoilageReport as WasteSpoilageData, type WasteSpoilageRow, type ReportExportFormat, type Product, type User } from "@/lib/api";
+import { api, type WasteSpoilageReport as WasteSpoilageData, type WasteSpoilageRow, type ReportExportFormat } from "@/lib/api";
+import { useReportFilterOptions } from "@/lib/use-report-filters";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -40,35 +43,43 @@ function WasteSpoilage() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [reason, setReason] = useState("all");
+  const [categoryId, setCategoryId] = useState("all");
   const [productId, setProductId] = useState("all");
   const [adjustedBy, setAdjustedBy] = useState("all");
-  const [products, setProducts] = useState<Product[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [isTobacco, setIsTobacco] = useState(false);
   const [data, setData] = useState<WasteSpoilageData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
-  useEffect(() => { api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then(setUsers).catch(() => {}); }, [branchId]);
+  const { categories, products, employees: users } = useReportFilterOptions(branchId, categoryId);
+
+  useEffect(() => { setAdjustedBy("all"); }, [branchId]);
+  useEffect(() => {
+    if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
+  }, [products, productId]);
+
+  const filters = useMemo(() => ({
+    branchId: branchId !== "all" ? branchId : undefined,
+    reason: reason !== "all" ? reason : undefined,
+    categoryId: categoryId !== "all" ? categoryId : undefined,
+    productId: productId !== "all" ? productId : undefined,
+    adjustedBy: adjustedBy !== "all" ? adjustedBy : undefined,
+    isTobacco: isTobacco || undefined,
+  }), [branchId, reason, categoryId, productId, adjustedBy, isTobacco]);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getWasteSpoilageReport({
-      from, to, branchId: branchId !== "all" ? branchId : undefined, reason: reason !== "all" ? reason : undefined,
-      productId: productId !== "all" ? productId : undefined, adjustedBy: adjustedBy !== "all" ? adjustedBy : undefined,
-    })
+    api.getWasteSpoilageReport({ from, to, ...filters })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, reason, productId, adjustedBy]);
+  }, [from, to, filters]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportWasteSpoilageReport({
-        from, to, branchId: branchId !== "all" ? branchId : undefined, reason: reason !== "all" ? reason : undefined,
-        productId: productId !== "all" ? productId : undefined, adjustedBy: adjustedBy !== "all" ? adjustedBy : undefined,
-        exportedBy: user?.id, includeCost: canViewCost, format,
+        from, to, ...filters, exportedBy: user?.id, includeCost: canViewCost, format,
       });
       downloadBlob(blob, `waste-spoilage-${from}-to-${to}.${format}`);
     } catch (e) {
@@ -107,6 +118,13 @@ function WasteSpoilage() {
             <SelectItem value="damage">Damage</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={categoryId} onValueChange={setCategoryId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Select value={productId} onValueChange={setProductId}>
           <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
           <SelectContent>
@@ -121,6 +139,10 @@ function WasteSpoilage() {
             {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
           </SelectContent>
         </Select>
+        <label className="flex items-center gap-1.5 text-sm px-2">
+          <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
+          Tobacco only
+        </label>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -156,6 +178,7 @@ function WasteSpoilage() {
             { key: "productName", label: "Product" },
             { key: "category", label: "Category" },
             { key: "branch", label: "Branch" },
+            { key: "isTobacco", label: "Tobacco", render: (r: WasteSpoilageRow) => (r.isTobacco ? <Badge variant="outline" className="text-[10px]">Tobacco</Badge> : "—") },
             { key: "batchNumber", label: "Batch/Lot", render: (r: WasteSpoilageRow) => r.batchNumber ?? "—" },
             { key: "expiryDate", label: "Expiry Date", render: (r: WasteSpoilageRow) => r.expiryDate ? new Date(r.expiryDate).toLocaleDateString("en-SA") : "—" },
             { key: "qty", label: "Qty" },

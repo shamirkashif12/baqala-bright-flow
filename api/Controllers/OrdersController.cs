@@ -278,6 +278,35 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             catch (Exception ex) { logger.LogError(ex, "Low-stock check failed after sale for product {ProductId}", productId); }
         }
 
+        // Employee Audit Center — the sale itself is an employee action and has to appear on the
+        // cashier's activity trail, not just the void/edit that might follow it. There is no
+        // before-state for a brand-new order, so only the after-snapshot is recorded. Best-effort:
+        // an audit write must never roll back a sale the customer has already paid for.
+        try
+        {
+            await audit.LogAsync(
+                action: "create_order",
+                entityType: "Order",
+                entityId: order.Id,
+                userId: order.CashierId,
+                branchId: order.BranchId,
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    order.OrderNumber,
+                    order.Subtotal,
+                    order.DiscountAmount,
+                    order.TaxAmount,
+                    order.TobaccoFeeAmount,
+                    order.TotalAmount,
+                    order.CustomerId,
+                    PaymentMethod = order.Payments.FirstOrDefault()?.PaymentMethod,
+                    Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
+                }),
+                // A discounted sale is the one a manager actually wants to spot in the trail.
+                severity: order.DiscountAmount > 0 ? "warning" : "info");
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for order {OrderId}", order.Id); }
+
         if (checkoutWithoutShiftRole is not null)
         {
             await audit.LogAsync(

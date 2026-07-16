@@ -263,6 +263,7 @@ export interface Offer {
   offerType: "bogo" | "combo" | "buy_a_get_b" | "product_offer" | "lucky_draw";
   branchId?: string;
   triggerProductId?: string;
+  triggerBarcode?: string; // when set, the offer only fires for this exact barcode
   getProductId?: string;
   triggerQuantity: number;
   getQuantity: number;

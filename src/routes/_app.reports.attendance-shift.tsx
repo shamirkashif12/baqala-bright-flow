@@ -40,7 +40,6 @@ function AttendanceShift() {
   const [staffId, setStaffId] = useState("all");
   const [roleId, setRoleId] = useState("all");
   const [terminalId, setTerminalId] = useState("all");
-  const [varianceThreshold, setVarianceThreshold] = useState("");
   const [staff, setStaff] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
@@ -62,7 +61,6 @@ function AttendanceShift() {
     staffId: staffId !== "all" ? staffId : undefined,
     roleId: roleId !== "all" ? roleId : undefined,
     terminalId: terminalId !== "all" ? terminalId : undefined,
-    varianceThreshold: varianceThreshold ? Number(varianceThreshold) : undefined,
   };
 
   const load = useCallback(() => {
@@ -72,7 +70,7 @@ function AttendanceShift() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, branchId, status, staffId, roleId, terminalId, varianceThreshold]);
+  }, [from, to, branchId, status, staffId, roleId, terminalId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -138,10 +136,6 @@ function AttendanceShift() {
             {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Input
-          type="number" placeholder="Min variance (SAR)" value={varianceThreshold}
-          onChange={(e) => setVarianceThreshold(e.target.value)} className="h-9 w-40"
-        />
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

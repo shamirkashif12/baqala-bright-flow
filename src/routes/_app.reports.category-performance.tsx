@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,11 +10,13 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type CategoryPerformanceReport as CategoryPerformanceData, type CategoryPerformanceRow, type ReportExportFormat, type Category } from "@/lib/api";
+import { api, type CategoryPerformanceReport as CategoryPerformanceData, type CategoryPerformanceRow, type ReportExportFormat } from "@/lib/api";
+import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Tags, Layers, Percent } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tags, Layers, Percent, Cigarette } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/category-performance")({ component: CategoryPerformance });
@@ -40,25 +42,42 @@ function CategoryPerformance() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [categoryId, setCategoryId] = useState("all");
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [productId, setProductId] = useState("all");
+  const [cashierId, setCashierId] = useState("all");
+  const [terminalId, setTerminalId] = useState("all");
+  const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<CategoryPerformanceData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { api.getCategories().then(setCategories).catch(() => {}); }, []);
+  const { categories, products, employees, terminals } = useReportFilterOptions(branchId, categoryId);
+
+  useEffect(() => { setCashierId("all"); setTerminalId("all"); }, [branchId]);
+  useEffect(() => {
+    if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
+  }, [products, productId]);
+
+  const filters = useMemo(() => ({
+    branchId: branchId !== "all" ? branchId : undefined,
+    categoryId: categoryId !== "all" ? categoryId : undefined,
+    productId: productId !== "all" ? productId : undefined,
+    cashierId: cashierId !== "all" ? cashierId : undefined,
+    terminalId: terminalId !== "all" ? terminalId : undefined,
+    hasTobaccoFee: hasTobaccoFee || undefined,
+  }), [branchId, categoryId, productId, cashierId, terminalId, hasTobaccoFee]);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getCategoryPerformanceReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, categoryId: categoryId !== "all" ? categoryId : undefined })
+    api.getCategoryPerformanceReport({ from, to, ...filters })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, categoryId]);
+  }, [from, to, filters]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportCategoryPerformanceReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, categoryId: categoryId !== "all" ? categoryId : undefined, exportedBy: user?.id, includeMargin: canViewMargin, format });
+      const blob = await api.exportCategoryPerformanceReport({ from, to, ...filters, exportedBy: user?.id, includeMargin: canViewMargin, format });
       downloadBlob(blob, `category-performance-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -93,15 +112,41 @@ function CategoryPerformance() {
             {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={productId} onValueChange={setProductId}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Products</SelectItem>
+            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={cashierId} onValueChange={setCashierId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={terminalId} onValueChange={setTerminalId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Device" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Devices</SelectItem>
+            {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <label className="flex items-center gap-1.5 text-sm px-2">
+          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+          Tobacco fee only
+        </label>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
         <MetricCard label="Top Category" value={kpis?.topCategory ?? "—"} icon={Tags} accent="primary" />
         {canViewMargin && <MetricCard label="Highest Margin Category" value={kpis?.highestMarginCategory ?? "—"} icon={Percent} accent="success" />}
         <MetricCard label="Category Return Rate" value={`${kpis?.categoryReturnRatePct ?? 0}%`} icon={Layers} accent="warning" />
         <MetricCard label="Categories Sold" value={String(kpis?.totalCategoriesSold ?? 0)} icon={Layers} />
         <MetricCard label="Category Discount Value" value={<><SARIcon />{fmt(kpis?.categoryDiscountValue ?? 0)}</>} icon={Percent} accent="warning" />
+        <MetricCard label="Tobacco Fees" value={<><SARIcon />{fmt(kpis?.totalTobaccoFees ?? 0)}</>} icon={Cigarette} accent="warning" />
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">
@@ -132,6 +177,7 @@ function CategoryPerformance() {
             { key: "returnRatePct", label: "Return Rate %", render: (r: CategoryPerformanceRow) => `${r.returnRatePct}%` },
             { key: "netSales", label: "Net Sales", render: (r: CategoryPerformanceRow) => <span className="font-semibold"><SARIcon />{fmt(r.netSales)}</span> },
             { key: "salesContributionPct", label: "Contribution %", render: (r: CategoryPerformanceRow) => `${r.salesContributionPct}%` },
+            { key: "tobaccoFees", label: "Tobacco Fees", render: (r: CategoryPerformanceRow) => <><SARIcon />{fmt(r.tobaccoFees)}</> },
             ...(canViewMargin
               ? [
                   { key: "cogs", label: "COGS", render: (r: CategoryPerformanceRow) => <><SARIcon />{fmt(r.cogs)}</> },

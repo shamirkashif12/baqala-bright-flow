@@ -65,7 +65,17 @@ export function computePricing(args: {
   customer: Customer | null;
   tobaccoFeeEnabled: boolean;
 }): PricingResult {
-  const { lines, coupon, products, activeDiscounts, activeOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled } = args;
+  const { lines, coupon, products, activeDiscounts, activeOffers: allActiveOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled } = args;
+
+  // ─── Barcode-specific offers — mirrors the staff POS (src/routes/_app.pos.tsx). An offer keyed
+  // to an exact barcode fires only when the trigger product carries that barcode; the kiosk reads
+  // the same /offers/active feed as the POS, so without this gate the same offer would price
+  // differently at a self-checkout lane than at a staffed till.
+  const activeOffers = allActiveOffers.filter((o) => {
+    if (!o.triggerBarcode) return true;
+    if (!o.triggerProductId) return false;
+    return products.find((p) => p.id === o.triggerProductId)?.barcode === o.triggerBarcode;
+  });
 
   // ─── Bundle / multi-buy engine (bogo, buy_a_get_b) — mirrors the staff POS's own logic
   // in src/routes/_app.pos.tsx. Trigger thresholds are evaluated against the paid quantity

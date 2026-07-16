@@ -10,7 +10,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ReturnsController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
+public class ReturnsController(BaqalaDbContext db, INotificationService notifications, IAuditService audit) : ControllerBase
 {
     // Reads the real, tenant-editable "Manager approval above (SAR)" field from the Returns
     // Policy tab (Settings → Policies & Conditions), so this gate stays in sync with whatever
@@ -103,6 +103,21 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
             $"Return {ret.ReturnNumber} requires approval (SAR {ret.RefundAmount:F2})",
             severity: "warning", entityType: "CustomerReturn", entityId: ret.Id);
 
+        // Employee Audit Center — a refund is one of the listed employee actions and is attributed
+        // to the cashier who raised it (ProcessedBy), which is who a manager reviews the trail for.
+        await audit.LogAsync(
+            action: "create_refund",
+            entityType: "CustomerReturn",
+            entityId: ret.Id,
+            userId: ret.ProcessedBy ?? CallerId(),
+            branchId: ret.BranchId,
+            details: System.Text.Json.JsonSerializer.Serialize(new
+            {
+                ret.ReturnNumber, ret.OrderId, ret.ReturnType, ret.RefundMethod, ret.RefundAmount, ret.Reason, ret.Status,
+                Items = ret.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.RefundAmount, i.Condition }),
+            }),
+            severity: "warning");
+
         return CreatedAtAction(nameof(GetById), new { id = ret.Id }, ret);
     }
 
@@ -118,11 +133,25 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
         if (role == "cashier" && ret.RefundAmount > threshold)
             return StatusCode(403, new { message = $"Manager approval is required for refunds over SAR {threshold:F2}." });
 
+        var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new { ret.Status, ret.ApprovedBy });
+
         ret.Status = req.Approved ? "approved" : "rejected";
         var sub = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value;
         if (Guid.TryParse(sub, out var approver)) ret.ApprovedBy = approver;
         ret.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        // Attributed to the approver (not ProcessedBy) — this row answers "who authorised this
+        // refund", which is the accountability question the approval gate above exists to enforce.
+        await audit.LogAsync(
+            action: req.Approved ? "approve_refund" : "reject_refund",
+            entityType: "CustomerReturn",
+            entityId: ret.Id,
+            userId: CallerId(),
+            branchId: ret.BranchId,
+            details: System.Text.Json.JsonSerializer.Serialize(new { ret.Status, ret.ApprovedBy, ret.RefundAmount, ret.ReturnNumber }),
+            severity: "warning",
+            beforeValue: beforeSnapshot);
 
         // Notify both the cashier who raised the return and the manager who acted on it.
         // Previously only ProcessedBy was notified (and only when set), so approving a return that
