@@ -18,7 +18,7 @@ import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Wa
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
-import { localDateStr } from "@/lib/utils";
+import { localDateStr, uuid } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/purchase-orders")({ component: PurchaseOrders });
 
@@ -229,7 +229,7 @@ function CreatePOWizard({
     setError("");
     try {
       const validItems = items.filter(it => it.productId && totalQty(it) > 0);
-      const batchId = plannedWarehouseIds.length > 1 ? crypto.randomUUID() : undefined;
+      const batchId = plannedWarehouseIds.length > 1 ? uuid() : undefined;
       for (const whId of plannedWarehouseIds) {
         const whItems = validItems
           .map(it => ({ productId: it.productId, orderedQuantity: it.qtyByWarehouse[whId] || 0, unitCost: it.unitCost }))

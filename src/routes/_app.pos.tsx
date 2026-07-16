@@ -23,6 +23,7 @@ import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
+import { uuid } from "@/lib/utils";
 
 // Distinguishes a printer-connectivity failure from a generic print error using the message
 // text — qz.ts/api.printReceipt don't return a structured error code, just a message string.
@@ -1559,7 +1560,7 @@ function POS() {
           .map((p) => ({ paymentMethod: p.method, amount: p.amount, status: "completed" }))
       : [{ paymentMethod, amount: total, status: "completed" }];
 
-    if (!checkoutRequestIdRef.current) checkoutRequestIdRef.current = crypto.randomUUID();
+    if (!checkoutRequestIdRef.current) checkoutRequestIdRef.current = uuid();
 
     const order: Order = await api.createOrder({
       source: "pos",
