@@ -9,7 +9,10 @@ export type AppRole =
   | "supervisor"
   | "finance_user"
   | "marketing_user"
-  | "picker";
+  | "picker"
+  | "auditor"
+  | "warehouse_staff"
+  | "warehouse_manager";
 
 export const ROLE_LABELS: Record<AppRole, string> = {
   tenant_admin:   "Tenant Admin",
@@ -20,6 +23,9 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   finance_user:   "Finance User",
   marketing_user: "Marketing User",
   picker:         "Picker",
+  auditor:          "Auditor",
+  warehouse_staff:  "Warehouse Staff",
+  warehouse_manager:"Warehouse Manager",
 };
 
 export interface RolePermFlags {

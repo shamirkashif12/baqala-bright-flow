@@ -18,6 +18,7 @@ import { api, type TaxFeeRule, type Product, type ZatcaSettings } from "@/lib/ap
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
+import { localDateStr } from "@/lib/utils";
 import { BranchFilter } from "@/components/branch-filter";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
@@ -179,7 +180,7 @@ function TaxFees() {
         applicableTo: form.applicableTo,
         isTobacco: false,
         status: form.status,
-        effectiveDate: new Date().toISOString().slice(0, 10),
+        effectiveDate: localDateStr(),
       };
       if (editRule) {
         await api.updateTaxRule(editRule.id, payload);

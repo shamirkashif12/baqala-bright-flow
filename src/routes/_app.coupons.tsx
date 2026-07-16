@@ -16,11 +16,14 @@ import { toast } from "sonner";
 import { api, type Coupon, type Discount, type Offer, type Product, type Branch, type Category } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
+import { localDateStr } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/coupons")({ component: Coupons });
 
-const today = new Date().toISOString().slice(0, 10);
-const nextMonth = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+const today = localDateStr();
+const nextMonthDate = new Date();
+nextMonthDate.setDate(nextMonthDate.getDate() + 30);
+const nextMonth = localDateStr(nextMonthDate);
 
 // A coupon/discount/offer whose end date is already in the past is dead on arrival — the end
 // date must be today or later, and can't be before its own start date. Used by all three forms

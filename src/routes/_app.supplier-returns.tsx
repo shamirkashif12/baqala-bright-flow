@@ -115,6 +115,9 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
   const [manualSupplierId, setManualSupplierId] = useState("");
   // all warehouse IDs from the original order (may be 1 or many)
   const [allWhOptions, setAllWhOptions] = useState<{ id: string; label: string }[]>([]);
+  // Which PO (if any) each warehouse's return should link back to — a batch PO fans out to
+  // several sibling POs, one per warehouse, so this can't be a single scalar id.
+  const [whToPoId, setWhToPoId] = useState<Record<string, string>>({});
 
   // Step 2
   const [selectedWhIds, setSelectedWhIds] = useState<string[]>([]);
@@ -134,14 +137,14 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
     setStep(1);
     setOrderNumber(""); setFetchError("");
     setFetchedSupplierId(""); setFetchedSupplierName(""); setManualSupplierId("");
-    setAllWhOptions([]); setSelectedWhIds([]);
+    setAllWhOptions([]); setSelectedWhIds([]); setWhToPoId({});
     setReturnReason(""); setItems([]); setNotes(""); setError("");
   };
 
   const lookupOrder = async () => {
     const num = orderNumber.trim();
     if (!num) return;
-    setFetching(true); setFetchError("");
+    setFetching(true); setFetchError(""); setWhToPoId({});
 
     try {
       // ── Try warehouse request lookup first (covers multi-destination batch case) ──
@@ -204,24 +207,28 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
           setFetchedSupplierName(supplier?.name ?? po.supplier?.name ?? "");
 
           let whPairs: { id: string; label: string }[] = [];
+          const poIdByWarehouse: Record<string, string> = {};
           if (po.batchId) {
-            // Batch PO — collect all sibling warehouses
+            // Batch PO — collect all sibling warehouses, each linked back to its own PO
             const siblings = await api.getPurchaseOrdersByBatch(po.batchId);
             const seen = new Set<string>();
             whPairs = siblings
               .filter(p => p.warehouseId)
               .map(p => {
                 const wh = warehouses.find(w => w.id === p.warehouseId);
+                if (wh) poIdByWarehouse[wh.id] = p.id;
                 return wh ? { id: wh.id, label: wh.name } : null;
               })
               .filter((p): p is { id: string; label: string } => p !== null && !seen.has(p.id) && !!seen.add(p.id));
           } else {
             const wh = warehouses.find(w => w.id === po.warehouseId);
             whPairs = wh ? [{ id: wh.id, label: wh.name }] : [];
+            if (wh) poIdByWarehouse[wh.id] = po.id;
           }
 
           setAllWhOptions(whPairs);
           setSelectedWhIds(whPairs.map(w => w.id));
+          setWhToPoId(poIdByWarehouse);
 
           if (po.items?.length) {
             setItems(po.items.map((i: { productId: string; product?: { name: string; costPrice?: number }; orderedQuantity: number; unitCost: number }) => ({
@@ -303,6 +310,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
           status: "draft",
           sourceWarehouseId: whId,
           destSupplierId: effectiveSupplierId,
+          purchaseOrderId: whToPoId[whId] || undefined,
           returnReason,
           notes: notes || undefined,
           batchId,

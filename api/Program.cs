@@ -51,6 +51,8 @@ builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IStockAlertService, StockAlertService>();
+builder.Services.AddScoped<IBatchConsumptionService, BatchConsumptionService>();
+builder.Services.AddScoped<IStockMovementService, StockMovementService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 builder.Services.AddHostedService<UsbPrinterAutoInstallService>();
 

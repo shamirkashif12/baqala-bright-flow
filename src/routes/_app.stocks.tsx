@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import {
   api, Branch, Product, Supplier, Warehouse, Category,
   InventoryStock, InventoryBatch, InventoryAdjustment,
-  PurchaseOrder, StockTransfer, StockCount, StockCountItem,
+  PurchaseOrder, StockTransfer, StockCount, StockCountItem, StockMovement,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -32,6 +32,30 @@ export const Route = createFileRoute("/_app/stocks")({ component: Stocks });
 function fmt(n: number) { return n.toLocaleString("en-SA", { minimumFractionDigits: 0 }); }
 function fmtDate(d?: string) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" }); }
 function fmtTime(d?: string) { if (!d) return "—"; return new Date(d).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" }); }
+
+// Every distinct movementType the ledger's write paths ever record (PurchaseOrdersController,
+// OrdersController, StockTransfersController, InventoryController, OperationalAlertsService) —
+// kept in one place so the Movement tab's filter dropdown and the timeline's label/color never
+// drift out of sync with what the backend actually writes.
+const MOVEMENT_TYPES = [
+  "purchase_receive", "sale", "transfer_out", "transfer_in", "transfer_restore",
+  "manual_receive", "adjustment_addition", "adjustment_reduction", "adjustment_damage",
+  "adjustment_expired", "adjustment_transfer_in", "adjustment_return_to_supplier", "expired",
+];
+const MOVEMENT_TYPE_META: Record<string, { label: string; color: string }> = {
+  purchase_receive: { label: "Purchase Receive", color: "bg-green-100 text-green-700" },
+  sale: { label: "Sale", color: "bg-blue-100 text-blue-700" },
+  transfer_out: { label: "Transfer Out", color: "bg-orange-100 text-orange-700" },
+  transfer_in: { label: "Transfer In", color: "bg-cyan-100 text-cyan-700" },
+  transfer_restore: { label: "Transfer Restored", color: "bg-indigo-100 text-indigo-700" },
+  manual_receive: { label: "Manual Receive", color: "bg-emerald-100 text-emerald-700" },
+  expired: { label: "Expired Write-off", color: "bg-red-100 text-red-700" },
+};
+function movementMeta(type: string) {
+  if (MOVEMENT_TYPE_META[type]) return MOVEMENT_TYPE_META[type];
+  if (type.startsWith("adjustment_")) return { label: `Adjustment — ${type.replace("adjustment_", "").replace(/_/g, " ")}`, color: "bg-purple-100 text-purple-700" };
+  return { label: type.replace(/_/g, " "), color: "bg-gray-100 text-gray-600" };
+}
 
 function StBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -49,7 +73,7 @@ function StBadge({ status }: { status: string }) {
     reduction: "bg-orange-100 text-orange-700",
     addition: "bg-green-100 text-green-700",
     transfer_in: "bg-blue-100 text-blue-700",
-    return_to_supplier: "bg-purple-100 text-purple-700",
+    warehouse_to_supplier: "bg-purple-100 text-purple-700",
     warehouse_to_branch: "bg-indigo-100 text-indigo-700",
     branch_to_branch: "bg-cyan-100 text-cyan-700",
     confirmed: "bg-teal-100 text-teal-700",
@@ -280,167 +304,6 @@ function BarcodeStockInDialog({
   );
 }
 
-// ─── Stock-In dialog ─────────────────────────────────────────────────────────
-
-function StockInDialog({ branches, products, suppliers, onDone }: { branches: Branch[]; products: Product[]; suppliers: Supplier[]; onDone: () => void }) {
-  const { canCreate } = usePermission("Stocks");
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ productId: "", branchId: "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "" });
-
-  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
-
-  async function handleSave() {
-    if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
-    setSaving(true);
-    try {
-      await api.receiveBatch({
-        productId: form.productId, branchId: form.branchId,
-        supplierId: form.supplierId || undefined,
-        quantity: Number(form.quantity),
-        purchaseCost: form.purchaseCost ? Number(form.purchaseCost) : undefined,
-        expiryDate: form.expiryDate || undefined,
-        batchNumber: form.batchNumber || undefined,
-        notes: form.notes || undefined,
-      } as Parameters<typeof api.receiveBatch>[0]);
-      toast.success("Stock-In recorded");
-      setOpen(false);
-      setForm({ productId: "", branchId: "", supplierId: "", quantity: "", purchaseCost: "", expiryDate: "", batchNumber: "", notes: "" });
-      onDone();
-    } catch { toast.error("Failed to record stock-in"); }
-    finally { setSaving(false); }
-  }
-
-  return (
-    <>
-      {canCreate && (
-        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> Add Stock-In
-        </Button>
-      )}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Add Stock-In</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
-            <div className="col-span-2">
-              <Label>Product *</Label>
-              <Select value={form.productId} onValueChange={v => set("productId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-                <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Branch *</Label>
-              <Select value={form.branchId} onValueChange={v => set("branchId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Supplier</Label>
-              <Select value={form.supplierId} onValueChange={v => set("supplierId", v)}>
-                <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
-                <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Quantity *</Label>
-              <Input type="number" min="1" value={form.quantity} onChange={e => set("quantity", e.target.value)} placeholder="0" />
-            </div>
-            <div>
-              <Label>Purchase Cost (SAR)</Label>
-              <Input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={e => set("purchaseCost", e.target.value)} placeholder="0.00" />
-            </div>
-            <div>
-              <Label>Expiry Date</Label>
-              <Input type="date" value={form.expiryDate} onChange={e => set("expiryDate", e.target.value)} />
-            </div>
-            <div>
-              <Label>Batch Number</Label>
-              <Input value={form.batchNumber} onChange={e => set("batchNumber", e.target.value)} placeholder="Auto-generated if blank" />
-            </div>
-            <div className="col-span-2">
-              <Label>Notes</Label>
-              <Textarea rows={2} value={form.notes} onChange={e => set("notes", e.target.value)} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-// ─── Stock-Out dialog ────────────────────────────────────────────────────────
-
-function StockOutDialog({ branches, products, onDone }: { branches: Branch[]; products: Product[]; onDone: () => void }) {
-  const { user } = useAuth();
-  const { canCreate } = usePermission("Stocks");
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ productId: "", branchId: "", quantity: "", reason: "" });
-  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
-
-  async function handleSave() {
-    if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
-    setSaving(true);
-    try {
-      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "reduction", reason: form.reason || undefined, adjustedBy: user?.id });
-      toast.success("Stock-Out recorded");
-      setOpen(false);
-      setForm({ productId: "", branchId: "", quantity: "", reason: "" });
-      onDone();
-    } catch { toast.error("Failed to record stock-out"); }
-    finally { setSaving(false); }
-  }
-
-  return (
-    <>
-      {canCreate && (
-        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> Add Stock-Out
-        </Button>
-      )}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Add Stock-Out</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
-            <div className="col-span-2">
-              <Label>Product *</Label>
-              <Select value={form.productId} onValueChange={v => set("productId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-                <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Branch *</Label>
-              <Select value={form.branchId} onValueChange={v => set("branchId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Quantity *</Label>
-              <Input type="number" min="1" value={form.quantity} onChange={e => set("quantity", e.target.value)} placeholder="0" />
-            </div>
-            <div className="col-span-2">
-              <Label>Reason</Label>
-              <Textarea rows={2} value={form.reason} onChange={e => set("reason", e.target.value)} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
 // ─── GRN Receive dialog ──────────────────────────────────────────────────────
 
 function GrnReceiveDialog({ po, onDone }: { po: PurchaseOrder; onDone: () => void }) {
@@ -496,191 +359,6 @@ function GrnReceiveDialog({ po, onDone }: { po: PurchaseOrder; onDone: () => voi
   );
 }
 
-// ─── Store Delivery dialog ────────────────────────────────────────────────────
-
-function StoreDeliveryDialog({ branches, warehouses, products, onDone }: { branches: Branch[]; warehouses: Warehouse[]; products: Product[]; onDone: () => void }) {
-  const { user } = useAuth();
-  const { canCreate } = usePermission("Stocks");
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ sourceWarehouseId: "", destBranchId: "", notes: "", expectedDate: "" });
-  const [items, setItems] = useState([{ productId: "", quantity: "" }]);
-  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
-
-  async function handleSave() {
-    if (!form.sourceWarehouseId || !form.destBranchId) { toast.error("Source warehouse and destination branch are required"); return; }
-    const validItems = items.filter(it => it.productId && Number(it.quantity) > 0);
-    if (!validItems.length) { toast.error("Add at least one item"); return; }
-    setSaving(true);
-    try {
-      await api.createStockTransfer({
-        transferType: "warehouse_to_branch",
-        sourceWarehouseId: form.sourceWarehouseId,
-        destBranchId: form.destBranchId,
-        createdBy: user?.id ?? "",
-        status: "pending",
-        notes: form.notes || undefined,
-        expectedDate: form.expectedDate || undefined,
-        items: validItems.map(it => ({ productId: it.productId, requestedQuantity: Number(it.quantity) })) as StockTransfer["items"],
-      });
-      toast.success("Store delivery created");
-      setOpen(false);
-      setForm({ sourceWarehouseId: "", destBranchId: "", notes: "", expectedDate: "" });
-      setItems([{ productId: "", quantity: "" }]);
-      onDone();
-    } catch { toast.error("Failed to create delivery"); }
-    finally { setSaving(false); }
-  }
-
-  return (
-    <>
-      {canCreate && (
-        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> New Delivery
-        </Button>
-      )}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>New Store Delivery</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
-            <div>
-              <Label>From Warehouse *</Label>
-              <Select value={form.sourceWarehouseId} onValueChange={v => set("sourceWarehouseId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select warehouse" /></SelectTrigger>
-                <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>To Branch *</Label>
-              <Select value={form.destBranchId} onValueChange={v => set("destBranchId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Expected Date</Label>
-              <Input type="date" value={form.expectedDate} onChange={e => set("expectedDate", e.target.value)} />
-            </div>
-            <div>
-              <Label>Notes</Label>
-              <Input value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Optional" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Items</Label>
-            {items.map((it, i) => (
-              <div key={i} className="flex gap-2">
-                <Select value={it.productId} onValueChange={v => setItems(arr => arr.map((x, j) => j === i ? { ...x, productId: v } : x))}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="Product" /></SelectTrigger>
-                  <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                </Select>
-                <Input className="w-24" type="number" min="1" placeholder="Qty" value={it.quantity}
-                  onChange={e => setItems(arr => arr.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
-                {items.length > 1 && <Button size="sm" variant="ghost" onClick={() => setItems(arr => arr.filter((_, j) => j !== i))}>×</Button>}
-              </div>
-            ))}
-            <Button size="sm" variant="outline" onClick={() => setItems(arr => [...arr, { productId: "", quantity: "" }])}>+ Add Item</Button>
-          </div>
-          <DialogFooter className="mt-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Create Delivery"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-// ─── Supplier Return dialog ───────────────────────────────────────────────────
-
-function SupplierReturnDialog({ branches, suppliers, products, onDone }: { branches: Branch[]; suppliers: Supplier[]; products: Product[]; onDone: () => void }) {
-  const { user } = useAuth();
-  const { canCreate } = usePermission("Stocks");
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ sourceBranchId: "", destSupplierId: "", returnReason: "", notes: "" });
-  const [items, setItems] = useState([{ productId: "", quantity: "" }]);
-  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
-
-  async function handleSave() {
-    if (!form.sourceBranchId || !form.destSupplierId) { toast.error("Branch and supplier are required"); return; }
-    const validItems = items.filter(it => it.productId && Number(it.quantity) > 0);
-    if (!validItems.length) { toast.error("Add at least one item"); return; }
-    setSaving(true);
-    try {
-      await api.createStockTransfer({
-        transferType: "return_to_supplier",
-        sourceBranchId: form.sourceBranchId,
-        destSupplierId: form.destSupplierId,
-        createdBy: user?.id ?? "",
-        status: "pending",
-        returnReason: form.returnReason || undefined,
-        notes: form.notes || undefined,
-        items: validItems.map(it => ({ productId: it.productId, requestedQuantity: Number(it.quantity), returnReason: form.returnReason || undefined })) as StockTransfer["items"],
-      });
-      toast.success("Supplier return created");
-      setOpen(false);
-      setForm({ sourceBranchId: "", destSupplierId: "", returnReason: "", notes: "" });
-      setItems([{ productId: "", quantity: "" }]);
-      onDone();
-    } catch { toast.error("Failed to create return"); }
-    finally { setSaving(false); }
-  }
-
-  return (
-    <>
-      {canCreate && (
-        <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> Create Return
-        </Button>
-      )}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Return to Supplier</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
-            <div>
-              <Label>From Branch *</Label>
-              <Select value={form.sourceBranchId} onValueChange={v => set("sourceBranchId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Return to Supplier *</Label>
-              <Select value={form.destSupplierId} onValueChange={v => set("destSupplierId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="col-span-2">
-              <Label>Return Reason</Label>
-              <Input value={form.returnReason} onChange={e => set("returnReason", e.target.value)} placeholder="e.g. damaged, expired, wrong item" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Items</Label>
-            {items.map((it, i) => (
-              <div key={i} className="flex gap-2">
-                <Select value={it.productId} onValueChange={v => setItems(arr => arr.map((x, j) => j === i ? { ...x, productId: v } : x))}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="Product" /></SelectTrigger>
-                  <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                </Select>
-                <Input className="w-24" type="number" min="1" placeholder="Qty" value={it.quantity}
-                  onChange={e => setItems(arr => arr.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
-                {items.length > 1 && <Button size="sm" variant="ghost" onClick={() => setItems(arr => arr.filter((_, j) => j !== i))}>×</Button>}
-              </div>
-            ))}
-            <Button size="sm" variant="outline" onClick={() => setItems(arr => [...arr, { productId: "", quantity: "" }])}>+ Add Item</Button>
-          </div>
-          <DialogFooter className="mt-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Submit Return"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
 
 // ─── Wastage dialog ───────────────────────────────────────────────────────────
 
@@ -689,14 +367,21 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
   const { canCreate } = usePermission("Stocks");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ productId: "", branchId: "", quantity: "", reason: "" });
-  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+  const [form, setForm] = useState({ productId: "", branchId: "", batchId: "", quantity: "", reason: "" });
+  const [batches, setBatches] = useState<InventoryBatch[]>([]);
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v, ...(k === "productId" || k === "branchId" ? { batchId: "" } : {}) })); }
+
+  useEffect(() => {
+    if (!form.productId || !form.branchId) { setBatches([]); return; }
+    api.getBatches({ productId: form.productId, branchId: form.branchId }).then(setBatches).catch(() => setBatches([]));
+  }, [form.productId, form.branchId]);
+  const eligibleBatches = batches.filter(b => b.status !== "expired").sort((a, b) => (a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity) - (b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity));
 
   async function handleSave() {
     if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
     setSaving(true);
     try {
-      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "damage", reason: form.reason || undefined, adjustedBy: user?.id });
+      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "damage", reason: form.reason || undefined, adjustedBy: user?.id, batchId: form.batchId || undefined });
       toast.success("Wastage recorded");
       const productName = products.find(p => p.id === form.productId)?.name ?? "item";
       const isExpiry = /expir/i.test(form.reason);
@@ -705,7 +390,7 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
         isExpiry ? "Expired stock write-off completed" : `Wastage recorded for ${productName}`,
         { entityType: "Product", entityId: form.productId, branchId: form.branchId });
       setOpen(false);
-      setForm({ productId: "", branchId: "", quantity: "", reason: "" });
+      setForm({ productId: "", branchId: "", batchId: "", quantity: "", reason: "" });
       onDone();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to record wastage"); }
     finally { setSaving(false); }
@@ -739,6 +424,20 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
             <div>
               <Label>Quantity *</Label>
               <Input type="number" min="1" value={form.quantity} onChange={e => set("quantity", e.target.value)} placeholder="0" />
+            </div>
+            <div className="col-span-2">
+              <Label>Batch (optional)</Label>
+              <Select value={form.batchId || "none"} onValueChange={v => set("batchId", v === "none" ? "" : v)} disabled={!form.productId || !form.branchId}>
+                <SelectTrigger><SelectValue placeholder="No specific batch" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific batch</SelectItem>
+                  {eligibleBatches.map(b => (
+                    <SelectItem key={b.id} value={b.id} title={`${b.batchNumber} — ${b.remainingQuantity}/${b.quantity} — ${b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}`}>
+                      {b.batchNumber} — {b.remainingQuantity}/{b.quantity} — {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="col-span-2">
               <Label>Reason / Notes</Label>
@@ -1061,7 +760,7 @@ function Stocks() {
   const [damages, setDamages] = useState<InventoryAdjustment[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [deliveries, setDeliveries] = useState<StockTransfer[]>([]);
-  const [returns, setReturns] = useState<StockTransfer[]>([]);
+  const [movements, setMovements] = useState<StockMovement[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
@@ -1078,15 +777,14 @@ function Stocks() {
   const [siStatus, setSiStatus] = useState("all");
   const [grnStatus, setGrnStatus] = useState("all");
   const [dlStatus, setDlStatus] = useState("all");
-  const [rtStatus, setRtStatus] = useState("all");
+  const [mvBranch, setMvBranch] = useState(lockedBranchId ?? "all");
+  const [mvType, setMvType] = useState("all");
 
   // Per-tab date filters (FE-side since BE doesn't expose date range params)
   const [grnDateFrom, setGrnDateFrom] = useState("");
   const [grnDateTo, setGrnDateTo] = useState("");
   const [dlDateFrom, setDlDateFrom] = useState("");
   const [dlDateTo, setDlDateTo] = useState("");
-  const [rtDateFrom, setRtDateFrom] = useState("");
-  const [rtDateTo, setRtDateTo] = useState("");
 
   // ── Per-section fetch functions ──────────────────────────────────────────────
 
@@ -1152,30 +850,14 @@ function Stocks() {
     setTabLoading(false);
   }
 
-  async function fetchReturns() {
-    setTabLoading(true);
-    const rt = await api.getStockTransfers({
-      transferType: "return_to_supplier",
-      status: rtStatus !== "all" ? rtStatus : undefined,
-    }).catch(() => []);
-    setReturns(rt ?? []);
-    setTabLoading(false);
-  }
-
   async function fetchMovement() {
     setTabLoading(true);
-    const [bt, rd, dm, dl, rt] = await Promise.allSettled([
-      api.getBatches(),
-      api.getAdjustments({ adjustmentType: "reduction" }),
-      api.getAdjustments({ adjustmentType: "damage" }),
-      api.getStockTransfers({ transferType: "warehouse_to_branch" }),
-      api.getStockTransfers({ transferType: "return_to_supplier" }),
-    ]);
-    if (bt.status === "fulfilled") setBatches(bt.value ?? []);
-    if (rd.status === "fulfilled") setReductions(rd.value ?? []);
-    if (dm.status === "fulfilled") setDamages(dm.value ?? []);
-    if (dl.status === "fulfilled") setDeliveries(dl.value ?? []);
-    if (rt.status === "fulfilled") setReturns(rt.value ?? []);
+    const mv = await api.getStockMovements({
+      branchId: mvBranch !== "all" ? mvBranch : undefined,
+      movementType: mvType !== "all" ? mvType : undefined,
+      limit: 500,
+    }).catch(() => []);
+    setMovements(mv ?? []);
     setTabLoading(false);
   }
 
@@ -1185,7 +867,6 @@ function Stocks() {
     else if (tab === "stock-out") fetchReductions();
     else if (tab === "grn") fetchPOs();
     else if (tab === "delivery") fetchDeliveries();
-    else if (tab === "supplier-return") fetchReturns();
     else if (tab === "wastage") fetchDamages();
     else if (tab === "movement") fetchMovement();
   }
@@ -1225,10 +906,9 @@ function Stocks() {
     else if (tab === "stock-out") fetchReductions();
     else if (tab === "grn") fetchPOs();
     else if (tab === "delivery") fetchDeliveries();
-    else if (tab === "supplier-return") fetchReturns();
     else if (tab === "wastage") fetchDamages();
     else if (tab === "movement") fetchMovement();
-  }, [tab, overviewBranch, categoryFilter, siBranch, siStatus, grnStatus, dlStatus, rtStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, overviewBranch, categoryFilter, siBranch, siStatus, grnStatus, dlStatus, mvBranch, mvType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Metrics (from overview stock + pre-fetched expiring count)
   const totalSKUs = stock.length;
@@ -1239,8 +919,14 @@ function Stocks() {
   // Category is already BE-filtered; only search filter applied here
   const filteredStock = stock.filter(s => !q || s.product?.name?.toLowerCase().includes(q));
 
-  // Sub-tabs: data already fetched from BE with status filter; apply date range FE-side only
-  const filteredBatches = batches; // branch+status already filtered by BE
+  // Sub-tabs: data already fetched from BE with status filter; apply date range FE-side only.
+  // The batches endpoint orders by ExpiryDate (FEFO, for the expiry-watch views) — this
+  // "Stock-In Records" table is a log of receipts, so re-sort newest-received-first here.
+  const filteredBatches = [...batches].sort((a, b) => {
+    const ra = a.receivedDate ? new Date(a.receivedDate).getTime() : 0;
+    const rb = b.receivedDate ? new Date(b.receivedDate).getTime() : 0;
+    return rb - ra;
+  });
   const filteredPOs = purchaseOrders.filter(po => {
     const mdf = !grnDateFrom || (!!po.createdAt && po.createdAt >= grnDateFrom);
     const mdt = !grnDateTo || (!!po.createdAt && po.createdAt <= grnDateTo + "T23:59:59");
@@ -1251,30 +937,6 @@ function Stocks() {
     const mdt = !dlDateTo || (!!d.createdAt && d.createdAt <= dlDateTo + "T23:59:59");
     return mdf && mdt;
   });
-  const filteredReturns = returns.filter(r => {
-    const mdf = !rtDateFrom || (!!r.createdAt && r.createdAt >= rtDateFrom);
-    const mdt = !rtDateTo || (!!r.createdAt && r.createdAt <= rtDateTo + "T23:59:59");
-    return mdf && mdt;
-  });
-
-  // Movement timeline
-  type Event = { date: string; type: string; label: string; qty: number; detail: string };
-  const events: Event[] = [
-    ...batches.map(b => ({ date: b.receivedDate ?? "", type: "in", label: b.product?.name ?? "—", qty: b.quantity, detail: `Batch ${b.batchNumber} — ${b.supplier?.name ?? ""}` })),
-    ...reductions.map(a => ({ date: a.createdAt, type: "out", label: a.product?.name ?? "—", qty: a.quantity, detail: a.reason ?? "Reduction" })),
-    ...damages.map(a => ({ date: a.createdAt, type: "damage", label: a.product?.name ?? "—", qty: a.quantity, detail: a.reason ?? "Damage" })),
-    ...deliveries.map(t => ({ date: t.createdAt, type: "delivery", label: t.destBranch?.name ?? "—", qty: t.items?.reduce((s, i) => s + i.requestedQuantity, 0) ?? 0, detail: t.transferNumber })),
-    ...returns.map(t => ({ date: t.createdAt, type: "return", label: t.destSupplier?.name ?? "—", qty: t.items?.reduce((s, i) => s + i.requestedQuantity, 0) ?? 0, detail: t.transferNumber })),
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-  const movColor: Record<string, string> = {
-    in: "bg-green-100 text-green-700",
-    out: "bg-orange-100 text-orange-700",
-    damage: "bg-red-100 text-red-700",
-    delivery: "bg-blue-100 text-blue-700",
-    return: "bg-purple-100 text-purple-700",
-  };
-
   return (
     <PageShell
       title="Stocks"
@@ -1298,7 +960,6 @@ function Stocks() {
           <TabsTrigger value="stock-out" className="gap-1.5"><ArrowUpFromLine className="h-3.5 w-3.5" />Stock-Out</TabsTrigger>
           <TabsTrigger value="grn" className="gap-1.5"><ClipboardCheck className="h-3.5 w-3.5" />GRN</TabsTrigger>
           <TabsTrigger value="delivery" className="gap-1.5"><Truck className="h-3.5 w-3.5" />Store Delivery</TabsTrigger>
-          <TabsTrigger value="supplier-return" className="gap-1.5"><Undo2 className="h-3.5 w-3.5" />Supplier Return</TabsTrigger>
           <TabsTrigger value="wastage" className="gap-1.5"><Trash2 className="h-3.5 w-3.5" />Wastage</TabsTrigger>
           <TabsTrigger value="movement" className="gap-1.5"><History className="h-3.5 w-3.5" />Movement</TabsTrigger>
           <TabsTrigger value="stocking-review" className="gap-1.5"><ClipboardCheck className="h-3.5 w-3.5" />Stocking Review</TabsTrigger>
@@ -1398,7 +1059,6 @@ function Stocks() {
                     <SelectItem value="expired">Expired</SelectItem>
                   </SelectContent>
                 </Select>
-                <div onClick={ensureDialogMetadata}><StockInDialog branches={branches} products={products} suppliers={suppliers} onDone={refreshCurrentTab} /></div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -1449,7 +1109,6 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between">
               <CardTitle className="text-base">Stock-Out Records</CardTitle>
-              <div onClick={ensureDialogMetadata}><StockOutDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
             </CardHeader>
             <CardContent className="p-0">
               <AdjustmentTable rows={reductions} branches={branches} loading={tabLoading} />
@@ -1538,38 +1197,10 @@ function Stocks() {
                 </Select>
                 <Input type="date" className="h-8 w-36 text-xs" value={dlDateFrom} onChange={e => setDlDateFrom(e.target.value)} title="From" />
                 <Input type="date" className="h-8 w-36 text-xs" value={dlDateTo} onChange={e => setDlDateTo(e.target.value)} title="To" />
-                <div onClick={ensureDialogMetadata}><StoreDeliveryDialog branches={branches} warehouses={warehouses} products={products} onDone={refreshCurrentTab} /></div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
               <TransferTable rows={filteredDeliveries} loading={tabLoading} />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ── Supplier Return ── */}
-        <TabsContent value="supplier-return">
-          <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
-              <CardTitle className="text-base">Supplier Returns</CardTitle>
-              <div className="flex items-center gap-2">
-                <Select value={rtStatus} onValueChange={setRtStatus}>
-                  <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="confirmed">Confirmed</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input type="date" className="h-8 w-36 text-xs" value={rtDateFrom} onChange={e => setRtDateFrom(e.target.value)} title="From" />
-                <Input type="date" className="h-8 w-36 text-xs" value={rtDateTo} onChange={e => setRtDateTo(e.target.value)} title="To" />
-                <div onClick={ensureDialogMetadata}><SupplierReturnDialog branches={branches} suppliers={suppliers} products={products} onDone={refreshCurrentTab} /></div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <TransferTable rows={filteredReturns} loading={tabLoading} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -1590,33 +1221,74 @@ function Stocks() {
         {/* ── Movement ── */}
         <TabsContent value="movement">
           <Card>
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-2 flex flex-row items-center gap-2 justify-between flex-wrap">
               <CardTitle className="text-base">Stock Movement Timeline</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {tabLoading ? <p className="text-center text-muted-foreground py-8">Loading…</p>
-                : events.length === 0 ? <p className="text-center text-muted-foreground py-8">No movement records found</p>
-                : (
-                  <div className="space-y-1 max-h-[600px] overflow-y-auto">
-                    {events.map((ev, i) => (
-                      <div key={i} className="flex items-start gap-3 py-2 border-b last:border-0">
-                        <div className="w-1.5 h-1.5 mt-2 rounded-full bg-primary flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${movColor[ev.type] ?? "bg-gray-100 text-gray-600"}`}>{ev.type}</span>
-                            <span className="font-medium text-sm truncate">{ev.label}</span>
-                            <span className="text-xs text-muted-foreground">Qty: {fmt(ev.qty)}</span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5 truncate">{ev.detail}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-xs text-muted-foreground">{fmtDate(ev.date)}</p>
-                          <p className="text-xs text-muted-foreground">{fmtTime(ev.date)}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {!lockedBranchId && (
+                  <Select value={mvBranch} onValueChange={setMvBranch}>
+                    <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Branches</SelectItem>
+                      {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 )}
+                <Select value={mvType} onValueChange={setMvType}>
+                  <SelectTrigger className="h-8 w-52"><SelectValue placeholder="All Movement Types" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Movement Types</SelectItem>
+                    {MOVEMENT_TYPES.map(t => <SelectItem key={t} value={t}>{movementMeta(t).label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground uppercase sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Date / Time</th>
+                      <th className="px-4 py-2 text-left">Type</th>
+                      <th className="px-4 py-2 text-left">Product</th>
+                      <th className="px-4 py-2 text-left">Location</th>
+                      <th className="px-4 py-2 text-left">Batch #</th>
+                      <th className="px-4 py-2 text-right">Qty</th>
+                      <th className="px-4 py-2 text-left">Reference</th>
+                      <th className="px-4 py-2 text-left">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tabLoading ? (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                    ) : movements.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No movement records found</td></tr>
+                    ) : movements.map(mv => {
+                      const meta = movementMeta(mv.movementType);
+                      const location = mv.branch?.name ?? mv.warehouse?.name ?? "—";
+                      const isIncrease = mv.quantity >= 0;
+                      return (
+                        <tr key={mv.id} className="border-t hover:bg-muted/20">
+                          <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
+                            <div>{fmtDate(mv.createdAt)}</div>
+                            <div className="text-xs">{fmtTime(mv.createdAt)}</div>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${meta.color}`}>{meta.label}</span>
+                          </td>
+                          <td className="px-4 py-2.5 font-medium">{mv.product?.name ?? "—"}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground">{location}</td>
+                          <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{mv.batch?.batchNumber ?? "—"}</td>
+                          <td className={`px-4 py-2.5 text-right font-semibold whitespace-nowrap ${isIncrease ? "text-green-600" : "text-red-600"}`}>
+                            {isIncrease ? "+" : ""}{fmt(mv.quantity)}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground">{mv.referenceNumber ?? "—"}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground max-w-[220px] truncate" title={mv.notes ?? undefined}>{mv.notes ?? "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

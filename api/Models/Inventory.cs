@@ -51,8 +51,14 @@ public class InventoryBatch
     [Required, Column("product_id")]
     public Guid ProductId { get; set; }
 
-    [Required, Column("branch_id")]
-    public Guid BranchId { get; set; }
+    // Destination: exactly one of Branch or Warehouse, same nullable-pair convention as
+    // PurchaseOrder/StockTransfer — enforced in application code, not a DB constraint (MariaDB's
+    // CHECK support is version-gated, so this repo doesn't rely on it for this kind of invariant).
+    [Column("branch_id")]
+    public Guid? BranchId { get; set; }
+
+    [Column("warehouse_id")]
+    public Guid? WarehouseId { get; set; }
 
     [Column("supplier_id")]
     public Guid? SupplierId { get; set; }
@@ -90,6 +96,7 @@ public class InventoryBatch
     // Navigation
     public Product? Product { get; set; }
     public Branch? Branch { get; set; }
+    public Warehouse? Warehouse { get; set; }
     public Supplier? Supplier { get; set; }
 }
 
@@ -102,13 +109,19 @@ public class InventoryAdjustment
     [Required, Column("product_id")]
     public Guid ProductId { get; set; }
 
-    [Required, Column("branch_id")]
-    public Guid BranchId { get; set; }
+    // Destination: exactly one of Branch or Warehouse — same nullable-pair convention as
+    // InventoryBatch, needed so an auto-expiry write-off for a warehouse-held batch (which has
+    // no branch) can still get an audit row here.
+    [Column("branch_id")]
+    public Guid? BranchId { get; set; }
+
+    [Column("warehouse_id")]
+    public Guid? WarehouseId { get; set; }
 
     [Column("batch_id")]
     public Guid? BatchId { get; set; }
 
-    // addition | subtraction | waste | damage | return_to_supplier | transfer_in | transfer_out
+    // addition | subtraction | waste | damage | return_to_supplier | transfer_in | transfer_out | expired
     [Required, MaxLength(30), Column("adjustment_type")]
     public string AdjustmentType { get; set; } = default!;
 
@@ -130,6 +143,7 @@ public class InventoryAdjustment
     // Navigation
     public Product? Product { get; set; }
     public Branch? Branch { get; set; }
+    public Warehouse? Warehouse { get; set; }
     public InventoryBatch? Batch { get; set; }
     public User? AdjustedByUser { get; set; }
 }
@@ -215,4 +229,70 @@ public class StockCountItem
     // Navigation
     [JsonIgnore] public StockCount? StockCount { get; set; }
     public Product? Product { get; set; }
+}
+
+// Authoritative, append-only record of every event that changes stock anywhere in the system —
+// the single source of truth the Stock Movement Timeline reads from. Previously that timeline
+// was reconstructed client-side by guessing from five unrelated tables (batches, two differently
+// -typed adjustment queries, and transfers filtered by type strings that didn't match what the
+// rest of the app actually writes), so whole categories of movement (sales, expiry write-offs,
+// most transfer types, the transfer_out/transfer_in split introduced by the two-phase transfer
+// flow) were silently missing or mislabeled. Every stock-mutating code path now appends one row
+// here in the same unit of work as the mutation itself.
+[Table("stock_movements")]
+public class StockMovement
+{
+    [Key, Column("id")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required, Column("product_id")]
+    public Guid ProductId { get; set; }
+
+    // Exactly one of Branch/Warehouse — the location this movement happened at.
+    [Column("branch_id")]
+    public Guid? BranchId { get; set; }
+
+    [Column("warehouse_id")]
+    public Guid? WarehouseId { get; set; }
+
+    [Column("batch_id")]
+    public Guid? BatchId { get; set; }
+
+    // purchase_receive | manual_receive | sale | transfer_out | transfer_in | transfer_restore |
+    // addition | reduction | waste | damage | return_to_supplier | expired
+    [Required, MaxLength(30), Column("movement_type")]
+    public string MovementType { get; set; } = default!;
+
+    // Signed: positive = stock increased at this location, negative = decreased. Lets the
+    // timeline and any future "net movement" rollup sum directly without a type lookup.
+    [Column("quantity")]
+    public decimal Quantity { get; set; }
+
+    // "PurchaseOrder" | "Order" | "StockTransfer" | "InventoryAdjustment" | "InventoryBatch"
+    [MaxLength(30), Column("reference_type")]
+    public string? ReferenceType { get; set; }
+
+    [Column("reference_id")]
+    public Guid? ReferenceId { get; set; }
+
+    // Denormalized human-readable number (PO-.../ORD-.../TRF-...) so the timeline doesn't need a
+    // join per reference type just to show what triggered the movement.
+    [MaxLength(50), Column("reference_number")]
+    public string? ReferenceNumber { get; set; }
+
+    [Column("notes")]
+    public string? Notes { get; set; }
+
+    [Column("created_by")]
+    public Guid? CreatedBy { get; set; }
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // Navigation
+    public Product? Product { get; set; }
+    public Branch? Branch { get; set; }
+    public Warehouse? Warehouse { get; set; }
+    public InventoryBatch? Batch { get; set; }
+    public User? CreatedByUser { get; set; }
 }

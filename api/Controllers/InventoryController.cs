@@ -9,7 +9,16 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class InventoryController(BaqalaDbContext db, IStockAlertService stockAlerts, IAuditService audit, ILogger<InventoryController> logger) : ControllerBase
+// Both ledgers are recorded here, and they answer different questions: IStockMovementService is the
+// inventory ledger (what moved, signed quantity, against which batch/reference), IAuditService is the
+// employee trail (who did it, before/after on-hand, why). Neither subsumes the other — a movement row
+// has no actor context and an audit row has no signed quantity — so an adjustment writes both.
+public class InventoryController(
+    BaqalaDbContext db,
+    IStockAlertService stockAlerts,
+    IStockMovementService stockMovements,
+    IAuditService audit,
+    ILogger<InventoryController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see/write their own branch's
     // batches — mirrors the scoping the frontend already applies to the plain stock list.
@@ -40,6 +49,12 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
         var query = db.InventoryStocks
             .Include(i => i.Product).ThenInclude(p => p!.Category)
             .Include(i => i.Branch)
+            // A discontinued product (including one left behind by a failed create — the "Add
+            // Product" flow soft-deletes via this same status field if the initial stock/batch
+            // call fails after the product row was already committed) has no business appearing
+            // as a sellable, zero-stock catalog row on any of this endpoint's callers (Inventory,
+            // Stocks, POS, Orders, etc.).
+            .Where(i => i.Product!.Status != "discontinued")
             .AsQueryable();
         if (branchId.HasValue) query = query.Where(i => i.BranchId == branchId);
         if (lowStock == true) query = query.Where(i => i.Quantity <= i.ReorderLevel);
@@ -55,26 +70,94 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
         return stock is null ? NotFound() : Ok(stock);
     }
 
+    // Removes a product's stock row from a single branch — used to clean up a branch's
+    // inventory list, NOT to write off stock. Only ever allowed once the row is already
+    // fully zeroed (on-hand and reserved), since the only legitimate way to actually GET a
+    // product's stock at a branch to zero is to sell it or transfer it out — both of which
+    // already happened by the time this succeeds. If the same product is later received here
+    // again (PO receipt, transfer receive, manual receive), every one of those write paths
+    // already does a find-or-create on InventoryStock, so a fresh row is created automatically
+    // with no special-casing needed — deleting this row doesn't blacklist the product/branch
+    // pair, it just removes a stale zero row from the list.
+    [RequirePermission("Inventory", PermAction.Delete)]
+    [HttpDelete("stock/{id:guid}")]
+    public async Task<IActionResult> DeleteStock(Guid id)
+    {
+        var stock = await db.InventoryStocks.FindAsync(id);
+        if (stock is null) return NotFound();
+
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && callerBranchId != stock.BranchId)
+            return Forbid();
+
+        if (stock.Quantity != 0 || stock.ReservedQuantity != 0)
+        {
+            return Conflict(new
+            {
+                message = $"Cannot delete — {stock.Quantity} unit(s) on hand" +
+                    (stock.ReservedQuantity != 0 ? $" ({stock.ReservedQuantity} reserved)" : "") +
+                    " at this branch. Transfer the stock to another branch or warehouse first, then delete.",
+                quantity = stock.Quantity,
+                reservedQuantity = stock.ReservedQuantity,
+                productId = stock.ProductId,
+                branchId = stock.BranchId,
+            });
+        }
+
+        // A batch still claiming remaining stock here would become an orphaned record once the
+        // aggregate row is gone — same reconciliation guarantee the Inventory page's batch
+        // expand-row already depends on (aggregate on-hand must always match tracked batches).
+        var hasOpenBatches = await db.InventoryBatches.AnyAsync(b =>
+            b.ProductId == stock.ProductId && b.BranchId == stock.BranchId && b.RemainingQuantity > 0);
+        if (hasOpenBatches)
+        {
+            return Conflict(new
+            {
+                message = "Cannot delete — this product still has active batch(es) recorded at this branch. Transfer or write off those batches first.",
+                productId = stock.ProductId,
+                branchId = stock.BranchId,
+            });
+        }
+
+        db.InventoryStocks.Remove(stock);
+        await db.SaveChangesAsync();
+        return NoContent();
+    }
+
     [HttpGet("batches")]
-    public async Task<IActionResult> GetBatches([FromQuery] Guid? branchId, [FromQuery] string? status)
+    public async Task<IActionResult> GetBatches(
+        [FromQuery] Guid? branchId, [FromQuery] Guid? warehouseId, [FromQuery] Guid? productId, [FromQuery] string? status,
+        [FromQuery] string? locationType)
     {
         var (role, callerBranchId) = GetCallerContext();
-        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+        // Only clobber branchId onto a branch-scoped request — a caller explicitly asking for a
+        // WAREHOUSE's batches isn't querying "their branch" at all, and warehouse batches always
+        // have BranchId null (mutually exclusive with WarehouseId), so forcing branchId here would
+        // AND together a non-null branch filter with the warehouse filter and always return empty.
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && !warehouseId.HasValue) branchId = callerBranchId;
 
         var query = db.InventoryBatches
             .Include(b => b.Product)
             .Include(b => b.Supplier)
             .AsQueryable();
         if (branchId.HasValue) query = query.Where(b => b.BranchId == branchId);
+        if (warehouseId.HasValue) query = query.Where(b => b.WarehouseId == warehouseId);
+        // "Any branch"/"any warehouse" browsing (no specific id picked) still needs to stay
+        // scoped to that location TYPE — otherwise it falls through to no location filter at
+        // all and returns every batch system-wide, branches and warehouses mixed together.
+        if (locationType == "branch" && !branchId.HasValue) query = query.Where(b => b.BranchId != null);
+        else if (locationType == "warehouse" && !warehouseId.HasValue) query = query.Where(b => b.WarehouseId != null);
+        if (productId.HasValue) query = query.Where(b => b.ProductId == productId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(b => b.Status == status);
         return Ok(await query.OrderBy(b => b.ExpiryDate).ToListAsync());
     }
 
     [HttpGet("batches/expiring")]
-    public async Task<IActionResult> GetExpiringBatches([FromQuery] Guid? branchId, [FromQuery] int daysAhead = 30)
+    public async Task<IActionResult> GetExpiringBatches([FromQuery] Guid? branchId, [FromQuery] Guid? warehouseId, [FromQuery] int daysAhead = 30)
     {
         var (role, callerBranchId) = GetCallerContext();
-        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+        // Same reasoning as GetBatches above — don't clobber branchId onto an explicit warehouse query.
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && !warehouseId.HasValue) branchId = callerBranchId;
 
         var cutoff = DateTime.UtcNow.AddDays(daysAhead);
         var query = db.InventoryBatches
@@ -82,6 +165,7 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
             .Include(b => b.Supplier)
             .Where(b => b.ExpiryDate != null && b.ExpiryDate <= cutoff && b.RemainingQuantity > 0);
         if (branchId.HasValue) query = query.Where(b => b.BranchId == branchId);
+        if (warehouseId.HasValue) query = query.Where(b => b.WarehouseId == warehouseId);
         return Ok(await query.OrderBy(b => b.ExpiryDate).ToListAsync());
     }
 
@@ -144,6 +228,11 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
             stock.Quantity += req.Quantity;
             stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
         }
+
+        stockMovements.Record(
+            req.ProductId, req.BranchId, warehouseId: null, movementType: "manual_receive", quantity: req.Quantity,
+            batchId: batch.Id, referenceType: "manual_receive", referenceId: batch.Id, notes: req.DamagedOrReturnReason);
+
         await db.SaveChangesAsync();
 
         // Receiving stock was previously invisible to the Employee Audit Center — the batch and the
@@ -177,15 +266,46 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
         return Created($"/api/inventory/batches/{batch.Id}", batch);
     }
 
+    // Single source of truth for "how did stock actually move" — every stock-mutating endpoint in
+    // the app (PO receive, sale, transfer ship/receive/restore, manual receive/adjust, expiry
+    // write-off) appends to this ledger in the same request that changes the stock, so this list
+    // is never missing a step the way the old page-level reconstruction from five different
+    // tables was.
+    [HttpGet("movements")]
+    public async Task<IActionResult> GetMovements(
+        [FromQuery] Guid? productId, [FromQuery] Guid? branchId, [FromQuery] Guid? warehouseId,
+        [FromQuery] Guid? batchId, [FromQuery] string? movementType, [FromQuery] DateTime? from, [FromQuery] DateTime? to,
+        [FromQuery] int limit = 200)
+    {
+        var query = db.StockMovements
+            .Include(m => m.Product)
+            .Include(m => m.Branch)
+            .Include(m => m.Warehouse)
+            .Include(m => m.Batch)
+            .Include(m => m.CreatedByUser)
+            .AsQueryable();
+        if (productId.HasValue) query = query.Where(m => m.ProductId == productId);
+        if (branchId.HasValue) query = query.Where(m => m.BranchId == branchId);
+        if (warehouseId.HasValue) query = query.Where(m => m.WarehouseId == warehouseId);
+        if (batchId.HasValue) query = query.Where(m => m.BatchId == batchId);
+        if (!string.IsNullOrEmpty(movementType)) query = query.Where(m => m.MovementType == movementType);
+        if (from.HasValue) query = query.Where(m => m.CreatedAt >= from);
+        if (to.HasValue) query = query.Where(m => m.CreatedAt <= to);
+        return Ok(await query.OrderByDescending(m => m.CreatedAt).Take(Math.Clamp(limit, 1, 1000)).ToListAsync());
+    }
+
     [HttpGet("adjustments")]
-    public async Task<IActionResult> GetAdjustments([FromQuery] Guid? branchId, [FromQuery] string? adjustmentType)
+    public async Task<IActionResult> GetAdjustments([FromQuery] Guid? branchId, [FromQuery] Guid? warehouseId, [FromQuery] Guid? batchId, [FromQuery] string? adjustmentType)
     {
         var query = db.InventoryAdjustments
             .Include(a => a.Product)
             .Include(a => a.Branch)
+            .Include(a => a.Warehouse)
             .Include(a => a.AdjustedByUser)
             .AsQueryable();
         if (branchId.HasValue) query = query.Where(a => a.BranchId == branchId);
+        if (warehouseId.HasValue) query = query.Where(a => a.WarehouseId == warehouseId);
+        if (batchId.HasValue) query = query.Where(a => a.BatchId == batchId);
         if (!string.IsNullOrEmpty(adjustmentType)) query = query.Where(a => a.AdjustmentType == adjustmentType);
         return Ok(await query.OrderByDescending(a => a.CreatedAt).ToListAsync());
     }
@@ -199,6 +319,22 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
         // of defect (corrupt on-hand quantity), separate from the Receive Batch form.
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Adjustment quantity must be greater than zero." });
+
+        var isIncrease = req.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in";
+
+        // Batch selection is optional — most cycle-count corrections aren't tied to a specific
+        // lot. When one IS picked, it must actually belong here, and a decrease can't remove
+        // more than that lot has left (mirrors ValidateSourceStockAsync's same check in
+        // StockTransfersController, just against a batch instead of an aggregate row).
+        InventoryBatch? batch = null;
+        if (req.BatchId.HasValue)
+        {
+            batch = await db.InventoryBatches.FirstOrDefaultAsync(b => b.Id == req.BatchId);
+            if (batch is null || batch.ProductId != req.ProductId || batch.BranchId != req.BranchId)
+                return BadRequest(new { message = "Selected batch does not match this product and branch." });
+            if (!isIncrease && req.Quantity > batch.RemainingQuantity)
+                return BadRequest(new { message = $"Cannot adjust {req.Quantity} unit(s) — only {batch.RemainingQuantity} remaining in batch {batch.BatchNumber}." });
+        }
 
         // Recording wastage/damage (or any adjustment) against a product that has no stock row in
         // the chosen branch used to 404 with "Stock record not found", surfacing to the user as the
@@ -231,6 +367,7 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
             Id = Guid.NewGuid(),
             ProductId = req.ProductId,
             BranchId = req.BranchId,
+            BatchId = req.BatchId,
             Quantity = req.Quantity,
             AdjustmentType = req.AdjustmentType,
             Reason = req.Reason ?? "",
@@ -243,7 +380,7 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
         // the audit trail needs to make an adjustment reviewable.
         var quantityBefore = stock.Quantity;
 
-        if (req.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in")
+        if (isIncrease)
             stock.Quantity += req.Quantity;
         else
             // Clamp at zero rather than letting a removal push stock negative — same
@@ -251,7 +388,30 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
             stock.Quantity = Math.Max(0, stock.Quantity - req.Quantity);
         stock.LastUpdated = DateTime.UtcNow;
 
+        if (batch != null)
+        {
+            // Increases only ever credit RemainingQuantity, never the original received Quantity
+            // — same convention StockTransfersController.RestoreSourceAsync already uses when
+            // giving stock back to a batch; Quantity stays an immutable "originally received" fact.
+            batch.RemainingQuantity = isIncrease
+                ? batch.RemainingQuantity + req.Quantity
+                : Math.Max(0, batch.RemainingQuantity - req.Quantity);
+            batch.UpdatedAt = DateTime.UtcNow;
+            if (!isIncrease && batch.RemainingQuantity == 0) batch.Status = "consumed";
+            // A correction crediting stock back into a batch that was previously fully consumed
+            // makes it live again — leaving Status stuck at "consumed" would misrepresent it
+            // everywhere that reads Status (badges, BatchExpandRow's exclusion, etc.) despite it
+            // now genuinely having stock on hand.
+            else if (isIncrease && batch.Status == "consumed" && batch.RemainingQuantity > 0) batch.Status = "active";
+        }
+
         db.InventoryAdjustments.Add(adjustment);
+
+        stockMovements.Record(
+            req.ProductId, req.BranchId, warehouseId: null, movementType: $"adjustment_{req.AdjustmentType}",
+            quantity: isIncrease ? req.Quantity : -req.Quantity,
+            batchId: req.BatchId, referenceType: "adjustment", referenceId: adjustment.Id, notes: req.Reason);
+
         await db.SaveChangesAsync();
 
         // Employee Audit Center — inventory adjustments are a listed employee action. Best-effort:
@@ -294,7 +454,8 @@ public record AdjustRequest(
     decimal Quantity,
     string AdjustmentType,
     string? Reason,
-    Guid? AdjustedBy
+    Guid? AdjustedBy,
+    Guid? BatchId = null
 );
 
 public record ReceiveBatchRequest(

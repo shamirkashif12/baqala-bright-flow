@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, ILogger<OrdersController> logger) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, IBatchConsumptionService batchConsumption, IStockMovementService stockMovements, ILogger<OrdersController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's orders —
     // mirrors ReportsController.GetCallerContext. Previously branchId was just an optional query
@@ -265,6 +265,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     UpdatedAt = DateTime.UtcNow,
                 });
             }
+
+            stockMovements.Record(
+                item.ProductId, order.BranchId, warehouseId: null, movementType: "sale", quantity: -item.Quantity,
+                referenceType: "order", referenceId: order.Id, referenceNumber: order.OrderNumber);
         }
 
         await db.SaveChangesAsync();
@@ -276,6 +280,16 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         {
             try { await stockAlerts.CheckStockLevelAsync(productId, order.BranchId); }
             catch (Exception ex) { logger.LogError(ex, "Low-stock check failed after sale for product {ProductId}", productId); }
+        }
+
+        // Keep each sold product's batch(es) in sync with the aggregate stock write above (FEFO —
+        // oldest expiry first) so the batch drill-down UI reflects what actually sold instead of a
+        // static "still full" quantity. Same best-effort treatment as the low-stock check: batch
+        // remaining-quantity is traceability data, never allowed to fail or slow down the sale.
+        foreach (var item in order.Items)
+        {
+            try { await batchConsumption.ConsumeFefoAsync(item.ProductId, order.BranchId, warehouseId: null, item.Quantity); }
+            catch (Exception ex) { logger.LogError(ex, "Batch FEFO consumption failed after sale for product {ProductId}", item.ProductId); }
         }
 
         // Employee Audit Center — the sale itself is an employee action and has to appear on the
@@ -457,6 +471,24 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     {
         var order = await db.Orders.FindAsync(id);
         if (order is null) return NotFound();
+
+        // Cancelling has to reverse stock and the cashier shift's running totals — VoidOrder
+        // (the DELETE endpoint) already does that correctly. This endpoint used to accept
+        // "cancelled" too and just overwrite the status label with none of that reversal,
+        // silently leaving sold stock permanently gone and the shift overstated. Route callers
+        // to Void instead of reproducing (and re-diverging from) that logic here.
+        if (req.Status == "cancelled")
+            return BadRequest(new { message = "Use Void to cancel an order — it reverses stock and shift totals; this endpoint only changes the status label." });
+
+        if (order.OrderStatus is "cancelled" or "refunded")
+            return BadRequest(new { message = $"This order is already {order.OrderStatus} and cannot be changed further." });
+
+        // A completed (paid, fulfilled) order can no longer be walked back through the
+        // fulfillment pipeline or cancelled outright — the only legitimate reversal left is a
+        // refund, which the frontend's Refund dialog routes through the Returns approval flow.
+        if (order.OrderStatus == "completed" && req.Status != "refunded")
+            return BadRequest(new { message = "A completed order can only move to Refunded." });
+
         order.OrderStatus = req.Status;
         order.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
@@ -670,6 +702,15 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 stock.LastUpdated = DateTime.UtcNow;
                 stock.UpdatedAt = DateTime.UtcNow;
             }
+        }
+
+        // Best-effort, mirrors the same restore Create's ConsumeFefoAsync call needs undoing —
+        // without this the specific batch a voided sale drew down never gets its RemainingQuantity
+        // (and therefore its expiry visibility in the Inventory batch drill-down) back.
+        foreach (var item in order.Items)
+        {
+            try { await batchConsumption.RestoreFefoAsync(item.ProductId, order.BranchId, warehouseId: null, item.Quantity); }
+            catch (Exception ex) { logger.LogError(ex, "Batch restore failed for voided order {OrderId} product {ProductId}", order.Id, item.ProductId); }
         }
 
         // Reverse this order's contribution to its shift's running totals — otherwise a void

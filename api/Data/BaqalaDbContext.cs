@@ -36,6 +36,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<InventoryAdjustment> InventoryAdjustments { get; set; }
     public DbSet<StockCount> StockCounts { get; set; }
     public DbSet<StockCountItem> StockCountItems { get; set; }
+    public DbSet<StockMovement> StockMovements { get; set; }
 
     // Orders
     public DbSet<Order> Orders { get; set; }

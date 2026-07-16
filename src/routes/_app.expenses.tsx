@@ -17,6 +17,7 @@ import { api, type Expense, type ExpenseType, type Branch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
+import { localDateStr } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/expenses")({ component: Expenses });
 
@@ -32,7 +33,7 @@ type ExpenseForm = {
 };
 const emptyForm: ExpenseForm = {
   expenseTypeId: "", branchId: "", amount: "", paidAmount: "",
-  description: "", expenseDate: new Date().toISOString().slice(0, 10),
+  description: "", expenseDate: localDateStr(),
   referenceNumber: "", paymentMethod: "Cash",
 };
 

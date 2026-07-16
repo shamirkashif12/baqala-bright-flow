@@ -719,8 +719,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .Select(b => new { b.ProductId, b.BranchId, SupplierName = b.Supplier!.Name })
             .ToListAsync();
         var supplierMap = latestBatches
-            .Where(b => productIdSet.Contains(b.ProductId) && branchIdSet.Contains(b.BranchId))
-            .GroupBy(b => (b.ProductId, b.BranchId))
+            .Where(b => productIdSet.Contains(b.ProductId) && b.BranchId.HasValue && branchIdSet.Contains(b.BranchId.Value))
+            .GroupBy(b => (b.ProductId, BranchId: b.BranchId!.Value))
             .ToDictionary(g => g.Key, g => g.First().SupplierName);
 
         var lastSoldQ = db.OrderItems.Include(i => i.Order).Include(i => i.Product).Where(i => i.Order != null);
@@ -1601,7 +1601,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var (scopeRole, scopeBranchId) = GetCallerContext();
         if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
         var adjQ = db.InventoryAdjustments.Include(a => a.Product).ThenInclude(p => p!.Category).Include(a => a.Branch).Include(a => a.Batch)
-            .Where(a => (a.AdjustmentType == "waste" || a.AdjustmentType == "damage") && a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive);
+            .Where(a => (a.AdjustmentType == "waste" || a.AdjustmentType == "damage" || a.AdjustmentType == "expired") && a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive);
         if (branchId.HasValue) adjQ = adjQ.Where(a => a.BranchId == branchId);
         if (!string.IsNullOrEmpty(reasonFilter)) adjQ = adjQ.Where(a => a.AdjustmentType == reasonFilter);
         if (productId.HasValue) adjQ = adjQ.Where(a => a.ProductId == productId);
@@ -1635,8 +1635,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             Kpis = new WasteSpoilageKpis
             {
                 TotalWriteOffValue = totalWriteOff,
-                // The schema's adjustment_type enum has no distinct "expired" value — approximated from free-text reason.
-                ExpiredItems = rows.Count(r => r.Notes != null && r.Notes.Contains("expir", StringComparison.OrdinalIgnoreCase)),
+                ExpiredItems = rows.Count(r => r.Reason == "expired"),
                 DamagedItems = rows.Count(r => r.Reason == "damage"),
                 TopWasteCategory = rows.Count > 0
                     ? rows.GroupBy(r => r.Category).OrderByDescending(g => g.Sum(r => r.CostValue)).First().Key

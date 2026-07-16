@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
@@ -11,15 +11,17 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Plus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
+  Plus, Minus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
-  ImageOff,
+  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft,
 } from "lucide-react";
-import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse } from "@/lib/api";
+import { BatchExpandRow } from "@/components/batch-expand-row";
+import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { fileToCompressedDataUrl } from "@/lib/image";
+import { localDateStr } from "@/lib/utils";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/inventory")({ component: Inventory });
@@ -27,7 +29,7 @@ export const Route = createFileRoute("/_app/inventory")({ component: Inventory }
 // A freshly received batch can't already be expired — used as the min on both "Expiry date"
 // inputs below (Receive Batch / Quick Stock In) and to validate on submit, since some browsers
 // let a date be typed in manually past the input's own min.
-const todayStr = new Date().toISOString().slice(0, 10);
+const todayStr = localDateStr();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -58,6 +60,98 @@ function ExpiryCell({ date }: { date?: string | null }) {
   else if (d !== null && d <= 30) badge = <span className="inline-block rounded-full bg-warning/20 text-warning-foreground text-[10px] px-1.5 py-0.5 font-medium">{d}d left</span>;
   else badge = <span className="inline-block rounded-full bg-success/15 text-success text-[10px] px-1.5 py-0.5 font-medium">Safe</span>;
   return <div className="text-xs"><p className="text-muted-foreground">{formatted}</p><div className="mt-0.5">{badge}</div></div>;
+}
+
+// ─── Incoming Transfers (in-transit warehouse→branch transfers awaiting receipt) ──────────────
+// Previously the only way to receive one of these was to leave Inventory and find it on the
+// dedicated Stock Transfers page — this surfaces it right where a branch user is already looking
+// at stock, and receiving here carries the source batch's number/expiry forward automatically
+// (StockTransfersController.MoveTransferStockAsync already does this) rather than minting a
+// disconnected one.
+function QuickReceiveTransferSheet({ transfer, onClose, onReceived }: {
+  transfer: StockTransfer | null; onClose: () => void; onReceived: () => void;
+}) {
+  const { user } = useAuth();
+  const [qtys, setQtys] = useState<Record<string, number>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (transfer) {
+      const q: Record<string, number> = {};
+      (transfer.items ?? []).forEach(it => { q[it.id] = it.requestedQuantity; });
+      setQtys(q);
+      setError("");
+    }
+  }, [transfer]);
+
+  if (!transfer) return null;
+
+  const handleConfirm = async () => {
+    const items = (transfer.items ?? [])
+      .filter(it => (qtys[it.id] ?? 0) > 0)
+      .map(it => ({ itemId: it.id, receivedQuantity: qtys[it.id] }));
+    if (!items.length) return setError("Enter at least one quantity.");
+    setSaving(true); setError("");
+    try {
+      await api.receiveStockTransfer(transfer.id, items, user?.id);
+      onReceived();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to receive transfer.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Sheet open={!!transfer} onOpenChange={v => !v && onClose()}>
+      <SheetContent style={{ width: 480, maxWidth: "100vw" }} className="overflow-y-auto">
+        <SheetHeader><SheetTitle>Receive Transfer — {transfer.transferNumber}</SheetTitle></SheetHeader>
+        <p className="text-xs text-muted-foreground mt-1">From {transfer.sourceWarehouse?.name ?? transfer.sourceBranch?.name ?? "—"}</p>
+        <div className="mt-4 space-y-3">
+          {(transfer.items ?? []).map(it => (
+            <div key={it.id} className="rounded-xl border border-border/60 p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-medium text-sm truncate">{it.product?.name ?? it.productId}</p>
+                <p className="text-xs text-muted-foreground">Requested: {it.requestedQuantity}</p>
+              </div>
+              <div className="shrink-0 space-y-1">
+                <Label className="text-[11px] font-medium">Qty Received</Label>
+                <Input type="number" min={0} className="h-8 w-20 text-xs text-center"
+                  value={qtys[it.id] ?? 0} onChange={e => setQtys(p => ({ ...p, [it.id]: Number(e.target.value) }))} />
+              </div>
+            </div>
+          ))}
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleConfirm} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Confirm Receipt
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function IncomingTransfersBanner({ transfers, onReceive }: { transfers: StockTransfer[]; onReceive: (t: StockTransfer) => void }) {
+  if (transfers.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-2">
+      <p className="text-xs font-semibold text-primary flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" />Incoming Transfers — awaiting receipt</p>
+      <div className="space-y-1.5">
+        {transfers.map(t => (
+          <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg bg-background border border-border/50 px-3 py-2">
+            <div className="min-w-0 text-xs">
+              <span className="font-mono font-semibold">{t.transferNumber}</span>
+              <span className="text-muted-foreground"> · from {t.sourceWarehouse?.name ?? t.sourceBranch?.name ?? "—"} · {(t.items ?? []).length} item(s)</span>
+            </div>
+            <Button size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={() => onReceive(t)}>
+              <Truck className="h-3 w-3" />Receive
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -116,118 +210,84 @@ function ProductImagePicker({ value, onChange }: { value: string; onChange: (dat
   );
 }
 
-// ─── Receive Batch Dialog ─────────────────────────────────────────────────────
-
-function ReceiveBatchDialog({ open, onClose, stock, branches, suppliers, onDone, lockedBranchId }: {
+// ─── Receive Stock Dialog (from an in-transit Stock Transfer) ────────────────
+// Stock may only enter a branch through PO → Stock Transfer → in_transit → receive
+// (StockTransfersController.ReceiveTransfer) — this replaces the old free-form "Receive Batch"
+// form, which let anyone materialize stock for a branch with a quantity they just typed in,
+// no Purchase Order and no supplier payment trail behind it. Here the user picks where the
+// stock is coming from (a warehouse, or another branch for branch_to_branch transfers) and
+// only sees shipments that are actually in transit from that source into this branch.
+function ReceiveStockDialog({ open, onClose, warehouses, branches, destBranchId, onReceive }: {
   open: boolean; onClose: () => void;
-  stock: StockItem[]; branches: Branch[]; suppliers: Supplier[];
-  onDone: () => void; lockedBranchId: string | null;
+  warehouses: Warehouse[]; branches: Branch[];
+  destBranchId: string | null;
+  onReceive: (t: StockTransfer) => void;
 }) {
-  const [form, setForm] = useState({
-    batchNumber: "", supplierId: "", productId: "", quantity: "",
-    expiryDate: "", purchaseCost: "", vatPct: "15", customFee: "0.00",
-    branchId: lockedBranchId ?? "", notes: "",
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [sourceKey, setSourceKey] = useState("");
+  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const set = (k: keyof typeof form) => (v: string) => setForm(p => ({ ...p, [k]: v }));
+  useEffect(() => {
+    if (!open) { setSourceKey(""); setTransfers([]); }
+  }, [open]);
 
-  const reset = () => setForm({ batchNumber: "", supplierId: "", productId: "", quantity: "", expiryDate: "", purchaseCost: "", vatPct: "15", customFee: "0.00", branchId: lockedBranchId ?? "", notes: "" });
+  useEffect(() => {
+    if (!sourceKey || !destBranchId) { setTransfers([]); return; }
+    const [type, id] = sourceKey.split(":");
+    setLoading(true);
+    api.getStockTransfers({
+      status: "in_transit",
+      ...(type === "warehouse" ? { sourceWarehouseId: id } : { sourceBranchId: id }),
+    })
+      .then(all => setTransfers(all.filter(t => t.destBranchId === destBranchId)))
+      .catch(() => setTransfers([]))
+      .finally(() => setLoading(false));
+  }, [sourceKey, destBranchId]);
 
-  const handleSubmit = async () => {
-    if (!form.productId || !form.quantity) return setError("Product and quantity are required.");
-    if (!form.branchId) return setError("Please select a branch.");
-    if (lockedBranchId && form.branchId !== lockedBranchId) return setError("You can only receive stock into your own branch.");
-    if (form.expiryDate && form.expiryDate < todayStr) return setError("Expiry date cannot be in the past for a batch received today.");
-    const branchId = form.branchId;
-    setSaving(true); setError("");
-    try {
-      await api.receiveBatch({
-        productId: form.productId,
-        branchId,
-        supplierId: form.supplierId || undefined,
-        quantity: Number(form.quantity),
-        purchaseCost: Number(form.purchaseCost) || undefined,
-        expiryDate: form.expiryDate || undefined,
-        batchNumber: form.batchNumber || undefined,
-        notes: form.notes || undefined,
-      } as Parameters<typeof api.receiveBatch>[0]);
-      toast.success("Batch received successfully");
-      reset(); onDone(); onClose();
-    } catch (e) { setError(e instanceof Error ? e.message : "Failed."); }
-    finally { setSaving(false); }
-  };
+  const sourceOptions = [
+    ...warehouses.map(w => ({ key: `warehouse:${w.id}`, label: w.name })),
+    ...branches.filter(b => b.id !== destBranchId).map(b => ({ key: `branch:${b.id}`, label: b.name })),
+  ];
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Receive Batch</DialogTitle>
-          <p className="text-sm text-muted-foreground">Record a new batch arrival into a branch or warehouse.</p>
+          <DialogTitle>Receive Stock</DialogTitle>
+          <p className="text-sm text-muted-foreground">Pick where the stock is coming from to see shipments currently in transit to this branch.</p>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3 mt-2">
-          <FieldRow label="Batch number">
-            <Input className="h-9" placeholder="B-2406-A" value={form.batchNumber} onChange={e => set("batchNumber")(e.target.value)} />
-          </FieldRow>
-          <FieldRow label="Supplier">
-            <Select value={form.supplierId} onValueChange={set("supplierId")}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select supplier" /></SelectTrigger>
-              <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-            </Select>
-          </FieldRow>
-          <FieldRow label="Item name / SKU *">
-            <Select value={form.productId} onValueChange={v => {
-              const p = stock.find(s => s.productId === v);
-              set("productId")(v);
-              if (p?.product?.costPrice) set("purchaseCost")(String(p.product.costPrice));
-            }}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select product" /></SelectTrigger>
+        <div className="mt-2 space-y-3">
+          <FieldRow label="Coming from">
+            <Select value={sourceKey} onValueChange={setSourceKey}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select warehouse or branch" /></SelectTrigger>
               <SelectContent>
-                {[...new Map(stock.map(s => [s.productId, s.product])).entries()].map(([id, p]) => (
-                  <SelectItem key={id} value={id}>{p?.name ?? id}</SelectItem>
-                ))}
+                {sourceOptions.map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </FieldRow>
-          <FieldRow label="Quantity received *">
-            <Input type="number" min={1} className="h-9" placeholder="240" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
-          </FieldRow>
-          <FieldRow label="Expiry date">
-            <Input type="date" className="h-9" min={todayStr} value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
-          </FieldRow>
-          <FieldRow label="Purchase cost (per unit)">
-            <Input type="number" step="0.01" className="h-9" placeholder="4.20" value={form.purchaseCost} onChange={e => set("purchaseCost")(e.target.value)} />
-          </FieldRow>
-          <FieldRow label="VAT %">
-            <Input type="number" className="h-9" placeholder="15" value={form.vatPct} onChange={e => set("vatPct")(e.target.value)} />
-          </FieldRow>
-          <FieldRow label="Custom fee">
-            <Input type="number" step="0.01" className="h-9" placeholder="0.00" value={form.customFee} onChange={e => set("customFee")(e.target.value)} />
-          </FieldRow>
-          <div className="col-span-2">
-            {/* Warehouse stock is received via Purchase Orders/Stock Transfers, which write to
-                WarehouseStock — batches here are always branch stock (InventoryBatch has no
-                warehouse concept). A "Warehouse" option previously existed but had no real
-                destination field to write to, so the received quantity silently landed on
-                whichever branch happened to be first in the list. */}
-            <FieldRow label="Receiving branch">
-              <Select value={form.branchId} onValueChange={set("branchId")} disabled={!!lockedBranchId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
-                <SelectContent>{(lockedBranchId ? branches.filter(b => b.id === lockedBranchId) : branches).map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </FieldRow>
-          </div>
-          <div className="col-span-2">
-            <FieldRow label="Notes">
-              <Textarea className="resize-none text-sm h-16" placeholder="e.g. condition on arrival…" value={form.notes} onChange={e => set("notes")(e.target.value)} />
-            </FieldRow>
-          </div>
+
+          {loading && <p className="text-sm text-muted-foreground text-center py-6">Loading…</p>}
+
+          {!loading && sourceKey && transfers.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-6">Nothing in transit from this source right now.</p>
+          )}
+
+          {!loading && transfers.length > 0 && (
+            <div className="space-y-2">
+              {transfers.map(t => (
+                <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2.5">
+                  <div className="min-w-0 text-sm">
+                    <p className="font-mono font-semibold">{t.transferNumber}</p>
+                    <p className="text-xs text-muted-foreground">{(t.items ?? []).length} item(s)</p>
+                  </div>
+                  <Button size="sm" className="h-8 text-xs gap-1 shrink-0" onClick={() => onReceive(t)}>
+                    <Truck className="h-3 w-3" />Receive
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        {error && <p className="text-xs text-destructive mt-1">{error}</p>}
-        <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow mt-2" onClick={handleSubmit} disabled={saving}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}Receive batch
-        </Button>
       </DialogContent>
     </Dialog>
   );
@@ -315,7 +375,6 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   };
 
   const missingFields = [
-    !form.imageUrl && "Product Photo",
     !form.name && "Product Name",
     !form.sku && "SKU",
     !form.categoryId && "Category",
@@ -340,7 +399,17 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     if (form.expiryDate && form.expiryDate < todayStr) {
       return setError("Expiry date cannot be in the past for stock received today.");
     }
+    // The initial batch call below (ReceiveBatch) hard-rejects quantity <= 0 server-side.
+    // Validating it here, before the product is created, stops the two-step create+stock
+    // flow from ever reaching a state where the product exists but the batch call fails —
+    // previously that left an orphaned, stock-less product with no way to retry cleanly
+    // (a second Save attempt would then hit the SKU/barcode uniqueness conflict against
+    // the orphan it had just silently created).
+    if (!form.quantity || Number(form.quantity) <= 0) {
+      return setError("Initial quantity must be greater than zero.");
+    }
     setSaving(true); setError("");
+    let createdProductId: string | null = null;
     try {
       const product = await api.createProduct({
         name: form.name, sku: form.sku,
@@ -354,21 +423,29 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
         status: "active",
         weightBased: false,
         isTobacco: form.isTobacco,
-        imageUrl: form.imageUrl,
+        imageUrl: form.imageUrl || undefined,
         ...(form.discount ? { discount: Number(form.discount), discountType: form.discountType } : {}),
       } as Parameters<typeof api.createProduct>[0]);
+      createdProductId = product.id;
       // Create an initial stock record so the product appears in the inventory list
       await api.receiveBatch({
         productId: product.id,
         branchId: form.branchId,
-        quantity: Number(form.quantity) || 0,
+        quantity: Number(form.quantity),
         purchaseCost: Number(form.purchasePrice) || undefined,
         expiryDate: form.expiryDate || undefined,
         batchNumber: `INIT-${product.id.slice(0, 6).toUpperCase()}`,
       } as Parameters<typeof api.receiveBatch>[0]);
       toast.success("Product created successfully");
       reset(); onDone(); onClose();
-    } catch (e) { setError(e instanceof Error ? e.message : "Failed."); }
+    } catch (e) {
+      // The product record was already committed by the first call above; if the batch
+      // step then fails for any reason (network blip, backend rejecting the expiry date,
+      // a branch-scoped permission mismatch), discontinue it rather than leaving a phantom
+      // active, stock-less item sitting in the catalog that the user never sees was created.
+      if (createdProductId) await api.deleteProduct(createdProductId).catch(() => {});
+      setError(e instanceof Error ? e.message : "Failed.");
+    }
     finally { setSaving(false); }
   };
 
@@ -377,7 +454,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Add Product</DialogTitle></DialogHeader>
         <div className="mt-2">
-          <FieldRow label="Product Photo *">
+          <FieldRow label="Product Photo">
             <ProductImagePicker value={form.imageUrl} onChange={set("imageUrl")} />
           </FieldRow>
         </div>
@@ -442,13 +519,13 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             </Select>
           </FieldRow>
           <FieldRow label="Purchase Price">
-            <Input type="number" step="0.01" className="h-9" placeholder="4.20" value={form.purchasePrice} onChange={e => set("purchasePrice")(e.target.value)} />
+            <Input type="number" step="0.01" min={0} className="h-9" placeholder="4.20" value={form.purchasePrice} onChange={e => set("purchasePrice")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Selling Price *">
-            <Input type="number" step="0.01" className={`h-9 ${fieldError("Selling Price")}`} placeholder="6.50" value={form.sellingPrice} onChange={e => set("sellingPrice")(e.target.value)} />
+            <Input type="number" step="0.01" min={0} className={`h-9 ${fieldError("Selling Price")}`} placeholder="6.50" value={form.sellingPrice} onChange={e => set("sellingPrice")(e.target.value)} />
           </FieldRow>
-          <FieldRow label="Quantity">
-            <Input type="number" className="h-9" placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
+          <FieldRow label="Quantity *">
+            <Input type="number" min={1} className={`h-9 ${submitted && (!form.quantity || Number(form.quantity) <= 0) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`} placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Expiry Date">
             <Input type="date" className="h-9" min={todayStr} value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
@@ -476,10 +553,10 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
 
           <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Optional tax / fee fields</p>
           <FieldRow label="VAT %">
-            <Input type="number" className="h-9" placeholder="15" value={form.vatPct} onChange={e => set("vatPct")(e.target.value)} />
+            <Input type="number" min={0} max={100} className="h-9" placeholder="15" value={form.vatPct} onChange={e => set("vatPct")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Custom fee (SAR)">
-            <Input type="number" step="0.01" className="h-9" placeholder="0.00" value={form.customFee} onChange={e => set("customFee")(e.target.value)} />
+            <Input type="number" step="0.01" min={0} className="h-9" placeholder="0.00" value={form.customFee} onChange={e => set("customFee")(e.target.value)} />
           </FieldRow>
           <div className="col-span-2 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-3 py-2.5">
             <input
@@ -711,27 +788,37 @@ function ViewSheet({ item, suppliers, onClose }: { item: StockItem | null; suppl
 
 // ─── Adjust Stock Dialog ──────────────────────────────────────────────────────
 
-function AdjustDialog({ item, onClose, onDone }: { item: StockItem | null; onClose: () => void; onDone: () => void }) {
-  const [newQty, setNewQty] = useState("");
+function AdjustDialog({ item, batches, onClose, onDone }: { item: StockItem | null; batches: InventoryBatch[]; onClose: () => void; onDone: () => void }) {
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [direction, setDirection] = useState<"increase" | "decrease">("decrease");
   const [reason, setReason] = useState("cycle_count");
   const [notes, setNotes] = useState("");
+  const [batchId, setBatchId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { if (item) { setNewQty(String(item.quantity)); setNotes(""); setError(""); } }, [item]);
+  useEffect(() => { if (item) { setAdjustAmount(""); setDirection("decrease"); setNotes(""); setError(""); setBatchId(""); } }, [item]);
+
+  // Expired batches are already written off (see BatchExpandRow's same exclusion) — not a valid
+  // target for either direction of a manual adjustment. Sorted FEFO, matching every other batch
+  // picker in the app (Stock Transfers' item rows, BatchExpandRow's own listing).
+  const eligibleBatches = item
+    ? batches
+        .filter(b => b.productId === item.productId && b.branchId === item.branchId && b.status !== "expired")
+        .sort((a, b) => (a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity) - (b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity))
+    : [];
 
   const handleSave = async () => {
-    if (!item || newQty === "") return;
-    const qty = Number(newQty);
-    const diff = qty - item.quantity;
+    if (!item || adjustAmount === "") return;
+    const diff = direction === "increase" ? Number(adjustAmount) : -Number(adjustAmount);
     setSaving(true); setError("");
     try {
       // A decrease reasoned as Damage/Loss is a real waste event, not just a generic stock
       // correction — the Waste/Spoilage report filters on AdjustmentType being exactly "damage"
       // or "waste", so those two reasons need to carry through as the type itself (not just land
       // in the free-text reason), or a real "record this as damaged" action would never appear
-      // there. Cycle count/correction/return-to-supplier and any increase stay generic, matching
-      // the stock-quantity direction logic in InventoryController.Adjust unchanged.
+      // there. Cycle count/correction and any increase stay generic, matching the stock-quantity
+      // direction logic in InventoryController.Adjust unchanged.
       const adjustmentType = diff >= 0
         ? "addition"
         : reason === "damage" ? "damage"
@@ -742,11 +829,15 @@ function AdjustDialog({ item, onClose, onDone }: { item: StockItem | null; onClo
         quantity: Math.abs(diff),
         adjustmentType,
         reason: notes || reason,
+        batchId: batchId || undefined,
       });
       onDone(); onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed."); }
     finally { setSaving(false); }
   };
+
+  const navigate = useNavigate();
+  const previewQty = adjustAmount === "" ? item?.quantity : Math.max(0, (item?.quantity ?? 0) + (direction === "increase" ? Number(adjustAmount) : -Number(adjustAmount)));
 
   if (!item) return null;
   return (
@@ -760,10 +851,27 @@ function AdjustDialog({ item, onClose, onDone }: { item: StockItem | null; onClo
           <p className="text-4xl font-bold mt-1">{item.quantity}</p>
         </div>
         <div className="space-y-3">
+          <FieldRow label="Adjust by">
+            <div className="flex gap-2">
+              <div className="flex h-9 rounded-lg border border-border/60 overflow-hidden shrink-0">
+                <button type="button" onClick={() => setDirection("decrease")}
+                  className={`w-9 flex items-center justify-center transition-colors ${direction === "decrease" ? "bg-destructive text-destructive-foreground" : "hover:bg-muted/50 text-muted-foreground"}`}
+                  title="Decrease">
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+                <button type="button" onClick={() => setDirection("increase")}
+                  className={`w-9 flex items-center justify-center border-l border-border/60 transition-colors ${direction === "increase" ? "bg-success text-success-foreground" : "hover:bg-muted/50 text-muted-foreground"}`}
+                  title="Increase">
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <Input type="number" min={0} className="h-9 flex-1" placeholder="Quantity" value={adjustAmount} onChange={e => setAdjustAmount(e.target.value)} />
+            </div>
+            {adjustAmount !== "" && (
+              <p className="text-xs text-muted-foreground mt-1.5">New quantity will be <span className="font-semibold text-foreground">{previewQty}</span></p>
+            )}
+          </FieldRow>
           <div className="grid grid-cols-2 gap-3">
-            <FieldRow label="New quantity">
-              <Input type="number" min={0} className="h-9" value={newQty} onChange={e => setNewQty(e.target.value)} />
-            </FieldRow>
             <FieldRow label="Reason">
               <Select value={reason} onValueChange={setReason}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
@@ -771,8 +879,20 @@ function AdjustDialog({ item, onClose, onDone }: { item: StockItem | null; onClo
                   <SelectItem value="cycle_count">Cycle count</SelectItem>
                   <SelectItem value="damage">Damage</SelectItem>
                   <SelectItem value="loss">Loss / Shrinkage</SelectItem>
-                  <SelectItem value="return_to_supplier">Return to supplier</SelectItem>
                   <SelectItem value="correction">Correction</SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldRow>
+            <FieldRow label="Batch (optional)">
+              <Select value={batchId || "none"} onValueChange={v => setBatchId(v === "none" ? "" : v)}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific batch</SelectItem>
+                  {eligibleBatches.map(b => (
+                    <SelectItem key={b.id} value={b.id} title={`${b.batchNumber} — ${b.remainingQuantity}/${b.quantity} — ${b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}`}>
+                      {b.batchNumber} — {b.remainingQuantity}/{b.quantity} — {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </FieldRow>
@@ -782,9 +902,13 @@ function AdjustDialog({ item, onClose, onDone }: { item: StockItem | null; onClo
           </FieldRow>
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
-        <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleSave} disabled={saving || newQty === ""}>
+        <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleSave} disabled={saving || adjustAmount === ""}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Save adjustment
         </Button>
+        <button type="button" onClick={() => { onClose(); navigate({ to: "/supplier-returns" }); }}
+          className="text-xs text-muted-foreground hover:text-primary hover:underline text-center w-full border-t border-border/40 pt-3 -mt-1">
+          Need to return stock to a supplier? That's done from a warehouse — go to Supplier Returns
+        </button>
       </DialogContent>
     </Dialog>
   );
@@ -830,7 +954,8 @@ function exportCSV(data: StockItem[]) {
 
 function Inventory() {
   const { user } = useAuth();
-  const { canCreate, canEdit } = usePermission("Inventory");
+  const { canCreate, canEdit, canDelete } = usePermission("Inventory");
+  const navigate = useNavigate();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
 
   const [stock, setStock] = useState<StockItem[]>([]);
@@ -848,21 +973,44 @@ function Inventory() {
   const [viewItem, setViewItem] = useState<StockItem | null>(null);
   const [adjustItem, setAdjustItem] = useState<StockItem | null>(null);
   const [editItem, setEditItem] = useState<StockItem | null>(null);
-  const [batchOpen, setBatchOpen] = useState(false);
+  const [deleteItem, setDeleteItem] = useState<StockItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [receiveOpen, setReceiveOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [allBatches, setAllBatches] = useState<InventoryBatch[]>([]);
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [incomingTransfers, setIncomingTransfers] = useState<StockTransfer[]>([]);
+  const [receiveTransferTarget, setReceiveTransferTarget] = useState<StockTransfer | null>(null);
+
+  // Only meaningful once a single branch is in view — a locked branch-scoped user, or an admin
+  // who's picked one in the filter. "All branches" has no single destination to receive against.
+  const effectiveBranchId = lockedBranchId ?? (branchFilter !== "all" ? branchFilter : null);
+
+  const loadIncomingTransfers = () => {
+    if (!effectiveBranchId) { setIncomingTransfers([]); return; }
+    api.getStockTransfers({ status: "in_transit" })
+      .then(all => setIncomingTransfers(all.filter(t => t.destBranchId === effectiveBranchId)))
+      .catch(() => {});
+  };
+  useEffect(loadIncomingTransfers, [effectiveBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = () => {
     setLoading(true);
-    Promise.all([api.getStock({ branchId: lockedBranchId ?? undefined }), api.getCategories(), api.getBranches(), api.getWarehouses()])
-      .then(([s, c, b, w]) => {
+    Promise.all([api.getStock({ branchId: lockedBranchId ?? undefined }), api.getCategories(), api.getBranches(), api.getWarehouses(), api.getSuppliers()])
+      .then(([s, c, b, w, sup]) => {
         setStock(s as StockItem[]);
         setCategories(c);
         setBranches(b);
         setWarehouses(w);
-        // Enrich expiry dates async (non-blocking — page shows immediately)
+        setSuppliers(sup);
+        // Enrich expiry dates async (non-blocking — page shows immediately). Keeps the full
+        // batch array around too (not just the earliest-expiry rollup) so each row's expand
+        // affordance can show every batch without a per-row fetch.
         api.getBatches().then(batches => {
+          setAllBatches(batches);
           const expiryMap = new Map<string, string>();
-          (batches as InventoryBatch[]).forEach(batch => {
+          batches.forEach(batch => {
             if (!batch.expiryDate || batch.remainingQuantity <= 0) return;
             const key = `${batch.productId}:${batch.branchId}`;
             const existing = expiryMap.get(key);
@@ -884,12 +1032,24 @@ function Inventory() {
     if (lockedBranchId) setBranchFilter(lockedBranchId);
   }, [lockedBranchId]);
 
-  // Lazy-load suppliers only when the Receive Batch dialog is first opened
-  useEffect(() => {
-    if (batchOpen && suppliers.length === 0) {
-      api.getSuppliers().then(setSuppliers).catch(() => {});
+  async function handleDeleteStock() {
+    if (!deleteItem) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.deleteInventoryStock(deleteItem.id);
+      toast.success("Inventory record deleted");
+      setDeleteItem(null);
+      load();
+    } catch (e) {
+      // Backend message already explains the fix (transfer the stock out first) — surface it
+      // as-is instead of a generic failure toast, since this is an expected/actionable outcome,
+      // not a bug.
+      setDeleteError(e instanceof Error ? e.message : "Cannot delete this inventory record.");
+    } finally {
+      setDeleting(false);
     }
-  }, [batchOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   const filtered = useMemo(() => stock.filter(s => {
     const mq = !q || (s.product?.name?.toLowerCase().includes(q.toLowerCase()) || s.product?.sku?.toLowerCase().includes(q.toLowerCase()) || s.product?.barcode?.toLowerCase().includes(q.toLowerCase()));
@@ -920,8 +1080,9 @@ function Inventory() {
       actions={
         <div className="flex gap-2">
           {canCreate && (
-            <Button variant="outline" className="h-9 gap-1.5" onClick={() => setBatchOpen(true)}>
-              <Package className="h-4 w-4" />Receive Batch
+            <Button variant="outline" className="h-9 gap-1.5" onClick={() => setReceiveOpen(true)} disabled={!effectiveBranchId}
+              title={!effectiveBranchId ? "Select a branch to receive stock into" : undefined}>
+              <Package className="h-4 w-4" />Receive Stock
             </Button>
           )}
           {canCreate && (
@@ -1047,6 +1208,8 @@ function Inventory() {
         </Button>
       </div>
 
+      <IncomingTransfersBanner transfers={incomingTransfers} onReceive={setReceiveTransferTarget} />
+
       {/* ── Table ── */}
       {loading ? (
         <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center"><Loader2 className="h-5 w-5 animate-spin" />Loading inventory…</div>
@@ -1056,6 +1219,7 @@ function Inventory() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="w-8 px-2 py-3" />
                   <th className="px-3 py-3 font-semibold">Product</th>
                   <th className="px-3 py-3 font-semibold">Category</th>
                   <th className="px-3 py-3 font-semibold">Branch</th>
@@ -1068,36 +1232,68 @@ function Inventory() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(s => (
-                  <tr key={s.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
-                    <td className="px-3 py-3">
-                      <p className="font-semibold text-sm">{s.product?.name ?? "—"}</p>
-                      <p className="text-xs text-muted-foreground font-mono">{s.product?.sku} · {s.product?.barcode}</p>
-                    </td>
-                    <td className="px-3 py-3 text-xs">{s.product?.category?.name ?? "—"}</td>
-                    <td className="px-3 py-3 text-xs">{s.branch?.name ?? "—"}</td>
-                    <td className="px-3 py-3 font-bold tabular-nums">{s.quantity}</td>
-                    <td className="px-3 py-3"><StockBadge qty={s.quantity} reorder={s.reorderLevel} /></td>
-                    <td className="px-3 py-3"><ExpiryCell date={s.expiryDate} /></td>
-                    <td className="px-3 py-3 text-xs">
-                      <p className="tabular-nums text-muted-foreground">{s.product?.costPrice == null ? "—" : <><SARIcon />{fmtPrice(s.product.costPrice)}</>}</p>
-                      <p className="tabular-nums font-semibold">{s.product?.basePrice == null ? "—" : <><SARIcon />{fmtPrice(s.product.basePrice)}</>}</p>
-                    </td>
-                    <td className="px-3 py-3 text-xs text-muted-foreground">
-                      <p>VAT {s.product?.taxPercentage ?? 15}%</p>
-                      <p>Fee: {s.product?.customFee == null ? "—" : <><SARIcon />{fmtPrice(s.product.customFee ?? 0)}</>}</p>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-1">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" title="View" onClick={() => setViewItem(s)}><Eye className="h-3.5 w-3.5" /></Button>
-                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={() => setEditItem(s)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                        {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" title="Adjust stock" onClick={() => setAdjustItem(s)}><LayoutGrid className="h-3.5 w-3.5" /></Button>}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map(s => {
+                  const isExpanded = expandedRow === s.id;
+                  return (
+                    <React.Fragment key={s.id}>
+                      <tr className="border-b border-border/40 hover:bg-muted/20 last:border-0">
+                        <td className="px-2 py-3">
+                          <button type="button" className="text-muted-foreground hover:text-foreground" title="Show batches"
+                            onClick={() => setExpandedRow(isExpanded ? null : s.id)}>
+                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                        </td>
+                        <td className="px-3 py-3">
+                          <p className="font-semibold text-sm">{s.product?.name ?? "—"}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{s.product?.sku} · {s.product?.barcode}</p>
+                        </td>
+                        <td className="px-3 py-3 text-xs">{s.product?.category?.name ?? "—"}</td>
+                        <td className="px-3 py-3 text-xs">{s.branch?.name ?? "—"}</td>
+                        <td className="px-3 py-3 font-bold tabular-nums">{s.quantity}</td>
+                        <td className="px-3 py-3"><StockBadge qty={s.quantity} reorder={s.reorderLevel} /></td>
+                        <td className="px-3 py-3"><ExpiryCell date={s.expiryDate} /></td>
+                        <td className="px-3 py-3 text-xs">
+                          <p className="tabular-nums text-muted-foreground">{s.product?.costPrice == null ? "—" : <><SARIcon />{fmtPrice(s.product.costPrice)}</>}</p>
+                          <p className="tabular-nums font-semibold">{s.product?.basePrice == null ? "—" : <><SARIcon />{fmtPrice(s.product.basePrice)}</>}</p>
+                        </td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">
+                          <p>VAT {s.product?.taxPercentage ?? 15}%</p>
+                          <p>Fee: {s.product?.customFee == null ? "—" : <><SARIcon />{fmtPrice(s.product.customFee ?? 0)}</>}</p>
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1">
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="View" onClick={() => setViewItem(s)}><Eye className="h-3.5 w-3.5" /></Button>
+                            {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={() => setEditItem(s)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                            {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" title="Adjust stock" onClick={() => setAdjustItem(s)}><LayoutGrid className="h-3.5 w-3.5" /></Button>}
+                            {canDelete && (
+                              <Button
+                                size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
+                                title="Delete from this branch"
+                                onClick={() => {
+                                  setDeleteItem(s);
+                                  // Known client-side already — skip straight to the error instead of
+                                  // showing a confirm prompt for a delete that's guaranteed to fail
+                                  // server-side anyway. The server still re-checks on submit (defense
+                                  // in depth) for the qty === 0 case, where staleness is still possible.
+                                  setDeleteError(s.quantity !== 0 || (s.reservedQuantity ?? 0) !== 0
+                                    ? `Cannot delete — ${s.quantity} unit(s) on hand${(s.reservedQuantity ?? 0) !== 0 ? ` (${s.reservedQuantity} reserved)` : ""} at this branch. Transfer the stock to another branch or warehouse first, then delete.`
+                                    : null);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <BatchExpandRow productId={s.productId} locationType="branch" locationId={s.branchId} colSpan={10} batches={allBatches} aggregateQuantity={s.quantity} />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={9} className="text-center py-12 text-muted-foreground text-sm">No items found.</td></tr>
+                  <tr><td colSpan={10} className="text-center py-12 text-muted-foreground text-sm">No items found.</td></tr>
                 )}
               </tbody>
             </table>
@@ -1105,11 +1301,61 @@ function Inventory() {
         </Card>
       )}
 
-      <ReceiveBatchDialog open={batchOpen} onClose={() => setBatchOpen(false)} stock={stock} branches={branches} suppliers={suppliers} onDone={load} lockedBranchId={lockedBranchId} />
+      <ReceiveStockDialog
+        open={receiveOpen}
+        onClose={() => setReceiveOpen(false)}
+        warehouses={warehouses}
+        branches={branches}
+        destBranchId={effectiveBranchId}
+        onReceive={t => { setReceiveOpen(false); setReceiveTransferTarget(t); }}
+      />
       <AddProductDialog open={addOpen} onClose={() => setAddOpen(false)} categories={categories} branches={branches} onDone={load} />
       <EditProductDialog item={editItem} onClose={() => setEditItem(null)} categories={categories} onDone={load} />
       <ViewSheet item={viewItem} suppliers={suppliers} onClose={() => setViewItem(null)} />
-      <AdjustDialog item={adjustItem} onClose={() => setAdjustItem(null)} onDone={load} />
+      <AdjustDialog item={adjustItem} batches={allBatches} onClose={() => setAdjustItem(null)} onDone={load} />
+      <QuickReceiveTransferSheet
+        transfer={receiveTransferTarget}
+        onClose={() => setReceiveTransferTarget(null)}
+        onReceived={() => { setReceiveTransferTarget(null); loadIncomingTransfers(); load(); }}
+      />
+
+      <Dialog open={!!deleteItem} onOpenChange={v => { if (!v) { setDeleteItem(null); setDeleteError(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Delete Inventory Record</DialogTitle></DialogHeader>
+          {deleteItem && (
+            deleteError ? (
+              <div className="space-y-3">
+                <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <p>{deleteError}</p>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => { setDeleteItem(null); setDeleteError(null); }}>Close</Button>
+                  <Button
+                    className="gap-1.5"
+                    onClick={() => { setDeleteItem(null); setDeleteError(null); navigate({ to: "/stock-transfers" }); }}
+                  >
+                    <ArrowRightLeft className="h-3.5 w-3.5" /> Go to Stock Transfers
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Delete the inventory record for <span className="font-medium text-foreground">{deleteItem.product?.name ?? "this product"}</span> at{" "}
+                  <span className="font-medium text-foreground">{branches.find(b => b.id === deleteItem.branchId)?.name ?? "this branch"}</span>? This only removes the (already zero) stock row from this branch's list — it doesn't affect the product itself, and a fresh row is created automatically the next time this product is received here again.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setDeleteItem(null)} disabled={deleting}>Cancel</Button>
+                  <Button variant="destructive" onClick={handleDeleteStock} disabled={deleting}>
+                    {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete
+                  </Button>
+                </div>
+              </div>
+            )
+          )}
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

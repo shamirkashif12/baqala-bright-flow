@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/purchase-orders")]
-public class PurchaseOrdersController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
+public class PurchaseOrdersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
@@ -221,7 +221,8 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                     ? recv.BatchNumber
                     : $"BATCH-{po.PoNumber}-{recv.ProductId.ToString()[..4].ToUpper()}",
                 ProductId = recv.ProductId,
-                BranchId = po.BranchId ?? Guid.Empty,
+                BranchId = po.BranchId,
+                WarehouseId = po.WarehouseId,
                 SupplierId = po.SupplierId,
                 Quantity = recv.Quantity,
                 RemainingQuantity = recv.Quantity,
@@ -248,7 +249,6 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                 }
                 wStock.Quantity += recv.Quantity;
                 wStock.LastUpdated = wStock.UpdatedAt = DateTime.UtcNow;
-                batch.BranchId = (await db.BranchWarehouses.Where(bw => bw.WarehouseId == po.WarehouseId).Select(bw => bw.BranchId).FirstOrDefaultAsync());
             }
             else if (po.BranchId.HasValue)
             {
@@ -264,6 +264,10 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                 bStock.LastUpdated = bStock.UpdatedAt = DateTime.UtcNow;
             }
             db.InventoryBatches.Add(batch);
+
+            stockMovements.Record(
+                recv.ProductId, po.BranchId, po.WarehouseId, "purchase_receive", recv.Quantity,
+                batchId: batch.Id, referenceType: "purchase_order", referenceId: po.Id, referenceNumber: po.PoNumber);
         }
 
         // Update PO status

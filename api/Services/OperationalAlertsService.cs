@@ -43,9 +43,10 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
         var notifications = scope.ServiceProvider.GetRequiredService<INotificationService>();
+        var stockMovements = scope.ServiceProvider.GetRequiredService<IStockMovementService>();
 
         await ScanStockLevelsAsync(db, notifications, ct);
-        await ScanExpiringBatchesAsync(db, notifications, ct);
+        await ScanExpiringBatchesAsync(db, notifications, stockMovements, ct);
         await ScanOfflineTerminalsAsync(db, notifications, ct);
     }
 
@@ -76,35 +77,89 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
         }
     }
 
-    private async Task ScanExpiringBatchesAsync(BaqalaDbContext db, INotificationService notifications, CancellationToken ct)
+    // Previously this only sent notifications and never touched the batch itself — Status stayed
+    // "active" forever, RemainingQuantity was never written off, and the aggregate stock
+    // (InventoryStock/WarehouseStock) kept counting expired units as sellable on-hand stock. Now
+    // it actually transitions the batch (active → near_expiry → expired), and on the transition
+    // INTO expired, writes off the batch's remaining quantity: decrements the aggregate stock,
+    // zeroes the batch, and logs an InventoryAdjustment audit row (AdjustmentType "expired") — that
+    // adjustment log, plus the Batches & Expiry page filtered to status=expired, IS the "expiry
+    // table" the write-off lands in; no separate table needed.
+    private async Task ScanExpiringBatchesAsync(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
         var horizon = now.AddDays(7); // matches DashboardController's "expiring soon" tile
 
         var batches = await db.InventoryBatches
             .Include(b => b.Product)
-            .Where(b => b.Status == "active" && b.RemainingQuantity > 0
+            .Where(b => b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0
                 && b.ExpiryDate != null && b.ExpiryDate <= horizon)
             .ToListAsync(ct);
 
         foreach (var batch in batches)
         {
-            var isExpired = batch.ExpiryDate!.Value < now;
-            var type = isExpired ? "Product Expired" : "Product Near Expiry";
+            var isExpired = batch.ExpiryDate!.Value.Date < now.Date;
+            var writtenOff = batch.RemainingQuantity;
 
+            if (isExpired)
+            {
+                if (batch.BranchId.HasValue)
+                {
+                    var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == batch.BranchId && s.ProductId == batch.ProductId, ct);
+                    if (stock != null) { stock.Quantity = Math.Max(0, stock.Quantity - writtenOff); stock.LastUpdated = stock.UpdatedAt = now; }
+                }
+                else if (batch.WarehouseId.HasValue)
+                {
+                    var stock = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == batch.WarehouseId && s.ProductId == batch.ProductId, ct);
+                    if (stock != null) { stock.Quantity = Math.Max(0, stock.Quantity - writtenOff); stock.LastUpdated = stock.UpdatedAt = now; }
+                }
+
+                db.InventoryAdjustments.Add(new Models.InventoryAdjustment
+                {
+                    Id = Guid.NewGuid(),
+                    ProductId = batch.ProductId,
+                    BranchId = batch.BranchId,
+                    WarehouseId = batch.WarehouseId,
+                    BatchId = batch.Id,
+                    AdjustmentType = "expired",
+                    Quantity = writtenOff,
+                    Reason = "Automatic write-off: batch expired",
+                    AdjustedBy = null,
+                    CreatedAt = now,
+                });
+
+                batch.Status = "expired";
+                batch.RemainingQuantity = 0;
+                batch.UpdatedAt = now;
+
+                stockMovements.Record(
+                    batch.ProductId, batch.BranchId, batch.WarehouseId, "expired", -writtenOff,
+                    batchId: batch.Id, referenceType: "batch_expiry", referenceId: batch.Id,
+                    notes: "Automatic write-off: batch expired");
+            }
+            else if (batch.Status == "active")
+            {
+                batch.Status = "near_expiry";
+                batch.UpdatedAt = now;
+            }
+
+            var type = isExpired ? "Product Expired" : "Product Near Expiry";
             var alreadyNotified = await db.Notifications.AnyAsync(n =>
                 n.Type == type && n.EntityId == batch.ProductId && n.BranchId == batch.BranchId && !n.IsRead, ct);
-            if (alreadyNotified) continue;
+            if (!alreadyNotified)
+            {
+                var message = isExpired
+                    ? $"Expired item detected: {batch.Product?.Name} — {writtenOff} unit(s) written off"
+                    : $"Expiry alert: {batch.Product?.Name} expires in {Math.Max(0, (int)(batch.ExpiryDate!.Value.Date - now.Date).TotalDays)} days";
 
-            var message = isExpired
-                ? $"Expired item detected: {batch.Product?.Name}"
-                : $"Expiry alert: {batch.Product?.Name} expires in {Math.Max(0, (int)(batch.ExpiryDate!.Value.Date - now.Date).TotalDays)} days";
-
-            await notifications.NotifyRoleAsync(["Manager", "Admin"], batch.BranchId,
-                "Expiry / Perishable", type, type, message,
-                severity: isExpired ? "error" : "warning",
-                entityType: "Product", entityId: batch.ProductId);
+                await notifications.NotifyRoleAsync(["Manager", "Admin"], batch.BranchId,
+                    "Expiry / Perishable", type, type, message,
+                    severity: isExpired ? "error" : "warning",
+                    entityType: "Product", entityId: batch.ProductId);
+            }
         }
+
+        if (batches.Count > 0) await db.SaveChangesAsync(ct);
     }
 
     // TerminalsController.UpdateStatus only fires "Terminal Offline" on the transition into

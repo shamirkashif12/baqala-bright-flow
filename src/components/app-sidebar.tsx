@@ -41,6 +41,7 @@ import {
   Boxes,
   ClipboardList,
   ArrowLeftRight,
+  PackageSearch,
 } from "lucide-react";
 import {
   Sidebar,
@@ -102,6 +103,7 @@ const navGroups: NavGroup[] = [
       { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Stocks" },
       { title: "Inventory",            url: "/inventory",       icon: Package,       module: "Inventory" },
       { title: "Expiry & Perishable",  url: "/batches",         icon: CalendarClock, module: "Batches" },
+      { title: "Batch Tracking",       url: "/batch-tracking",  icon: PackageSearch, module: "Batches" },
       { title: "Warehouses",           url: "/warehouses",      icon: Warehouse,     module: "Warehouses" },
       { title: "Stock Transfers",      url: "/stock-transfers", icon: ArrowLeftRight, module: "Stock Transfers" },
     ],

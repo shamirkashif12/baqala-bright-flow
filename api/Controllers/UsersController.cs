@@ -32,8 +32,9 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
     // src/lib/role-hierarchy.ts and the role slugs AuthController.ToAppRole assigns.
     private static readonly Dictionary<string, int> RoleRank = new()
     {
-        ["tenant_admin"] = 1, ["branch_manager"] = 2, ["supervisor"] = 3,
+        ["tenant_admin"] = 1, ["branch_manager"] = 2, ["supervisor"] = 3, ["warehouse_manager"] = 3,
         ["cashier"] = 4, ["storekeeper"] = 4, ["finance_user"] = 4, ["marketing_user"] = 4, ["picker"] = 4,
+        ["auditor"] = 4, ["warehouse_staff"] = 4,
     };
 
     // Mirrors AuthController.ToAppRole / src/lib/role-hierarchy.ts roleNameToSlug, so a
@@ -46,8 +47,11 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         "Storekeeper" or "Inventory Staff" => "storekeeper",
         "Supervisor" => "supervisor",
         "Finance User" or "Accountant" => "finance_user",
-        "Marketing User" or "Auditor" => "marketing_user",
-        "Picker" or "Warehouse Staff" => "picker",
+        "Marketing User" => "marketing_user",
+        "Picker" => "picker",
+        "Auditor" => "auditor",
+        "Warehouse Staff" => "warehouse_staff",
+        "Warehouse Manager" => "warehouse_manager",
         _ => (roleName ?? "").ToLower().Replace(' ', '_'),
     };
 

@@ -58,10 +58,13 @@ function ChangesCell({ row, productName }: { row: AuditTrailRow; productName: (i
 }
 
 function sevenDaysAgoStr() {
-  return new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function AuditTrail() {
