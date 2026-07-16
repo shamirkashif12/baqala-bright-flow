@@ -11,6 +11,10 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // No inline FKs to branches/inventory_batches/products/users/warehouses here — they
+            // were all created in earlier migrations, so their actual collation may not match
+            // whatever this new table's columns get from the server's ambient default. See
+            // MigrationCollationHelper for why.
             migrationBuilder.CreateTable(
                 name: "stock_movements",
                 columns: table => new
@@ -33,32 +37,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_stock_movements", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_stock_movements_branches_branch_id",
-                        column: x => x.branch_id,
-                        principalTable: "branches",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_stock_movements_inventory_batches_batch_id",
-                        column: x => x.batch_id,
-                        principalTable: "inventory_batches",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_stock_movements_products_product_id",
-                        column: x => x.product_id,
-                        principalTable: "products",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_stock_movements_users_CreatedByUserId",
-                        column: x => x.CreatedByUserId,
-                        principalTable: "users",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_stock_movements_warehouses_warehouse_id",
-                        column: x => x.warehouse_id,
-                        principalTable: "warehouses",
-                        principalColumn: "id");
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -86,6 +64,50 @@ namespace BaqalaPOS.Api.Migrations
                 name: "IX_stock_movements_warehouse_id",
                 table: "stock_movements",
                 column: "warehouse_id");
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_movements_branches_branch_id",
+                table: "stock_movements",
+                column: "branch_id",
+                principalTable: "branches",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_movements_inventory_batches_batch_id",
+                table: "stock_movements",
+                column: "batch_id",
+                principalTable: "inventory_batches",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_movements_products_product_id",
+                table: "stock_movements",
+                column: "product_id",
+                principalTable: "products",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_movements_users_CreatedByUserId",
+                table: "stock_movements",
+                column: "CreatedByUserId",
+                principalTable: "users",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_stock_movements_warehouses_warehouse_id",
+                table: "stock_movements",
+                column: "warehouse_id",
+                principalTable: "warehouses",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
         }
 
         /// <inheritdoc />
