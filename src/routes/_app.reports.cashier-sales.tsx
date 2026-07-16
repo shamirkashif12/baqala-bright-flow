@@ -23,7 +23,8 @@ export const Route = createFileRoute("/_app/reports/cashier-sales")({ component:
 const VARIANCE_THRESHOLD = 50; // SAR — rows above this are flagged, matching the FRD's example threshold
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function CashierSales() {

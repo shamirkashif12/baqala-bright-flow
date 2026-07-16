@@ -27,6 +27,16 @@ export const Route = createFileRoute("/_app/orders")({ component: Orders });
 const ORDER_STATUSES = ["pending", "processing", "ready_to_deliver", "delivered", "completed", "cancelled", "refunded"];
 const PAYMENT_STATUSES = ["pending", "paid", "partially_paid", "refunded"];
 
+// Statuses reachable from the "Update Status" editor — deliberately excludes "cancelled": voiding
+// an order has to reverse stock and the cashier shift's totals (see OrdersController.VoidOrder /
+// ApplyVoidAsync), which this simple status editor doesn't do, so cancelling only ever happens
+// through the dedicated Void button. Once completed, the only legitimate move left is a refund
+// (routed through the Returns approval flow below) — not back through the fulfillment pipeline.
+const FULFILLMENT_STATUSES = ["pending", "processing", "ready_to_deliver", "delivered", "completed"];
+function editableStatusOptions(current: string): string[] {
+  return current === "completed" ? ["completed", "refunded"] : [...FULFILLMENT_STATUSES, "refunded"];
+}
+
 function statusColor(s: string) {
   switch (s) {
     case "paid": case "completed": case "delivered": return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
@@ -192,6 +202,22 @@ const REFUND_METHODS = [
   { value: "store_credit", label: "Store Credit" },
 ];
 
+// Same reason list as the dedicated Returns page (_app.returns.tsx) — kept identical so a
+// return filed from either place gets the same condition/restock outcome for the same reason.
+const REFUND_REASONS = [
+  "Damaged packaging", "Wrong item received", "Expired product",
+  "Quality issue", "Customer changed mind", "Duplicate purchase", "Other",
+];
+
+// This dialog used to hardcode every returned item as condition "good" / restock true no matter
+// what reason was picked — a refund for "Damaged packaging" or "Expired product" still silently
+// put the stock back on the shelf as sellable. Mirrors the same derivation _app.returns.tsx
+// already uses: only genuinely non-sellable reasons are written off instead of restocked.
+function deriveReturnCondition(reason: string): { condition: string; restock: boolean } {
+  const nonSellable = reason === "Damaged packaging" || reason === "Expired product" || reason === "Quality issue";
+  return { condition: reason === "Expired product" ? "expired" : nonSellable ? "damaged" : "good", restock: !nonSellable };
+}
+
 function RefundDialog({ order, open, onClose, onDone }: {
   order: Order; open: boolean; onClose: () => void; onDone: () => void;
 }) {
@@ -221,6 +247,7 @@ function RefundDialog({ order, open, onClose, onDone }: {
     setError("");
     setSaving(true);
     try {
+      const { condition, restock } = deriveReturnCondition(reason);
       const returnItems: CustomerReturnItem[] = items
         .map((item, i) => ({ item, state: itemStates[i] }))
         .filter(({ state }) => state?.selected)
@@ -230,8 +257,8 @@ function RefundDialog({ order, open, onClose, onDone }: {
           quantity: state!.qty,
           unitPrice: item.unitPrice,
           refundAmount: +(item.unitPrice * state!.qty).toFixed(2),
-          condition: "good",
-          restock: true,
+          condition,
+          restock,
         }));
 
       await api.createReturn({
@@ -326,12 +353,19 @@ function RefundDialog({ order, open, onClose, onDone }: {
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
               Reason <span className="text-red-500">*</span>
             </p>
-            <Input
-              value={reason}
-              onChange={e => { setReason(e.target.value); setError(""); }}
-              placeholder="e.g. Damaged product, wrong item delivered…"
-              className="h-9"
-            />
+            <Select value={reason} onValueChange={v => { setReason(v); setError(""); }}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select reason" /></SelectTrigger>
+              <SelectContent>
+                {REFUND_REASONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {reason && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {deriveReturnCondition(reason).restock
+                  ? "Items will be returned to sellable stock."
+                  : "Items will be written off, not returned to sellable stock."}
+              </p>
+            )}
           </div>
 
           {error && <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 rounded px-3 py-2">{error}</p>}
@@ -877,7 +911,7 @@ function OrderDetail({ orderId, onStatusChanged }: {
             <Select value={newStatus} onValueChange={setNewStatus}>
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {ORDER_STATUSES.map(s => (
+                {editableStatusOptions(order.orderStatus).map(s => (
                   <SelectItem key={s} value={s}>
                     <span className="capitalize">{s.replace(/_/g, " ")}</span>
                   </SelectItem>
@@ -896,7 +930,7 @@ function OrderDetail({ orderId, onStatusChanged }: {
         ) : (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">{statusIcon(order.orderStatus)}<span className="capitalize text-sm">{order.orderStatus.replace(/_/g, " ")}</span></div>
-            {canEdit && (
+            {canEdit && !["cancelled", "refunded"].includes(order.orderStatus) && (
               <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setEditing(true)}>
                 <Pencil className="h-3.5 w-3.5" /> Change
               </Button>

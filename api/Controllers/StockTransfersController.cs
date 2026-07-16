@@ -9,10 +9,21 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/stock-transfers")]
-public class StockTransfersController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
+public class StockTransfersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    // Mirrors InventoryController.GetCallerContext — branch-scoped roles may only see transfers
+    // touching their own branch (as source or destination). GetAll previously had no scoping at
+    // all, so any authenticated user's browser downloaded every branch's transfers and relied on
+    // the frontend to hide the rest — the same class of gap already fixed on InventoryController.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
 
     // Rejects moving more than the source location currently has on hand. Shared by
     // ReceiveTransfer and UpdateStatus's "completed" branch, since both move stock the same way.
@@ -39,12 +50,201 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         return null;
     }
 
+    // Two-phase stock movement, matching physical reality: once a transfer ships (goes
+    // in_transit), the stock has physically left the source — it must stop counting as available
+    // there immediately, not linger until someone gets around to confirming receipt days later.
+    // Phase 1 (DeductSourceAsync, called on the transition INTO in_transit) removes it from the
+    // source. Phase 2 (CreditDestinationAsync, called on receive/complete) adds the ACTUALLY
+    // received quantity to the destination — which can legitimately be less than what shipped
+    // (loss/damage in transit), and that gap is exactly the existing StockDiscrepancy logic's
+    // shortage detection, not a bug. If a shipped transfer is instead cancelled/rejected before
+    // being received, RestoreSourceAsync reverses phase 1 so that stock isn't lost into the void.
+
+    // Phase 1 — goods leave the source. Resolves the specific batch this transfer draws from (the
+    // one the user picked via item.BatchId, or failing that the source's oldest-expiry active
+    // batch — FEFO), decrements its RemainingQuantity and the source aggregate stock, and persists
+    // the resolved batch back onto item.BatchId so phase 2/3 both know exactly which lot without
+    // re-resolving FEFO (which could pick a different batch by the time receive happens).
+    private async Task DeductSourceAsync(StockTransfer transfer, StockTransferItem item, decimal qty)
+    {
+        InventoryBatch? sourceBatch = item.BatchId.HasValue
+            ? await db.InventoryBatches.FirstOrDefaultAsync(b => b.Id == item.BatchId)
+            : null;
+        if (sourceBatch != null)
+        {
+            // User picked this exact lot — draw only from it (the frontend already caps requested
+            // quantity at this batch's remainingQuantity), no need to spill into other batches.
+            sourceBatch.RemainingQuantity = Math.Max(0, sourceBatch.RemainingQuantity - qty);
+            sourceBatch.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            // Auto (FEFO): the requested quantity can exceed any single batch's remaining stock
+            // (e.g. transferring the full on-hand quantity spread across several lots), so walk
+            // every eligible batch oldest-expiry-first and draw from each in turn — same pattern
+            // BatchConsumptionService.ConsumeFefoAsync uses for sales. Previously this resolved
+            // only the single earliest batch and clamped straight to 0 regardless of how much of
+            // `qty` it actually covered, leaving every other batch's RemainingQuantity untouched
+            // even after the aggregate stock had been fully deducted — batch totals silently
+            // drifted away from the real on-hand number with every multi-lot transfer.
+            var sourceBatchQuery = db.InventoryBatches.Where(b => b.ProductId == item.ProductId && b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0);
+            sourceBatchQuery = transfer.SourceBranchId.HasValue
+                ? sourceBatchQuery.Where(b => b.BranchId == transfer.SourceBranchId)
+                : transfer.SourceWarehouseId.HasValue
+                    ? sourceBatchQuery.Where(b => b.WarehouseId == transfer.SourceWarehouseId)
+                    : sourceBatchQuery.Where(b => false);
+            var candidates = await sourceBatchQuery
+                .OrderBy(b => b.ExpiryDate ?? DateTime.MaxValue).ThenBy(b => b.ReceivedDate)
+                .ToListAsync();
+
+            var remaining = qty;
+            foreach (var candidate in candidates)
+            {
+                if (remaining <= 0) break;
+                var take = Math.Min(candidate.RemainingQuantity, remaining);
+                candidate.RemainingQuantity -= take;
+                candidate.UpdatedAt = DateTime.UtcNow;
+                remaining -= take;
+                // item.BatchId (and the batch metadata CreditDestinationAsync carries forward)
+                // only has room for one lot, so keep the first — earliest-expiry — batch actually
+                // drawn from, matching the existing single-batch traceability contract.
+                sourceBatch ??= candidate;
+            }
+        }
+
+        if (transfer.SourceBranchId.HasValue)
+        {
+            var src = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.SourceBranchId && s.ProductId == item.ProductId);
+            if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+        }
+        else if (transfer.SourceWarehouseId.HasValue)
+        {
+            var src = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.SourceWarehouseId && s.ProductId == item.ProductId);
+            if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+        }
+
+        item.BatchId = sourceBatch?.Id;
+
+        stockMovements.Record(
+            item.ProductId, transfer.SourceBranchId, transfer.SourceWarehouseId, "transfer_out", -qty,
+            batchId: sourceBatch?.Id, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber);
+    }
+
+    // Phase 2 — goods arrive at the destination. Reads the batch DeductSourceAsync already
+    // resolved (item.BatchId) to carry its batch number/expiry/supplier forward instead of
+    // minting a disconnected "TRF-..." one or re-resolving FEFO against a possibly-changed set of
+    // source batches. No-ops the destination side entirely for a supplier destination (RTS) —
+    // stock leaving to a supplier has nowhere local to be credited.
+    private async Task CreditDestinationAsync(StockTransfer transfer, StockTransferItem item, decimal qty, string? damagedOrReturnReason)
+    {
+        if (!transfer.DestBranchId.HasValue && !transfer.DestWarehouseId.HasValue) return;
+
+        var sourceBatch = item.BatchId.HasValue
+            ? await db.InventoryBatches.FirstOrDefaultAsync(b => b.Id == item.BatchId)
+            : null;
+
+        if (transfer.DestBranchId.HasValue)
+        {
+            var dst = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.DestBranchId && s.ProductId == item.ProductId);
+            if (dst is null) { dst = new InventoryStock { Id = Guid.NewGuid(), BranchId = transfer.DestBranchId.Value, ProductId = item.ProductId }; db.InventoryStocks.Add(dst); }
+            dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            var dst = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.DestWarehouseId && s.ProductId == item.ProductId);
+            if (dst is null) { dst = new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = transfer.DestWarehouseId!.Value, ProductId = item.ProductId }; db.WarehouseStocks.Add(dst); }
+            dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
+        }
+
+        // transfer.TransferNumber already carries a type-appropriate prefix ("TRF-..." or,
+        // for a linked PO, "PO-..."), so prepending another "TRF-" here produced doubled
+        // "TRF-TRF-20260716-..." batch numbers.
+        var batchNumber = sourceBatch?.BatchNumber ?? $"{transfer.TransferNumber}-{item.ProductId.ToString()[..4].ToUpper()}";
+        var expiryDate = sourceBatch?.ExpiryDate ?? item.ExpiryDate;
+        var supplierId = sourceBatch?.SupplierId ?? transfer.SourceSupplierId;
+        var purchaseCost = sourceBatch?.PurchaseCost ?? item.UnitCost ?? 0;
+        var notes = !string.IsNullOrWhiteSpace(damagedOrReturnReason)
+            ? $"Received via transfer {transfer.TransferNumber} [Damaged/Return: {damagedOrReturnReason}]"
+            : $"Received via transfer {transfer.TransferNumber}";
+
+        // If the destination already holds a batch with this exact batch number (e.g. a repeat
+        // transfer of the same lot), add to it instead of creating a duplicate row for the
+        // same physical batch at the same location.
+        var destBatch = await db.InventoryBatches.FirstOrDefaultAsync(b =>
+            b.ProductId == item.ProductId && b.BatchNumber == batchNumber &&
+            (transfer.DestBranchId.HasValue ? b.BranchId == transfer.DestBranchId : b.WarehouseId == transfer.DestWarehouseId));
+        Guid creditedBatchId;
+        if (destBatch != null)
+        {
+            destBatch.Quantity += qty;
+            destBatch.RemainingQuantity += qty;
+            destBatch.UpdatedAt = DateTime.UtcNow;
+            creditedBatchId = destBatch.Id;
+        }
+        else
+        {
+            var newBatch = new InventoryBatch
+            {
+                Id = Guid.NewGuid(),
+                BatchNumber = batchNumber,
+                ProductId = item.ProductId,
+                BranchId = transfer.DestBranchId,
+                WarehouseId = transfer.DestWarehouseId,
+                SupplierId = supplierId,
+                Quantity = qty,
+                RemainingQuantity = qty,
+                PurchaseCost = purchaseCost,
+                ExpiryDate = expiryDate,
+                ReceivedDate = DateTime.UtcNow,
+                Status = "active",
+                Notes = notes,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.InventoryBatches.Add(newBatch);
+            creditedBatchId = newBatch.Id;
+        }
+
+        stockMovements.Record(
+            item.ProductId, transfer.DestBranchId, transfer.DestWarehouseId, "transfer_in", qty,
+            batchId: creditedBatchId, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber, notes: damagedOrReturnReason);
+    }
+
+    // Phase 1 reversal — a transfer that shipped (deducted from source) but was then
+    // cancelled/rejected before being received never actually left, so give the source location
+    // its stock and its batch's remaining quantity back rather than leaving it debited forever.
+    private async Task RestoreSourceAsync(StockTransfer transfer, StockTransferItem item, decimal qty)
+    {
+        if (transfer.SourceBranchId.HasValue)
+        {
+            var src = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.SourceBranchId && s.ProductId == item.ProductId);
+            if (src != null) { src.Quantity += qty; src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+        }
+        else if (transfer.SourceWarehouseId.HasValue)
+        {
+            var src = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.SourceWarehouseId && s.ProductId == item.ProductId);
+            if (src != null) { src.Quantity += qty; src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+        }
+
+        if (item.BatchId.HasValue)
+        {
+            var batch = await db.InventoryBatches.FirstOrDefaultAsync(b => b.Id == item.BatchId);
+            if (batch != null) { batch.RemainingQuantity += qty; batch.UpdatedAt = DateTime.UtcNow; }
+        }
+
+        stockMovements.Record(
+            item.ProductId, transfer.SourceBranchId, transfer.SourceWarehouseId, "transfer_restore", qty,
+            batchId: item.BatchId, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? transferType,
         [FromQuery] string? status,
         [FromQuery] Guid? sourceWarehouseId,
         [FromQuery] Guid? destWarehouseId,
+        [FromQuery] Guid? sourceBranchId,
+        [FromQuery] Guid? destBranchId,
         [FromQuery] string? batchId,
         [FromQuery] Guid? purchaseOrderId,
         [FromQuery] Guid? sourceSupplierId)
@@ -53,14 +253,22 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
             .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
             .Include(t => t.Items).ThenInclude(i => i.Product)
+            .Include(t => t.Items).ThenInclude(i => i.Batch)
             .AsQueryable();
         if (!string.IsNullOrEmpty(transferType)) query = query.Where(t => t.TransferType == transferType);
         if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);
         if (sourceWarehouseId.HasValue) query = query.Where(t => t.SourceWarehouseId == sourceWarehouseId);
         if (destWarehouseId.HasValue) query = query.Where(t => t.DestWarehouseId == destWarehouseId);
+        if (sourceBranchId.HasValue) query = query.Where(t => t.SourceBranchId == sourceBranchId);
+        if (destBranchId.HasValue) query = query.Where(t => t.DestBranchId == destBranchId);
         if (!string.IsNullOrEmpty(batchId)) query = query.Where(t => t.BatchId == batchId);
         if (purchaseOrderId.HasValue) query = query.Where(t => t.PurchaseOrderId == purchaseOrderId);
         if (sourceSupplierId.HasValue) query = query.Where(t => t.SourceSupplierId == sourceSupplierId);
+
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue)
+            query = query.Where(t => t.SourceBranchId == callerBranchId || t.DestBranchId == callerBranchId);
+
         return Ok(await query.OrderByDescending(t => t.CreatedAt).ToListAsync());
     }
 
@@ -71,6 +279,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
             .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
             .Include(t => t.Items).ThenInclude(i => i.Product)
+            .Include(t => t.Items).ThenInclude(i => i.Batch)
             .Where(t => t.BatchId == batchId)
             .OrderBy(t => t.CreatedAt)
             .ToListAsync();
@@ -84,6 +293,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
             .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
             .Include(t => t.Items).ThenInclude(i => i.Product)
+            .Include(t => t.Items).ThenInclude(i => i.Batch)
             .FirstOrDefaultAsync(t => t.Id == id);
         return t is null ? NotFound() : Ok(t);
     }
@@ -95,6 +305,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
             .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
             .Include(t => t.Items).ThenInclude(i => i.Product)
+            .Include(t => t.Items).ThenInclude(i => i.Batch)
             .FirstOrDefaultAsync(t => t.TransferNumber == number);
         return t is null ? NotFound() : Ok(t);
     }
@@ -109,8 +320,10 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             Id = Guid.NewGuid(),
             TransferId = transferId,
             ProductId = i.ProductId,
+            BatchId = i.BatchId,
             RequestedQuantity = i.RequestedQuantity,
             UnitCost = i.UnitCost,
+            ExpiryDate = i.ExpiryDate,
             ReturnReason = i.ReturnReason,
             Notes = i.Notes,
             CreatedAt = DateTime.UtcNow,
@@ -227,13 +440,6 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 return BadRequest(new { message = $"Expiry date for transfer item {recv.ItemId} cannot be in the past — provide a damagedOrReturnReason to log it as damaged/return stock instead of resalable inventory." });
         }
 
-        var receiveLines = (req.Items ?? [])
-            .Select(recv => (ProductId: transfer.Items.FirstOrDefault(i => i.Id == recv.ItemId)?.ProductId, recv.ReceivedQuantity))
-            .Where(l => l.ProductId.HasValue)
-            .Select(l => (l.ProductId!.Value, l.ReceivedQuantity));
-        var stockError = await ValidateSourceStockAsync(transfer, receiveLines);
-        if (stockError != null) return BadRequest(new { message = stockError });
-
         // Update per-item received quantities
         foreach (var recv in req.Items ?? [])
         {
@@ -250,56 +456,15 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
 
         var reasonsByItemId = (req.Items ?? []).ToDictionary(r => r.ItemId, r => r.DamagedOrReturnReason);
 
+        // Source stock/batch was already deducted when this transfer went in_transit — only the
+        // destination side moves here. Crediting the ACTUAL received quantity (which can be less
+        // than what shipped) is deliberate: any shortfall is real shrinkage/damage in transit, not
+        // an error, and is exactly what the discrepancy pass below is for.
         foreach (var item in transfer.Items)
         {
             var qty = item.ReceivedQuantity ?? item.ApprovedQuantity ?? item.RequestedQuantity;
-
-            if (transfer.SourceBranchId.HasValue)
-            {
-                var src = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.SourceBranchId && s.ProductId == item.ProductId);
-                if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
-            }
-            else if (transfer.SourceWarehouseId.HasValue)
-            {
-                var src = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.SourceWarehouseId && s.ProductId == item.ProductId);
-                if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
-            }
-
-            if (transfer.DestBranchId.HasValue)
-            {
-                var dst = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.DestBranchId && s.ProductId == item.ProductId)
-                          ?? new InventoryStock { Id = Guid.NewGuid(), BranchId = transfer.DestBranchId.Value, ProductId = item.ProductId };
-                if (!await db.InventoryStocks.AnyAsync(s => s.Id == dst.Id))
-                    db.InventoryStocks.Add(dst);
-                dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
-
-                // Create InventoryBatch so expiry date and cost are tracked
-                db.InventoryBatches.Add(new InventoryBatch
-                {
-                    Id = Guid.NewGuid(),
-                    BatchNumber = $"TRF-{transfer.TransferNumber}-{item.ProductId.ToString()[..4].ToUpper()}",
-                    ProductId = item.ProductId,
-                    BranchId = transfer.DestBranchId.Value,
-                    SupplierId = transfer.SourceSupplierId,
-                    Quantity = qty,
-                    RemainingQuantity = qty,
-                    PurchaseCost = item.UnitCost ?? 0,
-                    ExpiryDate = item.ExpiryDate,
-                    ReceivedDate = DateTime.UtcNow,
-                    Status = "active",
-                    Notes = reasonsByItemId.TryGetValue(item.Id, out var reason) && !string.IsNullOrWhiteSpace(reason)
-                        ? $"Received via transfer {transfer.TransferNumber} [Damaged/Return: {reason}]"
-                        : $"Received via transfer {transfer.TransferNumber}",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                });
-            }
-            else if (transfer.DestWarehouseId.HasValue)
-            {
-                var dst = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.DestWarehouseId && s.ProductId == item.ProductId);
-                if (dst is null) { dst = new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = transfer.DestWarehouseId.Value, ProductId = item.ProductId }; db.WarehouseStocks.Add(dst); }
-                dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
-            }
+            reasonsByItemId.TryGetValue(item.Id, out var reason);
+            await CreditDestinationAsync(transfer, item, qty, reason);
         }
 
         // Discrepancy records for qty mismatches
@@ -396,45 +561,40 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         if (req.ApprovedBy.HasValue) transfer.ApprovedBy = req.ApprovedBy;
         transfer.UpdatedAt = DateTime.UtcNow;
 
-        // When completed: move stock
-        if (req.Status == "completed" && prev != "completed")
+        // Shipped: the goods physically leave the source right now — deduct immediately rather
+        // than leaving them sitting in the source's "available" count until someone eventually
+        // confirms receipt (which could be hours/days later for an in-transit shipment).
+        if (req.Status == "in_transit" && prev != "in_transit")
         {
-            var lines = transfer.Items.Select(item => (item.ProductId, Quantity: item.ReceivedQuantity ?? item.ApprovedQuantity ?? item.RequestedQuantity));
+            var lines = transfer.Items.Select(item => (item.ProductId, Quantity: item.ApprovedQuantity ?? item.RequestedQuantity));
             var stockError = await ValidateSourceStockAsync(transfer, lines);
             if (stockError != null) return BadRequest(new { message = stockError });
 
+            foreach (var item in transfer.Items)
+                await DeductSourceAsync(transfer, item, item.ApprovedQuantity ?? item.RequestedQuantity);
+        }
+
+        // Completed: credit the destination. A transfer that skipped in_transit entirely (some
+        // flows jump straight from draft/approved to completed) never had its source deducted, so
+        // fall back to doing that here too — otherwise this branch would manufacture stock at the
+        // destination without ever having removed it from the source.
+        if (req.Status == "completed" && prev != "completed")
+        {
             transfer.CompletedDate = DateTime.UtcNow;
+
+            if (prev != "in_transit")
+            {
+                var lines = transfer.Items.Select(item => (item.ProductId, Quantity: item.ReceivedQuantity ?? item.ApprovedQuantity ?? item.RequestedQuantity));
+                var stockError = await ValidateSourceStockAsync(transfer, lines);
+                if (stockError != null) return BadRequest(new { message = stockError });
+                foreach (var item in transfer.Items)
+                    await DeductSourceAsync(transfer, item, item.ReceivedQuantity ?? item.ApprovedQuantity ?? item.RequestedQuantity);
+            }
+
             foreach (var item in transfer.Items)
             {
                 var qty = item.ReceivedQuantity ?? item.ApprovedQuantity ?? item.RequestedQuantity;
-
-                // Deduct from source
-                if (transfer.SourceBranchId.HasValue)
-                {
-                    var src = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.SourceBranchId && s.ProductId == item.ProductId);
-                    if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
-                }
-                else if (transfer.SourceWarehouseId.HasValue)
-                {
-                    var src = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.SourceWarehouseId && s.ProductId == item.ProductId);
-                    if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
-                }
-
-                // Add to destination
-                if (transfer.DestBranchId.HasValue)
-                {
-                    var dst = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.DestBranchId && s.ProductId == item.ProductId)
-                              ?? new InventoryStock { Id = Guid.NewGuid(), BranchId = transfer.DestBranchId.Value, ProductId = item.ProductId };
-                    if (dst.Id == Guid.Empty || !await db.InventoryStocks.AnyAsync(s => s.Id == dst.Id))
-                        db.InventoryStocks.Add(dst);
-                    dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
-                }
-                else if (transfer.DestWarehouseId.HasValue)
-                {
-                    var dst = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.DestWarehouseId && s.ProductId == item.ProductId);
-                    if (dst is null) { dst = new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = transfer.DestWarehouseId.Value, ProductId = item.ProductId }; db.WarehouseStocks.Add(dst); }
-                    dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
-                }
+                await CreditDestinationAsync(transfer, item, qty, damagedOrReturnReason: null);
             }
 
             // Auto-create credit note for RTS when completed via status patch
@@ -468,6 +628,15 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
 
             // Sync linked PO to fully_received
             await SyncLinkedPoStatus(transfer);
+        }
+
+        // Shipped but never arrived — cancelling/rejecting an in-transit transfer means the goods
+        // never actually left, so give the source its stock and batch quantity back rather than
+        // leaving it permanently debited for a transfer that's now going nowhere.
+        if ((req.Status == "cancelled" || req.Status == "rejected") && prev == "in_transit")
+        {
+            foreach (var item in transfer.Items)
+                await RestoreSourceAsync(transfer, item, item.ApprovedQuantity ?? item.RequestedQuantity);
         }
 
         await db.SaveChangesAsync();
@@ -535,7 +704,9 @@ public record CreateTransferItemRequest(
     decimal RequestedQuantity,
     decimal? UnitCost,
     string? ReturnReason,
-    string? Notes
+    string? Notes,
+    Guid? BatchId = null,
+    DateTime? ExpiryDate = null
 );
 
 public record CreateTransferRequest(

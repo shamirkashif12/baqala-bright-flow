@@ -23,10 +23,11 @@ const REASON_COLORS: Record<string, string> = { waste: "var(--warning)", damage:
 
 function firstOfMonthStr() {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function WasteSpoilage() {
@@ -105,6 +106,7 @@ function WasteSpoilage() {
             <SelectItem value="all">All Reasons</SelectItem>
             <SelectItem value="waste">Waste</SelectItem>
             <SelectItem value="damage">Damage</SelectItem>
+            <SelectItem value="expired">Expired</SelectItem>
           </SelectContent>
         </Select>
         <Select value={productId} onValueChange={setProductId}>

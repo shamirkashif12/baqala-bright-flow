@@ -18,6 +18,7 @@ import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Wa
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
+import { localDateStr } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/purchase-orders")({ component: PurchaseOrders });
 
@@ -663,7 +664,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("bank_transfer");
   const [payRef, setPayRef] = useState("");
-  const [payDate, setPayDate] = useState(new Date().toISOString().split("T")[0]);
+  const [payDate, setPayDate] = useState(localDateStr());
   const [payNotes, setPayNotes] = useState("");
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState("");
@@ -894,7 +895,16 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                 <div className="rounded-lg border border-border/60 p-3 space-y-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Add Payment</p>
                   <div className="grid grid-cols-2 gap-2">
-                    <FieldRow label="Amount (SAR) *"><Input type="number" min={0} step="0.01" className="h-9" placeholder="0.00" value={payAmount} onChange={e => setPayAmount(e.target.value)} /></FieldRow>
+                    <FieldRow label="Amount (SAR) *">
+                      <div className="relative">
+                        <Input type="number" min={0} step="0.01" className="h-9 pr-14" placeholder="0.00" value={payAmount} onChange={e => setPayAmount(e.target.value)} />
+                        <button type="button"
+                          onClick={() => setPayAmount(Math.max(0, activePo.totalAmount - activePo.paidAmount).toFixed(2))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-primary hover:underline">
+                          Full
+                        </button>
+                      </div>
+                    </FieldRow>
                     <FieldRow label="Method">
                       <Select value={payMethod} onValueChange={setPayMethod}>
                         <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>

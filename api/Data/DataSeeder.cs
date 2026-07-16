@@ -373,7 +373,7 @@ public static class DataSeeder
         var ret1 = new StockTransfer
         {
             Id = Guid.NewGuid(), TransferNumber = "TRF-RT-001",
-            TransferType = "return_to_supplier",
+            TransferType = "warehouse_to_supplier",
             SourceBranchId = brOlaya.Id, DestSupplierId = sup?.Id,
             CreatedBy = user.Id, Status = "completed", ReturnReason = "expired",
             CompletedDate = DateTime.UtcNow.AddDays(-5),

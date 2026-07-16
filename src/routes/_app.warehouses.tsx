@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { MetricCard } from "@/components/metric-card";
@@ -16,15 +16,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Eye, CheckCircle, XCircle, Truck, Info, Package, ClipboardList,
   Warehouse, Plus, Trash2, X,
-  Pencil, MapPin, Phone, User, Boxes, ArrowLeftRight,
+  Pencil, MapPin, User, ArrowLeftRight,
   ChevronDown, Check, Loader2, Search,
 } from "lucide-react";
 import {
   api,
   type WarehouseRequest, type Warehouse as WarehouseType,
-  type Branch, type Product, type Supplier, type WarehouseStock,
-  type PurchaseOrder, type StockTransfer, type SupplierCreditNote,
+  type Branch, type Product, type Supplier,
 } from "@/lib/api";
+import { WarehouseFormSheet } from "@/components/warehouse-form-sheet";
 import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -76,378 +76,10 @@ function F({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ─── Warehouse Form Sheet ─────────────────────────────────────────────────────
-
-type WHForm = { name: string; code: string; address: string; city: string; contactPerson: string; contactNumber: string; capacity: string; status: string };
-const emptyWHForm = (): WHForm => ({ name: "", code: "", address: "", city: "", contactPerson: "", contactNumber: "", capacity: "", status: "active" });
-
-function WarehouseFormSheet({
-  open, onOpenChange, warehouse, onSaved,
-}: {
-  open: boolean; onOpenChange: (v: boolean) => void;
-  warehouse?: WarehouseType | null; onSaved: () => void;
-}) {
-  const editing = !!warehouse;
-  const [form, setForm] = useState<WHForm>(emptyWHForm());
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (open) {
-      setForm(warehouse
-        ? { name: warehouse.name, code: warehouse.code, address: warehouse.address ?? "", city: warehouse.city ?? "", contactPerson: warehouse.contactPerson ?? "", contactNumber: warehouse.contactNumber ?? "", capacity: String(warehouse.capacity ?? ""), status: warehouse.status }
-        : emptyWHForm());
-      setError("");
-    }
-  }, [open, warehouse]);
-
-  const set = (k: keyof WHForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
-  const setS = (k: keyof WHForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
-
-  const handleSave = async () => {
-    if (!form.name.trim()) { setError("Warehouse name is required."); return; }
-    if (!form.code.trim()) { setError("Warehouse code is required."); return; }
-    setSaving(true); setError("");
-    try {
-      const payload = { name: form.name, code: form.code, address: form.address || undefined, city: form.city || undefined, contactPerson: form.contactPerson || undefined, contactNumber: form.contactNumber || undefined, capacity: form.capacity ? Number(form.capacity) : undefined, status: form.status };
-      if (editing && warehouse) await api.updateWarehouse(warehouse.id, payload);
-      else await api.createWarehouse(payload);
-      onSaved(); onOpenChange(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={v => { onOpenChange(v); if (!v) setError(""); }}>
-      <SheetContent className="w-[480px] overflow-y-auto">
-        <SheetHeader className="pb-4 border-b border-border/60">
-          <SheetTitle className="flex items-center gap-2">
-            <Warehouse className="h-5 w-5 text-primary" />
-            {editing ? "Edit Warehouse" : "New Warehouse"}
-          </SheetTitle>
-        </SheetHeader>
-        <div className="mt-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2 space-y-1.5">
-              <Label className="text-xs font-medium">Warehouse Name <span className="text-destructive">*</span></Label>
-              <Input value={form.name} onChange={set("name")} className="h-9" placeholder="Central Warehouse" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Code <span className="text-destructive">*</span></Label>
-              <Input value={form.code} onChange={set("code")} className="h-9" placeholder="WH-001" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Capacity (units)</Label>
-              <Input type="number" value={form.capacity} onChange={set("capacity")} className="h-9" placeholder="10000" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">City</Label>
-              <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Riyadh" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Contact Person</Label>
-              <Input value={form.contactPerson} onChange={set("contactPerson")} className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Contact Number</Label>
-              <Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Status</Label>
-              <Select value={form.status} onValueChange={setS("status")}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Address</Label>
-            <Textarea value={form.address} onChange={set("address")} rows={2} className="resize-none text-sm" placeholder="Full address…" />
-          </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <div className="flex gap-2 pt-2 border-t border-border/60">
-            <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button className="flex-1 gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : editing ? "Save Changes" : "Create Warehouse"}
-            </Button>
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-// ─── Warehouse Profile Drawer ─────────────────────────────────────────────────
-
-function WarehouseProfileDrawer({
-  warehouse, onClose, onEdit,
-}: {
-  warehouse: WarehouseType | null; onClose: () => void; onEdit: (w: WarehouseType) => void;
-}) {
-  const { canEdit } = usePermission("Warehouses");
-  const [stock, setStock] = useState<WarehouseStock[]>([]);
-  const [loadingStock, setLoadingStock] = useState(false);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [activeTab, setActiveTab] = useState("overview");
-  const [wPos, setWPos] = useState<PurchaseOrder[]>([]);
-  const [rtsTransfers, setRtsTransfers] = useState<StockTransfer[]>([]);
-  const [wCreditNotes, setWCreditNotes] = useState<SupplierCreditNote[]>([]);
-  const [loadingLedger, setLoadingLedger] = useState(false);
-
-  useEffect(() => {
-    if (!warehouse) return;
-    setActiveTab("overview");
-    setLoadingStock(true);
-    api.getWarehouseStock(warehouse.id).then(setStock).finally(() => setLoadingStock(false));
-    api.getSuppliers().then(setSuppliers).catch(() => {});
-    setLoadingLedger(true);
-    Promise.allSettled([
-      api.getPurchaseOrders({ warehouseId: warehouse.id }),
-      api.getStockTransfers({ sourceWarehouseId: warehouse.id, transferType: "warehouse_to_supplier" }),
-      api.getCreditNotes({ sourceWarehouseId: warehouse.id }),
-    ]).then(([posRes, rtsRes, cnRes]) => {
-      if (posRes.status === "fulfilled") setWPos(posRes.value);
-      if (rtsRes.status === "fulfilled") setRtsTransfers(rtsRes.value);
-      if (cnRes.status === "fulfilled") setWCreditNotes(cnRes.value);
-    }).finally(() => setLoadingLedger(false));
-  }, [warehouse?.id]);
-
-  const totalStock = stock.reduce((s, r) => s + r.quantity, 0);
-  const skuCount = stock.length;
-
-  return (
-    <Sheet open={!!warehouse} onOpenChange={v => !v && onClose()}>
-      <SheetContent className="w-[560px] overflow-y-auto">
-        {warehouse && (
-          <>
-            <SheetHeader className="pb-4 border-b border-border/60">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <SheetTitle className="text-base">{warehouse.name}</SheetTitle>
-                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{warehouse.code}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className={warehouse.status === "active" ? "bg-success/15 text-success border-success/30 text-xs" : "bg-muted text-muted-foreground text-xs"}>
-                    {warehouse.status}
-                  </Badge>
-                  {canEdit && (
-                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onEdit(warehouse)}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </SheetHeader>
-
-            {/* Quick stats */}
-            <div className="grid grid-cols-2 gap-2 mt-4 mb-4">
-              {[
-                { label: "SKUs", value: String(skuCount), icon: Package },
-                { label: "Total Units", value: String(Math.round(totalStock)), icon: Boxes },
-              ].map(({ label, value, icon: Icon }) => (
-                <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
-                  <Icon className="h-4 w-4 text-primary mx-auto mb-1" />
-                  <p className="text-lg font-bold">{value}</p>
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                </div>
-              ))}
-            </div>
-
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid grid-cols-3 h-8 text-xs">
-                <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
-                <TabsTrigger value="inventory" className="text-xs">Inventory</TabsTrigger>
-                <TabsTrigger value="ledger" className="text-xs">Ledger</TabsTrigger>
-              </TabsList>
-
-              {/* Overview */}
-              <TabsContent value="overview" className="mt-4 space-y-3">
-                {warehouse.city && (
-                  <div className="flex items-start gap-2 text-sm">
-                    <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <span>{warehouse.address ? `${warehouse.address}, ` : ""}{warehouse.city}</span>
-                  </div>
-                )}
-                {warehouse.contactPerson && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <User className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span>{warehouse.contactPerson}</span>
-                  </div>
-                )}
-                {warehouse.contactNumber && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span>{warehouse.contactNumber}</span>
-                  </div>
-                )}
-                {warehouse.capacity && (
-                  <F label="Capacity" value={`${warehouse.capacity.toLocaleString()} units`} />
-                )}
-                <F label="Created" value={new Date(warehouse.createdAt).toLocaleDateString("en-SA")} />
-              </TabsContent>
-
-              {/* Inventory */}
-              <TabsContent value="inventory" className="mt-4">
-                {loadingStock ? (
-                  <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 rounded-xl" />)}</div>
-                ) : stock.length === 0 ? (
-                  <div className="text-center py-8 text-sm text-muted-foreground">No stock records yet.</div>
-                ) : (
-                  <div className="rounded-lg border border-border/60 overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead className="bg-muted/40">
-                        <tr>
-                          <th className="text-left px-3 py-2 font-semibold">Product</th>
-                          <th className="text-left px-2 py-2 font-semibold">SKU</th>
-                          <th className="text-right px-2 py-2 font-semibold">On Hand</th>
-                          <th className="text-right px-2 py-2 font-semibold">Reserved</th>
-                          <th className="text-right px-2 py-2 font-semibold">Available</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {stock.map(s => (
-                          <tr key={s.id} className="border-t border-border/40 hover:bg-muted/20">
-                            <td className="px-3 py-2 font-medium">{s.product?.name ?? "—"}</td>
-                            <td className="px-2 py-2 font-mono text-muted-foreground">{s.product?.sku ?? "—"}</td>
-                            <td className="px-2 py-2 text-right font-semibold">{s.quantity}</td>
-                            <td className="px-2 py-2 text-right text-warning-foreground">{s.reservedQuantity}</td>
-                            <td className="px-2 py-2 text-right text-success">{Math.max(0, s.quantity - s.reservedQuantity)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* Ledger */}
-              <TabsContent value="ledger" className="mt-4">
-                {loadingLedger ? (
-                  <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 rounded-xl" />)}</div>
-                ) : (() => {
-                  const transferById = new Map(rtsTransfers.map(t => [t.id, t]));
-                  const activeCreditNotes = wCreditNotes.filter(cn => cn.status !== "cancelled");
-                  const receivedPos = wPos.filter(p => p.status === "partial_received" || p.status === "fully_received");
-                  const totalReceived = receivedPos.reduce((s, p) => s + p.totalAmount, 0);
-                  const totalPaid = wPos.reduce((s, p) => s + p.paidAmount, 0);
-                  const rtsCredits = activeCreditNotes.reduce((s, cn) => s + cn.amount, 0);
-                  const netBalance = totalReceived - totalPaid - rtsCredits;
-                  const allPayments = wPos
-                    .flatMap(p => (p.payments ?? []).map(pay => ({ ...pay, poNumber: p.poNumber })))
-                    .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate));
-
-                  return (
-                    <div className="space-y-1.5">
-                      {/* Summary — 3 cards matching supplier ledger */}
-                      <div className="grid grid-cols-3 gap-2 mb-3">
-                        {[
-                          { label: "Total Invoiced", val: totalReceived, cls: "" },
-                          { label: "Paid", val: totalPaid, cls: "text-success" },
-                          { label: "RTS Credits", val: rtsCredits, cls: "text-primary" },
-                        ].map(({ label, val, cls }) => (
-                          <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-2.5 text-center">
-                            <p className={`text-sm font-bold ${cls}`}><SARIcon />{val.toLocaleString()}</p>
-                            <p className="text-[10px] text-muted-foreground">{label}</p>
-                          </div>
-                        ))}
-                      </div>
-                      {/* Net balance banner */}
-                      {netBalance !== 0 && (
-                        <div className={`rounded-xl border px-3 py-2 text-sm font-semibold flex justify-between ${netBalance > 0 ? "border-destructive/40 bg-destructive/5 text-destructive" : "border-success/40 bg-success/5 text-success"}`}>
-                          <span>{netBalance > 0 ? "Net Amount Owed to Suppliers" : "Net Credit from Suppliers"}</span>
-                          <span><SARIcon />{Math.abs(netBalance).toLocaleString()}</span>
-                        </div>
-                      )}
-                      {/* Goods received (payables) */}
-                      {receivedPos.length > 0 && (
-                        <div className="mt-3">
-                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Goods Received (Payables)</p>
-                          {receivedPos.map(p => (
-                            <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
-                              <div>
-                                <p className="font-medium font-mono">{p.poNumber}</p>
-                                <p className="text-muted-foreground">
-                                  {new Date(p.receivedDate ?? p.updatedAt).toLocaleDateString("en-SA")}
-                                  {p.supplier?.name ? ` · ${p.supplier.name}` : ""}
-                                  {" · "}
-                                  <span className={p.paymentStatus === "paid" ? "text-success" : p.paymentStatus === "partial" ? "text-amber-600" : "text-destructive"}>
-                                    {p.paymentStatus === "paid" ? "Paid" : p.paymentStatus === "partial" ? `Partial — SAR ${p.paidAmount.toLocaleString()} paid` : "Unpaid"}
-                                  </span>
-                                </p>
-                              </div>
-                              <span className="font-semibold text-destructive flex items-center gap-0.5"><SARIcon />{p.totalAmount.toLocaleString()}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {/* Payments made */}
-                      {allPayments.length > 0 && (
-                        <div className="mt-3">
-                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Payments Made</p>
-                          {allPayments.map(pay => (
-                            <div key={pay.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
-                              <div>
-                                <p className="font-medium">{new Date(pay.paymentDate).toLocaleDateString("en-SA")}</p>
-                                <p className="text-muted-foreground">{pay.poNumber} · {pay.paymentMethod.replace(/_/g, " ")}</p>
-                              </div>
-                              <span className="font-semibold text-success flex items-center gap-0.5"><SARIcon />{pay.amount.toLocaleString()}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {/* Returns to Supplier (RTS) — one row per credit note, the canonical RTS record */}
-                      {wCreditNotes.length > 0 && (
-                        <div className="mt-3">
-                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Returns to Supplier (RTS)</p>
-                          {wCreditNotes.map(cn => {
-                            const t = cn.transferId ? transferById.get(cn.transferId) : undefined;
-                            return (
-                              <div key={cn.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
-                                <div>
-                                  <p className="font-medium font-mono">
-                                    {t?.transferNumber ?? cn.creditNoteNumber ?? "—"}
-                                    {t?.transferNumber && cn.creditNoteNumber && (
-                                      <span className="ml-1 text-muted-foreground font-normal">({cn.creditNoteNumber})</span>
-                                    )}
-                                  </p>
-                                  <p className="text-muted-foreground">
-                                    {new Date(cn.issuedDate).toLocaleDateString("en-SA")}
-                                    {(cn.supplier?.name ?? t?.destSupplier?.name) ? ` · ${cn.supplier?.name ?? t?.destSupplier?.name}` : ""}
-                                    {t?.returnReason ? ` · ${t.returnReason}` : ""}
-                                    {" · "}
-                                    <span className={cn.status === "applied" ? "text-success" : cn.status === "cancelled" ? "text-destructive" : "text-primary"}>{cn.status}</span>
-                                  </p>
-                                </div>
-                                <span className="font-semibold text-primary flex items-center gap-0.5"><SARIcon />{cn.amount.toLocaleString()}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {receivedPos.length === 0 && allPayments.length === 0 && wCreditNotes.length === 0 && (
-                        <p className="text-center py-6 text-sm text-muted-foreground">No ledger entries yet.</p>
-                      )}
-                    </div>
-                  );
-                })()}
-              </TabsContent>
-            </Tabs>
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
-  );
-}
-
 // ─── Warehouse Management Tab ─────────────────────────────────────────────────
 
 function WarehouseManagement() {
+  const navigate = useNavigate();
   const { canCreate, canEdit } = usePermission("Warehouses");
   const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -455,7 +87,7 @@ function WarehouseManagement() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<WarehouseType | null>(null);
-  const [profileTarget, setProfileTarget] = useState<WarehouseType | null>(null);
+  const viewWarehouse = (id: string) => navigate({ to: "/warehouses/$warehouseId", params: { warehouseId: id } });
 
   const load = () => {
     setLoading(true);
@@ -513,7 +145,7 @@ function WarehouseManagement() {
             <Card
               key={w.id}
               className="border-border/60 shadow-card hover:border-primary/30 transition-all cursor-pointer"
-              onClick={() => setProfileTarget(w)}
+              onClick={() => viewWarehouse(w.id)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-2 mb-3">
@@ -541,7 +173,7 @@ function WarehouseManagement() {
                   </div>
                 )}
                 <div className="mt-3 flex gap-1.5 justify-end" onClick={e => e.stopPropagation()}>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs px-2 gap-1" onClick={() => setProfileTarget(w)}>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs px-2 gap-1" onClick={() => viewWarehouse(w.id)}>
                     <Eye className="h-3.5 w-3.5" /> View
                   </Button>
                   {canEdit && (
@@ -561,12 +193,6 @@ function WarehouseManagement() {
         onOpenChange={v => { setCreateOpen(v); if (!v) setEditTarget(null); }}
         warehouse={editTarget}
         onSaved={load}
-      />
-
-      <WarehouseProfileDrawer
-        warehouse={profileTarget}
-        onClose={() => setProfileTarget(null)}
-        onEdit={w => { setProfileTarget(null); setEditTarget(w); setCreateOpen(true); }}
       />
     </div>
   );

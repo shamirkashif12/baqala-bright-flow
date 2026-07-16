@@ -10,7 +10,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ReturnsController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
+public class ReturnsController(BaqalaDbContext db, INotificationService notifications, IBatchConsumptionService batchConsumption, IStockMovementService stockMovements, ILogger<ReturnsController> logger) : ControllerBase
 {
     // Reads the real, tenant-editable "Manager approval above (SAR)" field from the Returns
     // Policy tab (Settings → Policies & Conditions), so this gate stays in sync with whatever
@@ -179,9 +179,50 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
             }
         }
 
+        // Items NOT restocked (damaged/expired/otherwise non-sellable) previously vanished with no
+        // trace once the return completed: the sale had already removed them from on-hand stock,
+        // and nothing here ever recorded WHY they never came back — no InventoryAdjustment (so the
+        // Waste/Spoilage report, which reads AdjustmentType in waste/damage/expired, never saw
+        // them) and no StockMovement (so the timeline showed nothing either). Quantity is 0 here
+        // deliberately — on-hand stock was already debited by the original sale's movement, so
+        // logging a second nonzero delta here would double-count the same units leaving stock.
+        foreach (var item in ret.Items.Where(i => !(i.Restock && i.Condition == "good")))
+        {
+            var adjustmentType = item.Condition switch { "expired" => "expired", "damaged" => "damage", _ => "waste" };
+            db.InventoryAdjustments.Add(new InventoryAdjustment
+            {
+                Id = Guid.NewGuid(),
+                ProductId = item.ProductId,
+                BranchId = ret.BranchId,
+                AdjustmentType = adjustmentType,
+                Quantity = item.Quantity,
+                Reason = $"Customer return {ret.ReturnNumber}: {ret.Reason}",
+                Notes = $"Condition: {item.Condition ?? "unspecified"} — not restocked",
+                AdjustedBy = ret.ApprovedBy ?? CallerId(),
+                CreatedAt = DateTime.UtcNow,
+            });
+
+            stockMovements.Record(
+                item.ProductId, ret.BranchId, warehouseId: null, movementType: adjustmentType, quantity: 0,
+                referenceType: "customer_return", referenceId: ret.Id, referenceNumber: ret.ReturnNumber,
+                notes: $"Condition: {item.Condition ?? "unspecified"} — not restocked", createdBy: ret.ApprovedBy ?? CallerId());
+        }
+
         ret.Status = "completed";
         ret.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        // Best-effort, after the transactional stock write above already succeeded — same
+        // convention as IStockAlertService.CheckStockLevelAsync. Without this, a restocked return
+        // only ever bumped the aggregate InventoryStock count; the specific batch the sale had
+        // drawn down at checkout stayed at its post-sale RemainingQuantity forever, so it never
+        // reappeared in the Inventory batch drill-down (which filters to remainingQuantity > 0) —
+        // the "expiry shows — after a refund" symptom.
+        foreach (var item in ret.Items.Where(i => i.Restock && i.Condition == "good"))
+        {
+            try { await batchConsumption.RestoreFefoAsync(item.ProductId, ret.BranchId, warehouseId: null, item.Quantity); }
+            catch (Exception ex) { logger.LogError(ex, "Batch restore failed for return {ReturnId} product {ProductId}", ret.Id, item.ProductId); }
+        }
 
         // Notify whoever completed the return (the caller who clicked Complete) as well as the
         // cashier who originally processed it. Previously only ProcessedBy was notified, so a

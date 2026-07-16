@@ -177,21 +177,30 @@ export const api = {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<InventoryStock[]>(`/api/inventory/stock${q ? `?${q}` : ""}`);
   },
-  getBatches: (params?: { branchId?: string; status?: string }) => {
+  // Only succeeds once the row is fully zeroed (on-hand and reserved) with no open batches —
+  // the backend returns 409 with a message otherwise, which the caller surfaces as-is (it
+  // already explains the stock needs transferring out first).
+  deleteInventoryStock: (id: string) =>
+    request<void>(`/api/inventory/stock/${id}`, { method: "DELETE" }),
+  getBatches: (params?: { branchId?: string; warehouseId?: string; productId?: string; status?: string; locationType?: "branch" | "warehouse" }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<InventoryBatch[]>(`/api/inventory/batches${q ? `?${q}` : ""}`);
   },
-  getExpiringBatches: (branchId?: string, daysAhead = 30) => {
-    const q = new URLSearchParams({ ...(branchId && { branchId }), daysAhead: String(daysAhead) }).toString();
+  getExpiringBatches: (branchId?: string, daysAhead = 30, warehouseId?: string) => {
+    const q = new URLSearchParams({ ...(branchId && { branchId }), ...(warehouseId && { warehouseId }), daysAhead: String(daysAhead) }).toString();
     return request<InventoryBatch[]>(`/api/inventory/batches/expiring?${q}`);
   },
   receiveBatch: (data: ReceiveBatchPayload) =>
     request<InventoryBatch>("/api/inventory/batches", { method: "POST", body: JSON.stringify(data) }),
   adjustInventory: (data: AdjustInventoryPayload) =>
     request<{ id: string }>("/api/inventory/adjustments", { method: "POST", body: JSON.stringify(data) }),
-  getAdjustments: (params?: { branchId?: string; adjustmentType?: string }) => {
+  getAdjustments: (params?: { branchId?: string; warehouseId?: string; batchId?: string; adjustmentType?: string }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v))).toString();
     return request<InventoryAdjustment[]>(`/api/inventory/adjustments${q ? `?${q}` : ""}`);
+  },
+  getStockMovements: (params?: { productId?: string; branchId?: string; warehouseId?: string; batchId?: string; movementType?: string; from?: string; to?: string; limit?: number }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
+    return request<StockMovement[]>(`/api/inventory/movements${q ? `?${q}` : ""}`);
   },
 
   // Stock Counts (Stocking Review)
@@ -370,7 +379,7 @@ export const api = {
     request<SupplierPayment>(`/api/purchase-orders/${poId}/payments`, { method: "POST", body: JSON.stringify(data) }),
 
   // Stock Transfers
-  getStockTransfers: (params?: { transferType?: string; status?: string; sourceWarehouseId?: string; destWarehouseId?: string; purchaseOrderId?: string; sourceSupplierId?: string }) => {
+  getStockTransfers: (params?: { transferType?: string; status?: string; sourceWarehouseId?: string; destWarehouseId?: string; sourceBranchId?: string; destBranchId?: string; purchaseOrderId?: string; sourceSupplierId?: string }) => {
     const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
     const q = new URLSearchParams(filtered).toString();
     return request<StockTransfer[]>(`/api/stock-transfers${q ? `?${q}` : ""}`);
@@ -809,7 +818,7 @@ export interface InventoryStock {
 }
 
 export interface InventoryBatch {
-  id: string; batchNumber: string; productId: string; branchId: string;
+  id: string; batchNumber: string; productId: string; branchId?: string; warehouseId?: string;
   supplierId?: string; quantity: number; remainingQuantity: number;
   purchaseCost?: number; expiryDate?: string; receivedDate: string;
   status: string;
@@ -1074,15 +1083,36 @@ export interface DeviceRecord {
 export interface AdjustInventoryPayload {
   productId: string; branchId: string; quantity: number;
   adjustmentType: string; reason?: string; adjustedBy?: string;
+  // Optional — when set, the adjustment moves this specific batch's RemainingQuantity (clamped/
+  // validated server-side) instead of only the aggregate stock row. Omit for adjustments not
+  // tied to any particular lot (e.g. a cycle-count correction with no known batch origin).
+  batchId?: string;
 }
 
 export interface InventoryAdjustment {
-  id: string; productId: string; branchId: string;
+  id: string; productId: string; branchId?: string; warehouseId?: string; batchId?: string;
   quantity: number; adjustmentType: string; reason?: string;
   adjustedBy?: string; createdAt: string;
   product?: Product;
   branch?: { id: string; name: string };
+  warehouse?: { id: string; name: string };
   adjustedByUser?: { id: string; fullName: string };
+}
+
+// Signed ledger entry (positive = stock increase, negative = decrease) — the single source of
+// truth for "how did stock actually move", written by every stock-mutating endpoint in the same
+// unit of work as the mutation itself. movementType is one of: purchase_receive, sale,
+// transfer_out, transfer_in, transfer_restore, manual_receive, adjustment_<type>, expired.
+export interface StockMovement {
+  id: string; productId: string; branchId?: string; warehouseId?: string; batchId?: string;
+  movementType: string; quantity: number;
+  referenceType?: string; referenceId?: string; referenceNumber?: string;
+  notes?: string; createdBy?: string; createdAt: string;
+  product?: Product;
+  branch?: { id: string; name: string };
+  warehouse?: { id: string; name: string };
+  batch?: { id: string; batchNumber: string; expiryDate?: string };
+  createdByUser?: { id: string; fullName: string };
 }
 
 export interface StockCountItem {
@@ -1171,6 +1201,7 @@ export interface StockTransferItem {
   requestedQuantity: number; approvedQuantity?: number; receivedQuantity?: number;
   unitCost?: number; expiryDate?: string; returnReason?: string; notes?: string; createdAt: string;
   product?: Product;
+  batch?: InventoryBatch;
 }
 
 export interface ProductVariant {

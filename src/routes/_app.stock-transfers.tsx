@@ -17,15 +17,16 @@ import {
   ChevronDown, Check,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, localDateStr } from "@/lib/utils";
 import {
   api,
   type StockTransfer, type StockTransferItem, type PurchaseOrder,
-  type Branch, type Warehouse as WarehouseType, type Supplier, type Product,
+  type Branch, type Warehouse as WarehouseType, type Supplier, type Product, type InventoryBatch,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/stock-transfers")({ component: StockTransfers });
 
@@ -107,7 +108,7 @@ function isReturnType(type: string) {
 }
 
 function todayStr() {
-  return new Date().toISOString().split("T")[0];
+  return localDateStr();
 }
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -136,6 +137,7 @@ interface ItemRow {
   requestedQuantity: number;
   unitCost: string;
   expiryDate: string;
+  batchId?: string;
 }
 
 interface CreateForm {
@@ -459,12 +461,14 @@ function ItemsStep({
   items,
   products,
   poItems,
+  sourceBatches,
   onChange,
   destCount = 1,
 }: {
   items: ItemRow[];
   products: Product[];
   poItems?: PoItem[];
+  sourceBatches?: InventoryBatch[];
   onChange: (items: ItemRow[]) => void;
   destCount?: number;
 }) {
@@ -477,7 +481,7 @@ function ItemsStep({
     onChange(items.map((item, idx) => (idx === i ? { ...item, ...patch } : item)));
 
   const handleProductChange = (i: number, v: string) => {
-    const patch: Partial<ItemRow> = { productId: v };
+    const patch: Partial<ItemRow> = { productId: v, batchId: undefined };
     if (poItems) {
       // PO/transfer-linked: use the ordered unit cost
       const pi = poItems.find(x => x.productId === v);
@@ -521,7 +525,13 @@ function ItemsStep({
       )}
       <div className="space-y-2">
         {items.map((item, i) => {
-          const maxQty = poItems?.find(x => x.productId === item.productId)?.maxQty;
+          // Which batches of this product are actually on hand at the source — lets the user pick
+          // a specific lot instead of blindly drawing from "the aggregate". Left unselected, the
+          // backend falls back to FEFO (oldest expiry first) automatically on receipt.
+          const itemBatches = (sourceBatches ?? []).filter(b => b.productId === item.productId && b.remainingQuantity > 0)
+            .sort((a, b) => (a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity) - (b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity));
+          const selectedBatch = itemBatches.find(b => b.id === item.batchId);
+          const maxQty = selectedBatch ? selectedBatch.remainingQuantity : poItems?.find(x => x.productId === item.productId)?.maxQty;
           const qtyExceeded = maxQty !== undefined && item.requestedQuantity > maxQty;
           const qtyInvalid = item.requestedQuantity < 1;
           return (
@@ -554,7 +564,7 @@ function ItemsStep({
                       onChange={e => updateItem(i, { requestedQuantity: Number(e.target.value) })}
                     />
                     {qtyExceeded && (
-                      <p className="text-[10px] text-destructive leading-tight">Exceeds PO qty ({maxQty})</p>
+                      <p className="text-[10px] text-destructive leading-tight">Exceeds available ({maxQty})</p>
                     )}
                     {!qtyExceeded && qtyInvalid && (
                       <p className="text-[10px] text-destructive leading-tight">Quantity must be at least 1</p>
@@ -567,6 +577,22 @@ function ItemsStep({
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
+                {itemBatches.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-[11px]">Batch (optional — defaults to oldest expiry first)</Label>
+                    <Select value={item.batchId ?? "__auto"} onValueChange={v => updateItem(i, { batchId: v === "__auto" ? undefined : v })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__auto">Auto (FEFO)</SelectItem>
+                        {itemBatches.map(b => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.batchNumber} — {b.remainingQuantity} left{b.expiryDate ? ` — exp. ${new Date(b.expiryDate).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" })}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label className="text-[11px]">Unit Cost (optional)</Label>
@@ -578,13 +604,18 @@ function ItemsStep({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px]">Expiry Date (optional)</Label>
-                    <Input
-                      type="date"
-                      className="h-8 text-xs"
-                      value={item.expiryDate}
-                      onChange={e => updateItem(i, { expiryDate: e.target.value })}
-                    />
+                    <Label className="text-[11px]">Expiry Date {selectedBatch ? "" : "(optional)"}</Label>
+                    {selectedBatch ? (
+                      <Input className="h-8 text-xs" disabled
+                        value={selectedBatch.expiryDate ? new Date(selectedBatch.expiryDate).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" }) : "No expiry"} />
+                    ) : (
+                      <Input
+                        type="date"
+                        className="h-8 text-xs"
+                        value={item.expiryDate}
+                        onChange={e => updateItem(i, { expiryDate: e.target.value })}
+                      />
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -665,19 +696,23 @@ function CreateTransferSheet({
   // Source-location stock — loaded when source warehouse/branch is selected for non-return transfers
   // null = not applicable (show all products), [] = loaded but empty
   const [sourceStock, setSourceStock] = useState<PoItem[] | null>(null);
+  // Batch-level detail for that same source location, so ItemsStep can offer a per-product batch
+  // picker instead of only an aggregate max quantity.
+  const [sourceBatches, setSourceBatches] = useState<InventoryBatch[]>([]);
 
   useEffect(() => {
     const needsStock =
       transferType === "warehouse_to_branch" ||
       transferType === "warehouse_to_warehouse" ||
       transferType === "branch_to_branch";
-    if (!needsStock) { setSourceStock(null); return; }
+    if (!needsStock) { setSourceStock(null); setSourceBatches([]); return; }
 
     const whId = form.sourceWarehouseId;
     const brId = form.sourceBranchId;
-    if (!whId && !brId) { setSourceStock(null); return; }
+    if (!whId && !brId) { setSourceStock(null); setSourceBatches([]); return; }
 
     setSourceStock(null); // loading — temporarily show all
+    setSourceBatches([]);
     setItems([]);         // clear previous items when source changes
 
     if (whId) {
@@ -693,6 +728,10 @@ function CreateTransferSheet({
             }))
         ))
         .catch(() => setSourceStock([]));
+      // No status filter — near_expiry batches still have real remainingQuantity and are exactly
+      // the stock you'd want to prioritize moving; itemBatches below already filters on
+      // remainingQuantity > 0, which excludes expired/consumed since those are always zeroed.
+      api.getBatches({ warehouseId: whId }).then(setSourceBatches).catch(() => {});
     } else if (brId) {
       api.getStock({ branchId: brId })
         .then(stocks => setSourceStock(
@@ -706,6 +745,7 @@ function CreateTransferSheet({
             }))
         ))
         .catch(() => setSourceStock([]));
+      api.getBatches({ branchId: brId }).then(setSourceBatches).catch(() => {});
     }
   }, [form.sourceWarehouseId, form.sourceBranchId, transferType]);
 
@@ -723,6 +763,7 @@ function CreateTransferSheet({
     setPoError("");
     setFetchedPo(null);
     setSourceStock(null);
+    setSourceBatches([]);
   };
 
   const handleClose = () => {
@@ -739,6 +780,7 @@ function CreateTransferSheet({
     setPoError("");
     setFetchedPo(null);
     setSourceStock(null);
+    setSourceBatches([]);
     setItems([]);
   };
 
@@ -965,6 +1007,7 @@ function CreateTransferSheet({
               requestedQuantity: item.requestedQuantity,
               unitCost: item.unitCost ? Number(item.unitCost) : undefined,
               expiryDate: item.expiryDate || undefined,
+              batchId: item.batchId || undefined,
             })) as StockTransferItem[],
         };
         await api.createStockTransfer(payload);
@@ -972,7 +1015,7 @@ function CreateTransferSheet({
       onCreated();
       handleClose();
     } catch (e) {
-      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Failed to create transfer.");
     } finally {
       setSaving(false);
     }
@@ -1089,6 +1132,7 @@ function CreateTransferSheet({
                 items={items}
                 products={products}
                 poItems={fetchedPo?.items ?? (sourceStock !== null ? sourceStock : undefined)}
+                sourceBatches={sourceBatches}
                 onChange={setItems}
                 destCount={
                   (transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse")
@@ -1375,7 +1419,7 @@ function ViewTransferSheet({
       await api.updateTransferStatus(transfer.id, newStatus, newStatus === "approved" ? user?.id : undefined);
       onStatusUpdate();
     } catch (e) {
-      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Failed to update transfer status.");
     } finally {
       setUpdating(false);
     }
@@ -1459,6 +1503,8 @@ function ViewTransferSheet({
                   <thead>
                     <tr className="border-b border-border/60">
                       <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Product</th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Batch #</th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Expiry</th>
                       <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Requested</th>
                       <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Approved</th>
                       <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Received</th>
@@ -1469,6 +1515,8 @@ function ViewTransferSheet({
                     {transfer.items.map(item => (
                       <tr key={item.id} className="border-b border-border/40 hover:bg-muted/30 transition-colors">
                         <td className="py-2 px-2 font-medium">{item.product?.name ?? item.productId}</td>
+                        <td className="py-2 px-2 font-mono text-xs text-muted-foreground">{item.batch?.batchNumber ?? "—"}</td>
+                        <td className="py-2 px-2 text-xs text-muted-foreground">{(item.batch?.expiryDate ?? item.expiryDate) ? new Date((item.batch?.expiryDate ?? item.expiryDate)!).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
                         <td className="py-2 px-2 text-right">{item.requestedQuantity}</td>
                         <td className="py-2 px-2 text-right">{item.approvedQuantity ?? "—"}</td>
                         <td className="py-2 px-2 text-right">{item.receivedQuantity ?? "—"}</td>
@@ -1481,7 +1529,7 @@ function ViewTransferSheet({
                     return total > 0 ? (
                       <tfoot>
                         <tr className="border-t-2 border-border/60 bg-muted/30">
-                          <td colSpan={4} className="py-2 px-2 text-xs font-semibold text-right text-muted-foreground">Total</td>
+                          <td colSpan={6} className="py-2 px-2 text-xs font-semibold text-right text-muted-foreground">Total</td>
                           <td className="py-2 px-2 text-right font-semibold text-sm">
                             <span className="flex items-center gap-0.5 justify-end"><SARIcon />{total.toFixed(2)}</span>
                           </td>
@@ -1576,14 +1624,14 @@ function RowStatusAction({
       </div>
     );
   }
-  if (transfer.status === "approved") {
+  if (transfer.status === "approved" && canApprove) {
     return (
       <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => onAction(ids, "in_transit")}>
         <Truck className="h-3 w-3 mr-1" /> In Transit
       </Button>
     );
   }
-  if (transfer.status === "in_transit") {
+  if (transfer.status === "in_transit" && canApprove) {
     return (
       <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => onReceive(transfer, group)}>
         <CheckCircle2 className="h-3 w-3 mr-1" /> Receive
@@ -1800,7 +1848,11 @@ function StockTransfers() {
       );
       load();
     } catch (e) {
-      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Failed to update transfer status.");
+      // Some ids in the batch may have succeeded before one failed — refresh so the
+      // table reflects whatever the backend actually committed, instead of silently
+      // showing stale statuses alongside the swallowed error.
+      load();
     }
   };
 

@@ -57,8 +57,14 @@ export function AutoTranslate() {
       const trimmed = raw.trim();
       if (!trimmed) return null;
       const known = textOrigin.get(node);
-      if (known) return known;
       const key = toEnglishKey(trimmed);
+      // React reuses the same Text node across re-renders (e.g. a "Loading…"
+      // placeholder mutating in place into a real, dynamic value), so a cached
+      // origin must be revalidated against the node's *current* content before
+      // being trusted — otherwise this stale mapping keeps stamping the old
+      // placeholder text back over legitimately-changed dynamic content forever.
+      if (known && key === known) return known;
+      if (known) textOrigin.delete(node);
       if (key) textOrigin.set(node, key);
       return key;
     };
@@ -83,6 +89,10 @@ export function AutoTranslate() {
         if (!trimmed) continue;
         let store = attrOrigin.get(el);
         let key = store?.[attr];
+        // Same staleness risk as text nodes: an element can be reused with a
+        // different dynamic attribute value, so a cached origin must still
+        // match the attribute's current content before being trusted.
+        if (key && toEnglishKey(trimmed) !== key) key = undefined;
         if (!key) {
           const resolved = toEnglishKey(trimmed);
           if (!resolved) continue;
