@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -992,6 +993,7 @@ function POSTab() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [stFilter, setStFilter] = useState("all");
@@ -1015,7 +1017,12 @@ function POSTab() {
       status: stFilter !== "all" ? stFilter : undefined,
       from: dateFrom || undefined,
       to: dateTo || undefined,
-    }).then(setOrders).finally(() => setLoading(false));
+    })
+      .then(o => { setOrders(o); setLoadError(false); })
+      // Keep previously loaded orders on failure — an unhandled rejection here used to
+      // render zero tiles / an empty list as if loaded (86eyag3ny).
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   }, [branchId, stFilter, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
@@ -1034,6 +1041,7 @@ function POSTab() {
 
   return (
     <div className="space-y-4">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
         {[
