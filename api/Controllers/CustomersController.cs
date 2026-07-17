@@ -10,6 +10,12 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class CustomersController(BaqalaDbContext db) : ControllerBase
 {
+    // Bulk enumeration of every customer (name, phone, spend, tier) — gated on "Customers" View,
+    // matching the dedicated /customers page. Previously ungated: any authenticated bearer,
+    // including a self-checkout kiosk's own JWT, could dump the entire customer database instead
+    // of looking up only the one customer for the current sale (see GetByPhone below, which stays
+    // deliberately open for exactly that lookup).
+    [RequirePermission("Customers", PermAction.View)]
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? tier, [FromQuery] string? search)
     {
@@ -20,6 +26,8 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
         return Ok(await query.OrderByDescending(c => c.TotalSpend).ToListAsync());
     }
 
+    // Not called by any frontend route today — gated for defense in depth, zero flow impact.
+    [RequirePermission("Customers", PermAction.View)]
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
@@ -27,6 +35,10 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
         return customer is null ? NotFound() : Ok(customer);
     }
 
+    // Deliberately NOT gated — POS checkout, Orders, and the self-checkout kiosk all call this to
+    // look up ONE customer by phone for the current sale, for roles (Cashier, kiosk) that hold no
+    // "Customers" module permission at all. GetAll above is the actual bulk-enumeration risk this
+    // fixes; a phone-number lookup isn't the same exposure.
     [HttpGet("by-phone/{phone}")]
     public async Task<IActionResult> GetByPhone(string phone)
     {
@@ -69,6 +81,7 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
         return Ok(customer);
     }
 
+    [RequirePermission("Customers", PermAction.View)]
     [HttpGet("{id:guid}/loyalty")]
     public async Task<IActionResult> GetLoyalty(Guid id)
     {

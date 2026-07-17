@@ -29,14 +29,33 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
         var query = db.Terminals.Include(t => t.Branch).Include(t => t.AssignedCashier).Include(t => t.Devices).AsQueryable();
         if (branchId.HasValue) query = query.Where(t => t.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);
-        return Ok(await query.ToListAsync());
+
+        // AssignedCashier was serialized whole (email, username, phone, status, last login) with
+        // no permission gate at all; the frontend Terminal type (src/lib/api.ts) only ever reads
+        // id+fullName off it, matching the shape below.
+        var terminals = await query.Select(t => new
+        {
+            t.Id, t.TerminalCode, t.Name, t.BranchId, t.AssignedCashierId, t.Status, t.LastSync,
+            t.UptimeMinutes, t.PairingSecretSetAt,
+            Branch = t.Branch == null ? null : new { t.Branch.Id, t.Branch.Name },
+            AssignedCashier = t.AssignedCashier == null ? null : new { t.AssignedCashier.Id, t.AssignedCashier.FullName },
+        }).ToListAsync();
+        return Ok(terminals);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
         var terminal = await db.Terminals.Include(t => t.Devices).FirstOrDefaultAsync(t => t.Id == id);
-        return terminal is null ? NotFound() : Ok(terminal);
+        if (terminal is null) return NotFound();
+
+        // Branch-scoped roles may only look up their own branch's terminal — mirrors GetAll,
+        // which this direct-by-id lookup previously bypassed entirely.
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && terminal.BranchId != callerBranchId)
+            return NotFound();
+
+        return Ok(terminal);
     }
 
     [RequirePermission("Terminals", PermAction.Create)]

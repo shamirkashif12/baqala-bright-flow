@@ -14,6 +14,22 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 
+    // Mirrors OrdersController/StockTransfersController's GetCallerContext. Roles with Purchase
+    // Orders view are all branch-level (Branch Manager/Supervisor/Finance User) — Storekeeper has
+    // no PO visibility at all per the RolePermissions matrix. Warehouse-only POs (BranchId null)
+    // stay visible to everyone with the module grant, same as before this fix; only a DIFFERENT
+    // branch's PO is now blocked.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
+    private static readonly Func<PurchaseOrder, Guid?, bool> IsOwnBranchOrUnscoped =
+        (po, callerBranchId) => po.BranchId == null || po.BranchId == callerBranchId;
+
+    [RequirePermission("Purchase Orders", PermAction.View)]
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? supplierId,
@@ -44,9 +60,34 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         if (!string.IsNullOrEmpty(status)) query = query.Where(p => p.Status == status);
         if (!string.IsNullOrEmpty(paymentStatus)) query = query.Where(p => p.PaymentStatus == paymentStatus);
         if (!string.IsNullOrEmpty(batchId)) query = query.Where(p => p.BatchId == batchId);
-        return Ok(await query.OrderByDescending(p => p.CreatedAt).ToListAsync());
+
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            query = query.Where(p => p.BranchId == callerBranchId || p.BranchId == null);
+
+        // CreatedByUser/ApprovedByUser were serialized whole (email, username, phone, branch,
+        // status, last login); the frontend (_app.purchase-orders.tsx) only ever reads .fullName
+        // off either, so project down to id+fullName rather than embedding the full User.
+        var pos = await query.OrderByDescending(p => p.CreatedAt)
+            .Select(p => new
+            {
+                p.Id, p.PoNumber, p.SupplierId, p.WarehouseId, p.BranchId, p.OrderedBy, p.ApprovedBy, p.CreatedBy,
+                p.Status, p.PaymentStatus, p.PaymentTerms, p.TotalAmount, p.PaidAmount, p.TaxAmount, p.DiscountAmount,
+                p.ExpectedDeliveryDate, p.ReceivedDate, p.Notes, p.BatchId, p.CreatedAt, p.UpdatedAt,
+                p.Supplier, p.Warehouse, p.Branch,
+                CreatedByUser = p.CreatedByUser == null ? null : new { p.CreatedByUser.Id, p.CreatedByUser.FullName },
+                ApprovedByUser = p.ApprovedByUser == null ? null : new { p.ApprovedByUser.Id, p.ApprovedByUser.FullName },
+                Items = p.Items.Select(i => new { i.Id, i.PoId, i.ProductId, i.OrderedQuantity, i.ReceivedQuantity, i.UnitCost, i.Subtotal, i.ExpiryDate, i.Notes, i.Status, i.CreatedAt, i.Product }),
+                Payments = p.Payments.Select(pm => new { pm.Id, pm.PoId, pm.SupplierId, pm.Amount, pm.PaymentDate, pm.PaymentMethod, pm.ReferenceNumber, pm.Notes, pm.RecordedBy, pm.Status, pm.CreatedAt }),
+            })
+            .ToListAsync();
+        return Ok(pos);
     }
 
+    // Deliberately NOT gated on "Purchase Orders" View — this is used as a cross-module PO-number
+    // lookup by Stock Transfers/Supplier Returns creation flows for roles (e.g. Storekeeper) that
+    // hold Stock Transfers create but not Purchase Orders view. Branch-scoping below still closes
+    // the actual cross-branch data leak the audit flagged.
     [HttpGet("batch/{batchId}")]
     public async Task<IActionResult> GetByBatchId(string batchId)
     {
@@ -59,9 +100,15 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             .Where(p => p.BatchId == batchId)
             .OrderBy(p => p.CreatedAt)
             .ToListAsync();
+
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            pos = pos.Where(p => IsOwnBranchOrUnscoped(p, callerBranchId)).ToList();
+
         return Ok(pos);
     }
 
+    [RequirePermission("Purchase Orders", PermAction.View)]
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
@@ -72,9 +119,17 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             .Include(p => p.Items).ThenInclude(i => i.Product)
             .Include(p => p.Payments)
             .FirstOrDefaultAsync(p => p.Id == id);
-        return po is null ? NotFound() : Ok(po);
+        if (po is null) return NotFound();
+
+        // Direct-by-id lookup previously bypassed branch scoping entirely — mirrors GetAll above.
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && !IsOwnBranchOrUnscoped(po, callerBranchId))
+            return NotFound();
+
+        return Ok(po);
     }
 
+    // Same cross-module lookup exemption as GetByBatchId above.
     [HttpGet("by-number/{number}")]
     public async Task<IActionResult> GetByNumber(string number)
     {
@@ -85,7 +140,13 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             .Include(p => p.Items).ThenInclude(i => i.Product)
             .Include(p => p.Payments)
             .FirstOrDefaultAsync(p => p.PoNumber == number);
-        return po is null ? NotFound() : Ok(po);
+        if (po is null) return NotFound();
+
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && !IsOwnBranchOrUnscoped(po, callerBranchId))
+            return NotFound();
+
+        return Ok(po);
     }
 
     [RequirePermission("Purchase Orders", PermAction.Create)]

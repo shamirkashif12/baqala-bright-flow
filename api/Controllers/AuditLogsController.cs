@@ -55,6 +55,10 @@ public class AuditLogsController(BaqalaDbContext db) : ControllerBase
         return Ok(new { total, page, pageSize, items });
     }
 
+    // Not called by any frontend flow — real audit entries are written server-side via
+    // IAuditService.LogAsync. Previously ungated, any authenticated user could forge an arbitrary
+    // action/entity/user row into the one tamper-evident trail the rest of the system relies on.
+    [RequirePermission("Audit Logs", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] AuditLog log)
     {
