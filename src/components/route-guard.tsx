@@ -21,6 +21,13 @@ const ROLE_DEFAULT_ROUTES: Record<AppRole, string> = {
   finance_user:   "/sales",
   marketing_user: "/customers",
   picker:         "/stocks",
+  // DataSeeder.SeedName treats these as renames of Marketing User/Picker (same permission
+  // profile) — mirror their landing routes. Warehouse Manager has no seeded permissions yet
+  // (not in BuildPermissions' role-name switch), so it gets the same safe fallback as the
+  // other manager-tier roles.
+  auditor:           "/customers",
+  warehouse_staff:   "/stocks",
+  warehouse_manager: "/dashboard",
 };
 
 // Maps each URL prefix to the module permission or role restriction that controls access.
@@ -40,6 +47,10 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/stocks",              module: "Stocks" },
   { url: "/inventory",           module: "Inventory" },
   { url: "/batches",             module: "Batches" },
+  // /batch-tracking had no entry at all — ROUTE_RULES.find() returned undefined and the guard
+  // never even ran, so every logged-in role (regardless of Batches.canView) could reach it
+  // directly. Worse than a wrong-module gate: no gate at all.
+  { url: "/batch-tracking",      module: "Batches" },
   { url: "/warehouses",          module: "Warehouses" },
   { url: "/stock-transfers",     module: "Stock Transfers" },
   // Finance
