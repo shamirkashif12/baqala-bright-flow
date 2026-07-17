@@ -9,16 +9,53 @@ import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
-import { api, type AuditTrailReport as AuditTrailData, type AuditTrailRow, type ReportExportFormat, type User } from "@/lib/api";
+import { api, type AuditLog, type AuditTrailReport as AuditTrailData, type AuditTrailRow, type Product, type ReportExportFormat, type User } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { downloadBlob } from "@/lib/csv-export";
+import { describeChanges } from "@/lib/audit-changes";
 import { toast } from "sonner";
-import { ShieldAlert, KeyRound, Wrench, Settings, Download } from "lucide-react";
+import { ShieldAlert, KeyRound, Wrench, Settings, Download, ArrowRight } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/audit-trail")({ component: AuditTrail });
 
 const SEVERITY_COLORS: Record<string, string> = { info: "var(--primary)", warning: "var(--warning)", critical: "var(--destructive)" };
+
+/**
+ * The Before/After columns used to dump the stored JSON snapshot straight into the cell, which is
+ * unreadable for the order rows that carry a full `Items[]` payload. The same diff the Employee
+ * Audit Center uses is applied here instead, so a reviewer sees "Discount: SAR 0.00 → SAR 1.00"
+ * rather than a wall of braces.
+ *
+ * Not every row carries JSON: masked rows store "***masked***", and several actions (shift close,
+ * branch created) store a plain sentence. Both fall through to being rendered verbatim, which is
+ * already readable — only the JSON rows needed help.
+ */
+function ChangesCell({ row, productName }: { row: AuditTrailRow; productName: (id: string) => string }) {
+  const changes = describeChanges(
+    { oldValues: row.beforeValue, newValues: row.afterValue } as AuditLog,
+    productName,
+  );
+
+  if (changes.length === 0) {
+    const raw = [row.beforeValue, row.afterValue].filter(Boolean).join(" → ");
+    if (!raw) return <span className="text-muted-foreground">—</span>;
+    return <span className="block max-w-[280px] whitespace-normal break-words text-xs">{raw}</span>;
+  }
+
+  return (
+    <div className="max-w-[320px] space-y-1">
+      {changes.map((c, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-1 text-[11px]">
+          <span className="font-medium text-muted-foreground">{c.label}</span>
+          <span className="font-mono text-muted-foreground line-through">{c.before ?? "—"}</span>
+          <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="font-mono font-medium text-foreground">{c.after ?? "—"}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function sevenDaysAgoStr() {
   const d = new Date();
@@ -45,8 +82,14 @@ function AuditTrail() {
   const [users, setUsers] = useState<User[]>([]);
   const [data, setData] = useState<AuditTrailData | null>(null);
   const [loading, setLoading] = useState(true);
+  // Order snapshots reference products by id only, so the diff needs a name lookup to render
+  // "Item added — Laban 1L" instead of a truncated GUID. Loaded once, not per filter change.
+  const [productMap, setProductMap] = useState<Map<string, Product>>(new Map());
 
   useEffect(() => { api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then(setUsers).catch(() => {}); }, [branchId]);
+  useEffect(() => { api.getProducts().then((p) => setProductMap(new Map(p.map((x) => [x.id, x])))).catch(() => {}); }, []);
+
+  const productName = useCallback((id: string) => productMap.get(id)?.name ?? `${id.slice(0, 8)}…`, [productMap]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -100,12 +143,22 @@ function AuditTrail() {
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Module" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Modules</SelectItem>
-            <SelectItem value="Report">Report</SelectItem>
+            {/* These are matched verbatim against audit_logs.entity_type, so every option must be
+                a string some controller actually writes. "ZatcaSettings" and "TaxFeeRule" were
+                listed here but are written by nothing, while six real modules — CashierShift and
+                Product among them — had no option at all and were unfilterable. */}
             <SelectItem value="Order">Order</SelectItem>
-            <SelectItem value="User">User</SelectItem>
-            <SelectItem value="ZatcaSettings">ZATCA Settings</SelectItem>
-            <SelectItem value="TaxFeeRule">Tax/Fee Rule</SelectItem>
+            <SelectItem value="Product">Product</SelectItem>
             <SelectItem value="InventoryAdjustment">Inventory Adjustment</SelectItem>
+            <SelectItem value="InventoryBatch">Stock Received</SelectItem>
+            <SelectItem value="StockCount">Stock Count</SelectItem>
+            <SelectItem value="CustomerReturn">Return / Refund</SelectItem>
+            <SelectItem value="CashierShift">Cashier Shift</SelectItem>
+            <SelectItem value="User">User</SelectItem>
+            <SelectItem value="Branch">Branch</SelectItem>
+            <SelectItem value="PosSettings">POS Settings</SelectItem>
+            <SelectItem value="ZatcaInvoice">ZATCA Invoice</SelectItem>
+            <SelectItem value="Report">Report Export</SelectItem>
           </SelectContent>
         </Select>
         {!lockedBranchId && (
@@ -164,8 +217,7 @@ function AuditTrail() {
             { key: "role", label: "Role" },
             { key: "branch", label: "Branch" },
             { key: "ipAddress", label: "IP Address" },
-            { key: "beforeValue", label: "Before Value", render: (r: AuditTrailRow) => <span className="block max-w-[220px] whitespace-normal break-words font-mono text-xs">{r.beforeValue ?? "—"}</span> },
-            { key: "afterValue", label: "After Value", render: (r: AuditTrailRow) => <span className="block max-w-[220px] whitespace-normal break-words font-mono text-xs">{r.afterValue ?? "—"}</span> },
+            { key: "beforeValue", label: "Changes", render: (r: AuditTrailRow) => <ChangesCell row={r} productName={productName} /> },
           ]}
           rows={data?.rows ?? []}
         />

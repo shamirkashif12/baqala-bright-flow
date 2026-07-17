@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,10 +11,12 @@ import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { api, type PaymentMethodsReport, type PaymentMethodRow, type ReportExportFormat } from "@/lib/api";
+import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Banknote, CreditCard, Wallet, Clock, RotateCcw, DollarSign } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Banknote, CreditCard, Wallet, Clock, RotateCcw, DollarSign, Cigarette } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/payment-methods")({ component: PaymentMethods });
@@ -41,28 +43,37 @@ function PaymentMethods() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [paymentMethod, setPaymentMethod] = useState("all");
+  const [cashierId, setCashierId] = useState("all");
+  const [terminalId, setTerminalId] = useState("all");
+  const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<PaymentMethodsReport | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const { employees, terminals } = useReportFilterOptions(branchId);
+
+  useEffect(() => { setCashierId("all"); setTerminalId("all"); }, [branchId]);
+
+  const filters = useMemo(() => ({
+    branchId: branchId !== "all" ? branchId : undefined,
+    paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
+    cashierId: cashierId !== "all" ? cashierId : undefined,
+    terminalId: terminalId !== "all" ? terminalId : undefined,
+    hasTobaccoFee: hasTobaccoFee || undefined,
+  }), [branchId, paymentMethod, cashierId, terminalId, hasTobaccoFee]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getPaymentMethodsReport({
-      from, to, branchId: branchId !== "all" ? branchId : undefined,
-      paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
-    })
+    api.getPaymentMethodsReport({ from, to, ...filters })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, paymentMethod]);
+  }, [from, to, filters]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportPaymentMethodsReport({
-        from, to, branchId: branchId !== "all" ? branchId : undefined,
-        paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined, exportedBy: user?.id, format,
-      });
+      const blob = await api.exportPaymentMethodsReport({ from, to, ...filters, exportedBy: user?.id, format });
       downloadBlob(blob, `payment-methods-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -109,16 +120,35 @@ function PaymentMethods() {
             <SelectItem value="qr">QR</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={cashierId} onValueChange={setCashierId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={terminalId} onValueChange={setTerminalId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Device" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Devices</SelectItem>
+            {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <label className="flex items-center gap-1.5 text-sm px-2">
+          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+          Tobacco fee only
+        </label>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <MetricCard label="Cash Collected" value={<><SARIcon />{fmt(kpis?.cashCollected ?? 0)}</>} icon={Banknote} accent="primary" />
         <MetricCard label="Card Settled" value={<><SARIcon />{fmt(kpis?.cardSettled ?? 0)}</>} icon={CreditCard} accent="success" />
         <MetricCard label="Wallet Amount" value={<><SARIcon />{fmt(kpis?.walletAmount ?? 0)}</>} icon={Wallet} accent="warning" />
         <MetricCard label="Pending" value={<><SARIcon />{fmt(kpis?.pendingAmount ?? 0)}</>} icon={Clock} />
         <MetricCard label="Refund Value" value={<><SARIcon />{fmt(kpis?.refundValue ?? 0)}</>} icon={RotateCcw} accent="destructive" />
         <MetricCard label="Payment Fees" value={<><SARIcon />{fmt(kpis?.paymentFees ?? 0)}</>} icon={DollarSign} accent="primary" />
+        <MetricCard label="Tobacco Fees" value={<><SARIcon />{fmt(kpis?.tobaccoFees ?? 0)}</>} icon={Cigarette} accent="warning" />
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">

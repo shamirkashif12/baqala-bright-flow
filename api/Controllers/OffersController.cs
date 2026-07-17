@@ -52,6 +52,7 @@ public class OffersController(BaqalaDbContext db) : ControllerBase
             OfferType = req.OfferType,
             BranchId = req.BranchId,
             TriggerProductId = req.TriggerProductId,
+            TriggerBarcode = string.IsNullOrWhiteSpace(req.TriggerBarcode) ? null : req.TriggerBarcode.Trim(),
             GetProductId = req.GetProductId,
             TriggerQuantity = req.TriggerQuantity ?? 1,
             GetQuantity = req.GetQuantity ?? 1,
@@ -83,6 +84,7 @@ public class OffersController(BaqalaDbContext db) : ControllerBase
         o.OfferType = req.OfferType;
         o.BranchId = req.BranchId;
         o.TriggerProductId = req.TriggerProductId;
+        o.TriggerBarcode = string.IsNullOrWhiteSpace(req.TriggerBarcode) ? null : req.TriggerBarcode.Trim();
         o.GetProductId = req.GetProductId;
         o.TriggerQuantity = req.TriggerQuantity ?? o.TriggerQuantity;
         o.GetQuantity = req.GetQuantity ?? o.GetQuantity;
@@ -129,6 +131,7 @@ public record OfferRequest(
     string OfferType,
     Guid? BranchId,
     Guid? TriggerProductId,
+    string? TriggerBarcode,
     Guid? GetProductId,
     decimal? TriggerQuantity,
     decimal? GetQuantity,

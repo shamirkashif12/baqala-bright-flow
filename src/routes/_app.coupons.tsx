@@ -324,13 +324,22 @@ function CouponsTab() {
 type DiscountForm = {
   name: string; appliesTo: string; productId: string; categoryId: string; branchIds: string[];
   discountType: string; value: string; isActive: boolean; startDate: string; endDate: string;
-  excludedProductIds: string[];
+  excludedProductIds: string[]; minCustomerTier: string; requiresCustomer: boolean;
 };
 const emptyDiscount: DiscountForm = {
   name: "", appliesTo: "all", productId: "", categoryId: "", branchIds: [],
   discountType: "percentage", value: "", isActive: true, startDate: today, endDate: nextMonth,
-  excludedProductIds: [],
+  excludedProductIds: [], minCustomerTier: "none", requiresCustomer: false,
 };
+
+// Customer groups are loyalty tiers (Customer.Tier). Ranked, not arbitrary labels — picking Silver
+// means Silver *and above*, which is how the POS evaluates MinCustomerTier at checkout.
+const CUSTOMER_TIERS = [
+  { value: "standard", label: "Standard & above" },
+  { value: "silver", label: "Silver & above" },
+  { value: "gold", label: "Gold & above" },
+  { value: "platinum", label: "Platinum only" },
+];
 
 function DiscountsTab() {
   const { canCreate, canEdit, canDelete } = usePermission("Coupons");
@@ -369,6 +378,8 @@ function DiscountsTab() {
       branchIds: d.branchId ? [d.branchId] : [], discountType: d.discountType, value: String(d.value),
       isActive: d.isActive, startDate: d.startDate?.slice(0, 10) ?? today, endDate: d.endDate?.slice(0, 10) ?? nextMonth,
       excludedProductIds,
+      minCustomerTier: d.minCustomerTier ?? "none",
+      requiresCustomer: d.requiresCustomer ?? false,
     });
     setSheetOpen(true);
   };
@@ -388,6 +399,10 @@ function DiscountsTab() {
         isActive: form.isActive,
         startDate: form.startDate || undefined, endDate: form.endDate || undefined,
         excludedProductIds: form.excludedProductIds.length > 0 ? form.excludedProductIds : undefined,
+        minCustomerTier: form.minCustomerTier !== "none" ? form.minCustomerTier : undefined,
+        // A tier-gated discount is meaningless for an anonymous walk-in — there's no tier to check —
+        // so targeting a customer group implies the cashier must attach a customer at checkout.
+        requiresCustomer: form.minCustomerTier !== "none" ? true : form.requiresCustomer,
       };
       if (editItem) {
         const branchId = form.appliesTo === "branch" ? (form.branchIds[0] || undefined) : undefined;
@@ -529,6 +544,32 @@ function DiscountsTab() {
               </FL>
             )}
 
+            <FL label="Customer group (loyalty tier)">
+              <Select value={form.minCustomerTier} onValueChange={setS("minCustomerTier")}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Any customer" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Any customer</SelectItem>
+                  {CUSTOMER_TIERS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {form.minCustomerTier === "none"
+                  ? "Applies to everyone, including walk-ins."
+                  : "The cashier must attach a customer at checkout for this discount to apply."}
+              </p>
+            </FL>
+
+            {form.minCustomerTier === "none" && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox" id="requiresCustomer" checked={form.requiresCustomer}
+                  onChange={e => setForm(p => ({ ...p, requiresCustomer: e.target.checked }))}
+                  className="h-4 w-4 accent-primary"
+                />
+                <label htmlFor="requiresCustomer" className="text-sm cursor-pointer">Require a registered customer</label>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <FL label="Discount Type">
                 <Select value={form.discountType} onValueChange={setS("discountType")}>
@@ -572,7 +613,7 @@ function serializeComboIds(ids: string[]): string {
 
 type OfferForm = {
   name: string; offerType: string; branchIds: string[];
-  triggerProductId: string; getProductId: string;
+  triggerProductId: string; triggerBarcode: string; getProductId: string;
   triggerQuantity: string; getQuantity: string;
   offerPrice: string; discountPercentage: string;
   itemsDescription: string; minBasketAmount: string; winners: string;
@@ -580,12 +621,15 @@ type OfferForm = {
 };
 const emptyOffer: OfferForm = {
   name: "", offerType: "bogo", branchIds: [],
-  triggerProductId: "", getProductId: "",
+  triggerProductId: "", triggerBarcode: "", getProductId: "",
   triggerQuantity: "1", getQuantity: "1",
   offerPrice: "", discountPercentage: "",
   itemsDescription: "", minBasketAmount: "", winners: "",
   usageLimit: "", startDate: today, endDate: nextMonth, isActive: true,
 };
+
+// Offer types keyed off a single trigger product — the only ones a barcode can narrow.
+const TRIGGER_PRODUCT_OFFER_TYPES = ["bogo", "buy_a_get_b", "product_offer"];
 
 function OffersTab() {
   const { canCreate, canEdit, canDelete } = usePermission("Coupons");
@@ -622,7 +666,7 @@ function OffersTab() {
     setEditItem(o);
     setForm({
       name: o.name, offerType: o.offerType, branchIds: o.branchId ? [o.branchId] : [],
-      triggerProductId: o.triggerProductId ?? "", getProductId: o.getProductId ?? "",
+      triggerProductId: o.triggerProductId ?? "", triggerBarcode: o.triggerBarcode ?? "", getProductId: o.getProductId ?? "",
       triggerQuantity: String(o.triggerQuantity), getQuantity: String(o.getQuantity),
       offerPrice: o.offerPrice != null ? String(o.offerPrice) : "",
       discountPercentage: o.discountPercentage != null ? String(o.discountPercentage) : "",
@@ -657,6 +701,7 @@ function OffersTab() {
       const base: Partial<Offer> = {
         name: form.name, offerType: form.offerType,
         triggerProductId: form.triggerProductId || undefined,
+        triggerBarcode: form.triggerBarcode.trim() || undefined,
         getProductId: form.getProductId || undefined,
         triggerQuantity: Number(form.triggerQuantity) || 1,
         getQuantity: Number(form.getQuantity) || 1,
@@ -689,6 +734,8 @@ function OffersTab() {
   const set = (k: keyof OfferForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
   const setS = (k: keyof OfferForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
+
+  const triggerProductBarcode = products.find(p => p.id === form.triggerProductId)?.barcode ?? "";
 
   // Combo helpers
   const comboRetailTotal = comboIds.reduce((s, id) => {
@@ -982,6 +1029,35 @@ function OffersTab() {
                   <Input value={form.itemsDescription} onChange={set("itemsDescription")} className="h-9" placeholder="e.g. Spend SAR 200 to enter" />
                 </FL>
               </>
+            )}
+
+            {/* Barcode-specific targeting — only meaningful for the offer types that fire off a
+                trigger product. Combo matches a set of products and Lucky Draw is basket-level, so
+                neither has a single barcode to key on. */}
+            {TRIGGER_PRODUCT_OFFER_TYPES.includes(form.offerType) && (
+              <FL label="Barcode-specific (optional)">
+                <div className="flex gap-1.5">
+                  <Input
+                    value={form.triggerBarcode}
+                    onChange={set("triggerBarcode")}
+                    className="h-9"
+                    placeholder="Blank = any barcode for this product"
+                  />
+                  {triggerProductBarcode && form.triggerBarcode !== triggerProductBarcode && (
+                    <Button
+                      type="button" variant="outline" className="h-9 shrink-0 text-xs"
+                      onClick={() => setForm(p => ({ ...p, triggerBarcode: triggerProductBarcode }))}
+                    >
+                      Use {triggerProductBarcode}
+                    </Button>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {form.triggerBarcode
+                    ? "Only this scanned barcode triggers the offer — other barcodes for the same product won't."
+                    : "The offer fires for any barcode belonging to the selected product."}
+                </p>
+              </FL>
             )}
 
             {/* Common fields */}

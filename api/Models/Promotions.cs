@@ -90,6 +90,14 @@ public class Offer
     [Column("trigger_product_id")]
     public Guid? TriggerProductId { get; set; }
 
+    // Barcode-specific offer: the offer only fires when the trigger product's barcode is exactly
+    // this value — e.g. a promo run re-barcoded for the campaign, where the regular stock of the
+    // same SKU must stay at full price. Null (the default) means the offer applies to the trigger
+    // product regardless of its barcode. Only meaningful for offer types keyed off a single
+    // trigger product (bogo, buy_a_get_b, product_offer).
+    [MaxLength(100), Column("trigger_barcode")]
+    public string? TriggerBarcode { get; set; }
+
     // Product the customer receives (bogo / buy_a_get_b)
     [Column("get_product_id")]
     public Guid? GetProductId { get; set; }

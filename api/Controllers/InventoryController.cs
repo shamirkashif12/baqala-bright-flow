@@ -9,7 +9,16 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class InventoryController(BaqalaDbContext db, IStockAlertService stockAlerts, IStockMovementService stockMovements, ILogger<InventoryController> logger) : ControllerBase
+// Both ledgers are recorded here, and they answer different questions: IStockMovementService is the
+// inventory ledger (what moved, signed quantity, against which batch/reference), IAuditService is the
+// employee trail (who did it, before/after on-hand, why). Neither subsumes the other — a movement row
+// has no actor context and an audit row has no signed quantity — so an adjustment writes both.
+public class InventoryController(
+    BaqalaDbContext db,
+    IStockAlertService stockAlerts,
+    IStockMovementService stockMovements,
+    IAuditService audit,
+    ILogger<InventoryController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see/write their own branch's
     // batches — mirrors the scoping the frontend already applies to the plain stock list.
@@ -19,6 +28,14 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
         var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
         return (role, branchId);
     }
+
+    // The acting user comes from the JWT, never from the request body. AdjustRequest.AdjustedBy was
+    // client-supplied and most callers (the Inventory "Adjust stock" dialog, POS quick stock-in)
+    // simply omitted it — so the adjustment persisted a null actor and the Employee Audit Center
+    // rendered it as "System". Reading claims also closes the spoofing hole the body field opened:
+    // any cashier could previously attribute their own adjustment to another user.
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
     [HttpGet("stock")]
     public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock, [FromQuery] Guid? categoryId)
@@ -199,6 +216,9 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
 
         var stock = await db.InventoryStocks
             .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
+        // Captured before the mutation for the same reason Adjust does it: receiving stock is an
+        // inventory movement, and a reviewer needs the on-hand quantity either side of it.
+        var quantityBefore = stock?.Quantity ?? 0m;
         if (stock is null)
         {
             db.InventoryStocks.Add(new InventoryStock
@@ -219,6 +239,35 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
             batchId: batch.Id, referenceType: "manual_receive", referenceId: batch.Id, notes: req.DamagedOrReturnReason);
 
         await db.SaveChangesAsync();
+
+        // Receiving stock was previously invisible to the Employee Audit Center — the batch and the
+        // on-hand increase were both written with no audit row, so "who added this stock?" had no
+        // answer. Best-effort: the write is committed, so a failed audit must not 500 the caller.
+        try
+        {
+            await audit.LogAsync(
+                action: "receive_batch",
+                entityType: "InventoryBatch",
+                entityId: batch.Id,
+                userId: CallerId(),
+                branchId: req.BranchId,
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    productId = req.ProductId,
+                    batchNumber = batch.BatchNumber,
+                    quantity = req.Quantity,
+                    purchaseCost = req.PurchaseCost,
+                    expiryDate = req.ExpiryDate,
+                    supplierId = req.SupplierId,
+                    quantityAfter = quantityBefore + req.Quantity,
+                }),
+                // A back-dated expiry is an override the reviewer should see, not routine receiving.
+                severity: string.IsNullOrWhiteSpace(req.DamagedOrReturnReason) ? "info" : "warning",
+                beforeValue: System.Text.Json.JsonSerializer.Serialize(new { quantityBefore }),
+                notes: req.DamagedOrReturnReason);
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for batch {BatchId}", batch.Id); }
+
         return Created($"/api/inventory/batches/{batch.Id}", batch);
     }
 
@@ -342,6 +391,10 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
             db.InventoryStocks.Add(stock);
         }
 
+        // Falls back to the body only for callers with no usable claim (kiosk/service tokens);
+        // an authenticated user's claim always wins over whatever the body asserts.
+        var actingUserId = CallerId() ?? req.AdjustedBy;
+
         var adjustment = new InventoryAdjustment
         {
             Id = Guid.NewGuid(),
@@ -351,9 +404,14 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
             Quantity = req.Quantity,
             AdjustmentType = req.AdjustmentType,
             Reason = req.Reason ?? "",
-            AdjustedBy = req.AdjustedBy,
+            AdjustedBy = actingUserId,
             CreatedAt = DateTime.UtcNow,
         };
+
+        // Captured before the mutation below — InventoryAdjustment itself only stores the delta,
+        // so the on-hand quantity before/after the change exists nowhere else and is exactly what
+        // the audit trail needs to make an adjustment reviewable.
+        var quantityBefore = stock.Quantity;
 
         if (isIncrease)
             stock.Quantity += req.Quantity;
@@ -388,6 +446,27 @@ public class InventoryController(BaqalaDbContext db, IStockAlertService stockAle
             batchId: req.BatchId, referenceType: "adjustment", referenceId: adjustment.Id, notes: req.Reason);
 
         await db.SaveChangesAsync();
+
+        // Employee Audit Center — inventory adjustments are a listed employee action. Best-effort:
+        // the stock write is already committed, so a failed audit write must not 500 the caller.
+        try
+        {
+            await audit.LogAsync(
+                action: "inventory_adjustment",
+                entityType: "InventoryAdjustment",
+                entityId: adjustment.Id,
+                userId: actingUserId,
+                branchId: req.BranchId,
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    req.ProductId, req.AdjustmentType, req.Quantity, Reason = req.Reason ?? "",
+                    QuantityAfter = stock.Quantity,
+                }),
+                // Write-offs are the adjustments worth surfacing to a reviewer.
+                severity: req.AdjustmentType is "waste" or "damage" ? "warning" : "info",
+                beforeValue: System.Text.Json.JsonSerializer.Serialize(new { QuantityBefore = quantityBefore }));
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for adjustment {AdjustmentId}", adjustment.Id); }
 
         // Removal adjustments (wastage, damage, stock-out, transfer-out) can push on-hand below the
         // reorder threshold — check immediately so the Low Stock / Out of Stock alert fires now

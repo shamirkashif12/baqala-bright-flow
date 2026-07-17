@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -37,6 +38,7 @@ function DailySales() {
   const [cashierId, setCashierId] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState("all");
   const [customerType, setCustomerType] = useState("all");
+  const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<DailySalesReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [hideEmptyHours, setHideEmptyHours] = useState(true);
@@ -59,11 +61,12 @@ function DailySales() {
       cashierId: cashierId !== "all" ? cashierId : undefined,
       paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
       customerType: customerType !== "all" ? customerType : undefined,
+      hasTobaccoFee: hasTobaccoFee || undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [date, branchId, terminalId, cashierId, paymentMethod, customerType]);
+  }, [date, branchId, terminalId, cashierId, paymentMethod, customerType, hasTobaccoFee]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -75,6 +78,7 @@ function DailySales() {
         cashierId: cashierId !== "all" ? cashierId : undefined,
         paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
         customerType: customerType !== "all" ? customerType : undefined,
+        hasTobaccoFee: hasTobaccoFee || undefined,
         exportedBy: user?.id, format,
       });
       downloadBlob(blob, `daily-sales-${date}.${format}`);
@@ -138,6 +142,10 @@ function DailySales() {
             <SelectItem value="walk-in">Walk-in</SelectItem>
           </SelectContent>
         </Select>
+        <label className="flex items-center gap-1.5 text-sm px-2">
+          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+          Tobacco fee only
+        </label>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -208,6 +216,7 @@ function DailySales() {
                 { key: "returns", label: "Returns", render: (r) => <><SARIcon />{fmt(r.returns)}</> },
                 { key: "netSales", label: "Net Sales", render: (r) => <span className="font-semibold"><SARIcon />{fmt(r.netSales)}</span> },
                 { key: "vat", label: "VAT", render: (r) => <><SARIcon />{fmt(r.vat)}</> },
+                { key: "tobaccoFees", label: "Tobacco Fees", render: (r) => <span className={r.tobaccoFees > 0 ? "text-warning-foreground" : "text-muted-foreground"}><SARIcon />{fmt(r.tobaccoFees)}</span> },
                 { key: "cash", label: "Cash", render: (r) => <><SARIcon />{fmt(r.cash)}</> },
                 { key: "card", label: "Card", render: (r) => <><SARIcon />{fmt(r.card)}</> },
                 { key: "wallet", label: "Wallet", render: (r) => <><SARIcon />{fmt(r.wallet)}</> },

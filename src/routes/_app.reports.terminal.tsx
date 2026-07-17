@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,10 +10,12 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type TerminalReport as TerminalReportData, type TerminalReportRow, type ReportExportFormat, type Terminal } from "@/lib/api";
+import { api, type TerminalReport as TerminalReportData, type TerminalReportRow, type ReportExportFormat } from "@/lib/api";
+import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ShoppingCart, WifiOff, Wallet, Gauge } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
@@ -34,36 +36,37 @@ function TerminalReportPage() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [terminalId, setTerminalId] = useState("all");
+  const [cashierId, setCashierId] = useState("all");
   const [status, setStatus] = useState("all");
-  const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<TerminalReportData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    api.getTerminals({ branchId: branchId !== "all" ? branchId : undefined }).then(setTerminals).catch(() => {});
-    setTerminalId("all");
-  }, [branchId]);
+  const { employees, terminals } = useReportFilterOptions(branchId);
+
+  useEffect(() => { setTerminalId("all"); setCashierId("all"); }, [branchId]);
+
+  const filters = useMemo(() => ({
+    branchId: branchId !== "all" ? branchId : undefined,
+    terminalId: terminalId !== "all" ? terminalId : undefined,
+    cashierId: cashierId !== "all" ? cashierId : undefined,
+    status: status !== "all" ? status : undefined,
+    hasTobaccoFee: hasTobaccoFee || undefined,
+  }), [branchId, terminalId, cashierId, status, hasTobaccoFee]);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getTerminalReport({
-      from, to, branchId: branchId !== "all" ? branchId : undefined,
-      terminalId: terminalId !== "all" ? terminalId : undefined, status: status !== "all" ? status : undefined,
-    })
+    api.getTerminalReport({ from, to, ...filters })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, terminalId, status]);
+  }, [from, to, filters]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportTerminalReport({
-        from, to, branchId: branchId !== "all" ? branchId : undefined,
-        terminalId: terminalId !== "all" ? terminalId : undefined, status: status !== "all" ? status : undefined,
-        exportedBy: user?.id, format,
-      });
+      const blob = await api.exportTerminalReport({ from, to, ...filters, exportedBy: user?.id, format });
       downloadBlob(blob, `terminal-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -98,6 +101,13 @@ function TerminalReportPage() {
             {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={cashierId} onValueChange={setCashierId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
@@ -107,6 +117,10 @@ function TerminalReportPage() {
             <SelectItem value="syncing">Syncing</SelectItem>
           </SelectContent>
         </Select>
+        <label className="flex items-center gap-1.5 text-sm px-2">
+          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+          Tobacco fee only
+        </label>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -142,6 +156,7 @@ function TerminalReportPage() {
             { key: "assignedCashier", label: "Assigned Cashier" },
             { key: "transactions", label: "Txns" },
             { key: "netSales", label: "Net Sales", render: (r: TerminalReportRow) => <span className="font-semibold"><SARIcon />{fmt(r.netSales)}</span> },
+            { key: "tobaccoFees", label: "Tobacco Fees", render: (r: TerminalReportRow) => <><SARIcon />{fmt(r.tobaccoFees)}</> },
             { key: "refunds", label: "Refunds", render: (r: TerminalReportRow) => <><SARIcon />{fmt(r.refunds)}</> },
             { key: "uptimePct", label: "Uptime %", render: (r: TerminalReportRow) => `${r.uptimePct}%` },
             { key: "lastSyncTime", label: "Last Sync", render: (r: TerminalReportRow) => (r.lastSyncTime ? new Date(r.lastSyncTime).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" }) : "—") },

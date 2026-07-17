@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,6 +10,9 @@ import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { api, type LowStockReport, type LowStockRow, type ReportExportFormat } from "@/lib/api";
+import { useReportFilterOptions } from "@/lib/use-report-filters";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -31,22 +34,39 @@ function LowStock() {
   const { branches } = useBranch();
 
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [categoryId, setCategoryId] = useState("all");
+  const [productId, setProductId] = useState("all");
+  const [isTobacco, setIsTobacco] = useState(false);
   const [data, setData] = useState<LowStockReport | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const { categories, products } = useReportFilterOptions(branchId, categoryId);
+
+  useEffect(() => {
+    if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
+  }, [products, productId]);
+
+  const filters = useMemo(() => ({
+    branchId: branchId !== "all" ? branchId : undefined,
+    categoryId: categoryId !== "all" ? categoryId : undefined,
+    productId: productId !== "all" ? productId : undefined,
+    isTobacco: isTobacco || undefined,
+    onlyLowStock: true,
+  }), [branchId, categoryId, productId, isTobacco]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getLowStockReport({ branchId: branchId !== "all" ? branchId : undefined, onlyLowStock: true })
+    api.getLowStockReport(filters)
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [branchId]);
+  }, [filters]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
-      const blob = await api.exportLowStockReport({ branchId: branchId !== "all" ? branchId : undefined, onlyLowStock: true, exportedBy: user?.id, format });
+      const blob = await api.exportLowStockReport({ ...filters, exportedBy: user?.id, format });
       downloadBlob(blob, `low-stock-${new Date().toISOString().slice(0, 10)}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
@@ -75,6 +95,24 @@ function LowStock() {
             </SelectContent>
           </Select>
         )}
+        <Select value={categoryId} onValueChange={setCategoryId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={productId} onValueChange={setProductId}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Products</SelectItem>
+            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <label className="flex items-center gap-1.5 text-sm px-2">
+          <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
+          Tobacco only
+        </label>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -111,6 +149,7 @@ function LowStock() {
             { key: "productName", label: "Product" },
             { key: "category", label: "Category" },
             { key: "branch", label: "Branch" },
+            { key: "isTobacco", label: "Tobacco", render: (r: LowStockRow) => (r.isTobacco ? <Badge variant="outline" className="text-[10px]">Tobacco</Badge> : "—") },
             { key: "availableQty", label: "Available Qty" },
             { key: "reorderLevel", label: "Reorder Level" },
             { key: "recommendedReorderQty", label: "Recommended Qty" },

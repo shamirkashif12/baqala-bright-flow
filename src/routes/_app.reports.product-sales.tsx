@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow, type ReportExportFormat, type Category, type User } from "@/lib/api";
+import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow, type ReportExportFormat, type Category, type Product, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -40,15 +40,29 @@ function ProductSales() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [categoryId, setCategoryId] = useState("all");
+  const [productId, setProductId] = useState("all");
   const [cashierId, setCashierId] = useState("all");
   const [search, setSearch] = useState("");
   const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [cashiers, setCashiers] = useState<User[]>([]);
   const [data, setData] = useState<ProductSalesData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { api.getCategories().then(setCategories).catch(() => {}); }, []);
+  useEffect(() => { api.getProducts({ status: "active" }).then(setProducts).catch(() => {}); }, []);
+
+  // The product list follows the category filter so the picker only offers products that could
+  // actually appear in the current result set; a stale selection is cleared rather than silently
+  // returning an empty report.
+  const productOptions = useMemo(
+    () => (categoryId === "all" ? products : products.filter((p) => p.categoryId === categoryId)),
+    [products, categoryId],
+  );
+  useEffect(() => {
+    if (productId !== "all" && !productOptions.some((p) => p.id === productId)) setProductId("all");
+  }, [productOptions, productId]);
   useEffect(() => {
     api.getUsers({ branchId: branchId !== "all" ? branchId : undefined })
       // Any staff role can ring up a sale (Branch Manager/Supervisor covering a register), not
@@ -63,13 +77,14 @@ function ProductSales() {
     setLoading(true);
     api.getProductSalesReport({
       from, to, branchId: branchId !== "all" ? branchId : undefined,
-      categoryId: categoryId !== "all" ? categoryId : undefined, search: search || undefined,
+      categoryId: categoryId !== "all" ? categoryId : undefined,
+      productId: productId !== "all" ? productId : undefined, search: search || undefined,
       cashierId: cashierId !== "all" ? cashierId : undefined, hasTobaccoFee: hasTobaccoFee || undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, categoryId, search, cashierId, hasTobaccoFee]);
+  }, [from, to, branchId, categoryId, productId, search, cashierId, hasTobaccoFee]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -77,6 +92,7 @@ function ProductSales() {
     try {
       const blob = await api.exportProductSalesReport({
         from, to, branchId: branchId !== "all" ? branchId : undefined, categoryId: categoryId !== "all" ? categoryId : undefined,
+        productId: productId !== "all" ? productId : undefined,
         search: search || undefined, cashierId: cashierId !== "all" ? cashierId : undefined, hasTobaccoFee: hasTobaccoFee || undefined,
         exportedBy: user?.id, includeMargin: canViewMargin, format,
       });
@@ -112,6 +128,13 @@ function ProductSales() {
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
             {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={productId} onValueChange={setProductId}>
+          <SelectTrigger className="h-9 w-52"><SelectValue placeholder="Product" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Products</SelectItem>
+            {productOptions.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={cashierId} onValueChange={setCashierId}>

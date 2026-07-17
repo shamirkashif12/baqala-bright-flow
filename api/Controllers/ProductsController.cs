@@ -9,8 +9,50 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ProductsController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
+public class ProductsController(
+    BaqalaDbContext db,
+    INotificationService notifications,
+    IAuditService audit,
+    ILogger<ProductsController> logger) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    // The catalog fields a reviewer cares about, in the shape src/lib/audit-changes.ts diffs.
+    // Catalog rows are tenant-wide, so these audit rows carry no branchId.
+    private static object Snapshot(Product p) => new
+    {
+        name = p.Name,
+        sku = p.Sku,
+        barcode = p.Barcode,
+        basePrice = p.BasePrice,
+        costPrice = p.CostPrice,
+        taxPercentage = p.TaxPercentage,
+        customFee = p.CustomFee,
+        reorderLevel = p.ReorderLevel,
+        status = p.Status,
+        isTobacco = p.IsTobacco,
+        categoryId = p.CategoryId,
+    };
+
+    // Best-effort throughout: the catalog write is already committed by the time we log, so a
+    // failed audit write must never turn a successful save into a 500 for the caller.
+    private async Task TryAudit(string action, Product p, string severity = "info", object? before = null)
+    {
+        try
+        {
+            await audit.LogAsync(
+                action: action,
+                entityType: "Product",
+                entityId: p.Id,
+                userId: CallerId(),
+                details: System.Text.Json.JsonSerializer.Serialize(Snapshot(p)),
+                severity: severity,
+                beforeValue: before is null ? null : System.Text.Json.JsonSerializer.Serialize(before));
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for product {ProductId} ({Action})", p.Id, action); }
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? categoryId, [FromQuery] string? status, [FromQuery] string? search)
     {
@@ -52,6 +94,9 @@ public class ProductsController(BaqalaDbContext db, INotificationService notific
         product.CreatedAt = product.UpdatedAt = DateTime.UtcNow;
         db.Products.Add(product);
         await db.SaveChangesAsync();
+        // "Added Items" in the Employee Audit Center — a new catalog item was previously written
+        // with no audit row at all, so adding a product left no trace of who did it.
+        await TryAudit("create_product", product);
         return CreatedAtAction(nameof(GetById), new { id = product.Id }, product);
     }
 
@@ -62,6 +107,8 @@ public class ProductsController(BaqalaDbContext db, INotificationService notific
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
         var previousPrice = product.BasePrice;
+        // Snapshot before any field is overwritten — this is the "before" half of the audit row.
+        var before = Snapshot(product);
         product.Name = updated.Name;
         product.NameAr = updated.NameAr;
         product.CategoryId = updated.CategoryId;
@@ -79,6 +126,14 @@ public class ProductsController(BaqalaDbContext db, INotificationService notific
         product.ImageUrl = updated.ImageUrl;
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        // "Price Changes" in the Employee Audit Center. A price edit previously fired a
+        // notification (below) but wrote no audit row — the alert was transient and named no
+        // actor, so there was no durable record of who repriced an item. A price move is the
+        // edit worth flagging to a reviewer; other catalog edits stay informational.
+        await TryAudit("update_product", product,
+            severity: previousPrice != product.BasePrice ? "warning" : "info",
+            before: before);
 
         if (previousPrice != product.BasePrice)
         {
@@ -100,9 +155,13 @@ public class ProductsController(BaqalaDbContext db, INotificationService notific
     {
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
+        var before = Snapshot(product);
         product.Status = "discontinued";
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+        // "Deleted Items" in the Employee Audit Center. Note this is a soft delete (status flips to
+        // discontinued), so the before/after reads as a status change rather than a vanished row.
+        await TryAudit("delete_product", product, severity: "warning", before: before);
         return NoContent();
     }
 

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,10 +11,12 @@ import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { api, type BranchSalesReport, type BranchSalesRow, type ReportExportFormat } from "@/lib/api";
+import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Trophy, TrendingDown, Wallet, BarChart3, RotateCcw } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Trophy, TrendingDown, Wallet, BarChart3, RotateCcw, Cigarette } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/branch-sales")({ component: BranchSales });
@@ -44,27 +46,46 @@ function BranchSales() {
   const [city, setCity] = useState("all");
   const [branchId, setBranchId] = useState("all");
   const [customerType, setCustomerType] = useState("all");
+  const [categoryId, setCategoryId] = useState("all");
+  const [productId, setProductId] = useState("all");
+  const [cashierId, setCashierId] = useState("all");
+  const [terminalId, setTerminalId] = useState("all");
+  const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<BranchSalesReport | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const { categories, products, employees, terminals } = useReportFilterOptions(branchId, categoryId);
+
+  useEffect(() => { setCashierId("all"); setTerminalId("all"); }, [branchId]);
+  useEffect(() => {
+    if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
+  }, [products, productId]);
+
+  const filters = useMemo(() => ({
+    city: city !== "all" ? city : undefined,
+    branchId: branchId !== "all" ? branchId : undefined,
+    customerType: customerType !== "all" ? customerType : undefined,
+    categoryId: categoryId !== "all" ? categoryId : undefined,
+    productId: productId !== "all" ? productId : undefined,
+    cashierId: cashierId !== "all" ? cashierId : undefined,
+    terminalId: terminalId !== "all" ? terminalId : undefined,
+    hasTobaccoFee: hasTobaccoFee || undefined,
+  }), [city, branchId, customerType, categoryId, productId, cashierId, terminalId, hasTobaccoFee]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getBranchSalesReport({
-      from, to, city: city !== "all" ? city : undefined, branchId: branchId !== "all" ? branchId : undefined,
-      customerType: customerType !== "all" ? customerType : undefined,
-    })
+    api.getBranchSalesReport({ from, to, ...filters })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, city, branchId, customerType]);
+  }, [from, to, filters]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportBranchSalesReport({
-        from, to, city: city !== "all" ? city : undefined, branchId: branchId !== "all" ? branchId : undefined,
-        customerType: customerType !== "all" ? customerType : undefined, exportedBy: user?.id, includeMargin: canViewMargin, format,
+        from, to, ...filters, exportedBy: user?.id, includeMargin: canViewMargin, format,
       });
       downloadBlob(blob, `branch-sales-${from}-to-${to}.${format}`);
     } catch (e) {
@@ -110,15 +131,48 @@ function BranchSales() {
             <SelectItem value="walk-in">Walk-in</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={categoryId} onValueChange={setCategoryId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={productId} onValueChange={setProductId}>
+          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Products</SelectItem>
+            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={cashierId} onValueChange={setCashierId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            {employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={terminalId} onValueChange={setTerminalId}>
+          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Device" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Devices</SelectItem>
+            {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <label className="flex items-center gap-1.5 text-sm px-2">
+          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+          Tobacco fee only
+        </label>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
         <MetricCard label="Top Branch" value={kpis?.topBranch ?? "—"} icon={Trophy} accent="primary" />
         <MetricCard label="Lowest Branch" value={kpis?.lowestBranch ?? "—"} icon={TrendingDown} accent="warning" />
         <MetricCard label="Total Net Sales" value={<><SARIcon />{fmt(kpis?.totalNetSales ?? 0)}</>} icon={Wallet} />
         <MetricCard label="Avg Branch Sales" value={<><SARIcon />{fmt(kpis?.averageBranchSales ?? 0)}</>} icon={BarChart3} />
         <MetricCard label="Total Returns" value={<><SARIcon />{fmt(kpis?.totalReturns ?? 0)}</>} icon={RotateCcw} accent="destructive" />
+        <MetricCard label="Tobacco Fees" value={<><SARIcon />{fmt(kpis?.totalTobaccoFees ?? 0)}</>} icon={Cigarette} accent="warning" />
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">
@@ -150,6 +204,7 @@ function BranchSales() {
             { key: "returns", label: "Returns", render: (r: BranchSalesRow) => <><SARIcon />{fmt(r.returns)}</> },
             { key: "netSales", label: "Net Sales", render: (r: BranchSalesRow) => <span className="font-semibold"><SARIcon />{fmt(r.netSales)}</span> },
             { key: "vat", label: "VAT", render: (r: BranchSalesRow) => <><SARIcon />{fmt(r.vat)}</> },
+            { key: "tobaccoFees", label: "Tobacco Fees", render: (r: BranchSalesRow) => <><SARIcon />{fmt(r.tobaccoFees)}</> },
             { key: "avgBasket", label: "Avg Basket", render: (r: BranchSalesRow) => <><SARIcon />{fmt(r.avgBasket)}</> },
             ...(canViewMargin
               ? [

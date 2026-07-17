@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260716110815_AddOfferTriggerBarcode")]
+    partial class AddOfferTriggerBarcode
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -940,7 +943,7 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("batch_id");
 
-                    b.Property<Guid?>("BranchId")
+                    b.Property<Guid>("BranchId")
                         .HasColumnType("char(36)")
                         .HasColumnName("branch_id");
 
@@ -966,10 +969,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("varchar(500)")
                         .HasColumnName("reason");
 
-                    b.Property<Guid?>("WarehouseId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("warehouse_id");
-
                     b.HasKey("Id");
 
                     b.HasIndex("AdjustedBy");
@@ -979,8 +978,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("BranchId");
 
                     b.HasIndex("ProductId");
-
-                    b.HasIndex("WarehouseId");
 
                     b.ToTable("inventory_adjustments");
                 });
@@ -997,7 +994,7 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("varchar(100)")
                         .HasColumnName("batch_number");
 
-                    b.Property<Guid?>("BranchId")
+                    b.Property<Guid>("BranchId")
                         .HasColumnType("char(36)")
                         .HasColumnName("branch_id");
 
@@ -1052,10 +1049,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("updated_at");
 
-                    b.Property<Guid?>("WarehouseId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("warehouse_id");
-
                     b.HasKey("Id");
 
                     b.HasIndex("BranchId");
@@ -1063,8 +1056,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("ProductId");
 
                     b.HasIndex("SupplierId");
-
-                    b.HasIndex("WarehouseId");
 
                     b.ToTable("inventory_batches");
                 });
@@ -2770,83 +2761,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("stock_discrepancies");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.StockMovement", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid?>("BatchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("batch_id");
-
-                    b.Property<Guid?>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("created_by");
-
-                    b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("char(36)");
-
-                    b.Property<string>("MovementType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("varchar(30)")
-                        .HasColumnName("movement_type");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("longtext")
-                        .HasColumnName("notes");
-
-                    b.Property<Guid>("ProductId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("product_id");
-
-                    b.Property<decimal>("Quantity")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("quantity");
-
-                    b.Property<Guid?>("ReferenceId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("reference_id");
-
-                    b.Property<string>("ReferenceNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("reference_number");
-
-                    b.Property<string>("ReferenceType")
-                        .HasMaxLength(30)
-                        .HasColumnType("varchar(30)")
-                        .HasColumnName("reference_type");
-
-                    b.Property<Guid?>("WarehouseId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("warehouse_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BatchId");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("CreatedByUserId");
-
-                    b.HasIndex("ProductId");
-
-                    b.HasIndex("WarehouseId");
-
-                    b.ToTable("stock_movements");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockTransfer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4346,17 +4260,15 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
                         .WithMany()
-                        .HasForeignKey("BranchId");
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.HasOne("BaqalaPOS.Api.Models.Product", "Product")
                         .WithMany()
                         .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.Warehouse", "Warehouse")
-                        .WithMany()
-                        .HasForeignKey("WarehouseId");
 
                     b.Navigation("AdjustedByUser");
 
@@ -4365,15 +4277,15 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("Product");
-
-                    b.Navigation("Warehouse");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.InventoryBatch", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
                         .WithMany()
-                        .HasForeignKey("BranchId");
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.HasOne("BaqalaPOS.Api.Models.Product", "Product")
                         .WithMany("Batches")
@@ -4385,17 +4297,11 @@ namespace BaqalaPOS.Api.Migrations
                         .WithMany("Batches")
                         .HasForeignKey("SupplierId");
 
-                    b.HasOne("BaqalaPOS.Api.Models.Warehouse", "Warehouse")
-                        .WithMany()
-                        .HasForeignKey("WarehouseId");
-
                     b.Navigation("Branch");
 
                     b.Navigation("Product");
 
                     b.Navigation("Supplier");
-
-                    b.Navigation("Warehouse");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.InventoryStock", b =>
@@ -4810,41 +4716,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("StockTransfer");
 
                     b.Navigation("Supplier");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.StockMovement", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.InventoryBatch", "Batch")
-                        .WithMany()
-                        .HasForeignKey("BatchId");
-
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId");
-
-                    b.HasOne("BaqalaPOS.Api.Models.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId");
-
-                    b.HasOne("BaqalaPOS.Api.Models.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.Warehouse", "Warehouse")
-                        .WithMany()
-                        .HasForeignKey("WarehouseId");
-
-                    b.Navigation("Batch");
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("CreatedByUser");
-
-                    b.Navigation("Product");
-
-                    b.Navigation("Warehouse");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.StockTransfer", b =>
