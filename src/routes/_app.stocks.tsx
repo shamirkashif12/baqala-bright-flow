@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -764,6 +765,7 @@ function Stocks() {
 
   const [loading, setLoading] = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [expiringSoonCount, setExpiringSoonCount] = useState(0);
 
   const [tab, setTab] = useState("overview");
@@ -788,22 +790,26 @@ function Stocks() {
 
   // ── Per-section fetch functions ──────────────────────────────────────────────
 
+  // Fetchers keep the previously loaded data and raise the error banner on failure —
+  // `.catch(() => [])` used to zero the tiles/list silently as if loaded (86eyag3ny).
   async function fetchOverview() {
     setLoading(true);
     const sk = await api.getStock({
       branchId: overviewBranch !== "all" ? overviewBranch : undefined,
       categoryId: categoryFilter !== "all" ? categoryFilter : undefined,
-    }).catch(() => []);
-    setStock(sk ?? []);
-    // Rebuild category options from unfiltered load (when no category is active)
-    if (categoryFilter === "all") {
-      const seen = new Map<string, string>();
-      (sk ?? []).forEach(s => {
-        const c = s.product?.category;
-        if (c?.id && c.name && !seen.has(c.id)) seen.set(c.id, c.name);
-      });
-      setAllCategoryOptions(Array.from(seen.entries()).map(([id, name]) => ({ id, name })));
-    }
+    }).catch(() => null);
+    if (sk) {
+      setStock(sk);
+      // Rebuild category options from unfiltered load (when no category is active)
+      if (categoryFilter === "all") {
+        const seen = new Map<string, string>();
+        sk.forEach(s => {
+          const c = s.product?.category;
+          if (c?.id && c.name && !seen.has(c.id)) seen.set(c.id, c.name);
+        });
+        setAllCategoryOptions(Array.from(seen.entries()).map(([id, name]) => ({ id, name })));
+      }
+    } else setLoadError(true);
     setLoading(false);
   }
 
@@ -812,22 +818,22 @@ function Stocks() {
     const bt = await api.getBatches({
       branchId: siBranch !== "all" ? siBranch : undefined,
       status: siStatus !== "all" ? siStatus : undefined,
-    }).catch(() => []);
-    setBatches(bt ?? []);
+    }).catch(() => null);
+    if (bt) setBatches(bt); else setLoadError(true);
     setTabLoading(false);
   }
 
   async function fetchReductions() {
     setTabLoading(true);
-    const rd = await api.getAdjustments({ adjustmentType: "reduction" }).catch(() => []);
-    setReductions(rd ?? []);
+    const rd = await api.getAdjustments({ adjustmentType: "reduction" }).catch(() => null);
+    if (rd) setReductions(rd); else setLoadError(true);
     setTabLoading(false);
   }
 
   async function fetchDamages() {
     setTabLoading(true);
-    const dm = await api.getAdjustments({ adjustmentType: "damage" }).catch(() => []);
-    setDamages(dm ?? []);
+    const dm = await api.getAdjustments({ adjustmentType: "damage" }).catch(() => null);
+    if (dm) setDamages(dm); else setLoadError(true);
     setTabLoading(false);
   }
 
@@ -835,8 +841,8 @@ function Stocks() {
     setTabLoading(true);
     const po = await api.getPurchaseOrders({
       status: grnStatus !== "all" ? grnStatus : undefined,
-    }).catch(() => []);
-    setPurchaseOrders(po ?? []);
+    }).catch(() => null);
+    if (po) setPurchaseOrders(po); else setLoadError(true);
     setTabLoading(false);
   }
 
@@ -845,8 +851,8 @@ function Stocks() {
     const dl = await api.getStockTransfers({
       transferType: "warehouse_to_branch",
       status: dlStatus !== "all" ? dlStatus : undefined,
-    }).catch(() => []);
-    setDeliveries(dl ?? []);
+    }).catch(() => null);
+    if (dl) setDeliveries(dl); else setLoadError(true);
     setTabLoading(false);
   }
 
@@ -856,8 +862,8 @@ function Stocks() {
       branchId: mvBranch !== "all" ? mvBranch : undefined,
       movementType: mvType !== "all" ? mvType : undefined,
       limit: 500,
-    }).catch(() => []);
-    setMovements(mv ?? []);
+    }).catch(() => null);
+    if (mv) setMovements(mv); else setLoadError(true);
     setTabLoading(false);
   }
 
@@ -945,6 +951,7 @@ function Stocks() {
         <BarcodeStockInDialog branches={branches} onDone={refreshCurrentTab} />
       }
     >
+      {loadError && <LoadErrorBanner onRetry={() => { setLoadError(false); refreshCurrentTab(); }} />}
       {/* Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <MetricCard label="Total SKUs" value={String(totalSKUs)} icon={Boxes} />

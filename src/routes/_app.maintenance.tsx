@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Wrench, Monitor, WifiOff, AlertOctagon, Search, RefreshCw, Ticket } from "lucide-react";
 import { api, type DeviceRecord } from "@/lib/api";
+import { uuid } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/maintenance")({ component: Maintenance });
 
@@ -176,7 +177,7 @@ function Maintenance() {
     const device = devices.find(d => d.id === form.deviceId);
     const ticket: Ticket = {
       ...form,
-      id: crypto.randomUUID(),
+      id: uuid(),
       status: "open",
       createdAt: new Date().toISOString(),
       deviceName: device?.deviceName ?? "Unknown",

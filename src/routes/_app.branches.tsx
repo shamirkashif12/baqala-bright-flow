@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -193,6 +194,7 @@ function Branches() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [stats, setStats] = useState<Record<string, BranchStats>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [viewBranch, setViewBranch] = useState<Branch | null>(null);
   const [editBranch, setEditBranch] = useState<Branch | null>(null);
@@ -200,21 +202,23 @@ function Branches() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      const [bs, orders, terminals] = await Promise.all([
-        api.getBranches(),
-        api.getOrders(),
-        api.getTerminals(),
-      ]);
-      setBranches(bs);
-      // Build per-branch stats
+    // allSettled, not all: one sibling call failing must not discard the results that DID
+    // arrive — that rendered 0/0/0 tiles and no branch card as if "loaded" (86eyag3ny).
+    const [bs, orders, terminals] = await Promise.allSettled([
+      api.getBranches(),
+      api.getOrders(),
+      api.getTerminals(),
+    ]);
+    if (bs.status === "fulfilled") {
+      setBranches(bs.value);
       const s: Record<string, BranchStats> = {};
-      bs.forEach(b => { s[b.id] = { orders: 0, terminals: 0 }; });
-      orders.forEach((o: { branchId: string }) => { if (s[o.branchId]) s[o.branchId].orders++; });
-      terminals.forEach((t: { branchId: string }) => { if (s[t.branchId]) s[t.branchId].terminals++; });
+      bs.value.forEach(b => { s[b.id] = { orders: 0, terminals: 0 }; });
+      if (orders.status === "fulfilled") orders.value.forEach((o: { branchId: string }) => { if (s[o.branchId]) s[o.branchId].orders++; });
+      if (terminals.status === "fulfilled") terminals.value.forEach((t: { branchId: string }) => { if (s[t.branchId]) s[t.branchId].terminals++; });
       setStats(s);
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
+    }
+    setLoadError([bs, orders, terminals].some(r => r.status === "rejected"));
+    setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
@@ -247,6 +251,7 @@ function Branches() {
         ) : undefined
       }
     >
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Summary strip */}
       <div className="grid grid-cols-3 gap-3">
         <Card className="p-3 border-border/60 flex items-center gap-3">

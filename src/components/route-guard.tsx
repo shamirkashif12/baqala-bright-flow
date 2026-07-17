@@ -61,7 +61,10 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/tax-reports",         module: "Tax & Fees" },
   // Suppliers
   { url: "/suppliers",           module: "Suppliers" },
-  { url: "/supplier-returns",    module: "Suppliers" },
+  // Supplier Returns is its own matrix row, distinct from Suppliers — Storekeeper and
+  // Supervisor hold Suppliers canView but are fully denied Supplier Returns, so gating
+  // this route on "Suppliers" let exactly those two roles through.
+  { url: "/supplier-returns",    module: "Supplier Returns" },
   { url: "/mart-suppliers",      module: "Suppliers" },
   { url: "/warehouse-suppliers", module: "Suppliers" },
   // Network

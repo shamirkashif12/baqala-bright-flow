@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -83,6 +84,7 @@ function WarehouseManagement() {
   const { canCreate, canEdit } = usePermission("Warehouses");
   const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
@@ -91,7 +93,12 @@ function WarehouseManagement() {
 
   const load = () => {
     setLoading(true);
-    api.getWarehouses().then(setWarehouses).finally(() => setLoading(false));
+    api.getWarehouses()
+      .then(w => { setWarehouses(w); setLoadError(false); })
+      // Keep previously loaded warehouses on failure — an unhandled rejection here used to
+      // render zero tiles / an empty list as if loaded (86eyag3ny).
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
 
@@ -109,6 +116,7 @@ function WarehouseManagement() {
 
   return (
     <div className="space-y-5">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <MetricCard label="Total Warehouses" value={String(totalWH)} icon={Warehouse} accent="primary" />
         <MetricCard label="Active" value={String(activeWH)} icon={CheckCircle} accent="success" />
@@ -650,6 +658,7 @@ function StockRequestsTab() {
   const { canCreate, canApprove } = usePermission("Stock Transfers");
   const [requests, setRequests] = useState<WarehouseRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [approvalFilter, setApprovalFilter] = useState("all");
   const [deliveryFilter, setDeliveryFilter] = useState("all");
@@ -663,7 +672,11 @@ function StockRequestsTab() {
     api.getWarehouseRequests({
       approvalStatus: approvalFilter !== "all" ? approvalFilter : undefined,
       deliveryStatus: deliveryFilter !== "all" ? deliveryFilter : undefined,
-    }).then(setRequests).finally(() => setLoading(false));
+    })
+      .then(r => { setRequests(r); setLoadError(false); })
+      // Keep previously loaded requests on failure instead of zeroing the tab (86eyag3ny).
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, [approvalFilter, deliveryFilter]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -691,6 +704,7 @@ function StockRequestsTab() {
 
   return (
     <div className="space-y-5">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Pending Approval" value={String(pendingCount)} icon={ClipboardList} accent="warning" />
         <MetricCard label="Approved" value={String(approvedCount)} icon={CheckCircle} accent="success" />

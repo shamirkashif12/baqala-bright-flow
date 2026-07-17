@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ import {
   ChevronDown, Check,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn, localDateStr } from "@/lib/utils";
+import { cn, localDateStr, uuid } from "@/lib/utils";
 import {
   api,
   type StockTransfer, type StockTransferItem, type PurchaseOrder,
@@ -981,7 +982,7 @@ function CreateTransferSheet({
     }
 
     const needsBatch = (isMultiDest && destIds.length > 1) || (isMultiSrc && srcIds.length > 1);
-    const batchId = needsBatch ? crypto.randomUUID() : undefined;
+    const batchId = needsBatch ? uuid() : undefined;
 
     try {
       for (const loopId of loopIds) {
@@ -1820,6 +1821,7 @@ function StockTransfers() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [loadError, setLoadError] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [poRefreshKey, setPoRefreshKey] = useState(0);
@@ -1829,7 +1831,12 @@ function StockTransfers() {
 
   const load = () => {
     setLoading(true);
-    api.getStockTransfers().then(setTransfers).finally(() => setLoading(false));
+    api.getStockTransfers()
+      .then(t => { setTransfers(t); setLoadError(false); })
+      // Keep previously loaded transfers on failure — an unhandled rejection here used to
+      // render zero tiles / an empty list as if loaded (86eyag3ny).
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -1901,6 +1908,7 @@ function StockTransfers() {
         </Button>
       ) : undefined}
     >
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard label="Total Transfers" value={String(totalTransfers)} icon={ArrowLeftRight} accent="default" />

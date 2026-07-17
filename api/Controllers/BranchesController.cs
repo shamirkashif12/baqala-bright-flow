@@ -38,7 +38,16 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
     public async Task<IActionResult> GetById(Guid id)
     {
         var branch = await db.Branches.FindAsync(id);
-        return branch is null ? NotFound() : Ok(branch);
+        if (branch is null) return NotFound();
+
+        // Branch-scoped roles may only look up their own branch — mirrors GetAll's filter, which
+        // this direct-by-id lookup previously bypassed entirely (any authenticated caller could
+        // fetch any branch's full record given just its GUID).
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && branch.Id != callerBranchId)
+            return NotFound();
+
+        return Ok(branch);
     }
 
     [RequirePermission("Branches", PermAction.Create)]
