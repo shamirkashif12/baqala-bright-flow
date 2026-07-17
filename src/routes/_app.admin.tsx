@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { RoleGate } from "@/components/role-gate";
 import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard, StatusDot } from "@/components/metric-card";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -108,16 +109,23 @@ function AdminHome() {
   const [dashboard, setDashboard] = useState<DashboardMetrics | null>(null);
   const [activeUsers, setActiveUsers] = useState<import("@/lib/api").User[] | null>(null);
   const [tenantCounts, setTenantCounts] = useState<{ branches: number; terminals: number; suppliers: number } | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
-    api.getAuditLogs({ page: 1 }).then((res) => setAuditLogs(res.items)).catch(() => setAuditLogs([]));
-    api.getDashboard().then(setDashboard).catch(() => {});
-    api.getUsers({ status: "active" }).then(setActiveUsers).catch(() => setActiveUsers([]));
-    Promise.all([api.getBranches(), api.getTerminals(), api.getSuppliers()])
-      .then(([branches, terminals, suppliers]) =>
-        setTenantCounts({ branches: branches.length, terminals: terminals.length, suppliers: suppliers.length }))
-      .catch(() => {});
-  }, []);
+  const load = () => {
+    setLoadError(false);
+    api.getAuditLogs({ page: 1 }).then((res) => setAuditLogs(res.items)).catch(() => setLoadError(true));
+    api.getDashboard().then(setDashboard).catch(() => setLoadError(true));
+    api.getUsers({ status: "active" }).then(setActiveUsers).catch(() => setLoadError(true));
+    Promise.allSettled([api.getBranches(), api.getTerminals(), api.getSuppliers()])
+      .then(([branches, terminals, suppliers]) => {
+        if (branches.status === "fulfilled" && terminals.status === "fulfilled" && suppliers.status === "fulfilled") {
+          setTenantCounts({ branches: branches.value.length, terminals: terminals.value.length, suppliers: suppliers.value.length });
+        }
+        if ([branches, terminals, suppliers].some((r) => r.status === "rejected")) setLoadError(true);
+      });
+  };
+
+  useEffect(() => { load(); }, []);
 
   const feed = useMemo(() => (auditLogs ?? []).slice(0, 6), [auditLogs]);
 
@@ -126,6 +134,7 @@ function AdminHome() {
 
   return (
     <PageShell title="Admin Portal" subtitle="Live operations · tenant control center">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Hero */}
       <Card className="relative overflow-hidden border-0 text-primary-foreground p-0 shadow-elegant">
         <img

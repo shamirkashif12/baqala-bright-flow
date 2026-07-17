@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -230,6 +231,7 @@ function BatchLocationPanel({
 }) {
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
   const [locationFilter, setLocationFilter] = useState(lockedLocationId ?? "all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -247,6 +249,9 @@ function BatchLocationPanel({
         locationType,
       });
       setBatches(data ?? []);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -314,6 +319,7 @@ function BatchLocationPanel({
 
   return (
     <div className="space-y-4">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Metrics */}
       <div className="grid gap-4 md:grid-cols-3">
         <MetricCard label="Total Batches" value={String(total)} icon={Boxes} accent="default" />

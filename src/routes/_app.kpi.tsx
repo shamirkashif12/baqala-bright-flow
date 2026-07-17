@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
@@ -26,24 +27,28 @@ function KPI() {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
+  const load = () => {
+    setLoading(true);
+    Promise.allSettled([
       api.getShifts(),
       api.getTerminals(),
       api.getBranches(),
-    ])
-      .then(([s, t, b]) => {
-        setShifts(s);
-        setTerminals(t);
-        setBranches(b);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+    ]).then(([s, t, b]) => {
+      if (s.status === "fulfilled") setShifts(s.value);
+      if (t.status === "fulfilled") setTerminals(t.value);
+      if (b.status === "fulfilled") setBranches(b.value);
+      setLoadError([s, t, b].some((r) => r.status === "rejected"));
+      setLoading(false);
+    });
+  };
+
+  useEffect(() => { load(); }, []);
 
   return (
     <PageShell title="KPI Evaluation" subtitle="Per-cashier, per-terminal, per-branch and per-scan performance">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Total Scans (today)" value="—" icon={ScanBarcode} accent="primary" />
         <MetricCard label="Avg Scan Time" value="—" icon={Timer} accent="success" />

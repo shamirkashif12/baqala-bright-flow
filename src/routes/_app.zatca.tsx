@@ -12,6 +12,7 @@ import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 
 export const Route = createFileRoute("/_app/zatca")({ component: Zatca });
 
@@ -27,12 +28,13 @@ function Zatca() {
   const [invoices, setInvoices] = useState<ZatcaInvoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   function load() {
     setLoading(true);
     api.getZatcaInvoices(branchFilter !== "all" ? { branchId: branchFilter } : undefined)
-      .then(setInvoices)
-      .catch(() => setInvoices([]))
+      .then(invoices => { setInvoices(invoices); setLoadError(false); })
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }
 
@@ -57,6 +59,7 @@ function Zatca() {
 
   return (
     <PageShell title="ZATCA Invoices" subtitle="VAT invoices · live sync · Arabic + English">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <Card className="p-6 border-success/30 bg-success/5 shadow-card">
         <div className="flex items-center gap-4">
           <div className="h-12 w-12 rounded-xl bg-success/15 text-success flex items-center justify-center">

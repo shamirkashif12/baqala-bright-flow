@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -40,10 +41,13 @@ function Sparkline({ data, color = "var(--primary)" }: { data: number[]; color?:
 
 function BI() {
   const [dashboard, setDashboard] = useState<DashboardMetrics | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
-    api.getDashboard().then(setDashboard).catch(console.error);
-  }, []);
+  const load = () => {
+    api.getDashboard().then((d) => { setDashboard(d); setLoadError(false); }).catch(() => setLoadError(true));
+  };
+
+  useEffect(() => { load(); }, []);
 
   const totalRevenue = dashboard?.sales.totalToday ?? 0;
   const totalOrders = dashboard?.orders.totalToday ?? 0;
@@ -56,6 +60,7 @@ function BI() {
 
   return (
     <PageShell title="Business Intelligence" subtitle="Performance, trends and analytics across the chain">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Revenue (today)" value={<><SARIcon />{" "}{fmt(totalRevenue)}</>} icon={Wallet} accent="primary" />
         <MetricCard label="Orders (today)" value={String(totalOrders)} icon={ShoppingBag} />

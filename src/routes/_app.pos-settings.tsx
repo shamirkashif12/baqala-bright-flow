@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -93,9 +94,10 @@ function PosSettings() {
 
   const [s, setS] = useState<S>(DEFAULTS);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  function loadSettings() {
     if (!branchId) return;
     setLoading(true);
     api.getPosSettings(branchId)
@@ -124,9 +126,20 @@ function PosSettings() {
           blockExpiredItems:              data.blockExpiredItems             ?? DEFAULTS.blockExpiredItems,
           blockNonpermissibleItems:       data.blockNonpermissibleItems      ?? DEFAULTS.blockNonpermissibleItems,
         });
+        setLoadError(false);
+        setLoading(false);
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // Do NOT fall back to DEFAULTS here — that would let a subsequent Save silently
+        // overwrite this branch's real saved settings. Leave `s` and `loading` untouched
+        // (Save stays disabled while loading=true) until Retry succeeds.
+        setLoadError(true);
+      });
+  }
+
+  useEffect(() => {
+    loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
 
   function t(key: keyof S) {
@@ -152,7 +165,14 @@ function PosSettings() {
       subtitle="Configure cashier, terminal, payments, printing and permissions"
       actions={<BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />}
     >
-      {loading && (
+      {loadError && (
+        <LoadErrorBanner
+          onRetry={loadSettings}
+          message="Failed to load this branch's POS settings — showing may be stale or unavailable. Saving is disabled until this loads successfully."
+        />
+      )}
+
+      {loading && !loadError && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading settings…
         </div>

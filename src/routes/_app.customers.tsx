@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -270,6 +271,7 @@ function Customers() {
   const { canCreate } = usePermission("Customers");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [tierFilter, setTierFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -282,7 +284,9 @@ function Customers() {
     api.getCustomers({
       tier: tierFilter !== "all" ? tierFilter : undefined,
       search: q || undefined,
-    }).then(setCustomers).finally(() => setLoading(false));
+    }).then(cs => { setCustomers(cs); setLoadError(false); })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   }, [tierFilter, q]);
 
   useEffect(() => { load(); }, [load]);
@@ -306,6 +310,7 @@ function Customers() {
 
   return (
     <PageShell title="Customers" subtitle="Loyalty tiers, spend tracking and customer profiles">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[

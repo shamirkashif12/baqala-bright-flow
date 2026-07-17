@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,7 @@ function Rules() {
   const [rules, setRules] = useState<ComplianceRule[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [view, setView] = useState<ComplianceRule | null>(null);
   const [editForm, setEditForm] = useState<RuleFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -71,12 +73,23 @@ function Rules() {
 
   const reload = () => api.getComplianceRules({ includeInactive: true }).then(setRules).catch(() => {});
 
-  useEffect(() => {
-    Promise.all([
+  const load = () => {
+    setLoading(true);
+    // allSettled: a getComplianceRules failure must not wipe out a successful branches
+    // fetch (and vice versa) — previously either call rejecting failed the whole Promise.all
+    // and left both `rules` and `branches` unset with no error surfaced.
+    Promise.allSettled([
       api.getComplianceRules({ includeInactive: true }),
-      api.getBranches().catch(() => [] as Branch[]),
-    ]).then(([r, b]) => { setRules(r); setBranches(b); }).finally(() => setLoading(false));
-  }, []);
+      api.getBranches(),
+    ]).then(([r, b]) => {
+      if (r.status === "fulfilled") setRules(r.value);
+      if (b.status === "fulfilled") setBranches(b.value);
+      setLoadError([r, b].some((res) => res.status === "rejected"));
+      setLoading(false);
+    });
+  };
+
+  useEffect(() => { load(); }, []);
 
   const openView = (r: ComplianceRule) => { setEditForm(ruleToForm(r)); setView(r); };
 
@@ -147,6 +160,7 @@ function Rules() {
       subtitle="Business rules for returns, discounts, coupons, fees, taxes & approvals"
       actions={canCreate ? <NewRule branches={branches} createdBy={user?.id} onCreated={reload} /> : undefined}
     >
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Active Rules" value={loading ? "—" : String(active)} icon={Workflow} accent="primary" />
         <MetricCard label="Approval Rules" value={loading ? "—" : String(approvalCount)} icon={ShieldCheck} accent="success" />

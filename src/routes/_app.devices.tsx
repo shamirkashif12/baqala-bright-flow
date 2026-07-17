@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,6 +92,7 @@ function Devices() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [view, setView] = useState<DeviceRecord | null>(null);
   const [edit, setEdit] = useState<DeviceRecord | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -100,14 +102,18 @@ function Devices() {
   const [br, setBr] = useState("All");
   const [st, setSt] = useState("All");
 
-  const load = () => {
+  const load = async () => {
     setLoading(true);
-    Promise.all([api.getDevices(), api.getBranches(), api.getTerminals()])
-      .then(([d, b, t]) => { setDevices(d); setBranches(b); setTerminals(t); })
-      .catch(() => toast.error("Failed to load devices."))
-      .finally(() => setLoading(false));
+    const [d, b, t] = await Promise.allSettled([api.getDevices(), api.getBranches(), api.getTerminals()]);
+    if (d.status === "fulfilled") setDevices(d.value);
+    if (b.status === "fulfilled") setBranches(b.value);
+    if (t.status === "fulfilled") setTerminals(t.value);
+    const hasError = [d, b, t].some(r => r.status === "rejected");
+    setLoadError(hasError);
+    if (hasError) toast.error("Failed to load devices.");
+    setLoading(false);
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
   const filtered = useMemo(() => devices.filter(d =>
     (!q || `${d.deviceName} ${d.deviceType} ${d.serialNumber ?? ""}`.toLowerCase().includes(q.toLowerCase())) &&
@@ -145,6 +151,7 @@ function Devices() {
 
   return (
     <PageShell title="Devices" subtitle="Hardware fleet + behavior in one place">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Total Devices" value={String(total)} icon={HardDrive} accent="primary" />
         <MetricCard label="Healthy" value={String(healthy)} icon={Activity} accent="success" />

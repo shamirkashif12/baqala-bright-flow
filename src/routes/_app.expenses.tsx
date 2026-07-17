@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +47,7 @@ function EntriesTab() {
   const [expenseTypes, setExpenseTypes] = useState<ExpenseType[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -74,7 +76,8 @@ function EntriesTab() {
       paymentMethod: methodFilter !== "all" ? methodFilter.toLowerCase().replace(" ", "_") : undefined,
       expenseTypeId: typeFilter !== "all" ? typeFilter : undefined,
     })
-      .then(setExpenses)
+      .then((es) => { setExpenses(es); setLoadError(false); })
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, [branchFilter, methodFilter, typeFilter]);
   useEffect(() => { load(); }, [load]);
@@ -163,6 +166,7 @@ function EntriesTab() {
 
   return (
     <div className="space-y-4">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ─── Toolbar ─── */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search ref or description…" className="h-9 w-52 flex-shrink-0" />

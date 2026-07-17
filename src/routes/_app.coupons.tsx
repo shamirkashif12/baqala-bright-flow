@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -158,12 +159,19 @@ function CouponsTab() {
   const { canCreate, canEdit, canDelete } = usePermission("Coupons");
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editItem, setEditItem] = useState<Coupon | null>(null);
   const [form, setForm] = useState<CouponForm>(emptyCoupon);
   const [saving, setSaving] = useState(false);
 
-  const load = () => { setLoading(true); api.getCoupons().then(setCoupons).finally(() => setLoading(false)); };
+  const load = () => {
+    setLoading(true);
+    api.getCoupons()
+      .then(c => { setCoupons(c); setLoadError(false); })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
+  };
   useEffect(load, []);
 
   const openCreate = () => { setEditItem(null); setForm(emptyCoupon); setSheetOpen(true); };
@@ -201,6 +209,7 @@ function CouponsTab() {
 
   return (
     <div className="space-y-4">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="flex justify-end">
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>
@@ -330,12 +339,19 @@ function DiscountsTab() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editItem, setEditItem] = useState<Discount | null>(null);
   const [form, setForm] = useState<DiscountForm>(emptyDiscount);
   const [saving, setSaving] = useState(false);
 
-  const load = () => { setLoading(true); api.getDiscounts().then(setDiscounts).finally(() => setLoading(false)); };
+  const load = () => {
+    setLoading(true);
+    api.getDiscounts()
+      .then(d => { setDiscounts(d); setLoadError(false); })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
+  };
   useEffect(() => {
     load();
     api.getProducts().then(setProducts).catch(() => {});
@@ -407,6 +423,7 @@ function DiscountsTab() {
 
   return (
     <div className="space-y-4">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="flex justify-end">
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>
@@ -576,6 +593,7 @@ function OffersTab() {
   const [products, setProducts] = useState<Product[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editItem, setEditItem] = useState<Offer | null>(null);
   const [form, setForm] = useState<OfferForm>(emptyOffer);
@@ -584,7 +602,13 @@ function OffersTab() {
   const [comboIds, setComboIds] = useState<string[]>([]);
   const [comboPickId, setComboPickId] = useState("");
 
-  const load = () => { setLoading(true); api.getOffers().then(setOffers).finally(() => setLoading(false)); };
+  const load = () => {
+    setLoading(true);
+    api.getOffers()
+      .then(o => { setOffers(o); setLoadError(false); })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
+  };
   useEffect(() => {
     load();
     api.getProducts().then(setProducts).catch(() => {});
@@ -691,6 +715,7 @@ function OffersTab() {
 
   return (
     <div className="space-y-4">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="flex justify-end">
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-10" onClick={openCreate}>

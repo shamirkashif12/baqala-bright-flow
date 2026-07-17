@@ -1,10 +1,11 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { api, type Branch, type Terminal, type User } from "@/lib/api";
 import {
   ArrowLeft,
@@ -57,22 +58,34 @@ function BranchDetail() {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
+  const load = () => {
+    setLoading(true);
+    // allSettled, not all: distinguish "fetch failed" (show retry banner) from "fetch
+    // succeeded but no branch matched this id" (genuine not-found) — previously any rejection
+    // here (including the deliberate `throw notFound()`) was swallowed the same way, so a
+    // transient network error rendered the misleading "Branch not found" page (86eyag3ny).
+    Promise.allSettled([
       api.getBranches(),
       api.getTerminals({ branchId }),
       api.getUsers({ branchId }),
     ])
-      .then(([branches, terms, staff]) => {
-        const found = branches.find((b) => b.id === branchId);
-        if (!found) throw notFound();
-        setBranch(found);
-        setTerminals(terms);
-        setUsers(staff);
+      .then(([branchesR, termsR, staffR]) => {
+        if (branchesR.status === "fulfilled") {
+          const found = branchesR.value.find((b) => b.id === branchId);
+          if (found) setBranch(found);
+        }
+        if (termsR.status === "fulfilled") setTerminals(termsR.value);
+        if (staffR.status === "fulfilled") setUsers(staffR.value);
+        setLoadError([branchesR, termsR, staffR].some(r => r.status === "rejected"));
       })
-      .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
 
   if (loading) {
@@ -84,6 +97,13 @@ function BranchDetail() {
   }
 
   if (!branch) {
+    if (loadError) {
+      return (
+        <PageShell title="Failed to load branch">
+          <LoadErrorBanner onRetry={load} message="Failed to load branch details — check your connection and retry." />
+        </PageShell>
+      );
+    }
     return (
       <PageShell title="Branch not found">
         <p className="text-sm text-muted-foreground">No branch with that ID.</p>
@@ -105,6 +125,7 @@ function BranchDetail() {
         </Link>
       }
     >
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-3 grid-cols-2 md:grid-cols-4 xl:grid-cols-5">
         <MetricCard label="Terminals" value={String(terminals.length)} icon={TerminalIcon} accent="primary" />
         <MetricCard label="Active" value={String(active)} icon={Activity} accent="success" />

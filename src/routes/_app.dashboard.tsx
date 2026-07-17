@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { cn } from "@/lib/utils";
 import { api, type DashboardMetrics, type CashierShift, type Branch, type InventoryStock, type Terminal } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
@@ -291,6 +292,7 @@ function Dashboard() {
   const [activeShifts, setActiveShifts] = useState<CashierShift[]>([]);
   const [warehousePending, setWarehousePending] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -325,22 +327,29 @@ function Dashboard() {
     if (isAdmin) api.getBranches("active").then(setBranches).catch(() => {});
   }, [isAdmin]);
 
-  useEffect(() => {
+  const loadDashboard = () => {
     setLoading(true);
     const apiPeriod = PERIOD_MAP[period] ?? "today";
     const branchId = branch !== "all" ? branch : undefined;
-    Promise.all([
+    // allSettled, not all: a permission-gated sibling call failing (shifts/warehouse) must not
+    // wipe out the core dashboard metrics that DID load — surface it via loadError instead.
+    Promise.allSettled([
       api.getDashboard({ period: apiPeriod, branchId }),
       canViewShifts ? api.getActiveShifts(branchId) : Promise.resolve([]),
       canViewWarehouses ? api.getWarehouseRequests({ approvalStatus: "pending" }) : Promise.resolve([]),
     ])
-      .then(([dash, shifts, warehouse]) => {
-        setDashData(dash);
-        setActiveShifts(shifts);
-        setWarehousePending(warehouse.length);
+      .then(([dashR, shiftsR, warehouseR]) => {
+        if (dashR.status === "fulfilled") setDashData(dashR.value);
+        if (shiftsR.status === "fulfilled") setActiveShifts(shiftsR.value);
+        if (warehouseR.status === "fulfilled") setWarehousePending(warehouseR.value.length);
+        setLoadError([dashR, shiftsR, warehouseR].some(r => r.status === "rejected"));
       })
-      .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadDashboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, branch, canViewShifts, canViewWarehouses]);
 
   // Reset lazy-loaded tab data when branch/period filter changes
@@ -398,6 +407,7 @@ function Dashboard() {
 
   return (
     <PageShell title="Dashboard" subtitle={`Live snapshot · ${selectedBranchName} · ${period}`}>
+      {loadError && <LoadErrorBanner onRetry={loadDashboard} />}
       {/* Filter bar */}
       <Card className="p-3 border-border/60 shadow-card">
         <div className="flex flex-wrap items-center gap-2">

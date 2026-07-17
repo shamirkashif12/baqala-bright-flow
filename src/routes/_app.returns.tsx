@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, ScanLine, Loader2 } from "lucide-react";
 import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type OrderItem } from "@/lib/api";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
@@ -218,6 +219,7 @@ function Returns() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -238,10 +240,15 @@ function Returns() {
 
   const load = useCallback(() => {
     setLoading(true);
+    // Keep whatever returns list is already on screen if this fails — previously had no
+    // .catch() at all, so a failed fetch left `returns` in whatever state it was in with no
+    // signal to the cashier that the tiles/table might be stale (86eyag3ny).
     api.getReturns({
       branchId: branchFilter !== "all" ? branchFilter : undefined,
       status: statusFilter !== "all" ? statusFilter : undefined,
-    }).then(setReturns).finally(() => setLoading(false));
+    }).then(r => { setReturns(r); setLoadError(false); })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   }, [branchFilter, statusFilter]);
   useEffect(() => { load(); }, [load]);
 
@@ -405,6 +412,7 @@ function Returns() {
 
   return (
     <PageShell title="Returns" subtitle="Customer return requests and refund processing">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-3 mb-2">
         {[

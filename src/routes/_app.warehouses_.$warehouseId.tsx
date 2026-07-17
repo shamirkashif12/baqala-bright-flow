@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useMemo, Fragment } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Card } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -48,6 +49,7 @@ function WarehouseDetail() {
 
   const [stock, setStock] = useState<WarehouseStock[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
+  const [stockLoadError, setStockLoadError] = useState(false);
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   const [wPos, setWPos] = useState<PurchaseOrder[]>([]);
   const [rtsTransfers, setRtsTransfers] = useState<StockTransfer[]>([]);
@@ -65,10 +67,18 @@ function WarehouseDetail() {
   };
   useEffect(load, [warehouseId]);
 
-  useEffect(() => {
+  const loadStock = () => {
     if (!warehouse) return;
     setLoadingStock(true);
-    api.getWarehouseStock(warehouse.id).then(setStock).finally(() => setLoadingStock(false));
+    api.getWarehouseStock(warehouse.id)
+      .then(s => { setStock(s); setStockLoadError(false); })
+      .catch(() => setStockLoadError(true))
+      .finally(() => setLoadingStock(false));
+  };
+
+  useEffect(() => {
+    if (!warehouse) return;
+    loadStock();
     api.getBatches({ warehouseId: warehouse.id }).then(setBatches).catch(() => {});
     setLoadingLedger(true);
     Promise.allSettled([
@@ -136,6 +146,7 @@ function WarehouseDetail() {
         </>
       }
     >
+      {stockLoadError && <LoadErrorBanner onRetry={loadStock} />}
       <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
         <MetricCard label="SKUs" value={String(skuCount)} icon={Package} accent="primary" />
         <MetricCard label="Total Units" value={String(Math.round(totalStock))} icon={Boxes} accent="success" />

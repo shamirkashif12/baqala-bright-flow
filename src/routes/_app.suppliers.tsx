@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -431,6 +432,7 @@ function SuppliersTab() {
   const { canCreate, canEdit, canDelete } = usePermission("Suppliers");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [viewSupplier, setViewSupplier] = useState<Supplier | null>(null);
@@ -441,7 +443,10 @@ function SuppliersTab() {
 
   const load = () => {
     setLoading(true);
-    api.getSuppliers().then(setSuppliers).finally(() => setLoading(false));
+    api.getSuppliers()
+      .then(s => { setSuppliers(s); setLoadError(false); })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
@@ -490,6 +495,7 @@ function SuppliersTab() {
 
   return (
     <div className="space-y-5">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Metric cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Total Suppliers" value={String(totalSuppliers)} icon={Truck} accent="primary" />
