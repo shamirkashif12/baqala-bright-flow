@@ -192,6 +192,10 @@ public class InventoryController(
         if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && callerBranchId != req.BranchId)
             return Forbid();
 
+        var product = await db.Products.FindAsync(req.ProductId);
+        var qtyError = QuantityValidation.ValidateWholeUnit(product, req.Quantity, "Received quantity");
+        if (qtyError is not null) return BadRequest(new { message = qtyError });
+
         var batchId = Guid.NewGuid();
         var batch = new InventoryBatch
         {
@@ -352,6 +356,10 @@ public class InventoryController(
         // of defect (corrupt on-hand quantity), separate from the Receive Batch form.
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Adjustment quantity must be greater than zero." });
+
+        var adjustProduct = await db.Products.FindAsync(req.ProductId);
+        var adjustQtyError = QuantityValidation.ValidateWholeUnit(adjustProduct, req.Quantity, "Adjustment quantity");
+        if (adjustQtyError is not null) return BadRequest(new { message = adjustQtyError });
 
         var isIncrease = req.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in";
 

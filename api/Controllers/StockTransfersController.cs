@@ -326,6 +326,16 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateTransferRequest req)
     {
+        var reqItems = req.Items ?? [];
+        var transferProducts = await db.Products
+            .Where(p => reqItems.Select(i => i.ProductId).Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id);
+        foreach (var i in reqItems)
+        {
+            var err = QuantityValidation.ValidateWholeUnit(transferProducts.GetValueOrDefault(i.ProductId), i.RequestedQuantity, "Requested quantity");
+            if (err is not null) return BadRequest(new { message = err });
+        }
+
         var transferId = Guid.NewGuid();
         var items = (req.Items ?? []).Select(i => new StockTransferItem
         {
@@ -441,6 +451,9 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         // quantity and any tracked expiry need the same validation as the other entry points.
         // Unlike those two, 0 is a legitimate value here (the frontend lets a receiver record a
         // fully lost/undelivered line item with a discrepancy note) — only negative is invalid.
+        var receiveProducts = await db.Products
+            .Where(p => transfer.Items.Select(i => i.ProductId).Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id);
         foreach (var recv in req.Items ?? [])
         {
             if (recv.ReceivedQuantity < 0)
@@ -450,6 +463,12 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             if (itemForCheck?.ExpiryDate is { } expiry && expiry.Date < DateTime.UtcNow.Date
                 && string.IsNullOrWhiteSpace(recv.DamagedOrReturnReason))
                 return BadRequest(new { message = $"Expiry date for transfer item {recv.ItemId} cannot be in the past — provide a damagedOrReturnReason to log it as damaged/return stock instead of resalable inventory." });
+
+            if (itemForCheck is not null)
+            {
+                var err = QuantityValidation.ValidateWholeUnit(receiveProducts.GetValueOrDefault(itemForCheck.ProductId), recv.ReceivedQuantity, "Received quantity");
+                if (err is not null) return BadRequest(new { message = err });
+            }
         }
 
         // Update per-item received quantities

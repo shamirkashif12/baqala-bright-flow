@@ -68,8 +68,25 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
     [HttpPost("requests")]
     public async Task<IActionResult> CreateRequest([FromBody] WarehouseRequest request)
     {
+        // RequestedBy is a required, non-nullable FK to Users — [Required] on a Guid is a no-op
+        // in model binding (it can't be "missing"), so a client that never sends this field
+        // (the New Stock Request form never has) silently bound Guid.Empty, which then violated
+        // FK_warehouse_requests_users_requested_by at SaveChangesAsync and 500'd on every submit,
+        // any role, no partial record left (the FK failure rolls back the whole insert). Derive
+        // it server-side from the caller's own JWT instead of trusting/requiring the client to
+        // send it, same convention as PurchaseOrdersController.Create's CreatedBy.
+        var callerId = Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var uid) ? uid : (Guid?)null;
+
+        // Same FK-violation-as-500 failure mode as RequestedBy above: a warehouse with no
+        // BranchWarehouse link can make the frontend fall back to sending the warehouse's own id
+        // as destinationBranchId, which has no matching row in branches and would otherwise 500
+        // at SaveChangesAsync instead of failing cleanly here.
+        if (!await db.Branches.AnyAsync(b => b.Id == request.DestinationBranchId))
+            return BadRequest(new { message = "Destination branch not found." });
+
         request.Id = Guid.NewGuid();
         request.RequestNumber = $"WH-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+        request.RequestedBy = callerId ?? request.RequestedBy;
         request.ApprovalStatus = "request_generated";
         request.DeliveryStatus = "pending";
         request.CreatedAt = request.UpdatedAt = DateTime.UtcNow;

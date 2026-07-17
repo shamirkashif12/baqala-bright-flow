@@ -153,6 +153,16 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreatePoRequest req)
     {
+        var poReqItems = req.Items ?? [];
+        var poProducts = await db.Products
+            .Where(p => poReqItems.Select(i => i.ProductId).Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id);
+        foreach (var i in poReqItems)
+        {
+            var err = QuantityValidation.ValidateWholeUnit(poProducts.GetValueOrDefault(i.ProductId), i.OrderedQuantity, "Ordered quantity");
+            if (err is not null) return BadRequest(new { message = err });
+        }
+
         var poId = Guid.NewGuid();
         var items = (req.Items ?? []).Select(i => new PurchaseOrderItem
         {
@@ -254,10 +264,16 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         // Same stock-write guard as InventoryController.ReceiveBatch — receiving against a PO
         // is a second, previously-unvalidated route to write InventoryBatch rows, so it needs
         // the same quantity/expiry checks rather than trusting the receive payload as-is.
+        var receiveProducts = await db.Products
+            .Where(p => items.Select(i => i.ProductId).Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id);
         foreach (var recv in items)
         {
             if (recv.Quantity <= 0)
                 return BadRequest(new { message = $"Received quantity for product {recv.ProductId} must be greater than zero." });
+
+            var qtyErr = QuantityValidation.ValidateWholeUnit(receiveProducts.GetValueOrDefault(recv.ProductId), recv.Quantity, "Received quantity");
+            if (qtyErr is not null) return BadRequest(new { message = qtyErr });
 
             var poItemForCheck = po.Items.FirstOrDefault(i => i.ProductId == recv.ProductId);
             var effectiveExpiry = recv.ExpiryDate ?? poItemForCheck?.ExpiryDate;
