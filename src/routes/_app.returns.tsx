@@ -282,7 +282,11 @@ function Returns() {
         setForm(p => ({
           ...p, orderId: v,
           branchId: order.branchId,
-          customerId: order.customerId ?? p.customerId,
+          // Always take the freshly-looked-up order's own customerId, never fall back to
+          // whatever was in the form before — switching from a customer's order to an
+          // anonymous/walk-in one within the same open sheet used to leave the PREVIOUS
+          // order's customerId attached, misattributing the return to an unrelated customer.
+          customerId: order.customerId ?? "",
           refundAmount: order.totalAmount.toFixed(2),
         }));
         setItemRows((order.items ?? []).map((oi: OrderItem) => ({
@@ -345,7 +349,8 @@ function Returns() {
         allBranches.find(b => b.id === order!.branchId)?.name ??
         "Unknown branch";
       setMatchedBranchName(branchName);
-      setForm(p => ({ ...p, orderId: order!.id, branchId: order!.branchId, customerId: order!.customerId ?? p.customerId }));
+      // Same fix as the orderId-select path above — always take this order's own customerId.
+      setForm(p => ({ ...p, orderId: order!.id, branchId: order!.branchId, customerId: order!.customerId ?? "" }));
       const rows: ItemRow[] = (order.items ?? []).map((oi: OrderItem) => ({
         orderItemId: oi.id ?? "",
         productId: oi.productId,

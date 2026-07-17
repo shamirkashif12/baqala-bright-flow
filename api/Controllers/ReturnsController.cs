@@ -73,6 +73,13 @@ public class ReturnsController(
         var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == ret.OrderId);
         if (order is null) return BadRequest(new { message = "Original order for this return was not found." });
 
+        // MIMONY-RETURNS-CUSTMISATTR-001: CustomerId was trusted verbatim from the client. The
+        // frontend bug (switching orders within one open Returns sheet without resetting form
+        // state) let a return against an anonymous/walk-in order get persisted with a real,
+        // unrelated customer's id attached — fixed there too, but derive it here as well so no
+        // other caller (or a future frontend regression) can misattribute a return again.
+        ret.CustomerId = order.CustomerId;
+
         // MIMONY-RETURNS-VAT-001: RefundAmount was persisted exactly as the client sent it, and
         // the frontend sends flat qty × unitPrice — so the VAT the customer paid was never
         // refunded and any discount they received was never netted out. Recompute every line
@@ -277,6 +284,16 @@ public class ReturnsController(
 
         ret.Status = "completed";
         ret.UpdatedAt = DateTime.UtcNow;
+
+        // MIMONY-RETURNS-ORDERSTATUS-001: the Orders page's "quick refund" dialog used to mark
+        // the order OrderStatus="refunded" immediately on submitting the return — before it had
+        // even been approved. Since Create above always forces a new return to "pending", a
+        // return that was later REJECTED left the order permanently mislabeled "refunded" with
+        // no return to back it up. This is the only place a return actually finishes — flip the
+        // order here instead, once it's genuinely approved and completed, never earlier.
+        var order = await db.Orders.FindAsync(ret.OrderId);
+        if (order is not null) order.OrderStatus = "refunded";
+
         await db.SaveChangesAsync();
 
         // Best-effort, after the transactional stock write above already succeeded — same

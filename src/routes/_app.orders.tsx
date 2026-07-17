@@ -262,6 +262,13 @@ function RefundDialog({ order, open, onClose, onDone }: {
           restock,
         }));
 
+      // MIMONY-RETURNS-ORDERSTATUS-001: this used to mark the order OrderStatus="refunded"
+      // immediately on submit — before any approval. The backend always creates a return as
+      // "pending" regardless of the status sent here, so a return raised from this dialog and
+      // later REJECTED (via the normal Returns page) left the order permanently mislabeled
+      // "refunded" with no completed return behind it. The order now only flips to "refunded"
+      // server-side, once this same return is actually approved and completed
+      // (ReturnsController.Complete) — this dialog raises the request, it doesn't finalize it.
       await api.createReturn({
         orderId: order.id,
         branchId: order.branchId,
@@ -270,10 +277,9 @@ function RefundDialog({ order, open, onClose, onDone }: {
         refundMethod,
         refundAmount: +refundTotal.toFixed(2),
         reason: reason.trim(),
-        status: "completed",
         items: returnItems,
       });
-      await api.updateOrderStatus(order.id, "refunded");
+      toast.success("Refund request submitted — pending manager approval.");
       onDone();
     } catch (e: any) {
       setError(e.message ?? "Failed to process refund.");
