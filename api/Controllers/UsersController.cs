@@ -93,7 +93,16 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
                 HasCustomPermissions = db.UserPermissions.Any(p => p.UserId == u.Id)
             })
             .FirstOrDefaultAsync(u => u.Id == id);
-        return user is null ? NotFound() : Ok(user);
+        if (user is null) return NotFound();
+
+        // Branch-scoped roles may only look up staff in their own branch — mirrors GetAll's
+        // filter, which this direct-by-id lookup previously bypassed entirely (any authenticated
+        // caller could fetch any user's email/username/branch given just their GUID).
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && user.BranchId != callerBranchId)
+            return NotFound();
+
+        return Ok(user);
     }
 
     // Any signed-in user may read their OWN overrides (needed to build their permission

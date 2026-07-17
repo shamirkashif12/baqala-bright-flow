@@ -44,20 +44,60 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (!string.IsNullOrEmpty(paymentStatus)) query = query.Where(o => o.PaymentStatus == paymentStatus);
         if (from.HasValue) query = query.Where(o => o.CreatedAt >= from);
         if (to.HasValue) query = query.Where(o => o.CreatedAt <= to);
-        return Ok(await query.OrderByDescending(o => o.CreatedAt).Take(200).ToListAsync());
+
+        var orders = await query.OrderByDescending(o => o.CreatedAt).Take(200)
+            .Select(o => new
+            {
+                o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
+                o.Subtotal, o.DiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
+                o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
+                Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
+                // Redacted: this used to embed the full Cashier User entity (email, username,
+                // phone, branchId, status, last login) via the EF Include below, exposing a
+                // cross-branch cashier's PII to anyone with ordinary access to a branch-scoped
+                // Orders list. id + display name is all the Orders page/CSV export/print/receipt
+                // actually use.
+                Cashier = o.Cashier == null ? null : new { o.Cashier.Id, o.Cashier.FullName },
+                Items = o.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount }),
+                Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
+            })
+            .ToListAsync();
+        return Ok(orders);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
         var order = await db.Orders
-            .Include(o => o.Items).ThenInclude(i => i.Product)
-            .Include(o => o.Payments)
-            .Include(o => o.Customer)
-            .Include(o => o.Branch)
-            .Include(o => o.Cashier)
-            .FirstOrDefaultAsync(o => o.Id == id);
-        return order is null ? NotFound() : Ok(order);
+            .Where(o => o.Id == id)
+            .Select(o => new
+            {
+                o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
+                o.Subtotal, o.DiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
+                o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
+                Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
+                // Redacted — same reason as GetAll above: id + display name only, never the full
+                // cashier User record.
+                Cashier = o.Cashier == null ? null : new { o.Cashier.Id, o.Cashier.FullName },
+                Customer = o.Customer == null ? null : new { o.Customer.Id, o.Customer.FullName, o.Customer.Phone, o.Customer.Email },
+                Items = o.Items.Select(i => new
+                {
+                    i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount,
+                    Product = i.Product == null ? null : new { i.Product.Id, i.Product.Name, i.Product.Sku }
+                }),
+                Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
+            })
+            .FirstOrDefaultAsync();
+        if (order is null) return NotFound();
+
+        // Branch-scoped roles may only look up an order from their own branch — mirrors GetAll's
+        // filter, which this direct-by-id lookup previously bypassed entirely (any authenticated
+        // caller could fetch any order, and its embedded cashier PII, given just its GUID).
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && order.BranchId != callerBranchId)
+            return NotFound();
+
+        return Ok(order);
     }
 
     [HttpGet("by-number/{orderNumber}")]
@@ -69,7 +109,15 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             .Include(o => o.Customer)
             .Include(o => o.Branch)
             .FirstOrDefaultAsync(o => o.OrderNumber == orderNumber);
-        return order is null ? NotFound() : Ok(order);
+        if (order is null) return NotFound();
+
+        // Same branch-scoping gap as GetById above — a direct order-number lookup previously
+        // bypassed the caller's branch entirely.
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && order.BranchId != callerBranchId)
+            return NotFound();
+
+        return Ok(order);
     }
 
     [RequirePermission("POS", PermAction.Create)]

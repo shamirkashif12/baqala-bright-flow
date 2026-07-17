@@ -265,11 +265,21 @@ function CustomizeDialog({
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 function Dashboard() {
-  const { user } = useAuth();
+  const { user, canViewModule } = useAuth();
   // Only tenant_admin sees cross-branch data and has the branch selector
   const isAdmin = user?.role === "tenant_admin";
   // For non-admins, lock to their assigned branch
   const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
+
+  // Dashboard tiles/tabs surface data owned by other modules (cashier PII + shift SAR
+  // totals, terminal-cashier assignments, return/refund detail) — gate each behind the
+  // same RolePermissions matrix the dedicated /cashier-shift, /terminals, /returns routes
+  // already enforce, so a role denied those modules doesn't get them for free here.
+  const canViewShifts = canViewModule("Cashier Shifts");
+  const canViewTerminals = canViewModule("Terminals");
+  const canViewReturns = canViewModule("Returns");
+  const canViewWarehouses = canViewModule("Warehouses");
+  const canViewInventory = canViewModule("Inventory");
 
   const [period, setPeriod] = useState<(typeof periods)[number]>("Daily");
   // Non-admin users locked to their assigned branch; admins start with "all"
@@ -321,8 +331,8 @@ function Dashboard() {
     const branchId = branch !== "all" ? branch : undefined;
     Promise.all([
       api.getDashboard({ period: apiPeriod, branchId }),
-      api.getActiveShifts(branchId),
-      api.getWarehouseRequests({ approvalStatus: "pending" }),
+      canViewShifts ? api.getActiveShifts(branchId) : Promise.resolve([]),
+      canViewWarehouses ? api.getWarehouseRequests({ approvalStatus: "pending" }) : Promise.resolve([]),
     ])
       .then(([dash, shifts, warehouse]) => {
         setDashData(dash);
@@ -331,7 +341,7 @@ function Dashboard() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [period, branch]);
+  }, [period, branch, canViewShifts, canViewWarehouses]);
 
   // Reset lazy-loaded tab data when branch/period filter changes
   useEffect(() => {
@@ -341,25 +351,39 @@ function Dashboard() {
 
   // Lazy load low-stock items when inventory tab is first opened
   useEffect(() => {
-    if (activeTab !== "inventory" || inventoryTabLoaded) return;
+    if (activeTab !== "inventory" || inventoryTabLoaded || !canViewInventory) return;
     setInventoryTabLoading(true);
     api.getStock({ branchId: branch !== "all" ? branch : undefined, lowStock: true })
       .then(items => { setInventoryItems(items); setInventoryTabLoaded(true); })
       .catch(() => {})
       .finally(() => setInventoryTabLoading(false));
-  }, [activeTab, inventoryTabLoaded, branch]);
+  }, [activeTab, inventoryTabLoaded, branch, canViewInventory]);
 
   // Lazy load terminals when terminals tab is first opened
   useEffect(() => {
-    if (activeTab !== "terminals" || terminalTabLoaded) return;
+    if (activeTab !== "terminals" || terminalTabLoaded || !canViewTerminals) return;
     setTerminalTabLoading(true);
     api.getTerminals({ branchId: branch !== "all" ? branch : undefined })
       .then(items => { setTerminalItems(items); setTerminalTabLoaded(true); })
       .catch(() => {})
       .finally(() => setTerminalTabLoading(false));
-  }, [activeTab, terminalTabLoaded, branch]);
+  }, [activeTab, terminalTabLoaded, branch, canViewTerminals]);
 
-  const allCards = dashData ? buildCards(dashData) : [];
+  // If the active tab is one this role can't view (e.g. deep-linked or set before
+  // permissions loaded), fall back to Overview instead of leaving a blank pane.
+  useEffect(() => {
+    if (activeTab === "terminals" && !canViewTerminals) setActiveTab("overview");
+    if (activeTab === "cashiers" && !canViewShifts) setActiveTab("overview");
+    if (activeTab === "returns" && !canViewReturns) setActiveTab("overview");
+  }, [activeTab, canViewTerminals, canViewShifts, canViewReturns]);
+
+  // Cards whose numbers belong to another module's data are dropped entirely for roles
+  // without that module — from the grid AND the Customize dialog.
+  const cardPermission: Record<string, boolean> = {
+    active_cashiers: canViewShifts,
+    active_terminals: canViewTerminals,
+  };
+  const allCards = (dashData ? buildCards(dashData) : []).filter(c => cardPermission[c.id] ?? true);
   const statCards = allCards.filter(c => visibleCards.has(c.id));
   const payBreakdown = dashData?.sales.paymentBreakdown ?? [];
   const cashierPerf = dashData?.cashierPerformance ?? [];
@@ -434,11 +458,11 @@ function Dashboard() {
             <AlertCard tone="destructive" icon={PackageX} label="Low Stock Items"
               value={String(dashData?.inventory.lowStockCount ?? 0)}
               hint={`${dashData?.inventory.outOfStockCount ?? 0} critical · reorder`} href="/inventory" />
-            <AlertCard tone="primary" icon={Timer} label="Active Shift Timer"
-              value={shiftTimerValue} hint={shiftHint} href="/cashier-shift" />
-            <AlertCard tone="warning" icon={Warehouse} label="Pending Warehouse Approvals"
+            {canViewShifts && <AlertCard tone="primary" icon={Timer} label="Active Shift Timer"
+              value={shiftTimerValue} hint={shiftHint} href="/cashier-shift" />}
+            {canViewWarehouses && <AlertCard tone="warning" icon={Warehouse} label="Pending Warehouse Approvals"
               value={String(warehousePending)}
-              hint={warehousePending > 0 ? `${warehousePending > 3 ? warehousePending : ""} high priority transfers` : "No pending approvals"} href="/warehouses" />
+              hint={warehousePending > 0 ? `${warehousePending > 3 ? warehousePending : ""} high priority transfers` : "No pending approvals"} href="/warehouses" />}
           </>
         )}
       </div>
@@ -464,9 +488,9 @@ function Dashboard() {
           <TabsTrigger value="overview" className="gap-1.5"><LayoutDashboard className="h-4 w-4" />Overview</TabsTrigger>
           <TabsTrigger value="orders" className="gap-1.5"><ShoppingBag className="h-4 w-4" />Orders</TabsTrigger>
           <TabsTrigger value="inventory" className="gap-1.5"><Package className="h-4 w-4" />Inventory</TabsTrigger>
-          <TabsTrigger value="cashiers" className="gap-1.5"><Users className="h-4 w-4" />Cashiers</TabsTrigger>
-          <TabsTrigger value="terminals" className="gap-1.5"><TerminalIcon className="h-4 w-4" />Terminals</TabsTrigger>
-          <TabsTrigger value="returns" className="gap-1.5"><Undo2 className="h-4 w-4" />Returns</TabsTrigger>
+          {canViewShifts && <TabsTrigger value="cashiers" className="gap-1.5"><Users className="h-4 w-4" />Cashiers</TabsTrigger>}
+          {canViewTerminals && <TabsTrigger value="terminals" className="gap-1.5"><TerminalIcon className="h-4 w-4" />Terminals</TabsTrigger>}
+          {canViewReturns && <TabsTrigger value="returns" className="gap-1.5"><Undo2 className="h-4 w-4" />Returns</TabsTrigger>}
           <TabsTrigger value="tax" className="gap-1.5"><Cigarette className="h-4 w-4" />Tax & Fees</TabsTrigger>
         </TabsList>
 
@@ -505,7 +529,7 @@ function Dashboard() {
                 <div className="grid grid-cols-2 gap-3">
                   <Mini label="Revenue (Week)" value={fmtSAR((dashData?.sales.totalToday ?? 0) * 7, 0)} />
                   <Mini label="Gross Profit" value={fmtSAR((dashData?.sales.totalToday ?? 0) * 0.3, 0)} tone="success" />
-                  <Mini label="Refunded" value={fmtSAR(dashData?.returns.refundedAmount ?? 0, 0)} tone="warning" />
+                  {canViewReturns && <Mini label="Refunded" value={fmtSAR(dashData?.returns.refundedAmount ?? 0, 0)} tone="warning" />}
                   <Mini label="Out of Stock" value={String(dashData?.inventory.outOfStockCount ?? 0)} tone={dashData?.inventory.outOfStockCount ? "destructive" : "default"} />
                 </div>
               )}
@@ -605,7 +629,7 @@ function Dashboard() {
           ) : null}
         </TabsContent>
 
-        <TabsContent value="cashiers" className="mt-4 space-y-4">
+        {canViewShifts && <TabsContent value="cashiers" className="mt-4 space-y-4">
           <div className="grid gap-3 sm:grid-cols-3">
             <Mini label="Active Cashiers" value={loading ? "…" : String(dashData?.shifts.active ?? 0)} tone="success" />
             <Mini label="Total Cashiers" value={loading ? "…" : String(dashData?.shifts.totalCashiers ?? 0)} />
@@ -663,9 +687,9 @@ function Dashboard() {
               ))}
             </Widget>
           )}
-        </TabsContent>
+        </TabsContent>}
 
-        <TabsContent value="terminals" className="mt-4 space-y-4">
+        {canViewTerminals && <TabsContent value="terminals" className="mt-4 space-y-4">
           {loading ? (
             <div className="grid grid-cols-3 gap-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
           ) : (
@@ -723,9 +747,9 @@ function Dashboard() {
               No terminals found.
             </Card>
           ) : null}
-        </TabsContent>
+        </TabsContent>}
 
-        <TabsContent value="returns" className="mt-4">
+        {canViewReturns && <TabsContent value="returns" className="mt-4">
           <Widget title="Returns & Refunds" link={{ to: "/returns", label: "All Returns" }}>
             {loading ? Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />) : (
               <div className="grid grid-cols-2 gap-3">
@@ -734,7 +758,7 @@ function Dashboard() {
               </div>
             )}
           </Widget>
-        </TabsContent>
+        </TabsContent>}
 
         <TabsContent value="tax" className="mt-4">
           <Widget title="Tax & Fees">
@@ -749,7 +773,7 @@ function Dashboard() {
       <CustomizeDialog
         open={customizeOpen}
         onClose={() => setCustomizeOpen(false)}
-        allCards={allCards.length > 0 ? allCards : ALL_CARD_IDS.map(id => ({ id, label: id, desc: "", icon: Package, href: "/", action: "", value: "" }))}
+        allCards={allCards.length > 0 ? allCards : ALL_CARD_IDS.filter(id => cardPermission[id] ?? true).map(id => ({ id, label: id, desc: "", icon: Package, href: "/", action: "", value: "" }))}
         visible={visibleCards}
         onChange={saveVisible}
       />

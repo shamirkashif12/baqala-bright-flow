@@ -191,7 +191,25 @@ const emptyForm: ReturnForm = {
   refundAmount: "", reason: "", notes: "",
 };
 
-type ItemRow = { orderItemId: string; productId: string; productName: string; unitPrice: number; maxQty: number; qty: number; condition: string; restock: boolean; selected: boolean; };
+type ItemRow = { orderItemId: string; productId: string; productName: string; unitPrice: number; refundPerUnit: number; maxQty: number; qty: number; condition: string; restock: boolean; selected: boolean; };
+
+// What the customer actually paid per unit of this order line — the base price carrying its
+// prorated share of the order's discount, VAT and custom fees, plus the line's own tobacco
+// excise — NOT the flat pre-tax unitPrice. Mirrors ReturnsController.Create, which recomputes
+// this server-side and is authoritative; this copy only exists so the cashier sees the real
+// refund figure before submitting.
+function refundPerUnit(order: Order, oi: OrderItem): number {
+  const subtotal = order.subtotal || 0;
+  const discount = order.discountAmount || 0;
+  const qty = Number(oi.quantity) || 1;
+  const baseShare = subtotal > 0 ? oi.unitPrice / subtotal : 0;
+  const discountShare = discount * baseShare;
+  const customFeeShare = (order.customFeeAmount ?? 0) * baseShare;
+  const tobaccoPerUnit = (oi.tobaccoFeeAmount ?? 0) / qty;
+  const taxableBase = subtotal - discount + (order.tobaccoFeeAmount ?? 0);
+  const taxShare = taxableBase > 0 ? (order.taxAmount || 0) * ((oi.unitPrice - discountShare + tobaccoPerUnit) / taxableBase) : 0;
+  return oi.unitPrice - discountShare + tobaccoPerUnit + taxShare + customFeeShare;
+}
 
 function Returns() {
   const { canCreate, canApprove } = usePermission("Returns");
@@ -265,6 +283,7 @@ function Returns() {
           productId: oi.productId,
           productName: oi.product?.name ?? oi.productId,
           unitPrice: oi.unitPrice,
+          refundPerUnit: refundPerUnit(order, oi),
           maxQty: Number(oi.quantity),
           qty: Number(oi.quantity),
           condition: "good",
@@ -292,7 +311,7 @@ function Returns() {
   }, [form.reason]);
 
   const selectedItems = itemRows.filter(r => r.selected);
-  const totalRefund = selectedItems.reduce((s, r) => s + r.qty * r.unitPrice, 0);
+  const totalRefund = selectedItems.reduce((s, r) => s + r.qty * r.refundPerUnit, 0);
 
   const lookupInvoice = async () => {
     const num = invoiceNumber.trim();
@@ -325,6 +344,7 @@ function Returns() {
         productId: oi.productId,
         productName: oi.product?.name ?? oi.productId,
         unitPrice: oi.unitPrice,
+        refundPerUnit: refundPerUnit(order, oi),
         maxQty: Number(oi.quantity),
         qty: 1,
         condition: "good",
@@ -345,16 +365,18 @@ function Returns() {
     }
     setSaving(true); setError(null);
     try {
+      // refundAmount here is advisory — ReturnsController.Create recomputes both the per-line
+      // and header amounts from the original order server-side and ignores what we send.
       const items: CustomerReturnItem[] = selectedItems.map(row => ({
         productId: row.productId,
         orderItemId: row.orderItemId || undefined,
         quantity: row.qty,
         unitPrice: row.unitPrice,
-        refundAmount: row.qty * row.unitPrice,
+        refundAmount: row.qty * row.refundPerUnit,
         condition: row.condition,
         restock: row.restock,
       }));
-      const totalRefundAmount = selectedItems.reduce((s, r) => s + r.qty * r.unitPrice, 0);
+      const totalRefundAmount = selectedItems.reduce((s, r) => s + r.qty * r.refundPerUnit, 0);
       await api.createReturn({
         orderId: form.orderId,
         customerId: form.customerId || undefined,
@@ -487,7 +509,7 @@ function Returns() {
                         />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{row.productName}</p>
-                          <p className="text-xs text-muted-foreground"><SARIcon />{row.unitPrice.toFixed(2)}/unit · max {row.maxQty}</p>
+                          <p className="text-xs text-muted-foreground"><SARIcon />{row.refundPerUnit.toFixed(2)}/unit refund · max {row.maxQty}</p>
                         </div>
                         {row.selected && (
                           <Input

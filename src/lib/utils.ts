@@ -11,3 +11,16 @@ export function cn(...inputs: ClassValue[]) {
 export function localDateStr(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+// crypto.randomUUID() only exists in secure contexts (HTTPS/localhost); on plain-HTTP
+// deployments it's undefined and throws. Fall back to a Math.random-based v4 UUID there.
+export function uuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,12 +51,16 @@ function Shift() {
 
   const [shifts, setShifts] = useState<CashierShift[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [checkoutShift, setCheckoutShift] = useState<CashierShift | null>(null);
 
   const refetch = useCallback(() => {
     setLoading(true);
     api.getShifts({ branchId: effectiveBranchId, cashierId: effectiveCashierId })
-      .then(s => setShifts(s))
+      .then(s => { setShifts(s); setLoadError(false); })
+      // Keep the previously loaded shifts on failure — an unhandled rejection here used to
+      // leave the queue rendered as zero/empty as if loaded (86eyag3ny).
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, [effectiveBranchId, effectiveCashierId]);
 
@@ -76,6 +81,7 @@ function Shift() {
 
   return (
     <PageShell title="Cashier Shift" subtitle="Check-in, check-out and shift totals">
+      {loadError && <LoadErrorBanner onRetry={refetch} />}
       {/* Active shifts banner */}
       {bannerShifts.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

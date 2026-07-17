@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -979,6 +980,10 @@ function Inventory() {
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [allBatches, setAllBatches] = useState<InventoryBatch[]>([]);
+  // Mirror of allBatches readable synchronously inside load() — lets a refetch whose
+  // getBatches call failed re-enrich rows from the previous batch list instead of blanking.
+  const allBatchesRef = useRef<InventoryBatch[]>([]);
+  const [loadError, setLoadError] = useState(false);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [incomingTransfers, setIncomingTransfers] = useState<StockTransfer[]>([]);
   const [receiveTransferTarget, setReceiveTransferTarget] = useState<StockTransfer | null>(null);
@@ -997,20 +1002,37 @@ function Inventory() {
 
   const load = () => {
     setLoading(true);
-    Promise.all([api.getStock({ branchId: lockedBranchId ?? undefined }), api.getCategories(), api.getBranches(), api.getWarehouses(), api.getSuppliers()])
-      .then(([s, c, b, w, sup]) => {
-        setStock(s as StockItem[]);
-        setCategories(c);
-        setBranches(b);
-        setWarehouses(w);
-        setSuppliers(sup);
-        // Enrich expiry dates async (non-blocking — page shows immediately). Keeps the full
-        // batch array around too (not just the earliest-expiry rollup) so each row's expand
-        // affordance can show every batch without a per-row fetch.
-        api.getBatches().then(batches => {
-          setAllBatches(batches);
+    // Batches load WITH the main batch so expiry data is on the rows at first paint —
+    // previously it was enriched after an extra round-trip, so every load had a window
+    // where "EXPIRED (BLOCKED): 0" / blank Expiry columns showed over real data, and a
+    // failed getBatches left it that way until a manual reload (86eyag3ny). allSettled +
+    // per-result application: one failed call keeps its previous data instead of zeroing
+    // the whole page. Keeps the full batch array around too (not just the earliest-expiry
+    // rollup) so each row's expand affordance can show every batch without a per-row fetch.
+    Promise.allSettled([
+      api.getStock({ branchId: lockedBranchId ?? undefined }),
+      api.getCategories(),
+      api.getBranches(),
+      api.getWarehouses(),
+      api.getSuppliers(),
+      api.getBatches(),
+    ])
+      .then((results) => {
+        const [s, c, b, w, sup, batches] = results;
+        if (c.status === "fulfilled") setCategories(c.value);
+        if (b.status === "fulfilled") setBranches(b.value);
+        if (w.status === "fulfilled") setWarehouses(w.value);
+        if (sup.status === "fulfilled") setSuppliers(sup.value);
+        if (batches.status === "fulfilled") {
+          allBatchesRef.current = batches.value;
+          setAllBatches(batches.value);
+        }
+        if (s.status === "fulfilled") {
+          // Enrich from the freshest batch list we have — this fetch's, or the previous
+          // one's when getBatches failed — so a refetch (e.g. after a Stock-In elsewhere)
+          // never reverts already-correct expiry data to blank.
           const expiryMap = new Map<string, string>();
-          batches.forEach(batch => {
+          allBatchesRef.current.forEach(batch => {
             if (!batch.expiryDate || batch.remainingQuantity <= 0) return;
             const key = `${batch.productId}:${batch.branchId}`;
             const existing = expiryMap.get(key);
@@ -1018,11 +1040,12 @@ function Inventory() {
               expiryMap.set(key, batch.expiryDate);
             }
           });
-          setStock(prev => prev.map(item => ({
+          setStock((s.value as StockItem[]).map(item => ({
             ...item,
             expiryDate: expiryMap.get(`${item.productId}:${item.branchId}`) ?? item.expiryDate,
           })));
-        }).catch(() => {});
+        }
+        setLoadError(results.some(r => r.status === "rejected"));
       })
       .finally(() => setLoading(false));
   };
@@ -1093,6 +1116,7 @@ function Inventory() {
         </div>
       }
     >
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ── Alert Banners ── */}
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-2xl border border-warning/30 bg-warning/10 p-4 flex items-center gap-4">

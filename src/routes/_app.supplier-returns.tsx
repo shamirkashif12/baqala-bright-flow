@@ -17,6 +17,7 @@ import { api, type StockTransfer, type Warehouse, type Supplier, type StockTrans
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
+import { uuid } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/supplier-returns")({ component: SupplierReturns });
 
@@ -303,7 +304,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
     if (validItems.length === 0) { setError("No valid items to return."); return; }
     setSaving(true); setError("");
     try {
-      const batchId = selectedWhIds.length > 1 ? crypto.randomUUID() : undefined;
+      const batchId = selectedWhIds.length > 1 ? uuid() : undefined;
       for (const whId of selectedWhIds) {
         await api.createStockTransfer({
           transferType: "warehouse_to_supplier",

@@ -63,24 +63,56 @@ public class ReturnsController(BaqalaDbContext db, INotificationService notifica
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CustomerReturn ret)
     {
-        // Cap each line to what's actually still returnable on the original order item — the
-        // ordered quantity minus whatever's already been claimed by a prior non-rejected return
-        // for that same order item. Without this, the same invoice line could be fully returned
-        // (refund + restock) more than once through this same endpoint.
+        // All refund math below derives from the original order's own money figures.
+        var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == ret.OrderId);
+        if (order is null) return BadRequest(new { message = "Original order for this return was not found." });
+
+        // MIMONY-RETURNS-VAT-001: RefundAmount was persisted exactly as the client sent it, and
+        // the frontend sends flat qty × unitPrice — so the VAT the customer paid was never
+        // refunded and any discount they received was never netted out. Recompute every line
+        // server-side instead and ignore client-sent money figures: the returned units' base
+        // price carries its prorated share of the order's discount, VAT and custom fees, plus
+        // the line's own persisted tobacco excise. VAT is prorated by share of the order's
+        // taxable base (subtotal − discount + tobacco fee, matching how checkout computed it),
+        // so a full return of every line reconciles exactly to order.TotalAmount.
+        var taxableBase = order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount;
+
         foreach (var item in ret.Items)
         {
-            if (!item.OrderItemId.HasValue) continue;
-            var orderItem = await db.OrderItems.FindAsync(item.OrderItemId.Value);
-            if (orderItem is null) continue;
+            // Resolve the original order line — by id when the client linked one (an id that
+            // belongs to a different order is rejected outright), else by product.
+            var line = item.OrderItemId.HasValue
+                ? order.Items.FirstOrDefault(oi => oi.Id == item.OrderItemId.Value)
+                : order.Items.FirstOrDefault(oi => oi.ProductId == item.ProductId);
+            if (item.OrderItemId.HasValue && line is null)
+                return BadRequest(new { message = "Return line references an item that is not on this order." });
+            if (line is null || line.Quantity <= 0) continue;
+            item.OrderItemId ??= line.Id;
 
+            // Cap each line to what's actually still returnable on the original order item — the
+            // ordered quantity minus whatever's already been claimed by a prior non-rejected
+            // return for that same order item. Without this, the same invoice line could be fully
+            // returned (refund + restock) more than once through this same endpoint.
             var alreadyReturned = await db.CustomerReturnItems
-                .Where(i => i.OrderItemId == item.OrderItemId && i.Return!.Status != "rejected")
+                .Where(i => i.OrderItemId == line.Id && i.Return!.Status != "rejected")
                 .SumAsync(i => i.Quantity);
 
-            var remaining = orderItem.Quantity - alreadyReturned;
+            var remaining = line.Quantity - alreadyReturned;
             if (item.Quantity > remaining)
                 return BadRequest(new { message = $"Only {remaining} unit(s) of this item can still be returned ({alreadyReturned} already claimed by a prior return)." });
+
+            var lineBase = line.UnitPrice * item.Quantity;
+            var baseShare = order.Subtotal > 0 ? lineBase / order.Subtotal : 0m;
+            var discountShare = order.DiscountAmount * baseShare;
+            var customFeeShare = order.CustomFeeAmount * baseShare;
+            var tobaccoShare = line.TobaccoFeeAmount * (item.Quantity / line.Quantity);
+            var lineTaxable = lineBase - discountShare + tobaccoShare;
+            var taxShare = taxableBase > 0 ? order.TaxAmount * (lineTaxable / taxableBase) : 0m;
+
+            item.UnitPrice = line.UnitPrice;
+            item.RefundAmount = Math.Round(lineBase - discountShare + tobaccoShare + taxShare + customFeeShare, 4);
         }
+        ret.RefundAmount = Math.Round(ret.Items.Sum(i => i.RefundAmount), 4);
 
         ret.Id = Guid.NewGuid();
         ret.ReturnNumber = $"RET-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
