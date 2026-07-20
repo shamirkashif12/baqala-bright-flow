@@ -1270,6 +1270,12 @@ public static class DataSeeder
                 P(r, "Audit Logs",          true,  true,  true,  true,  true,  true),
                 P(r, "Rules Engine",        true,  true,  true,  true,  true,  true),
                 P(r, "Settings",            true,  true,  true,  true,  true,  true),
+                P(r, "Employees",           true,  true,  true,  true,  true,  true),
+                P(r, "HR Master Data",      true,  true,  true,  true,  true,  true),
+                P(r, "HR Attendance",       true,  true,  true,  true,  true,  true),
+                P(r, "HR Shifts",           true,  true,  true,  true,  true,  true),
+                P(r, "Leave Management",    true,  true,  true,  true,  true,  true),
+                P(r, "Payroll",             true,  true,  true,  true,  true,  true),
             },
             "Branch Manager" => new[]
             {
@@ -1303,6 +1309,12 @@ public static class DataSeeder
                 P(r, "Audit Logs",          true,  false, false, false, false, true),
                 P(r, "Rules Engine",        true,  false, false, false, false, false),
                 P(r, "Settings",            true,  false, true,  false, false, false),
+                P(r, "Employees",           true,  true,  true,  false, false, true),
+                P(r, "HR Master Data",      true,  true,  true,  false, false, true),
+                P(r, "HR Attendance",       true,  true,  true,  false, true,  true),
+                P(r, "HR Shifts",           true,  true,  true,  false, true,  false),
+                P(r, "Leave Management",    true,  true,  false, false, true,  true),
+                P(r, "Payroll",             false, false, false, false, false, false),
             },
             "Cashier" => new[]
             {
@@ -1336,6 +1348,12 @@ public static class DataSeeder
                 P(r, "Audit Logs",          false, false, false, false, false, false),
                 P(r, "Rules Engine",        false, false, false, false, false, false),
                 P(r, "Settings",            false, false, false, false, false, false),
+                P(r, "Employees",           false, false, false, false, false, false),
+                P(r, "HR Master Data",      true,  false, false, false, false, false),
+                P(r, "HR Attendance",       true,  false, false, false, false, false),
+                P(r, "HR Shifts",           true,  false, false, false, false, false),
+                P(r, "Leave Management",    true,  true,  false, false, false, false),
+                P(r, "Payroll",             false, false, false, false, false, false),
             },
             "Storekeeper" => new[]
             {
@@ -1369,6 +1387,12 @@ public static class DataSeeder
                 P(r, "Audit Logs",          false, false, false, false, false, false),
                 P(r, "Rules Engine",        false, false, false, false, false, false),
                 P(r, "Settings",            false, false, false, false, false, false),
+                P(r, "Employees",           false, false, false, false, false, false),
+                P(r, "HR Master Data",      true,  false, false, false, false, false),
+                P(r, "HR Attendance",       true,  false, false, false, false, false),
+                P(r, "HR Shifts",           true,  false, false, false, false, false),
+                P(r, "Leave Management",    true,  true,  false, false, false, false),
+                P(r, "Payroll",             false, false, false, false, false, false),
             },
             "Supervisor" => new[]
             {
@@ -1402,6 +1426,12 @@ public static class DataSeeder
                 P(r, "Audit Logs",          true,  false, false, false, false, false),
                 P(r, "Rules Engine",        false, false, false, false, false, false),
                 P(r, "Settings",            true,  false, false, false, false, false),
+                P(r, "Employees",           true,  false, false, false, false, true),
+                P(r, "HR Master Data",      true,  false, false, false, false, false),
+                P(r, "HR Attendance",       true,  false, true,  false, true,  true),
+                P(r, "HR Shifts",           true,  false, false, false, true,  false),
+                P(r, "Leave Management",    true,  true,  false, false, true,  true),
+                P(r, "Payroll",             false, false, false, false, false, false),
             },
             "Finance User" => new[]
             {
@@ -1435,6 +1465,12 @@ public static class DataSeeder
                 P(r, "Audit Logs",          true,  false, false, false, false, true),
                 P(r, "Rules Engine",        true,  false, false, false, false, false),
                 P(r, "Settings",            false, false, false, false, false, false),
+                P(r, "Employees",           false, false, false, false, false, false),
+                P(r, "HR Master Data",      false, false, false, false, false, false),
+                P(r, "HR Attendance",       true,  false, false, false, false, false),
+                P(r, "HR Shifts",           false, false, false, false, false, false),
+                P(r, "Leave Management",    true,  false, false, false, false, false),
+                P(r, "Payroll",             true,  true,  true,  true,  true,  true),
             },
             "Marketing User" => new[]
             {
@@ -1470,6 +1506,12 @@ public static class DataSeeder
                 P(r, "Audit Logs",          false, false, false, false, false, false),
                 P(r, "Rules Engine",        false, false, false, false, false, false),
                 P(r, "Settings",            false, false, false, false, false, false),
+                P(r, "Employees",           false, false, false, false, false, false),
+                P(r, "HR Master Data",      false, false, false, false, false, false),
+                P(r, "HR Attendance",       false, false, false, false, false, false),
+                P(r, "HR Shifts",           false, false, false, false, false, false),
+                P(r, "Leave Management",    false, false, false, false, false, false),
+                P(r, "Payroll",             false, false, false, false, false, false),
             },
             "Picker" => new[]
             {
@@ -1503,6 +1545,12 @@ public static class DataSeeder
                 P(r, "Audit Logs",          false, false, false, false, false, false),
                 P(r, "Rules Engine",        false, false, false, false, false, false),
                 P(r, "Settings",            false, false, false, false, false, false),
+                P(r, "Employees",           false, false, false, false, false, false),
+                P(r, "HR Master Data",      false, false, false, false, false, false),
+                P(r, "HR Attendance",       true,  false, false, false, false, false),
+                P(r, "HR Shifts",           true,  false, false, false, false, false),
+                P(r, "Leave Management",    true,  true,  false, false, false, false),
+                P(r, "Payroll",             false, false, false, false, false, false),
             },
             // Kiosk device credential (never a human login) — only permission it holds is
             // creating orders. Everything else, including reading Orders/POS, stays false;
@@ -2162,6 +2210,534 @@ public static class DataSeeder
         }
 
         if (changed) await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: HRM Employees from existing POS/admin User accounts ──────
+    // The HRM Employees module is a separate profile table from User (so staff who never log
+    // into the POS, e.g. a baker, don't need a login) — but every existing User account IS a
+    // real staff member (cashier, manager, etc.) who should already show up as an employee.
+    // Runs every startup; idempotent via the UserId .Any() check below, so re-runs are a no-op
+    // once every current user has a linked Employee row.
+    public static async Task PatchBackfillEmployeesFromUsersAsync(BaqalaDbContext db)
+    {
+        var kioskRoleIds = await db.Roles
+            .Where(r => r.Name == "Self-Checkout Kiosk")
+            .Select(r => r.Id)
+            .ToListAsync();
+
+        var linkedUserIds = await db.Employees
+            .Where(e => e.UserId != null)
+            .Select(e => e.UserId!.Value)
+            .ToListAsync();
+        var linkedSet = linkedUserIds.ToHashSet();
+
+        var users = await db.Users
+            .Where(u => u.BranchId != null)
+            .ToListAsync();
+        var candidates = users.Where(u => !linkedSet.Contains(u.Id) && !kioskRoleIds.Contains(u.RoleId)).ToList();
+        if (candidates.Count == 0) return;
+
+        var lastCode = await db.Employees
+            .Where(e => e.EmployeeCode.StartsWith("EMP-"))
+            .OrderByDescending(e => e.EmployeeCode)
+            .Select(e => e.EmployeeCode)
+            .FirstOrDefaultAsync();
+        int next = 1;
+        if (lastCode is not null && int.TryParse(lastCode[4..], out int n)) next = n + 1;
+
+        foreach (var user in candidates)
+        {
+            db.Employees.Add(new Employee
+            {
+                Id = Guid.NewGuid(),
+                EmployeeCode = $"EMP-{next:D5}",
+                FullName = user.FullName,
+                Email = user.Email,
+                // Placeholder — Users don't collect phone/national ID today. Kept unique per
+                // employee (required index) and visibly a placeholder for the admin to replace
+                // when they complete this employee's HR profile.
+                Phone = user.Phone ?? "Not Provided",
+                NationalId = $"PENDING-{user.Id:N}"[..20],
+                BranchId = user.BranchId!.Value,
+                RoleId = user.RoleId,
+                UserId = user.Id,
+                HireDate = DateOnly.FromDateTime(user.CreatedAt),
+                EmploymentStatus = user.Status,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            next++;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: HRM org structure (departments/designations) + assign existing employees ──
+    // Employees backfilled from Users (above) had no department/designation — this gives the
+    // Departments/Designations/Employees pages real, populated demo data instead of the single
+    // manually-created "Grocery"/"Cashier" pair, matching each employee's existing ACL role.
+    private static readonly (string Department, string Designation)[] HrmDesignationCatalog =
+    [
+        ("Administration",   "Store Manager"),
+        ("Administration",   "Branch Manager"),
+        ("Retail Operations", "Shift Supervisor"),
+        ("Grocery",           "Cashier"),
+        ("Grocery",           "Grocery Associate"),
+        ("Finance & Accounts","Accountant"),
+        ("Marketing",         "Marketing Executive"),
+        ("Warehouse",         "Warehouse Assistant"),
+        ("Warehouse",         "Inventory Officer"),
+        ("Customer Service",  "Customer Service Representative"),
+        ("Human Resources",   "HR Executive"),
+        ("IT Support",        "IT Support Specialist"),
+    ];
+
+    // Maps each seeded Role.Name to the designation an employee holding that role should default
+    // into. Roles not listed (e.g. Self-Checkout Kiosk) are left without a department/designation.
+    private static readonly Dictionary<string, (string Department, string Designation)> RoleToDesignation = new()
+    {
+        ["Admin"]            = ("Administration",    "Store Manager"),
+        ["Manager"]          = ("Administration",    "Branch Manager"),
+        ["Supervisor"]       = ("Retail Operations",  "Shift Supervisor"),
+        ["Cashier"]          = ("Grocery",            "Cashier"),
+        ["Accountant"]       = ("Finance & Accounts", "Accountant"),
+        ["Auditor"]          = ("Marketing",          "Marketing Executive"),
+        ["Warehouse Staff"]  = ("Warehouse",           "Warehouse Assistant"),
+        ["Inventory Staff"]  = ("Warehouse",           "Inventory Officer"),
+    };
+
+    public static async Task PatchSeedHrmOrgDataAsync(BaqalaDbContext db)
+    {
+        var departmentNames = HrmDesignationCatalog.Select(d => d.Department).Distinct().ToList();
+        var existingDepartments = await db.Departments.ToListAsync();
+        var departmentsByName = existingDepartments.ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in departmentNames)
+        {
+            if (departmentsByName.ContainsKey(name)) continue;
+            var dept = new Department { Id = Guid.NewGuid(), Name = name, BranchId = null, Status = "active", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+            db.Departments.Add(dept);
+            departmentsByName[name] = dept;
+        }
+        if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync();
+
+        var existingDesignations = await db.Designations.ToListAsync();
+        var designationsByKey = existingDesignations.ToDictionary(
+            d => ((departmentsByName.Values.FirstOrDefault(dep => dep.Id == d.DepartmentId)?.Name ?? "").ToLowerInvariant(), d.Name.ToLowerInvariant()));
+
+        foreach (var (deptName, desigName) in HrmDesignationCatalog)
+        {
+            var key = (deptName.ToLowerInvariant(), desigName.ToLowerInvariant());
+            if (designationsByKey.ContainsKey(key)) continue;
+            var dept = departmentsByName[deptName];
+            var designation = new Designation { Id = Guid.NewGuid(), Name = desigName, DepartmentId = dept.Id, Status = "active", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+            db.Designations.Add(designation);
+            designationsByKey[key] = designation;
+        }
+        if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync();
+
+        // Re-read so every designation has a real DepartmentId/Id (some may have just been added).
+        var allDepartments = await db.Departments.ToDictionaryAsync(d => d.Name, StringComparer.OrdinalIgnoreCase);
+        var allDesignations = await db.Designations.Include(d => d.Department).ToListAsync();
+
+        var employees = await db.Employees
+            .Where(e => e.DepartmentId == null && e.DesignationId == null && e.RoleId != null)
+            .ToListAsync();
+        if (employees.Count == 0) return;
+
+        var roleNamesById = await db.Roles.ToDictionaryAsync(r => r.Id, r => r.Name);
+        // NOTE: any further backfill logic that must always run (regardless of whether every
+        // employee already has a department/designation) belongs in its own patch method, not
+        // appended below this point — the early return above skips everything after it once
+        // department/designation assignment has already completed on a prior startup.
+        var changed = false;
+
+        foreach (var employee in employees)
+        {
+            if (!roleNamesById.TryGetValue(employee.RoleId!.Value, out var roleName)) continue;
+            if (!RoleToDesignation.TryGetValue(roleName, out var mapping)) continue;
+
+            var designation = allDesignations.FirstOrDefault(d =>
+                d.Name.Equals(mapping.Designation, StringComparison.OrdinalIgnoreCase) &&
+                d.Department!.Name.Equals(mapping.Department, StringComparison.OrdinalIgnoreCase));
+            if (designation is null) continue;
+
+            employee.DepartmentId = designation.DepartmentId;
+            employee.DesignationId = designation.Id;
+            employee.UpdatedAt = DateTime.UtcNow;
+            changed = true;
+        }
+
+        if (changed) await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: default contract details for employees backfilled from Users ────────────
+    // Deliberately a separate method (not folded into PatchSeedHrmOrgDataAsync above) — that
+    // method early-returns once every employee already has a department/designation, which
+    // would silently skip this on every startup after the first.
+    public static async Task PatchSeedHrmEmployeeContractDefaultsAsync(BaqalaDbContext db)
+    {
+        var employeesNeedingContract = await db.Employees.Where(e => e.ContractType == null && e.EmploymentStatus == "active").ToListAsync();
+        if (employeesNeedingContract.Count == 0) return;
+
+        foreach (var employee in employeesNeedingContract)
+        {
+            employee.ContractType = "Permanent";
+            employee.ContractStartDate = employee.HireDate;
+            employee.ContractOpenEnded = true;
+            employee.UpdatedAt = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: KSA holidays beyond the single manually-created demo entry ──────────────
+    public static async Task PatchSeedHrmHolidaysAsync(BaqalaDbContext db)
+    {
+        var existingNames = await db.Holidays.Select(h => h.Name).ToListAsync();
+        var existingSet = existingNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var candidates = new[]
+        {
+            ("Founding Day",        "Company Holiday", new DateOnly(2026, 2, 22)),
+            ("Eid al-Fitr",          "Company Holiday", new DateOnly(2026, 3, 20)),
+            ("Saudi National Day",  "Company Holiday", new DateOnly(2026, 9, 23)),
+            ("Prophet's Birthday",  "Optional Holiday", new DateOnly(2026, 9, 4)),
+        };
+
+        var toAdd = candidates.Where(c => !existingSet.Contains(c.Item1)).ToList();
+        if (toAdd.Count == 0) return;
+
+        foreach (var (name, type, date) in toAdd)
+        {
+            db.Holidays.Add(new Holiday
+            {
+                Id = Guid.NewGuid(), Name = name, HolidayType = type, Date = date, BranchId = null,
+                Status = "active", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: additional shift templates + assign every active employee without one ────
+    public static async Task PatchSeedHrmShiftsAsync(BaqalaDbContext db)
+    {
+        var existingShifts = await db.WorkShifts.ToListAsync();
+        var shiftsByName = existingShifts.ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
+
+        var catalog = new[]
+        {
+            ("Morning Shift", "Sun,Mon,Tue,Wed,Thu", "08:00", "16:00", "12:00", "12:30", 10, 5),
+            ("Evening Shift",  "Sun,Mon,Tue,Wed,Thu", "14:00", "22:00", "18:00", "18:30", 10, 5),
+            ("Night Shift",    "Sun,Mon,Tue,Wed,Thu,Fri,Sat", "22:00", "06:00", (string?)null, (string?)null, 15, 10),
+        };
+
+        foreach (var (name, days, start, end, brkStart, brkEnd, graceIn, graceOut) in catalog)
+        {
+            if (shiftsByName.ContainsKey(name)) continue;
+            var shift = new WorkShift
+            {
+                Id = Guid.NewGuid(), Name = name, BranchId = null, DepartmentId = null,
+                WorkingDays = days, StartTime = start, EndTime = end, BreakStart = brkStart, BreakEnd = brkEnd,
+                GraceInMinutes = graceIn, GraceOutMinutes = graceOut, Status = "active",
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            };
+            db.WorkShifts.Add(shift);
+            shiftsByName[name] = shift;
+        }
+        if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync();
+
+        // Assign a sensible default shift to every active employee who doesn't have one yet.
+        // Office-style roles (Admin/Manager/Accountant/Marketing) default to Morning; frontline
+        // roles alternate Morning/Evening by a stable hash so the demo data isn't monotonous.
+        var activeAssignments = await db.EmployeeShiftAssignments.Where(a => a.Status == "active").ToListAsync();
+        var assignedEmployeeIds = activeAssignments.Select(a => a.EmployeeId).ToHashSet();
+
+        var employees = await db.Employees.Where(e => e.EmploymentStatus == "active").ToListAsync();
+        var unassigned = employees.Where(e => !assignedEmployeeIds.Contains(e.Id)).ToList();
+        if (unassigned.Count == 0) return;
+
+        var morning = shiftsByName["Morning Shift"];
+        var evening = shiftsByName["Evening Shift"];
+        var effectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-30);
+        var newAssignments = new List<EmployeeShiftAssignment>();
+
+        foreach (var employee in unassigned)
+        {
+            var shift = (employee.EmployeeCode.GetHashCode() & 1) == 0 ? morning : evening;
+            newAssignments.Add(new EmployeeShiftAssignment
+            {
+                Id = Guid.NewGuid(), EmployeeId = employee.Id, ShiftId = shift.Id,
+                EffectiveFrom = effectiveFrom, EffectiveTo = null, Status = "active",
+                AssignedBy = null, AssignedAt = DateTime.UtcNow,
+            });
+        }
+        db.EmployeeShiftAssignments.AddRange(newAssignments);
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: attendance history for the last 10 days for every shift-assigned employee ─
+    public static async Task PatchSeedHrmAttendanceAsync(BaqalaDbContext db)
+    {
+        var employees = await db.Employees.Where(e => e.EmploymentStatus == "active").ToListAsync();
+        if (employees.Count == 0) return;
+
+        var activeAssignments = await db.EmployeeShiftAssignments
+            .Where(a => a.Status == "active")
+            .ToListAsync();
+        var shiftByEmployee = activeAssignments.GroupBy(a => a.EmployeeId).ToDictionary(g => g.Key, g => g.First().ShiftId);
+
+        var shifts = await db.WorkShifts.ToDictionaryAsync(s => s.Id);
+
+        var existingDates = await db.StaffAttendances
+            .Where(a => a.EmployeeId != null)
+            .Select(a => new { a.EmployeeId, a.Date })
+            .ToListAsync();
+        var existingSet = existingDates.Select(x => (x.EmployeeId, x.Date)).ToHashSet();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var rows = new List<StaffAttendance>();
+
+        foreach (var employee in employees)
+        {
+            if (!shiftByEmployee.TryGetValue(employee.Id, out var shiftId)) continue;
+            if (!shifts.TryGetValue(shiftId, out var shift)) continue;
+            if (!TimeSpan.TryParse(shift.StartTime, out var startTime)) continue;
+
+            // Deterministic per-employee pseudo-randomness so re-runs stay idempotent in spirit
+            // (same seed → same pattern) without needing DateTime.Now-based randomness.
+            // Mask rather than Math.Abs — GetHashCode() can return int.MinValue, which Math.Abs throws on.
+            var seed = employee.Id.GetHashCode() & 0x7FFFFFFF;
+
+            for (int dayOffset = 1; dayOffset <= 10; dayOffset++)
+            {
+                var date = today.AddDays(-dayOffset);
+                if (existingSet.Contains((employee.Id, date))) continue;
+                // Skip weekly off day if this shift doesn't run that day.
+                var dayCode = date.DayOfWeek switch
+                {
+                    DayOfWeek.Sunday => "Sun", DayOfWeek.Monday => "Mon", DayOfWeek.Tuesday => "Tue",
+                    DayOfWeek.Wednesday => "Wed", DayOfWeek.Thursday => "Thu", DayOfWeek.Friday => "Fri",
+                    _ => "Sat",
+                };
+                if (!shift.WorkingDays.Contains(dayCode)) continue;
+
+                var pattern = (seed + dayOffset) % 10;
+                string status;
+                DateTime? checkIn = null, checkOut = null;
+                int lateMinutes = 0;
+
+                if (pattern == 0)
+                {
+                    status = "absent";
+                }
+                else if (pattern == 1)
+                {
+                    status = "on_leave";
+                }
+                else
+                {
+                    var lateBy = pattern == 2 ? 20 : 0; // occasional late arrival
+                    checkIn = date.ToDateTime(TimeOnly.FromTimeSpan(startTime)).AddMinutes(lateBy);
+                    checkOut = date.ToDateTime(TimeOnly.FromTimeSpan(startTime)).AddHours(8);
+                    lateMinutes = Math.Max(0, lateBy - shift.GraceInMinutes);
+                    status = lateMinutes > 0 ? "late" : "present";
+                }
+
+                rows.Add(new StaffAttendance
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = employee.UserId,
+                    BranchId = employee.BranchId,
+                    EmployeeId = employee.Id,
+                    Date = date,
+                    ShiftId = shiftId,
+                    CheckIn = checkIn,
+                    CheckOut = checkOut,
+                    Status = status,
+                    LateMinutes = lateMinutes,
+                    EarlyLeaveMinutes = 0,
+                    RecordedBy = null,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+        }
+
+        if (rows.Count == 0) return;
+        db.StaffAttendances.AddRange(rows);
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: Leave master data + default policy assignment + demo requests ───────────
+    public static async Task PatchSeedHrmLeaveDataAsync(BaqalaDbContext db)
+    {
+        var existingTypeNames = (await db.LeaveTypes.Select(t => t.Name).ToListAsync()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var typeCandidates = new[] { "Annual Leave", "Sick Leave", "Casual Leave", "Emergency Leave", "Unpaid Leave", "Maternity Leave", "Other" };
+        foreach (var name in typeCandidates)
+        {
+            if (existingTypeNames.Contains(name)) continue;
+            db.LeaveTypes.Add(new LeaveType { Id = Guid.NewGuid(), Name = name, Status = "active", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        }
+        if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync();
+
+        var standardPolicy = await db.LeavePolicies.FirstOrDefaultAsync(p => p.Name == "Standard Leave Policy");
+        if (standardPolicy is null)
+        {
+            standardPolicy = new LeavePolicy
+            {
+                Id = Guid.NewGuid(), Name = "Standard Leave Policy",
+                AnnualDays = 21, SickDays = 10, CasualDays = 7, Status = "active",
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            };
+            db.LeavePolicies.Add(standardPolicy);
+            await db.SaveChangesAsync();
+        }
+
+        var employeesNeedingPolicy = await db.Employees.Where(e => e.LeavePolicyId == null && e.EmploymentStatus == "active").ToListAsync();
+        foreach (var employee in employeesNeedingPolicy)
+        {
+            employee.LeavePolicyId = standardPolicy.Id;
+            employee.UpdatedAt = DateTime.UtcNow;
+        }
+        if (employeesNeedingPolicy.Count > 0) await db.SaveChangesAsync();
+
+        if (await db.LeaveRequests.AnyAsync()) return; // demo requests already seeded
+
+        var annual = await db.LeaveTypes.FirstAsync(t => t.Name == "Annual Leave");
+        var sick = await db.LeaveTypes.FirstAsync(t => t.Name == "Sick Leave");
+        var casual = await db.LeaveTypes.FirstAsync(t => t.Name == "Casual Leave");
+
+        var byName = await db.Employees.ToDictionaryAsync(e => e.FullName, StringComparer.OrdinalIgnoreCase);
+        var admin = await db.Users.FirstOrDefaultAsync(u => u.Username == "ahmad.aziz" || u.Email == "ahmad.aziz@mytm.co");
+
+        var demo = new List<LeaveRequest>();
+        void AddDemo(string employeeName, LeaveType type, DateOnly from, DateOnly to, string reason, string status, string? rejectionReason = null)
+        {
+            if (!byName.TryGetValue(employeeName, out var employee)) return;
+            var totalDays = to.DayNumber - from.DayNumber + 1;
+            demo.Add(new LeaveRequest
+            {
+                Id = Guid.NewGuid(), EmployeeId = employee.Id, LeaveTypeId = type.Id,
+                FromDate = from, ToDate = to, TotalDays = totalDays, Reason = reason,
+                Status = status,
+                ApproverId = status is "approved" or "rejected" ? admin?.Id : null,
+                ApprovedAt = status is "approved" or "rejected" ? DateTime.UtcNow : null,
+                RejectionReason = rejectionReason,
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            });
+        }
+
+        AddDemo("Omar Al Supervisor", annual, new DateOnly(2026, 7, 25), new DateOnly(2026, 7, 28), "Family vacation", "pending");
+        AddDemo("Nora Al Cashier",    sick,   new DateOnly(2026, 7, 16), new DateOnly(2026, 7, 16), "Fever and headache", "approved");
+        AddDemo("Reem Al Cashier",    casual, new DateOnly(2026, 7, 18), new DateOnly(2026, 7, 18), "Personal work", "rejected", "Insufficient staffing that day");
+        AddDemo("Sara Al Manager",    annual, new DateOnly(2026, 8, 1),  new DateOnly(2026, 8, 5),  "Travel", "pending");
+
+        if (demo.Count == 0) return;
+        db.LeaveRequests.AddRange(demo);
+        await db.SaveChangesAsync();
+
+        // Mirror LeaveController.Approve's on_leave attendance write for the one demo request
+        // that's already approved, so Attendance shows the same consistent picture.
+        foreach (var leave in demo.Where(l => l.Status == "approved"))
+        {
+            var employee = await db.Employees.FindAsync(leave.EmployeeId);
+            if (employee is null) continue;
+            for (var date = leave.FromDate; date <= leave.ToDate; date = date.AddDays(1))
+            {
+                var exists = await db.StaffAttendances.AnyAsync(a => a.EmployeeId == leave.EmployeeId && a.Date == date);
+                if (exists) continue;
+                db.StaffAttendances.Add(new StaffAttendance
+                {
+                    Id = Guid.NewGuid(), UserId = employee.UserId, BranchId = employee.BranchId,
+                    EmployeeId = employee.Id, Date = date, Status = "on_leave",
+                    CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+                });
+            }
+        }
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Backfill: salary components per employee + one processed payroll run per branch ────
+    private static readonly Dictionary<string, decimal> RoleBasicSalary = new()
+    {
+        ["Admin"] = 12000, ["Manager"] = 9000, ["Supervisor"] = 6500, ["Accountant"] = 7000,
+        ["Auditor"] = 5500, ["Cashier"] = 4000, ["Warehouse Staff"] = 3800, ["Inventory Staff"] = 4200,
+    };
+
+    public static async Task PatchSeedHrmPayrollDataAsync(BaqalaDbContext db)
+    {
+        var employeesNeedingComponents = await db.Employees
+            .Where(e => e.EmploymentStatus == "active" && e.RoleId != null)
+            .ToListAsync();
+        var haveComponents = (await db.SalaryComponents.Select(c => c.EmployeeId).Distinct().ToListAsync()).ToHashSet();
+        var candidates = employeesNeedingComponents.Where(e => !haveComponents.Contains(e.Id)).ToList();
+
+        if (candidates.Count > 0)
+        {
+            var roleNamesById = await db.Roles.ToDictionaryAsync(r => r.Id, r => r.Name);
+            var components = new List<SalaryComponent>();
+            var effectiveFrom = new DateOnly(2026, 6, 1);
+
+            foreach (var employee in candidates)
+            {
+                if (!roleNamesById.TryGetValue(employee.RoleId!.Value, out var roleName)) continue;
+                var basic = RoleBasicSalary.GetValueOrDefault(roleName, 4000);
+
+                components.Add(new SalaryComponent { Id = Guid.NewGuid(), EmployeeId = employee.Id, ComponentName = "Basic Salary", ComponentType = "Earning", Amount = basic, Frequency = "Monthly", EffectiveFrom = effectiveFrom, Status = "active", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+                components.Add(new SalaryComponent { Id = Guid.NewGuid(), EmployeeId = employee.Id, ComponentName = "Housing Allowance", ComponentType = "Earning", Amount = Math.Round(basic * 0.25m, 0), Frequency = "Monthly", EffectiveFrom = effectiveFrom, Status = "active", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+                components.Add(new SalaryComponent { Id = Guid.NewGuid(), EmployeeId = employee.Id, ComponentName = "Transport Allowance", ComponentType = "Earning", Amount = 500, Frequency = "Monthly", EffectiveFrom = effectiveFrom, Status = "active", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+            }
+            db.SalaryComponents.AddRange(components);
+            await db.SaveChangesAsync();
+        }
+
+        if (await db.PayrollRuns.AnyAsync()) return; // demo runs already seeded
+
+        var branches = await db.Branches.ToListAsync();
+        var runs = new List<PayrollRun>();
+        foreach (var branch in branches)
+        {
+            var hasEmployees = await db.Employees.AnyAsync(e => e.BranchId == branch.Id && e.EmploymentStatus == "active");
+            if (!hasEmployees) continue;
+            runs.Add(new PayrollRun
+            {
+                Id = Guid.NewGuid(), BranchId = branch.Id, Year = 2026, Month = 7,
+                PayDate = new DateOnly(2026, 7, 31), Status = "Draft",
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        if (runs.Count == 0) return;
+        db.PayrollRuns.AddRange(runs);
+        await db.SaveChangesAsync();
+
+        // Process each seeded run the same way PayrollController.Process does, so the demo data
+        // shows a real Processed run with employee-level net pay, not just an empty Draft shell.
+        foreach (var run in runs)
+        {
+            var employees = await db.Employees.Where(e => e.BranchId == run.BranchId && e.EmploymentStatus == "active").ToListAsync();
+            var components = await db.SalaryComponents.Where(c => c.Status == "active").ToListAsync();
+            var componentsByEmployee = components.GroupBy(c => c.EmployeeId).ToDictionary(g => g.Key, g => g.ToList());
+
+            decimal total = 0;
+            var rows = new List<PayrollRunEmployee>();
+            foreach (var employee in employees)
+            {
+                var employeeComponents = componentsByEmployee.GetValueOrDefault(employee.Id, []);
+                var basic = employeeComponents.FirstOrDefault(c => c.ComponentName == "Basic Salary")?.Amount ?? 0;
+                var earnings = employeeComponents.Where(c => c.ComponentType == "Earning").Sum(c => c.Amount);
+                var deductions = employeeComponents.Where(c => c.ComponentType == "Deduction").Sum(c => c.Amount);
+                var net = earnings - deductions;
+                rows.Add(new PayrollRunEmployee { Id = Guid.NewGuid(), PayrollRunId = run.Id, EmployeeId = employee.Id, BasicSalary = basic, GrossEarnings = earnings, TotalDeductions = deductions, NetPayable = net });
+                total += net;
+            }
+            db.PayrollRunEmployees.AddRange(rows);
+            run.Status = "Processed";
+            run.EmployeeCount = rows.Count;
+            run.TotalAmount = total;
+            run.ProcessedAt = DateTime.UtcNow;
+            run.UpdatedAt = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync();
     }
 
     // ─── Backfill: Offers ────────────────────────────────────────────────────

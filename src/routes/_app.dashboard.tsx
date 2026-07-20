@@ -11,17 +11,24 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Checkbox } from "@/components/ui/checkbox";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { cn } from "@/lib/utils";
-import { api, type DashboardMetrics, type CashierShift, type Branch, type InventoryStock, type Terminal } from "@/lib/api";
+import { api, type DashboardMetrics, type CashierShift, type Branch, type InventoryStock, type Terminal, type InventoryDashboardReport, type InventoryMoverRow } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
+import { MetricCard } from "@/components/metric-card";
 import { useAuth } from "@/lib/auth";
 import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowRight,
   LayoutDashboard, Timer, Warehouse, Undo2, Cigarette, Settings2,
-  TrendingUp, TrendingDown, type LucideIcon,
+  TrendingUp, TrendingDown, Boxes, AlertTriangle, ShoppingCart, Ban, RefreshCw, type LucideIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/dashboard")({ component: Dashboard });
+
+const firstOfMonthStr = () => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+};
+const todayStr = () => new Date().toISOString().slice(0, 10);
 
 const PERIOD_MAP: Record<string, string> = { Daily: "today", Weekly: "week", Monthly: "month" };
 const periods = ["Daily", "Weekly", "Monthly", "Custom"] as const;
@@ -281,6 +288,7 @@ function Dashboard() {
   const canViewReturns = canViewModule("Returns");
   const canViewWarehouses = canViewModule("Warehouses");
   const canViewInventory = canViewModule("Inventory");
+  const canViewCost = canViewModule("Accounting & Finance");
 
   const [period, setPeriod] = useState<(typeof periods)[number]>("Daily");
   // Non-admin users locked to their assigned branch; admins start with "all"
@@ -297,6 +305,7 @@ function Dashboard() {
   const [activeTab, setActiveTab] = useState("overview");
 
   const [inventoryItems, setInventoryItems] = useState<InventoryStock[]>([]);
+  const [invReport, setInvReport] = useState<InventoryDashboardReport | null>(null);
   const [inventoryTabLoading, setInventoryTabLoading] = useState(false);
   const [inventoryTabLoaded, setInventoryTabLoaded] = useState(false);
 
@@ -358,12 +367,16 @@ function Dashboard() {
     setTerminalTabLoaded(false);
   }, [branch, period]);
 
-  // Lazy load low-stock items when inventory tab is first opened
+  // Lazy load low-stock items + the inventory KPI/mover report when inventory tab is first opened
   useEffect(() => {
     if (activeTab !== "inventory" || inventoryTabLoaded || !canViewInventory) return;
     setInventoryTabLoading(true);
-    api.getStock({ branchId: branch !== "all" ? branch : undefined, lowStock: true })
-      .then(items => { setInventoryItems(items); setInventoryTabLoaded(true); })
+    const branchId = branch !== "all" ? branch : undefined;
+    Promise.all([
+      api.getStock({ branchId, lowStock: true }),
+      api.getInventoryDashboardReport({ from: firstOfMonthStr(), to: todayStr(), branchId }),
+    ])
+      .then(([items, report]) => { setInventoryItems(items); setInvReport(report); setInventoryTabLoaded(true); })
       .catch(() => {})
       .finally(() => setInventoryTabLoading(false));
   }, [activeTab, inventoryTabLoaded, branch, canViewInventory]);
@@ -404,6 +417,10 @@ function Dashboard() {
     : "No active shifts";
 
   const selectedBranchName = branches.find(b => b.id === branch)?.name ?? "All Branches";
+
+  const invKpis = invReport?.kpis;
+  // Turnover and movers are ledger-derived; flag when the ledger doesn't span the whole period.
+  const invPartialLedger = !!invReport?.dataWindow && !invReport.dataWindow.coversFullPeriod;
 
   return (
     <PageShell title="Dashboard" subtitle={`Live snapshot · ${selectedBranchName} · ${period}`}>
@@ -588,17 +605,34 @@ function Dashboard() {
 
         <TabsContent value="inventory" className="mt-4 space-y-4">
           <Widget title="Inventory Health" link={{ to: "/inventory", label: "Open Inventory" }}>
-            {loading ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />) : (
-              <div className="grid grid-cols-2 gap-3">
-                <Mini label="Low Stock" value={String(dashData?.inventory.lowStockCount ?? 0)} tone="warning" />
-                <Mini label="Near Expiry" value={String(dashData?.inventory.expiringCount ?? 0)} tone="warning" />
-                <Mini label="Out of Stock" value={String(dashData?.inventory.outOfStockCount ?? 0)} tone="destructive" />
-                <Mini label="Total Issues" value={String(
-                  (dashData?.inventory.lowStockCount ?? 0) + (dashData?.inventory.expiringCount ?? 0) + (dashData?.inventory.outOfStockCount ?? 0)
-                )} />
+            {inventoryTabLoading ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
+              </div>
+            ) : (
+              // All ten FRD §2.6 KPIs. Stock Value and Wastage Value are finance-gated — a role
+              // without Accounting & Finance sees the counts, not the money.
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {canViewCost && <MetricCard label="Current Stock Value" value={<><SARIcon />{fmtSAR(invKpis?.totalStockValue ?? 0)}</>} icon={Boxes} accent="primary" />}
+                <MetricCard label="Available Stock Qty" value={String(invKpis?.availableStockQty ?? 0)} icon={PackageCheck} accent="success" />
+                <MetricCard label="Low Stock Products" value={String(invKpis?.lowStockProducts ?? 0)} icon={AlertTriangle} accent="warning" />
+                <MetricCard label="Out of Stock Products" value={String(invKpis?.outOfStockProducts ?? 0)} icon={PackageX} accent="destructive" />
+                <MetricCard label="Negative Inventory Items" value={String(invKpis?.negativeInventoryItems ?? 0)} icon={AlertTriangle} accent="destructive" />
+                <MetricCard label="Pending Purchase Orders" value={String(invKpis?.pendingPurchaseOrders ?? 0)} icon={ShoppingCart} accent="warning" />
+                {canViewCost && <MetricCard label="Wastage Value" value={<><SARIcon />{fmtSAR(invKpis?.wastageValue ?? 0)}</>} icon={Ban} accent="destructive" />}
+                <MetricCard
+                  label="Inventory Turnover"
+                  value={`${invKpis?.inventoryTurnover ?? 0}×`}
+                  icon={RefreshCw}
+                  hint={invPartialLedger ? "Partial ledger data" : undefined}
+                />
               </div>
             )}
           </Widget>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <InvMoverCard title="Top Moving Products" rows={invReport?.topMoving ?? []} loading={inventoryTabLoading} canViewCost={canViewCost} emptyHint={invPartialLedger} />
+            <InvMoverCard title="Slow Moving Products" rows={invReport?.slowMoving ?? []} loading={inventoryTabLoading} canViewCost={canViewCost} emptyHint={invPartialLedger} />
+          </div>
           {inventoryTabLoading ? (
             <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-9 w-full rounded-xl" />)}</div>
           ) : inventoryItems.length > 0 ? (
@@ -803,6 +837,50 @@ function Widget({ title, link, children }: { title: string; link?: { to: string;
         )}
       </div>
       <div className="space-y-2.5">{children}</div>
+    </Card>
+  );
+}
+
+function InvMoverCard({ title, rows, loading, canViewCost, emptyHint }: {
+  title: string; rows: InventoryMoverRow[]; loading: boolean; canViewCost: boolean; emptyHint: boolean;
+}) {
+  return (
+    <Card className="p-5 border-border/60 shadow-card space-y-3">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : rows.length === 0 ? (
+        // Distinguish "nothing sold" from "nothing recorded" — with an empty ledger the second is
+        // the real reason, and showing a bare "no data" would imply the first.
+        <p className="text-sm text-muted-foreground">
+          {emptyHint
+            ? "No sales movements recorded in this period yet, so products cannot be ranked."
+            : "No product movement in this period."}
+        </p>
+      ) : (
+        <div className="rounded-lg border border-border/60 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/40">
+              <tr>
+                <th className="text-left px-3 py-2">Product</th>
+                <th className="text-left px-2 py-2">SKU</th>
+                <th className="text-right px-2 py-2">Units Moved</th>
+                {canViewCost && <th className="text-right px-2 py-2">COGS</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.productId} className="border-t border-border/40">
+                  <td className="px-3 py-2">{r.productName}</td>
+                  <td className="px-2 py-2 font-mono text-[11px] text-muted-foreground">{r.sku}</td>
+                  <td className="px-2 py-2 text-right tabular-nums font-medium">{r.unitsMoved}</td>
+                  {canViewCost && <td className="px-2 py-2 text-right tabular-nums"><SARIcon />{fmtSAR(r.cogsValue)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   );
 }

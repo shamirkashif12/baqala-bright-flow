@@ -9,3 +9,22 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+function escapeCsvCell(value: unknown): string {
+  const s = value == null ? "" : String(value);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * Client-side CSV export for module list pages (Employees, Departments, Holidays, etc.) whose
+ * data is already fully loaded and — where it matters (e.g. Payroll amounts) — already masked
+ * server-side. Mirrors the backend CsvWriter's UTF-8-BOM convention so Excel opens Arabic text
+ * correctly. Used where a dedicated report/export endpoint (with its own audit logging) isn't
+ * warranted — see the HRM Reports pages for that heavier pattern.
+ */
+export function exportRowsAsCsv(headers: string[], rows: unknown[][], filename: string) {
+  const lines = [headers, ...rows].map(row => row.map(escapeCsvCell).join(","));
+  const csv = "﻿" + lines.join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  downloadBlob(blob, filename);
+}

@@ -42,6 +42,11 @@ import {
   ClipboardList,
   ArrowLeftRight,
   PackageSearch,
+  Building,
+  IdCard,
+  CalendarDays,
+  Clock,
+  Plane,
 } from "lucide-react";
 import {
   Sidebar,
@@ -102,6 +107,9 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Stocks" },
       { title: "Inventory",            url: "/inventory",       icon: Package,       module: "Inventory" },
+      // Gated on Inventory, matching PricingController — see the comment there on why price rules
+      // deliberately don't get a permission module of their own.
+      { title: "Pricing",              url: "/pricing",         icon: TicketPercent, module: "Inventory" },
       { title: "Expiry & Perishable",  url: "/batches",         icon: CalendarClock, module: "Batches" },
       { title: "Batch Tracking",       url: "/batch-tracking",  icon: PackageSearch, module: "Batches" },
       { title: "Warehouses",           url: "/warehouses",      icon: Warehouse,     module: "Warehouses" },
@@ -140,6 +148,19 @@ const navGroups: NavGroup[] = [
       { title: "Reports",               url: "/reports",  icon: FileBarChart, module: "Reports" },
       { title: "KPI Evaluation",        url: "/kpi",      icon: Gauge,        module: "Reports" },
       { title: "Business Intelligence", url: "/bi",       icon: BarChart3,    module: "Reports" },
+    ],
+  },
+  {
+    label: "Human Resources",
+    items: [
+      { title: "Employees",    url: "/employees",    icon: Users,        module: "Employees" },
+      { title: "Attendance",   url: "/hrm-attendance", icon: ClipboardCheck, module: "HR Attendance" },
+      { title: "Shifts",       url: "/work-shifts",  icon: Clock,        module: "HR Shifts" },
+      { title: "Leave Requests", url: "/leaves",     icon: Plane,        module: "Leave Management" },
+      { title: "Payroll",      url: "/payroll",      icon: Wallet,       module: "Payroll" },
+      { title: "Departments",  url: "/departments",  icon: Building,     module: "HR Master Data" },
+      { title: "Designations", url: "/designations", icon: IdCard,       module: "HR Master Data" },
+      { title: "Holidays",     url: "/holidays",      icon: CalendarDays,module: "HR Master Data" },
     ],
   },
   {

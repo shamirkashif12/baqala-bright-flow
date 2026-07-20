@@ -52,6 +52,7 @@ builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IStockAlertService, StockAlertService>();
 builder.Services.AddScoped<IBatchConsumptionService, BatchConsumptionService>();
+builder.Services.AddScoped<IPriceResolutionService, PriceResolutionService>();
 builder.Services.AddScoped<IStockMovementService, StockMovementService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 builder.Services.AddHostedService<UsbPrinterAutoInstallService>();
@@ -222,6 +223,14 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchTrimExportAuditNoiseAsync(db);
     await DataSeeder.PatchBackfillMissingOrderTaxAsync(db);
     await DataSeeder.PatchBackfillShiftRollupsAsync(db);
+    await DataSeeder.PatchBackfillEmployeesFromUsersAsync(db);
+    await DataSeeder.PatchSeedHrmOrgDataAsync(db);
+    await DataSeeder.PatchSeedHrmEmployeeContractDefaultsAsync(db);
+    await DataSeeder.PatchSeedHrmHolidaysAsync(db);
+    await DataSeeder.PatchSeedHrmShiftsAsync(db);
+    await DataSeeder.PatchSeedHrmAttendanceAsync(db);
+    await DataSeeder.PatchSeedHrmLeaveDataAsync(db);
+    await DataSeeder.PatchSeedHrmPayrollDataAsync(db);
     await DataSeeder.PatchEnsureFreshDemoDataAsync(db);
     app.MapOpenApi();
 }
@@ -332,6 +341,13 @@ app.Use(async (context, next) =>
         var method = context.Request.Method;
         var allowed =
             (method == "GET" && path.StartsWith("/api/products")) ||
+            // The kiosk must price a basket exactly as the staffed till does. Without this the
+            // kiosk's resolve call 403s, its price map falls back to Product.BasePrice, and a
+            // branch/tier/scheduled price would apply at the till but not at the lane — a silent,
+            // customer-facing disagreement. Read-only, and PricingController.Resolve scopes a
+            // non-tenant_admin caller to its own branch regardless of the branchId it asks for.
+            // Note this is the *resolve* endpoint only; /api/pricing/lists (rule admin) stays denied.
+            (method == "GET" && path.StartsWith("/api/pricing/resolve")) ||
             (method == "GET" && path.StartsWith("/api/finance/coupons/validate/")) ||
             (method == "GET" && path.StartsWith("/api/finance/tax-rules")) ||
             (method == "GET" && path.StartsWith("/api/discounts")) ||
@@ -339,6 +355,10 @@ app.Use(async (context, next) =>
             (method == "GET" && path.StartsWith("/api/compliance/zatca/settings/")) ||
             (method == "GET" && path.StartsWith("/api/customers/by-phone/")) ||
             (method == "POST" && path == "/api/customers") ||
+            // Lets the kiosk gate its own fullscreen lockdown without any staff-only data
+            // exposure — the endpoint only ever answers true/false against its own terminal.
+            (method == "POST" && path == "/api/kiosk/verify-lockdown-pin") ||
+            (method == "GET" && path == "/api/kiosk/lockdown-pin-info") ||
             (method == "POST" && path == "/api/orders");
 
         if (!allowed)

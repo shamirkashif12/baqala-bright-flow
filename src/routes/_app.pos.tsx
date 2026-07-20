@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo, useRef, useEffect, type ReactNode } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,12 +12,12 @@ import {
   Search, ScanBarcode, Pause, RotateCcw, Printer,
   Plus, Minus, Trash2, CreditCard, Banknote, Split,
   Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode,
-  Building2, PrinterCheck, Usb, Wifi, RefreshCw, AlertCircle, Trash, Cable,
+  Building2, PrinterCheck, RefreshCw, AlertCircle,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getPrinterBase, PRINTER_API_KEY, DEFAULT_PRINTER_AGENT, getUsbPrinter, setUsbPrinter, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type DetectedPrinter, type InventoryBatch, type UsbPrinterSelection } from "@/lib/api";
-import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb, qzListUsbDevices, qzResolveUsbEndpoint, qzUsbTestPrint, type UsbDeviceInfo } from "@/lib/qz";
+import { api, getUsbPrinter, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice } from "@/lib/api";
+import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
 import { LoadErrorBanner } from "@/components/load-error-banner";
@@ -25,6 +25,15 @@ import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
 import { uuid } from "@/lib/utils";
+
+// "Failed to fetch" is the browser's own error when it can't reach anything at all (nothing
+// listening on the local print-agent port) — i.e. no printer/agent has ever been set up on
+// this till, not a real print failure. Silence that case entirely instead of alarming the
+// cashier on every single sale; a printer that's actually configured but errors for a real
+// reason (bad name, out of paper, etc.) still gets a normal HTTP-style error message.
+function isPrinterNotSetUp(msg: string): boolean {
+  return /failed to fetch|networkerror when attempting to fetch/i.test(msg);
+}
 
 // Distinguishes a printer-connectivity failure from a generic print error using the message
 // text — qz.ts/api.printReceipt don't return a structured error code, just a message string.
@@ -277,36 +286,16 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, onSto
 
 function PrinterSetupDialog() {
   const [open, setOpen] = useState(false);
-  const [detecting, setDetecting] = useState(false);
-  const [activating, setActivating] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<string | null>(null);
-  const [detected, setDetected] = useState<DetectedPrinter[]>([]);
-  const [installed, setInstalled] = useState<string[]>([]);
-  const [installedUris, setInstalledUris] = useState<Record<string, string>>({});
-  const [defaultPrinter, setDefaultPrinter] = useState<string | null>(null);
-  const [editNames, setEditNames] = useState<Record<string, string>>({});
   const [selectedPrinter, setSelectedPrinterState] = useState<string>(
     () => localStorage.getItem("baqala_receipt_printer") ?? ""
   );
-  const [printJobs, setPrintJobs] = useState<string[]>([]);
-  const [loadingJobs, setLoadingJobs] = useState(false);
-  const [clearingJobs, setClearingJobs] = useState(false);
-  const [agentUrl, setAgentUrl] = useState<string>(() => getPrinterBase());
-  const [agentUrlInput, setAgentUrlInput] = useState<string>(() => getPrinterBase());
-  const [testingAgent, setTestingAgent] = useState(false);
-  const [agentOk, setAgentOk] = useState<boolean | null>(null);
   // QZ Tray
   const [qzConnected, setQzConnected] = useState(false);
   const [qzPrinters, setQzPrinters] = useState<string[]>([]);
   const [connectingQz, setConnectingQz] = useState(false);
-  const [printMode, setPrintMode] = useState<"qz" | "local">(
-    () => (localStorage.getItem("baqala_print_mode") as "qz" | "local") ?? "local"
-  );
+  const [trustOpen, setTrustOpen] = useState(false);
 
-  function savePrintMode(m: "qz" | "local") {
-    setPrintMode(m);
-    localStorage.setItem("baqala_print_mode", m);
-  }
+  const trustCommand = `powershell -c "iex(irm '${api.qzTrustPs1Url()}')"`;
 
   async function handleQzConnect() {
     setConnectingQz(true);
@@ -322,159 +311,19 @@ function PrinterSetupDialog() {
     } finally { setConnectingQz(false); }
   }
 
-  // ── Direct USB (qz.usb.*) ──────────────────────────────────────────────────
-  const [usbDevices, setUsbDevices] = useState<UsbDeviceInfo[]>([]);
-  const [scanningUsb, setScanningUsb] = useState(false);
-  const [usbSelected, setUsbSelected] = useState<UsbPrinterSelection | null>(() => getUsbPrinter());
-  const [busyUsb, setBusyUsb] = useState<string | null>(null);
-  const usbKey = (d: { vendorId: string; productId: string }) => `${d.vendorId}:${d.productId}`;
-
-  async function handleScanUsb() {
-    setScanningUsb(true);
-    try {
-      await qzConnect();
-      setQzConnected(true);
-      const devices = await qzListUsbDevices();
-      setUsbDevices(devices);
-      toast[devices.length ? "success" : "info"](
-        devices.length ? `${devices.length} USB device(s) found` : "No USB devices found",
-      );
-    } catch {
-      toast.error("Cannot scan USB — is QZ Tray running?");
-    } finally { setScanningUsb(false); }
-  }
-
-  async function handleUseUsb(d: UsbDeviceInfo) {
-    setBusyUsb(usbKey(d));
-    try {
-      const target = await qzResolveUsbEndpoint(d.vendorId, d.productId);
-      if (!target) {
-        toast.error("This device exposes no writable endpoint — is it really a printer?");
-        return;
-      }
-      const sel: UsbPrinterSelection = {
-        ...target,
-        label: d.product || d.manufacturer || `USB ${d.vendorId}:${d.productId}`,
-      };
-      setUsbPrinter(sel);
-      setUsbSelected(sel);
-      // USB-direct takes precedence in QZ mode; clear any named selection so the
-      // routing is unambiguous and the UI reflects a single active target.
-      setSelectedPrinter("");
-      toast.success(`Direct USB printer set: ${sel.label}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to claim USB device");
-    } finally { setBusyUsb(null); }
-  }
-
-  function clearUsb() {
-    setUsbPrinter(null);
-    setUsbSelected(null);
-    toast.success("Direct USB printer cleared");
-  }
-
-  async function handleTestUsb() {
-    if (!usbSelected) return;
-    setBusyUsb("test");
-    try {
-      await qzUsbTestPrint(usbSelected);
-      toast.success("Test sent to USB printer");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Test print failed");
-    } finally { setBusyUsb(null); }
-  }
-
-  function saveAgentUrl(url: string) {
-    const clean = url.trim().replace(/\/$/, "");
-    localStorage.setItem(PRINTER_API_KEY, clean);
-    setAgentUrl(clean);
-    setAgentUrlInput(clean);
-    setAgentOk(null);
-  }
-
-  async function testAgentConnection(url: string) {
-    setTestingAgent(true); setAgentOk(null);
-    try {
-      const res = await fetch(`${url.trim().replace(/\/$/, "")}/api/printer/status`, { signal: AbortSignal.timeout(4000) });
-      setAgentOk(res.ok);
-      if (res.ok) toast.success("Local print agent reachable!");
-      else toast.error("Agent responded but returned an error.");
-    } catch { setAgentOk(false); toast.error("Cannot reach print agent — is it running?"); }
-    finally { setTestingAgent(false); }
-  }
-
   function setSelectedPrinter(name: string) {
     setSelectedPrinterState(name);
     localStorage.setItem("baqala_receipt_printer", name);
   }
 
-  async function loadPrintJobs() {
-    setLoadingJobs(true);
-    try {
-      const res = await api.getPrintJobs();
-      setPrintJobs(res.jobs);
-    } catch { setPrintJobs([]); }
-    finally { setLoadingJobs(false); }
-  }
-
-  async function handleClearQueue() {
-    setClearingJobs(true);
-    try {
-      const res = await api.cancelAllJobs();
-      toast.success(res.message);
-      setPrintJobs([]);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to clear queue");
-    } finally { setClearingJobs(false); }
-  }
-
-  async function loadStatus() {
-    const s = await api.getPrinterStatus().catch(() => null);
-    if (s) { setInstalled(s.installed); setDefaultPrinter(s.defaultPrinter); setInstalledUris(s.installedUris ?? {}); }
-  }
-
-  async function handleDetect() {
-    setDetecting(true);
-    try {
-      const res = await api.detectPrinters();
-      setDetected(res.printers);
-      if (res.printers.length === 0) toast.info("No printers detected — make sure the USB cable is connected.");
-      else toast.success(`${res.printers.length} printer(s) detected`);
-    } catch { toast.error("Detection failed — is the API running?"); }
-    finally { setDetecting(false); }
-  }
-
-  async function handleActivate(p: DetectedPrinter) {
-    const name = editNames[p.uri] ?? p.suggestedName;
-    setActivating(p.uri);
-    try {
-      const res = await api.activatePrinter({ uri: p.uri, name });
-      toast.success(res.message);
-      if (res.kioskReady) toast.info("Chrome kiosk shortcut created on Desktop — use it for silent printing.");
-      await loadStatus();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to activate printer";
-      toast.error(msg);
-    } finally { setActivating(null); }
-  }
-
-  async function handleRemove(name: string) {
-    setRemoving(name);
-    try {
-      const res = await api.removePrinter(name);
-      toast.success(res.message);
-      await loadStatus();
-    } catch { toast.error("Failed to remove printer"); }
-    finally { setRemoving(null); }
-  }
-
   function handleOpen() {
     setOpen(true);
-    loadPrintJobs();
+    // QZ Tray is the only supported route now that the local-agent tab is gone, so pin the
+    // stored mode here — terminals provisioned before this still carry mode="local".
+    localStorage.setItem("baqala_print_mode", "qz");
     const isQz = qzIsConnected();
     setQzConnected(isQz);
     if (isQz) qzListPrinters().then(setQzPrinters).catch(() => {});
-    if (printMode === "local") { loadStatus(); handleDetect(); }
   }
 
   return (
@@ -491,265 +340,122 @@ function PrinterSetupDialog() {
             </DialogTitle>
           </DialogHeader>
 
-          <Tabs value={printMode} onValueChange={v => { savePrintMode(v as "qz" | "local"); if (v === "local") { loadStatus(); handleDetect(); } }}>
-            <TabsList className="w-full mb-3">
-              <TabsTrigger value="qz" className="flex-1 gap-1.5">
-                <Printer className="h-3.5 w-3.5" /> QZ Tray <span className="text-[10px] bg-green-100 text-green-700 px-1 rounded">All Browsers</span>
-              </TabsTrigger>
-              <TabsTrigger value="local" className="flex-1 gap-1.5">
-                <Usb className="h-3.5 w-3.5" /> Local Agent <span className="text-[10px] bg-muted text-muted-foreground px-1 rounded">Linux/LAN</span>
-              </TabsTrigger>
-            </TabsList>
+          <div className="space-y-3">
+            {/* Connection status */}
+            <div className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm ${qzConnected ? "bg-green-50 border border-green-200 text-green-700" : "bg-muted/50 border text-muted-foreground"}`}>
+              {qzConnected
+                ? <><CheckCircle2 className="h-4 w-4 flex-shrink-0" /><span>QZ Tray connected — <strong>{qzPrinters.length}</strong> printer(s) found</span></>
+                : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>QZ Tray not connected</span></>}
+              <Button size="sm" variant="outline" className="ml-auto h-7 text-xs gap-1" onClick={handleQzConnect} disabled={connectingQz}>
+                {connectingQz ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                {qzConnected ? "Re-scan" : "Connect"}
+              </Button>
+            </div>
 
-            {/* ── QZ Tray tab ── */}
-            <TabsContent value="qz" className="space-y-3 mt-0">
-              {/* Connection status */}
-              <div className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm ${qzConnected ? "bg-green-50 border border-green-200 text-green-700" : "bg-muted/50 border text-muted-foreground"}`}>
-                {qzConnected
-                  ? <><CheckCircle2 className="h-4 w-4 flex-shrink-0" /><span>QZ Tray connected — <strong>{qzPrinters.length}</strong> printer(s) found</span></>
-                  : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>QZ Tray not connected</span></>}
-                <Button size="sm" variant="outline" className="ml-auto h-7 text-xs gap-1" onClick={handleQzConnect} disabled={connectingQz}>
-                  {connectingQz ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                  {qzConnected ? "Re-scan" : "Connect"}
-                </Button>
-              </div>
+            {/* Install instructions */}
+            {!qzConnected && (
+              <div className="rounded-lg border border-dashed px-4 py-3 space-y-2.5 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground text-sm">Setup (one-time per machine, run as IT/Admin):</p>
 
-              {/* Install instructions */}
-              {!qzConnected && (
-                <div className="rounded-lg border border-dashed px-4 py-3 space-y-2.5 text-xs text-muted-foreground">
-                  <p className="font-medium text-foreground text-sm">Setup (one-time per machine, run as IT/Admin):</p>
-
-                  {/* ── One-click installer (recommended) ── */}
-                  <a
-                    href={api.setupInstallerUrl()}
-                    download
-                    className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90 transition-colors"
-                  >
-                    <Printer className="h-4 w-4" />
-                    Download POS Setup Installer
-                  </a>
-                  <div className="space-y-1">
-                    <p><span className="font-medium text-foreground">Windows:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.bat</code> → click <strong>Run</strong> → click <strong>Yes</strong></p>
-                    <p><span className="font-medium text-foreground">macOS:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.command</code></p>
-                    <p><span className="font-medium text-foreground">Linux:</span> Open Terminal → paste this command:</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <code className="flex-1 bg-muted px-2 py-1 rounded text-[10px] break-all select-all">bash ~/Downloads/MiMony-POS-Setup.sh</code>
-                      <button
-                        type="button"
-                        className="shrink-0 rounded px-2 py-1 bg-muted hover:bg-muted/70 text-xs"
-                        onClick={() => navigator.clipboard.writeText("bash ~/Downloads/MiMony-POS-Setup.sh")}
-                      >Copy</button>
-                    </div>
-                  </div>
-                  <p>Installs QZ Tray silently + creates a POS shortcut on the Desktop. QZ Tray starts automatically on every boot.</p>
-                </div>
-              )}
-
-              {/* Windows: fix popup on a machine that already has QZ Tray installed manually */}
-              {!qzConnected && (
-                <div className="rounded-lg border border-dashed px-4 py-3 space-y-1.5 text-xs text-muted-foreground">
-                  <p className="font-medium text-foreground text-sm">Windows: already have QZ Tray installed?</p>
-                  <p>If you get an "Action Required" / "Untrusted website" popup every time you print, run this once (as Admin) to make QZ Tray trust this POS permanently:</p>
+                {/* ── One-click installer (recommended) ── */}
+                <a
+                  href={api.setupInstallerUrl()}
+                  download
+                  className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90 transition-colors"
+                >
+                  <Printer className="h-4 w-4" />
+                  Download POS Setup Installer
+                </a>
+                <div className="space-y-1">
+                  <p><span className="font-medium text-foreground">Windows:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.bat</code> → click <strong>Run</strong> → click <strong>Yes</strong></p>
+                  <p><span className="font-medium text-foreground">macOS:</span> Double-click <code className="bg-muted px-1 rounded">MiMony-POS-Setup.command</code></p>
+                  <p><span className="font-medium text-foreground">Linux:</span> Open Terminal → paste this command:</p>
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <code className="flex-1 bg-muted px-2 py-1 rounded text-[10px] break-all select-all">
-                      powershell -c "iex(irm '{api.qzTrustPs1Url()}')"
-                    </code>
+                    <code className="flex-1 bg-muted px-2 py-1 rounded text-[10px] break-all select-all">bash ~/Downloads/MiMony-POS-Setup.sh</code>
                     <button
                       type="button"
                       className="shrink-0 rounded px-2 py-1 bg-muted hover:bg-muted/70 text-xs"
-                      onClick={() => navigator.clipboard.writeText(`powershell -c "iex(irm '${api.qzTrustPs1Url()}')"`)}
+                      onClick={() => navigator.clipboard.writeText("bash ~/Downloads/MiMony-POS-Setup.sh")}
                     >Copy</button>
                   </div>
-                  <p>Paste into Win+R or a terminal, press Enter, and accept the Admin prompt.</p>
                 </div>
-              )}
+                <p>Installs QZ Tray silently + creates a POS shortcut on the Desktop. QZ Tray starts automatically on every boot.</p>
 
-              {/* Printer list from QZ */}
-              {qzConnected && qzPrinters.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Available Printers</p>
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {qzPrinters.map(name => {
-                      const isReceipt = selectedPrinter === name;
-                      return (
-                        <div key={name} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isReceipt ? "border-green-300 bg-green-50/60" : ""}`}>
-                          <PrinterCheck className={`h-4 w-4 flex-shrink-0 ${isReceipt ? "text-green-600" : "text-muted-foreground"}`} />
-                          <span className="flex-1 font-medium truncate">{name}</span>
-                          {isReceipt
-                            ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">Receipt Printer</span>
-                            : <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0" onClick={() => setSelectedPrinter(name)}>Use for receipts</Button>}
-                        </div>
-                      );
-                    })}
-                  </div>
+                {/* After-install steps — QZ Tray only attaches to browser tabs opened *after* it's
+                    running, so Chrome has to be restarted before the POS can reach it. */}
+                <div className="rounded-md bg-muted/50 px-3 py-2 space-y-1">
+                  <p className="font-medium text-foreground">After it installs:</p>
+                  <ol className="list-decimal list-inside space-y-0.5">
+                    <li>Close <strong>all</strong> Chrome / browser windows so QZ Tray can attach.</li>
+                    <li>Launch <strong>QZ Tray</strong> — look for its icon in the system tray (bottom-right).</li>
+                    <li>Reopen the POS, click <strong>Connect</strong> above, then <strong>select your printer</strong> below.</li>
+                  </ol>
                 </div>
-              )}
 
-              {qzConnected && qzPrinters.length === 0 && (
-                <p className="text-xs text-muted-foreground px-1">No printers found. Make sure the printer driver is installed on this machine.</p>
-              )}
-
-              {/* ── Direct USB (driverless) ── */}
-              <div className="pt-2 mt-1 border-t space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                    <Cable className="h-3.5 w-3.5" /> Direct USB <span className="normal-case tracking-normal text-[10px] bg-amber-100 text-amber-700 px-1 rounded">driverless</span>
-                  </p>
-                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleScanUsb} disabled={scanningUsb}>
-                    {scanningUsb ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                    Scan USB
-                  </Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-snug">
-                  Use this only when the printer refuses to show up above. Sends receipts straight to the
-                  printer's raw USB endpoint. On Windows the device first needs a WinUSB driver bound with Zadig.
-                </p>
-
-                {usbSelected && (
-                  <div className="flex items-center gap-2 rounded-lg border border-green-300 bg-green-50/60 px-3 py-2 text-sm">
-                    <PrinterCheck className="h-4 w-4 flex-shrink-0 text-green-600" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{usbSelected.label}</p>
-                      <p className="text-[11px] text-muted-foreground font-mono truncate">
-                        {usbSelected.vendorId}:{usbSelected.productId} · iface {usbSelected.interface} · ep {usbSelected.endpoint}
-                      </p>
-                    </div>
-                    <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0" onClick={handleTestUsb} disabled={busyUsb === "test"}>
-                      {busyUsb === "test" ? <Loader2 className="h-3 w-3 animate-spin" /> : "Test print"}
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive shrink-0" onClick={clearUsb}>
-                      <Trash className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                )}
-
-                {usbDevices.length > 0 && (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {usbDevices.map((d) => {
-                      const isSel = usbSelected?.vendorId === d.vendorId && usbSelected?.productId === d.productId;
-                      return (
-                        <div key={usbKey(d)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isSel ? "border-green-300 bg-green-50/40" : "border-border"}`}>
-                          <Usb className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium truncate">{d.product || d.manufacturer || "Unknown USB device"}</p>
-                            <p className="text-[11px] text-muted-foreground font-mono truncate">{d.vendorId}:{d.productId}</p>
-                          </div>
-                          {isSel
-                            ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">Receipt Printer</span>
-                            : <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0" disabled={busyUsb === usbKey(d)} onClick={() => handleUseUsb(d)}>
-                                {busyUsb === usbKey(d) ? <Loader2 className="h-3 w-3 animate-spin" /> : "Use for receipts"}
-                              </Button>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                {/* Details → opens the "already installed / fix trust popup" instructions */}
+                <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5" onClick={() => setTrustOpen(true)}>
+                  <Info className="h-3.5 w-3.5" /> Details — already have QZ Tray installed?
+                </Button>
               </div>
-            </TabsContent>
+            )}
 
-            {/* ── Local Agent tab ── */}
-            <TabsContent value="local" className="space-y-3 mt-0">
-              {/* Agent URL */}
-              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 space-y-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Printer Agent URL</p>
-                <div className="flex gap-2">
-                  <Input className="h-8 text-xs flex-1 font-mono" placeholder={DEFAULT_PRINTER_AGENT}
-                    value={agentUrlInput}
-                    onChange={e => { setAgentUrlInput(e.target.value); setAgentOk(null); }}
-                    onBlur={() => { if (agentUrlInput !== agentUrl) saveAgentUrl(agentUrlInput); }} />
-                  <Button size="sm" className="h-8 text-xs gap-1 whitespace-nowrap" variant="outline" disabled={testingAgent}
-                    onClick={() => { saveAgentUrl(agentUrlInput); testAgentConnection(agentUrlInput); }}>
-                    {testingAgent ? <Loader2 className="h-3 w-3 animate-spin" /> : agentOk === true ? <PrinterCheck className="h-3 w-3 text-green-600" /> : agentOk === false ? <AlertCircle className="h-3 w-3 text-destructive" /> : <Wifi className="h-3 w-3" />}
-                    Test
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">Start agent: <code className="bg-muted px-1 rounded text-[11px]">dotnet run --urls "http://0.0.0.0:5008"</code></p>
-              </div>
-
-              {/* Active receipt printer */}
-              <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${selectedPrinter || defaultPrinter ? "bg-green-50 text-green-700" : "bg-muted/50 text-muted-foreground"}`}>
-                {selectedPrinter || defaultPrinter
-                  ? <><PrinterCheck className="h-4 w-4 flex-shrink-0" /><span>Receipt printer: <strong>{selectedPrinter || defaultPrinter}</strong></span></>
-                  : <><AlertCircle className="h-4 w-4 flex-shrink-0" /><span>No printer configured — activate one below</span></>}
-              </div>
-
-              {/* Installed printers */}
-              {installed.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Installed Printers</p>
-                  <div className="space-y-1.5">
-                    {installed.map(name => {
-                      const isReceipt = (selectedPrinter || defaultPrinter) === name;
-                      return (
-                        <div key={name} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isReceipt ? "border-green-300 bg-green-50/60" : ""}`}>
-                          <PrinterCheck className={`h-4 w-4 flex-shrink-0 ${isReceipt ? "text-green-600" : "text-muted-foreground"}`} />
-                          <span className="flex-1 font-medium">{name}</span>
-                          {name === defaultPrinter && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">CUPS Default</span>}
-                          {isReceipt
-                            ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">Receipt Printer</span>
-                            : <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setSelectedPrinter(name)}>Use for receipts</Button>}
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive" disabled={removing === name} onClick={() => handleRemove(name)}>
-                            {removing === name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Detected devices */}
+            {/* Printer list from QZ */}
+            {qzConnected && qzPrinters.length > 0 && (
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Detected Devices</p>
-                  <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={handleDetect} disabled={detecting}>
-                    <RefreshCw className={`h-3 w-3 ${detecting ? "animate-spin" : ""}`} />
-                    {detecting ? "Scanning…" : "Re-scan"}
-                  </Button>
-                </div>
-                {detecting && <div className="flex items-center gap-2 text-sm text-muted-foreground py-3"><Loader2 className="h-4 w-4 animate-spin" /> Detecting connected printers…</div>}
-                {!detecting && detected.length === 0 && <div className="rounded-lg border border-dashed px-4 py-4 text-center text-sm text-muted-foreground">No printers detected. Connect the USB cable and click Re-scan.</div>}
-                {!detecting && detected.map(p => {
-                  const alreadyInstalled = Object.values(installedUris).some(u => u === p.uri);
-                  const installedName = alreadyInstalled ? Object.entries(installedUris).find(([, u]) => u === p.uri)?.[0] : null;
-                  return (
-                    <div key={p.uri} className={`rounded-lg border px-3 py-2.5 mb-2 space-y-2 ${alreadyInstalled ? "border-green-200 bg-green-50/50" : ""}`}>
-                      <div className="flex items-center gap-2">
-                        {p.type === "usb" ? <Usb className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <Wifi className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
-                        <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.model}</p><p className="text-xs text-muted-foreground font-mono truncate">{p.uri}</p></div>
-                        {alreadyInstalled && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1"><PrinterCheck className="h-3 w-3" /> {installedName}</span>}
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Available Printers</p>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {qzPrinters.map(name => {
+                    const isReceipt = selectedPrinter === name;
+                    return (
+                      <div key={name} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isReceipt ? "border-green-300 bg-green-50/60" : ""}`}>
+                        <PrinterCheck className={`h-4 w-4 flex-shrink-0 ${isReceipt ? "text-green-600" : "text-muted-foreground"}`} />
+                        <span className="flex-1 font-medium truncate">{name}</span>
+                        {isReceipt
+                          ? <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">Receipt Printer</span>
+                          : <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0" onClick={() => setSelectedPrinter(name)}>Use for receipts</Button>}
                       </div>
-                      {!alreadyInstalled && (
-                        <div className="flex gap-2">
-                          <Input className="h-8 text-xs flex-1" placeholder="Printer name" value={editNames[p.uri] ?? p.suggestedName} onChange={e => setEditNames(prev => ({ ...prev, [p.uri]: e.target.value }))} />
-                          <Button size="sm" className="h-8 gradient-primary text-primary-foreground border-0 gap-1 whitespace-nowrap" disabled={activating === p.uri} onClick={() => handleActivate(p)}>
-                            {activating === p.uri ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Activating…</> : <><PrinterCheck className="h-3.5 w-3.5" /> Activate</>}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Print queue */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Print Queue</p>
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={loadPrintJobs} disabled={loadingJobs}><RefreshCw className={`h-3 w-3 ${loadingJobs ? "animate-spin" : ""}`} />Refresh</Button>
-                    {printJobs.length > 0 && <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={handleClearQueue} disabled={clearingJobs}>{clearingJobs ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash className="h-3 w-3" />}Clear All</Button>}
-                  </div>
+                    );
+                  })}
                 </div>
-                {printJobs.length === 0
-                  ? <p className="text-xs text-muted-foreground px-1">No pending jobs — queue is clear.</p>
-                  : <div className="space-y-1 max-h-28 overflow-y-auto">{printJobs.map((job, i) => <div key={i} className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-mono text-amber-800 truncate">{job}</div>)}</div>}
               </div>
-            </TabsContent>
-          </Tabs>
+            )}
+
+            {qzConnected && qzPrinters.length === 0 && (
+              <p className="text-xs text-muted-foreground px-1">No printers found. Make sure the printer driver is installed on this machine.</p>
+            )}
+          </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Windows: fix "Action Required" / "Untrusted website" popup on a machine
+          that already has QZ Tray installed manually — shown from the Details button. */}
+      <Dialog open={trustOpen} onOpenChange={setTrustOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Printer className="h-5 w-5 text-primary" /> Windows: already have QZ Tray installed?
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2.5 text-sm text-muted-foreground">
+            <p>If you get an "Action Required" / "Untrusted website" popup every time you print, run this once (as Admin) to make QZ Tray trust this POS permanently:</p>
+            <div className="flex items-center gap-1.5">
+              <code className="flex-1 bg-muted px-2 py-1.5 rounded text-xs break-all select-all">{trustCommand}</code>
+              <button
+                type="button"
+                className="shrink-0 rounded px-2 py-1.5 bg-muted hover:bg-muted/70 text-xs"
+                onClick={() => { navigator.clipboard.writeText(trustCommand); toast.success("Command copied"); }}
+              >Copy</button>
+            </div>
+            <p>Paste into Win+R or a terminal, press Enter, and accept the Admin prompt.</p>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTrustOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -806,6 +512,9 @@ function POS() {
   const productsRef = useRef<Product[]>([]);
   const stockMapRef = useRef<Map<string, number>>(new Map());
   const expiredProductIdsRef = useRef<Set<string>>(new Set());
+  const recalledProductIdsRef = useRef<Set<string>>(new Set());
+  const priceMapRef = useRef<Map<string, ResolvedPrice>>(new Map());
+  const packBarcodeMapRef = useRef<Map<string, { productId: string; packSize: number }>>(new Map());
   const scanBuf = useRef("");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastKeyAt = useRef(0);
@@ -1015,10 +724,151 @@ function POS() {
   }, [holds]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
+  // ─── Resolved pricing (FRD §12) ─────────────────────────────────────────────
+  //
+  // A product's unit price used to be product.basePrice, read directly at every add-to-cart site.
+  // It now comes from the server's price resolution — branch-specific, customer-tier, and
+  // scheduled rules, falling back to basePrice when no rule matches (which is every product on an
+  // untouched database, so this is behaviour-preserving by default).
+  //
+  // Deliberately resolved here and snapshotted onto the cart line at add time, rather than
+  // re-derived during checkout: it mirrors exactly what basePrice did before, so the whole
+  // downstream engine (discounts, offers, bundles, tobacco, tax) is untouched. It only changes
+  // where the starting number comes from.
+  //
+  // Re-fetched when the customer changes, because tier-gated rules can only be resolved once we
+  // know who's buying. Failure is non-fatal: an empty map means every line falls back to
+  // basePrice, i.e. the pre-existing behaviour, so a pricing-service hiccup degrades to today's
+  // prices instead of blocking the till.
+  const [priceMap, setPriceMap] = useState<Map<string, ResolvedPrice>>(new Map());
+
+  useEffect(() => {
+    if (!branch) return;
+    let cancelled = false;
+    const load = () =>
+      api.resolvePrices({ branchId: branch.id, customerTier: customer?.tier })
+        .then((rows) => { if (!cancelled) setPriceMap(new Map(rows.map((r) => [r.productId, r]))); })
+        .catch(() => { if (!cancelled) setPriceMap(new Map()); });
+    load();
+    // Re-resolve when the till tab regains focus, so a product just added (with its branch/tier
+    // prices) in another tab is priced correctly here without a manual reload — the reported
+    // "the price wasn't the one I set" when a product was priced elsewhere moments earlier.
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => { cancelled = true; window.removeEventListener("focus", onFocus); };
+  }, [branch, customer?.tier]);
+
+  // The single place a unit price is decided on this screen.
+  const effectivePrice = useCallback(
+    (p: Product) => priceMap.get(p.id)?.unitPrice ?? p.basePrice,
+    [priceMap],
+  );
+
+  // Ref-based twin for the scanner listener, which runs outside React's render closure.
+  const effectivePriceOf = (p: Product) => priceMapRef.current.get(p.id)?.unitPrice ?? p.basePrice;
+
+  // ─── Pack & unit pricing (FRD §12) ──────────────────────────────────────────
+  //
+  // A pack is modelled as a quantity break, not as a separate line: once the line reaches the
+  // pack size, every unit on it drops to the pack's unit price (packPrice/packSize). Buying a
+  // case of 12 and buying 12 singles therefore cost the same, which is the point.
+  //
+  // One line per product is a hard requirement, not a simplification. The cart is keyed by SKU and
+  // the offer engine accumulates bonus quantities by productId, then adds them to *every* line
+  // carrying that productId (see displayCart) — so a second line for the same product would
+  // double-count its BOGO bonus and would independently re-pass the per-line stock guard,
+  // overselling. Quantity-break sidesteps both: the whole downstream engine still sees one
+  // ordinary line of N units.
+  //
+  // The cheapest applicable pack wins, and never loses to the plain unit price.
+  //
+  // One implementation, two entry points: the render path reads React state, the scanner listener
+  // reads the ref (it runs outside the render closure). They must never disagree on price, so the
+  // rule itself lives here once and both callers hand it a map.
+  const priceForQtyIn = (map: Map<string, ResolvedPrice>, p: Product, qty: number) => {
+    const resolved = map.get(p.id);
+    if (!resolved) return p.basePrice;
+    const unlocked = resolved.packs.filter((pk) => pk.packSize > 0 && qty >= pk.packSize);
+    if (unlocked.length === 0) return resolved.unitPrice;
+    const cheapest = unlocked.reduce((a, b) => (b.unitPrice < a.unitPrice ? b : a));
+    return Math.min(cheapest.unitPrice, resolved.unitPrice);
+  };
+
+  const priceForQty = useCallback(
+    (p: Product, qty: number) => priceForQtyIn(priceMap, p, qty),
+    [priceMap], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const priceForQtyOf = (p: Product, qty: number) => priceForQtyIn(priceMapRef.current, p, qty);
+
+  // Re-price the open cart whenever prices re-resolve. Cart lines snapshot their price when added,
+  // so without this: (1) attaching a customer mid-basket never applies that tier's special price to
+  // items already scanned, and (2) a cart restored from session storage before the price map has
+  // loaded keeps stale prices. Both were reported as "the special/tier price isn't reflected". The
+  // engine below (discounts, offers, tax) recomputes off these line prices, so re-pricing here
+  // flows through to the total.
+  useEffect(() => {
+    if (priceMap.size === 0) return;
+    setCart((prev) => {
+      let changed = false;
+      const next = prev.map((line) => {
+        const prod = productsRef.current.find((p) => p.id === line.productId);
+        if (!prod) return line;
+        const np = priceForQtyIn(priceMap, prod, line.qty);
+        if (np === line.price) return line;
+        changed = true;
+        return { ...line, price: np };
+      });
+      return changed ? next : prev;
+    });
+  }, [priceMap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Recalled products (FRD §13) ────────────────────────────────────────────
+  //
+  // Mirrors the expired-item block above, and the server-side guard in OrdersController.Create
+  // that is the real enforcement — this exists so the cashier finds out at scan time rather than
+  // at payment.
+  //
+  // Reads the purpose-built /recalls/blocked-products rather than the full recall list: the latter
+  // is gated on Batches:View, which the Cashier role isn't granted, so it would 403 here and the
+  // block would silently never engage. That endpoint also resolves lot-scoped recalls against
+  // on-hand stock server-side, so this screen doesn't pull the whole batch list to work it out.
+  const [recalledProductIds, setRecalledProductIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!branch) return;
+    let cancelled = false;
+    api.getBlockedProducts(branch.id)
+      .then((rows) => {
+        if (!cancelled) setRecalledProductIds(new Set(rows.map((r) => r.productId)));
+      })
+      .catch(() => { if (!cancelled) setRecalledProductIds(new Set()); });
+    return () => { cancelled = true; };
+  }, [branch]);
+
+  // Pack (case/outer) barcode → the product and how many units one scan represents. Scanning a
+  // case barcode adds a whole pack rather than a single unit. The backend guarantees a pack barcode
+  // can't collide with a product barcode, but product barcodes are still matched first so the
+  // meaning of a scan never depends on this map's iteration order.
+  const packBarcodeMap = useMemo(() => {
+    const map = new Map<string, { productId: string; packSize: number }>();
+    for (const resolved of priceMap.values()) {
+      for (const pack of resolved.packs) {
+        if (pack.packBarcode && pack.packSize > 0) {
+          map.set(pack.packBarcode, { productId: resolved.productId, packSize: pack.packSize });
+        }
+      }
+    }
+    return map;
+  }, [priceMap]);
+
   // Keep refs fresh so the scanner listener never has stale closures
   useEffect(() => { productsRef.current = products; }, [products]);
   useEffect(() => { stockMapRef.current = stockMap; }, [stockMap]);
   useEffect(() => { expiredProductIdsRef.current = expiredProductIds; }, [expiredProductIds]);
+  useEffect(() => { recalledProductIdsRef.current = recalledProductIds; }, [recalledProductIds]);
+  useEffect(() => { priceMapRef.current = priceMap; }, [priceMap]);
+  useEffect(() => { packBarcodeMapRef.current = packBarcodeMap; }, [packBarcodeMap]);
 
   // Global USB barcode scanner listener (works anywhere on the page)
   useEffect(() => {
@@ -1034,9 +884,15 @@ function POS() {
         scanBuf.current = "";
         if (scanTimer.current) { clearTimeout(scanTimer.current); scanTimer.current = null; }
         if (!code) return;
+        // Product barcode, then SKU, then a pack (case/outer) barcode. A pack scan resolves to the
+        // same product and adds packSize units — see priceForQty, which then re-prices the line at
+        // the pack rate.
+        const packHit = packBarcodeMapRef.current.get(code);
         const p =
           productsRef.current.find((x) => x.barcode === code) ??
-          productsRef.current.find((x) => x.sku === code);
+          productsRef.current.find((x) => x.sku === code) ??
+          (packHit ? productsRef.current.find((x) => x.id === packHit.productId) : undefined);
+        const addQty = packHit && p && p.barcode !== code && p.sku !== code ? packHit.packSize : 1;
         if (p) {
           if (!stockMapRef.current.has(p.id)) {
             toast.error(`Product not available in this branch`, {
@@ -1054,18 +910,32 @@ function POS() {
               `This batch is expired and cannot be sold: ${p.name}`, { severity: "warning", entityType: "Product", entityId: p.id });
             return;
           }
+          if (recalledProductIdsRef.current.has(p.id)) {
+            toast.error(`Cannot sell recalled item`, {
+              description: `"${p.name}" is under an active recall and is blocked from sale.`,
+              duration: 4000,
+            });
+            api.notify("Expiry / Perishable", "Recalled Item Scanned", "Recalled Item Scanned",
+              `This product is under an active recall and cannot be sold: ${p.name}`,
+              { severity: "error", entityType: "Product", entityId: p.id });
+            return;
+          }
           const stock = stockMapRef.current.get(p.id) ?? 0;
           let blockedByStock = false;
           setCart((c) => {
             const ex = c.find((i) => i.sku === p.sku);
-            const nextQty = (ex?.qty ?? 0) + 1;
+            const nextQty = (ex?.qty ?? 0) + addQty;
             if (nextQty > stock) { blockedByStock = true; return c; }
-            if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
-            return [...c, { name: p.name, sku: p.sku, productId: p.id, qty: 1, price: p.basePrice, stock }];
+            // Re-price on every quantity change — crossing a pack threshold is what unlocks the
+            // pack price, so the line's price is a function of its quantity, not of when it was added.
+            if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: nextQty, price: priceForQtyOf(p, nextQty) } : i));
+            return [...c, { name: p.name, sku: p.sku, productId: p.id, qty: addQty, price: priceForQtyOf(p, addQty), stock }];
           });
           if (blockedByStock) {
             toast.error(stock > 0 ? `Only ${stock} in stock` : `Out of stock`, {
-              description: `"${p.name}" has ${stock} unit(s) available at this branch.`,
+              description: addQty > 1
+                ? `Scanning a pack adds ${addQty} units — "${p.name}" has ${stock} available at this branch.`
+                : `"${p.name}" has ${stock} unit(s) available at this branch.`,
               duration: 4000,
             });
             if (stock === 0) {
@@ -1166,15 +1036,19 @@ function POS() {
       if (!prod) continue;
       result.push({
         name: prod.name, sku: prod.sku, productId: prod.id,
-        qty: bonusQty, price: prod.basePrice, stock: stockMap.get(prod.id) ?? 0,
+        qty: bonusQty, price: effectivePrice(prod), stock: stockMap.get(prod.id) ?? 0,
         bonusQty, isBonusOnly: true,
       });
     }
     return result;
-  }, [cart, bonusContributions, products, stockMap]);
+  }, [cart, bonusContributions, products, stockMap, effectivePrice]);
 
+  // The retail value a bonus unit is being given away at — must be the same resolved price the
+  // customer would otherwise have paid, or the bundle saving is computed against a price that
+  // doesn't apply at this branch/tier.
   const bundleDiscount = bonusContributions.reduce((sum, c) => {
-    const retailPrice = products.find(p => p.id === c.productId)?.basePrice
+    const prod = products.find(p => p.id === c.productId);
+    const retailPrice = (prod ? effectivePrice(prod) : undefined)
       ?? cart.find(i => i.productId === c.productId)?.price ?? 0;
     return sum + c.bonusQty * Math.max(0, retailPrice - c.payPerUnit);
   }, 0);
@@ -1349,7 +1223,11 @@ function POS() {
       if (i.sku !== sku) return i;
       const next = Math.max(1, i.qty + d);
       if (next > i.stock) { blockedByStock = true; return i; }
-      return { ...i, qty: next };
+      // Re-price both ways: crossing up into a pack size unlocks the pack price, and dropping back
+      // below it has to give that price up again — otherwise adding 12 then removing one would
+      // leave 11 units permanently at the case rate.
+      const prod = products.find((p) => p.id === i.productId);
+      return { ...i, qty: next, price: prod ? priceForQty(prod, next) : i.price };
     }));
     if (blockedByStock) {
       const item = cart.find((i) => i.sku === sku);
@@ -1372,6 +1250,16 @@ function POS() {
         `This batch is expired and cannot be sold: ${p.name}`, { severity: "warning", entityType: "Product", entityId: p.id });
       return;
     }
+    if (recalledProductIds.has(p.id)) {
+      toast.error(`Cannot sell recalled item`, {
+        description: `"${p.name}" is under an active recall and is blocked from sale.`,
+        duration: 4000,
+      });
+      api.notify("Expiry / Perishable", "Recalled Item Scanned", "Recalled Item Scanned",
+        `This product is under an active recall and cannot be sold: ${p.name}`,
+        { severity: "error", entityType: "Product", entityId: p.id });
+      return;
+    }
     const stock = stockMap.get(p.id) ?? 0;
     const existing = cart.find((i) => i.sku === p.sku);
     const nextQty = (existing?.qty ?? 0) + 1;
@@ -1388,8 +1276,9 @@ function POS() {
     }
     setCart((c) => {
       const ex = c.find((i) => i.sku === p.sku);
-      if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1 } : i));
-      return [...c, { name: p.name, sku: p.sku, productId: p.id, qty: 1, price: p.basePrice, stock }];
+      // Re-price on quantity change — see priceForQty: a pack price unlocks at its pack size.
+      if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1, price: priceForQty(p, i.qty + 1) } : i));
+      return [...c, { name: p.name, sku: p.sku, productId: p.id, qty: 1, price: priceForQty(p, 1), stock }];
     });
     setFlashSku(p.sku);
     setTimeout(() => setFlashSku(null), 600);
@@ -1694,6 +1583,7 @@ function POS() {
       .then((res) => toast.success(res.message, { id: printId }))
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : "Print failed";
+        if (isPrinterNotSetUp(msg)) { toast.dismiss(printId); return; }
         toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
         notifyPrintFailure(msg);
       });
@@ -1792,7 +1682,7 @@ function POS() {
                         </span>
                       )}
                       <span className="font-bold text-primary tabular-nums w-20 text-right">
-                        <SARIcon />{p.basePrice.toFixed(2)}
+                        <SARIcon />{effectivePrice(p).toFixed(2)}
                       </span>
                     </button>
                   );
@@ -2142,7 +2032,8 @@ function POS() {
             })}
             {bonusContributions.map(c => {
               const prod = products.find(p => p.id === c.productId);
-              const saving = c.bonusQty * Math.max(0, (prod?.basePrice ?? 0) - c.payPerUnit);
+              // Resolved price, so the displayed saving matches the bundleDiscount actually applied.
+              const saving = c.bonusQty * Math.max(0, (prod ? effectivePrice(prod) : 0) - c.payPerUnit);
               if (saving <= 0) return null;
               return (
                 <div key={c.offerId} className="flex justify-between text-sm">
@@ -2389,6 +2280,7 @@ function POS() {
                   .then((res) => toast.success(res.message, { id: printId }))
                   .catch((err: unknown) => {
                     const msg = err instanceof Error ? err.message : "Print failed";
+                    if (isPrinterNotSetUp(msg)) { toast.dismiss(printId); return; }
                     toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
                     notifyPrintFailure(msg);
                   });
@@ -2414,7 +2306,7 @@ function POS() {
           setCart(c => {
             const ex = c.find(i => i.sku === product.sku);
             if (ex) return c.map(i => i.sku === product.sku ? { ...i, qty: i.qty + 1, stock: newStock } : i);
-            return [...c, { name: product.name, sku: product.sku, productId: product.id, qty: 1, price: product.basePrice, stock: newStock }];
+            return [...c, { name: product.name, sku: product.sku, productId: product.id, qty: 1, price: effectivePrice(product), stock: newStock }];
           });
           setStockInOpen(false);
         }}

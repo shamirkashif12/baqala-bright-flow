@@ -11,10 +11,16 @@ namespace BaqalaPOS.Api.Services;
 // leaving an orphaned ledger entry with no corresponding stock change (or vice versa).
 public interface IStockMovementService
 {
+    // quantityBefore/quantityAfter are the on-hand either side of this mutation. They're optional
+    // because a few call sites genuinely can't know them (no stock row exists yet), but pass them
+    // wherever the value is in hand — the FRD's Inventory Transaction Audit Trail requires both,
+    // and they cannot be reconstructed later by summing the ledger (that only works if every
+    // movement since the stock row was created is present, which is false for pre-ledger rows).
     void Record(
         Guid productId, Guid? branchId, Guid? warehouseId, string movementType, decimal quantity,
         Guid? batchId = null, string? referenceType = null, Guid? referenceId = null,
-        string? referenceNumber = null, string? notes = null, Guid? createdBy = null);
+        string? referenceNumber = null, string? notes = null, Guid? createdBy = null,
+        decimal? quantityBefore = null, decimal? quantityAfter = null);
 }
 
 public class StockMovementService(BaqalaDbContext db) : IStockMovementService
@@ -22,7 +28,8 @@ public class StockMovementService(BaqalaDbContext db) : IStockMovementService
     public void Record(
         Guid productId, Guid? branchId, Guid? warehouseId, string movementType, decimal quantity,
         Guid? batchId = null, string? referenceType = null, Guid? referenceId = null,
-        string? referenceNumber = null, string? notes = null, Guid? createdBy = null)
+        string? referenceNumber = null, string? notes = null, Guid? createdBy = null,
+        decimal? quantityBefore = null, decimal? quantityAfter = null)
     {
         db.StockMovements.Add(new StockMovement
         {
@@ -33,6 +40,8 @@ public class StockMovementService(BaqalaDbContext db) : IStockMovementService
             BatchId = batchId,
             MovementType = movementType,
             Quantity = quantity,
+            QuantityBefore = quantityBefore,
+            QuantityAfter = quantityAfter,
             ReferenceType = referenceType,
             ReferenceId = referenceId,
             ReferenceNumber = referenceNumber,

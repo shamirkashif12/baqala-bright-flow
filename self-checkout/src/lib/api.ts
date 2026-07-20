@@ -180,6 +180,19 @@ export interface KioskPairResponse {
   terminalName: string;
 }
 
+// Checked before entering OR exiting the kiosk's fullscreen lockdown (see kiosk-lockdown.tsx).
+// "configured: false" means no PIN was ever set for this terminal in the Terminals admin
+// page — the lockdown shortcut is a no-op until staff set one there.
+export function verifyLockdownPin(pin: string): Promise<{ valid: boolean; configured: boolean }> {
+  return request("/api/kiosk/verify-lockdown-pin", { method: "POST", body: JSON.stringify({ pin }) });
+}
+
+// Fetched right before the PIN pad opens so it can show exactly as many digit slots as the
+// configured PIN, rather than always maxing out at 6 — length isn't secret, only the PIN is.
+export function getLockdownPinInfo(): Promise<{ configured: boolean; length: number | null }> {
+  return request("/api/kiosk/lockdown-pin-info");
+}
+
 export function pairKiosk(terminalCode: string, pairingSecret: string): Promise<KioskPairResponse> {
   // Pairing is anonymous — never attach a stale/foreign token here. If this device is
   // already paired to a different terminal, sending its old kiosk JWT alongside a
@@ -221,6 +234,38 @@ export function getProductByBarcode(barcode: string): Promise<Product> {
 // staff POS does, instead of a network round trip per keystroke/scan.
 export function listActiveProducts(): Promise<Product[]> {
   return request<Product[]>("/api/products?status=active");
+}
+
+// ─── Resolved pricing (FRD §12) ──────────────────────────────────────────────
+//
+// The kiosk must charge exactly what the staffed till charges. Both now source their unit price
+// from the same server-side resolution (branch / customer-tier / scheduled rules, falling back to
+// Product.BasePrice when no rule matches) rather than each reading basePrice directly — otherwise
+// setting a branch price would silently make the kiosk sell at the old price.
+export interface KioskPackOption {
+  priceListId: string;
+  label?: string | null;
+  packSize: number;
+  packPrice: number;
+  unitPrice: number;
+  packBarcode?: string | null;
+}
+
+export interface ResolvedPrice {
+  productId: string;
+  unitPrice: number;
+  basePrice: number;
+  priceListId?: string | null;
+  source: string;
+  packs: KioskPackOption[];
+}
+
+export function resolvePrices(branchId: string | null, customerTier?: string | null): Promise<ResolvedPrice[]> {
+  const q = new URLSearchParams();
+  if (branchId) q.set("branchId", branchId);
+  if (customerTier) q.set("customerTier", customerTier);
+  const qs = q.toString();
+  return request<ResolvedPrice[]>(`/api/pricing/resolve${qs ? `?${qs}` : ""}`);
 }
 
 export interface Coupon {

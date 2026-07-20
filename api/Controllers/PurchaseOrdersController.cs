@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/purchase-orders")]
-public class PurchaseOrdersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements) : ControllerBase
+public class PurchaseOrdersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, IAuditService audit, ILogger<PurchaseOrdersController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
@@ -314,6 +314,10 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                 UpdatedAt = DateTime.UtcNow,
             };
 
+            // On-hand either side of this receipt, for the audit trail's before/after. A stock row
+            // that doesn't exist yet was at 0 — captured before the mutation in both branches below.
+            decimal? quantityBefore = null, quantityAfter = null;
+
             // If destination is warehouse, handle WarehouseStock instead
             if (po.WarehouseId.HasValue)
             {
@@ -324,7 +328,9 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                     wStock = new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = po.WarehouseId.Value, ProductId = recv.ProductId };
                     db.WarehouseStocks.Add(wStock);
                 }
+                quantityBefore = wStock.Quantity;
                 wStock.Quantity += recv.Quantity;
+                quantityAfter = wStock.Quantity;
                 wStock.LastUpdated = wStock.UpdatedAt = DateTime.UtcNow;
             }
             else if (po.BranchId.HasValue)
@@ -337,14 +343,18 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                     bStock = new InventoryStock { Id = Guid.NewGuid(), BranchId = po.BranchId.Value, ProductId = recv.ProductId };
                     db.InventoryStocks.Add(bStock);
                 }
+                quantityBefore = bStock.Quantity;
                 bStock.Quantity += recv.Quantity;
+                quantityAfter = bStock.Quantity;
                 bStock.LastUpdated = bStock.UpdatedAt = DateTime.UtcNow;
             }
             db.InventoryBatches.Add(batch);
 
             stockMovements.Record(
                 recv.ProductId, po.BranchId, po.WarehouseId, "purchase_receive", recv.Quantity,
-                batchId: batch.Id, referenceType: "purchase_order", referenceId: po.Id, referenceNumber: po.PoNumber);
+                batchId: batch.Id, referenceType: "purchase_order", referenceId: po.Id, referenceNumber: po.PoNumber,
+                createdBy: CallerId(), notes: $"Received against PO {po.PoNumber}",
+                quantityBefore: quantityBefore, quantityAfter: quantityAfter);
         }
 
         // Update PO status
@@ -405,6 +415,24 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             $"Supplier delivery received for PO {po.PoNumber}",
             entityType: "PurchaseOrder", entityId: po.Id,
             alsoUserId: CallerId());
+
+        // FRD §2.4 — purchase receipts belong in the audit trail. Best-effort: the receipt is
+        // already committed, so a failed audit write must not fail the caller.
+        try
+        {
+            await audit.LogAsync(
+                action: "receive_purchase_order",
+                entityType: "PurchaseOrder", entityId: po.Id,
+                userId: CallerId(), branchId: po.BranchId,
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    po.PoNumber, po.Status, po.SupplierId, po.ReceivedDate,
+                    ReceivedNow = items.Select(r => new { r.ProductId, r.Quantity }),
+                    Lines = po.Items.Select(i => new { i.ProductId, i.OrderedQuantity, i.ReceivedQuantity, i.Status }),
+                }),
+                severity: "info");
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for PO receive {PoId}", po.Id); }
 
         return Ok(po);
     }

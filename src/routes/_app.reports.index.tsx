@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
   FileBarChart, Download, TrendingUp, Calendar, Building2, ShoppingCart, Tag, Truck, Boxes,
   Ban, RotateCcw, Percent, CreditCard, ShieldCheck, DollarSign, AlertTriangle, Cigarette, Coins,
-  ClipboardList, Clock, Lock, ExternalLink,
+  ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, UserCheck, CalendarCheck, History,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/")({ component: Reports });
@@ -52,8 +52,14 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/category-performance", exportFile: () => api.exportCategoryPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "supplier-performance", name: "Supplier Performance", desc: "Lead time, fill rate, dues", icon: Truck, color: "warning",
       href: "/reports/supplier-performance", exportFile: () => api.exportSupplierPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
-    { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch", icon: Boxes, color: "warning",
+    { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch & warehouse", icon: Boxes, color: "warning",
       href: "/reports/inventory-snapshot", exportFile: () => api.exportInventorySnapshotReport({ exportedBy }) },
+    { code: "stock-reconciliation", name: "Stock Reconciliation", desc: "Stock review / audit — system vs counted", icon: ClipboardCheck, color: "primary",
+      href: "/reports/stock-reconciliation", exportFile: () => api.exportStockReconciliationReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    // KPI dashboard rather than a tabular report — there is no row set to export, so it opts out
+    // of the export affordance the others share.
+    { code: "inventory-dashboard", name: "Inventory Aging", desc: "Product age, days since movement, slow-moving & dead stock", icon: Hourglass, color: "primary",
+      href: "/reports/inventory-dashboard" },
     { code: "low-stock", name: "Low Stock Report", desc: "Items below reorder thresholds", icon: AlertTriangle, color: "destructive",
       href: "/reports/low-stock", exportFile: () => api.exportLowStockReport({ onlyLowStock: true, exportedBy }) },
     { code: "waste-spoilage", name: "Waste / Spoilage Report", desc: "Expired & damaged write-offs", icon: Ban, color: "destructive",
@@ -78,6 +84,12 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/tobacco-excise", exportFile: () => api.exportTobaccoExciseReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "profit-margin", name: "Profit Margin", desc: "Gross & net margin by product", icon: DollarSign, color: "success",
       href: "/reports/profit-margin", exportFile: () => api.exportProfitMarginReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "hrm-attendance", name: "Attendance Report", desc: "Employee attendance across dates and branches", icon: UserCheck, color: "primary",
+      href: "/reports/hrm-attendance", exportFile: () => api.exportHrAttendanceReport({ dateFrom: todayStr(), dateTo: todayStr(), exportedBy }) },
+    { code: "shift-closing", name: "Shift Closing Report", desc: "Shift closing completion and exceptions", icon: CalendarCheck, color: "primary",
+      href: "/reports/shift-closing", exportFile: () => api.exportShiftClosingReport({ dateFrom: todayStr(), dateTo: todayStr(), exportedBy }) },
+    { code: "employee-activity", name: "Employee Activity Report", desc: "Audit trail of employee actions across HRM and POS", icon: History, color: "primary",
+      href: "/reports/employee-activity", exportFile: () => api.exportEmployeeActivityReport({ dateFrom: `${firstOfMonthStr()}T00:00:00`, dateTo: `${todayStr()}T23:59:59`, exportedBy }) },
   ];
 }
 
@@ -152,7 +164,7 @@ function Reports() {
       </div>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <FileBarChart className="h-3.5 w-3.5" />
-        All 21 reports are live.
+        All {reports.length} reports are live.
       </div>
     </PageShell>
   );

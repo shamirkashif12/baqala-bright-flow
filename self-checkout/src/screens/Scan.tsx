@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Minus, Plus, ScanBarcode, ShoppingCart, Tag, Trash2, X, QrCode, User, Loader2, Gift,
+  Minus, Plus, RotateCcw, ScanBarcode, ShoppingCart, Tag, Trash2, X, QrCode, User, Loader2, Gift,
 } from "lucide-react";
 import { useCart } from "../lib/cart";
 import { useSession } from "../lib/session";
@@ -11,6 +11,7 @@ import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { SARIcon } from "../lib/currency";
 import { PaymentDialog } from "../components/PaymentDialog";
 import { InvoiceDialog, getZatcaQr, printInvoice, type InvoiceSnapshot } from "../components/InvoiceDialog";
@@ -28,6 +29,7 @@ export default function ScanScreen() {
   const [invOpen, setInvOpen] = useState(false);
   const [invoice, setInvoice] = useState<InvoiceSnapshot | null>(null);
   const [doneOpen, setDoneOpen] = useState(false);
+  const [newOrderConfirmOpen, setNewOrderConfirmOpen] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
   const autoPrintRef = useRef(false);
 
@@ -239,6 +241,21 @@ export default function ScanScreen() {
     navigate("/", { replace: true });
   }
 
+  // Manual reset for a customer who scanned items and walked away without paying — clears
+  // the cart plus every bit of local UI state (coupon input, phone lookup, banner) and puts
+  // the scanner focus back so the next shopper can start scanning immediately. Stays on this
+  // screen rather than bouncing to Welcome — that's an extra tap this lane doesn't need
+  // between customers, unlike the idle-timeout reset which is meant to send it there.
+  function abandonOrder() {
+    cart.clear();
+    removeCustomer();
+    setCouponCode("");
+    setQuery("");
+    setMessage(null);
+    setNewOrderConfirmOpen(false);
+    scanInputRef.current?.focus();
+  }
+
   return (
     <div className="h-full overflow-y-auto bg-muted/30 p-3 sm:p-4 md:p-6 pb-44 md:pb-6">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -246,7 +263,18 @@ export default function ScanScreen() {
           <h1 className="font-display text-lg sm:text-xl font-bold truncate">Self-Checkout</h1>
           <p className="text-xs text-muted-foreground truncate">{branchName ?? "—"}</p>
         </div>
-        <PrinterSetupDialog />
+        <div className="flex items-center gap-2 shrink-0">
+          {cart.lines.length > 0 && (
+            <Button
+              variant="outline"
+              className="h-10 gap-2 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setNewOrderConfirmOpen(true)}
+            >
+              <RotateCcw className="h-4 w-4" /> New Order
+            </Button>
+          )}
+          <PrinterSetupDialog />
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-[1fr_320px] lg:grid-cols-[1fr_420px] gap-4">
         {/* ─── Left: scanner + cart ─────────────────────────────────────── */}
@@ -292,11 +320,6 @@ export default function ScanScreen() {
                   {cart.displayLines.reduce((s, l) => s + l.quantity, 0)} units
                 </Badge>
               </div>
-              {cart.lines.length > 0 && (
-                <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={cart.clear}>
-                  Clear all
-                </Button>
-              )}
             </div>
 
             {cart.displayLines.length === 0 ? (
@@ -557,6 +580,21 @@ export default function ScanScreen() {
       <PaymentDialog open={payOpen} onOpenChange={setPayOpen} total={cart.totalAmount} onCharge={handleCharge} onDone={onPaymentDone} />
       <InvoiceDialog open={invOpen} onOpenChange={setInvOpen} invoice={invoice} onNewOrder={startNewOrder} onPrinted={onReceiptPrinted} />
       <CompleteDialog open={doneOpen} onNewOrder={startNewOrder} />
+
+      <Dialog open={newOrderConfirmOpen} onOpenChange={setNewOrderConfirmOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Start a new order?</DialogTitle>
+            <DialogDescription>
+              This clears every scanned item, the coupon, and the customer for this order — use it when a shopper has left without paying.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewOrderConfirmOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={abandonOrder}>Start New Order</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -9,15 +9,16 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Minus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
-  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft,
+  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft, Check,
 } from "lucide-react";
 import { BatchExpandRow } from "@/components/batch-expand-row";
-import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer } from "@/lib/api";
+import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -296,6 +297,47 @@ function ReceiveStockDialog({ open, onClose, warehouses, branches, destBranchId,
 
 // ─── Add Product Dialog ───────────────────────────────────────────────────────
 
+// Compact multi-select dropdown for branches. A collapsed trigger ("3 branches") instead of an
+// always-open checklist, so the Add Product form stays short no matter how many branches exist.
+function BranchMultiSelect({ branches, selected, onToggle, invalid }: {
+  branches: Branch[]; selected: string[]; onToggle: (id: string) => void; invalid?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = selected.length === 0
+    ? "Select branches…"
+    : selected.length === branches.length
+      ? "All branches"
+      : selected.length <= 2
+        ? branches.filter(b => selected.includes(b.id)).map(b => b.name).join(", ")
+        : `${selected.length} branches selected`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button"
+          className={`h-9 w-full rounded-lg border px-3 text-sm flex items-center justify-between gap-2 ${invalid ? "border-destructive/60 ring-1 ring-destructive/30" : "border-border/60"} bg-transparent hover:bg-muted/30`}>
+          <span className={`truncate ${selected.length === 0 ? "text-muted-foreground" : ""}`}>{label}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-1 max-h-64 overflow-y-auto" align="start">
+        {branches.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">No branches.</p>}
+        {branches.map(b => {
+          const on = selected.includes(b.id);
+          return (
+            <button key={b.id} type="button" onClick={() => onToggle(b.id)}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-muted/50 text-left">
+              <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${on ? "bg-primary border-primary text-primary-foreground" : "border-border/60"}`}>
+                {on && <Check className="h-3 w-3" />}
+              </span>
+              <span className="truncate">{b.name}</span>
+            </button>
+          );
+        })}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function generateSKU(name: string): string {
   const words = name.trim().split(/\s+/).filter(w => w.length >= 2);
   const parts = words.slice(0, 3).map(w => w.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3));
@@ -357,13 +399,42 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   };
   const [form, setForm] = useState({
     name: "", sku: "", barcode: "", categoryId: "",
-    branchId: "",
+    // FRD §12 Pack & Unit: how the product is sold. "pack" means the sellable unit is a pack of
+    // itemsPerPack items, priced whole; it stocks and sells exactly like a single (on-hand −1 per
+    // sale). "single" is the default.
+    saleUnitType: "single" as "single" | "pack",
+    itemsPerPack: "",
     purchasePrice: "", sellingPrice: "",
     quantity: "100", expiryDate: "",
     vatPct: "15", customFee: "0.00", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
     discount: "", imageUrl: "",
   });
+
+  // Multi-branch: the product is stocked into every selected branch (same opening quantity), and
+  // the pricing section below offers a per-branch price for exactly these branches — "the product
+  // is added in those only", so there is nowhere else to price it.
+  const [branchIds, setBranchIds] = useState<string[]>([]);
+  const toggleBranch = (id: string) => {
+    setBranchIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    // Drop any per-branch price for a branch that's no longer selected — it can't be priced if the
+    // product isn't stocked there.
+    setBranchPrices(prev => { const next = { ...prev }; delete next[id]; return next; });
+    setError("");
+  };
+
+  // ─── Independent extra prices (FRD §12) ───────────────────────────────────
+  //
+  // Selling Price above is Product.BasePrice — the default every branch/customer pays. Each entry
+  // here is ONE extra price for ONE condition, resolved independently (never a combined
+  // branch+tier rule):
+  //   • branchPrices — a per-branch override, only for branches selected above.
+  //   • tierPrice    — one optional customer-tier price, applied across the selected branches.
+  //   • priceSchedule — an optional window applied to the extra prices ("this price until Friday").
+  const [pricingOpen, setPricingOpen] = useState(false);
+  const [branchPrices, setBranchPrices] = useState<Record<string, string>>({}); // branchId → price
+  const [tierPrice, setTierPrice] = useState<{ tier: "" | CustomerTier; price: string }>({ tier: "", price: "" });
+  const [priceSchedule, setPriceSchedule] = useState({ from: "", to: "" });
 
   const set = (k: keyof typeof form) => (v: string) => { setForm(p => ({ ...p, [k]: v })); setError(""); };
   const reset = () => {
@@ -372,15 +443,21 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     setError("");
     setLookupStatus(null);
     setLookupLoading(false);
-    setForm({ name: "", sku: "", barcode: "", categoryId: "", branchId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
+    setPricingOpen(false);
+    setBranchIds([]);
+    setBranchPrices({});
+    setTierPrice({ tier: "", price: "" });
+    setPriceSchedule({ from: "", to: "" });
+    setForm({ name: "", sku: "", barcode: "", categoryId: "", saleUnitType: "single", itemsPerPack: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
   };
 
   const missingFields = [
     !form.name && "Product Name",
     !form.sku && "SKU",
     !form.categoryId && "Category",
-    !form.branchId && "Branch",
+    branchIds.length === 0 && "Branch",
     !form.sellingPrice && "Selling Price",
+    form.saleUnitType === "pack" && (!form.itemsPerPack || Number(form.itemsPerPack) < 2) && "Items per pack",
   ].filter((x): x is string => !!x);
   const fieldError = (field: string) => (submitted && missingFields.includes(field) ? "border-destructive/60 ring-1 ring-destructive/30" : "");
 
@@ -409,6 +486,19 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     if (!form.quantity || Number(form.quantity) <= 0) {
       return setError("Initial quantity must be greater than zero.");
     }
+    const badBranchPrice = Object.entries(branchPrices)
+      .filter(([id]) => branchIds.includes(id))
+      .find(([, v]) => v.trim() !== "" && (Number.isNaN(Number(v)) || Number(v) < 0));
+    if (badBranchPrice) {
+      const branchName = branches.find(b => b.id === badBranchPrice[0])?.name ?? "a selected branch";
+      return setError(`Enter a valid price for ${branchName}, or clear it.`);
+    }
+    if (tierPrice.tier && (tierPrice.price.trim() === "" || Number(tierPrice.price) < 0)) {
+      return setError("Enter a valid price for the selected customer tier, or clear the tier.");
+    }
+    if (priceSchedule.from && priceSchedule.to && priceSchedule.to <= priceSchedule.from) {
+      return setError("Price schedule: the 'until' date must be after the 'from' date.");
+    }
     setSaving(true); setError("");
     let createdProductId: string | null = null;
     try {
@@ -425,25 +515,63 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
         weightBased: false,
         isTobacco: form.isTobacco,
         imageUrl: form.imageUrl || undefined,
+        // Pack & unit (FRD §12): a pack sells as one unit at the Selling Price above.
+        saleUnitType: form.saleUnitType,
+        itemsPerPack: form.saleUnitType === "pack" ? Number(form.itemsPerPack) : null,
         ...(form.discount ? { discount: Number(form.discount), discountType: form.discountType } : {}),
       } as Parameters<typeof api.createProduct>[0]);
       createdProductId = product.id;
-      // Create an initial stock record so the product appears in the inventory list
-      await api.receiveBatch({
-        productId: product.id,
-        branchId: form.branchId,
-        quantity: Number(form.quantity),
-        purchaseCost: Number(form.purchasePrice) || undefined,
-        expiryDate: form.expiryDate || undefined,
-        batchNumber: `INIT-${product.id.slice(0, 6).toUpperCase()}`,
-      } as Parameters<typeof api.receiveBatch>[0]);
-      toast.success("Product created successfully");
+
+      // Stock the product into every selected branch with the same opening quantity — this is what
+      // "add the product to those branches" means. Sequential so a failure rolls the product back.
+      for (const branchId of branchIds) {
+        await api.receiveBatch({
+          productId: product.id,
+          branchId,
+          quantity: Number(form.quantity),
+          purchaseCost: Number(form.purchasePrice) || undefined,
+          expiryDate: form.expiryDate || undefined,
+          batchNumber: `INIT-${product.id.slice(0, 6).toUpperCase()}`,
+        } as Parameters<typeof api.receiveBatch>[0]);
+      }
+
+      // Independent extra prices. Each rule targets exactly one condition — a branch OR a tier,
+      // never both — so a product can carry a per-branch price and a tier price as two separate
+      // rules, but never one combined branch+tier rule. Posted as one bulk call (all-or-nothing).
+      const from = priceSchedule.from ? new Date(priceSchedule.from).toISOString() : undefined;
+      const to = priceSchedule.to ? new Date(priceSchedule.to).toISOString() : undefined;
+      const rules: Parameters<typeof api.createPriceListsBulk>[0] = [];
+
+      for (const branchId of branchIds) {
+        const raw = branchPrices[branchId];
+        // Only create a branch rule where the operator actually set a different price.
+        if (raw && raw.trim() !== "" && Number(raw) !== Number(form.sellingPrice)) {
+          rules.push({
+            productId: product.id, branchId, price: Number(raw),
+            priceType: "standard", unitType: "unit", effectiveFrom: from, effectiveTo: to,
+          });
+        }
+      }
+      if (tierPrice.tier && tierPrice.price.trim() !== "") {
+        // Tenant-wide tier rule (branchId omitted) — independent of the branch rules above.
+        rules.push({
+          productId: product.id, price: Number(tierPrice.price),
+          priceType: "standard", unitType: "unit",
+          minCustomerTier: tierPrice.tier, effectiveFrom: from, effectiveTo: to,
+        });
+      }
+      if (rules.length > 0) await api.createPriceListsBulk(rules);
+
+      const branchWord = `${branchIds.length} branch${branchIds.length > 1 ? "es" : ""}`;
+      toast.success(
+        rules.length > 0
+          ? `Product added to ${branchWord} with ${rules.length} custom price${rules.length > 1 ? "s" : ""}`
+          : `Product added to ${branchWord}`,
+      );
       reset(); onDone(); onClose();
     } catch (e) {
-      // The product record was already committed by the first call above; if the batch
-      // step then fails for any reason (network blip, backend rejecting the expiry date,
-      // a branch-scoped permission mismatch), discontinue it rather than leaving a phantom
-      // active, stock-less item sitting in the catalog that the user never sees was created.
+      // The product (and possibly some branch batches) were already committed; discontinue it so no
+      // phantom half-stocked item is left behind.
       if (createdProductId) await api.deleteProduct(createdProductId).catch(() => {});
       setError(e instanceof Error ? e.message : "Failed.");
     }
@@ -513,18 +641,46 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
               <SelectContent>{categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
             </Select>
           </FieldRow>
-          <FieldRow label="Branch *">
-            <Select value={form.branchId} onValueChange={set("branchId")}>
-              <SelectTrigger className={`h-9 ${fieldError("Branch")}`}><SelectValue placeholder="Select branch" /></SelectTrigger>
-              <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-            </Select>
-          </FieldRow>
+          <div className="col-span-2">
+            <FieldRow label="Branches * (stock the product into these)">
+              <BranchMultiSelect branches={branches} selected={branchIds} onToggle={toggleBranch}
+                invalid={submitted && missingFields.includes("Branch")} />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                The opening quantity below is received into each selected branch. Set per-branch prices in
+                the pricing section further down.
+              </p>
+            </FieldRow>
+          </div>
           <FieldRow label="Purchase Price">
             <Input type="number" step="0.01" min={0} className="h-9" placeholder="4.20" value={form.purchasePrice} onChange={e => set("purchasePrice")(e.target.value)} />
           </FieldRow>
-          <FieldRow label="Selling Price *">
+          <FieldRow label={form.saleUnitType === "pack" ? "Selling Price * (per pack)" : "Selling Price *"}>
             <Input type="number" step="0.01" min={0} className={`h-9 ${fieldError("Selling Price")}`} placeholder="6.50" value={form.sellingPrice} onChange={e => set("sellingPrice")(e.target.value)} />
           </FieldRow>
+          {/* Pack & unit pricing (FRD §12) — sold as a single item or as a pack of N, one row per sale either way */}
+          <FieldRow label="Sold as">
+            <Select value={form.saleUnitType} onValueChange={v => setForm(p => ({ ...p, saleUnitType: v as "single" | "pack" }))}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single">Single item</SelectItem>
+                <SelectItem value="pack">Pack of items</SelectItem>
+              </SelectContent>
+            </Select>
+          </FieldRow>
+          {form.saleUnitType === "pack" && (
+            <FieldRow label="Items per pack *">
+              <Input type="number" min={2} step={1}
+                className={`h-9 ${submitted && missingFields.includes("Items per pack") ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`}
+                placeholder="12" value={form.itemsPerPack}
+                onChange={e => set("itemsPerPack")(e.target.value)} />
+            </FieldRow>
+          )}
+          {form.saleUnitType === "pack" && (
+            <p className="col-span-2 text-[10px] text-muted-foreground -mt-1">
+              A pack sells as one unit at the price above and reduces stock by one per sale, exactly like a
+              single item — the item count is just for your reference.
+            </p>
+          )}
           <FieldRow label="Quantity *">
             <Input type="number" min={1} className={`h-9 ${submitted && (!form.quantity || Number(form.quantity) <= 0) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`} placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
           </FieldRow>
@@ -550,6 +706,100 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
                   value={form.discount} onChange={e => set("discount")(e.target.value)} />
               </div>
             </FieldRow>
+          </div>
+
+          {/* Independent extra prices — per branch / per tier / scheduled (FRD §12) */}
+          <div className="col-span-2 border-t border-border/60 pt-3 mt-1">
+            <button type="button" onClick={() => setPricingOpen(o => !o)}
+              className="w-full flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors">
+              <span className="flex items-center gap-1.5">
+                <Tag className="h-3.5 w-3.5" />
+                Different prices per branch / tier (optional)
+              </span>
+              {pricingOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
+
+            {pricingOpen && (
+              branchIds.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground mt-3">
+                  Select one or more branches above first — extra prices apply to the branches the product
+                  is stocked in.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {/* Per-branch price — one independent "extra price" per selected branch */}
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Price per branch</Label>
+                    <div className="rounded-lg border border-border/60 divide-y divide-border/40 mt-0.5">
+                      {branchIds.map(id => {
+                        const b = branches.find(x => x.id === id);
+                        return (
+                          <div key={id} className="flex items-center gap-2 px-2.5 py-1.5">
+                            <span className="text-xs flex-1 truncate">{b?.name ?? id}</span>
+                            <span className="text-[10px] text-muted-foreground">SAR</span>
+                            <Input type="number" step="0.01" min={0} className="h-7 w-24 text-xs"
+                              placeholder={form.sellingPrice || "base"}
+                              value={branchPrices[id] ?? ""}
+                              onChange={e => { setBranchPrices(p => ({ ...p, [id]: e.target.value })); setError(""); }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Leave a branch blank to use the Selling Price above. This is the only price for that
+                      branch — it is never combined with the tier price below.
+                    </p>
+                  </div>
+
+                  {/* One independent customer-tier price */}
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Special price for a customer tier</Label>
+                    <div className="flex gap-2 mt-0.5">
+                      <Select value={tierPrice.tier || "none"}
+                        onValueChange={v => { setTierPrice(p => ({ ...p, tier: v === "none" ? "" : (v as CustomerTier) })); setError(""); }}>
+                        <SelectTrigger className="h-8 text-xs flex-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No tier price</SelectItem>
+                          <SelectItem value="silver">Silver and above</SelectItem>
+                          <SelectItem value="gold">Gold and above</SelectItem>
+                          <SelectItem value="platinum">Platinum only</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {tierPrice.tier && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[10px] text-muted-foreground">SAR</span>
+                          <Input type="number" step="0.01" min={0} className="h-8 w-24 text-xs"
+                            placeholder="0.00" value={tierPrice.price}
+                            onChange={e => { setTierPrice(p => ({ ...p, price: e.target.value })); setError(""); }} />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      A separate, independent price for that tier and above. Never applies to a walk-in with
+                      no customer attached.
+                    </p>
+                  </div>
+
+                  {/* Optional schedule applied to the extra prices */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground">Valid from</Label>
+                      <Input type="date" className="h-8 text-xs mt-0.5" value={priceSchedule.from}
+                        onChange={e => { setPriceSchedule(p => ({ ...p, from: e.target.value })); setError(""); }} />
+                    </div>
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground">Until</Label>
+                      <Input type="date" className="h-8 text-xs mt-0.5" value={priceSchedule.to}
+                        onChange={e => { setPriceSchedule(p => ({ ...p, to: e.target.value })); setError(""); }} />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground -mt-1.5">
+                    Optional. Blank = starts now, never expires. When the window ends, prices fall back to
+                    the Selling Price above.
+                  </p>
+                </div>
+              )
+            )}
           </div>
 
           <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Optional tax / fee fields</p>
@@ -584,20 +834,32 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
 
 // ─── Edit Product Dialog ──────────────────────────────────────────────────────
 
-function EditProductDialog({ item, onClose, categories, onDone }: {
+function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   item: StockItem | null; onClose: () => void;
-  categories: Category[]; onDone: () => void;
+  categories: Category[]; branches: Branch[]; onDone: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "", sku: "", barcode: "", categoryId: "",
+    saleUnitType: "single" as "single" | "pack", itemsPerPack: "",
     sellingPrice: "", purchasePrice: "",
     vatPct: "15", customFee: "0.00", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
     discount: "", imageUrl: "",
     status: "active", weightBased: false,
   });
+
+  // Existing extra prices for this product (FRD §12), managed inline here so the edit form shows
+  // the same pricing options as add. Each rule is one independent price for one condition.
+  const [rules, setRules] = useState<ProductPriceList[]>([]);
+  // Editing a product only offers a customer-tier price (+ optional schedule) — branch prices are
+  // set when the product is added, so they aren't offered here.
+  const [newRule, setNewRule] = useState({ tier: "" as "" | CustomerTier, price: "", from: "", to: "" });
+  const [ruleBusy, setRuleBusy] = useState(false);
+
+  const loadRules = (productId: string) =>
+    api.getPriceLists({ productId }).then(setRules).catch(() => setRules([]));
 
   useEffect(() => {
     if (!item?.product) return;
@@ -607,6 +869,8 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
       sku: p.sku ?? "",
       barcode: p.barcode ?? "",
       categoryId: (p as unknown as { categoryId?: string }).categoryId ?? "",
+      saleUnitType: (p.saleUnitType as "single" | "pack") ?? "single",
+      itemsPerPack: p.itemsPerPack != null ? String(p.itemsPerPack) : "",
       sellingPrice: String(p.basePrice ?? ""),
       purchasePrice: p.costPrice != null ? String(p.costPrice) : "",
       vatPct: String(p.taxPercentage ?? 15),
@@ -621,12 +885,17 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
       status: p.status ?? "active",
       weightBased: p.weightBased ?? false,
     });
+    setNewRule({ tier: "", price: "", from: "", to: "" });
     setError("");
+    loadRules(p.id);
   }, [item]);
 
   const handleSave = async () => {
     if (!item?.product?.id) return;
     if (!form.name || !form.sku || !form.sellingPrice) return setError("Name, SKU and selling price are required.");
+    if (form.saleUnitType === "pack" && (!form.itemsPerPack || Number(form.itemsPerPack) < 2)) {
+      return setError("A pack must contain at least 2 items.");
+    }
     setSaving(true); setError("");
     try {
       await api.updateProduct(item.product.id, {
@@ -644,11 +913,44 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
         imageUrl: form.imageUrl || undefined,
         status: form.status,
         weightBased: form.weightBased,
+        saleUnitType: form.saleUnitType,
+        itemsPerPack: form.saleUnitType === "pack" ? Number(form.itemsPerPack) : null,
         reorderLevel: item.reorderLevel ?? 10,
       });
       onDone(); onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to save."); }
     finally { setSaving(false); }
+  };
+
+  const addRule = async () => {
+    if (!item?.product?.id) return;
+    if (!newRule.tier) return setError("Pick a customer tier for the new price.");
+    if (newRule.price.trim() === "" || Number(newRule.price) < 0) return setError("Enter a valid price.");
+    if (newRule.from && newRule.to && newRule.to <= newRule.from) return setError("Schedule: 'until' must be after 'from'.");
+    setRuleBusy(true); setError("");
+    try {
+      await api.createPriceList({
+        productId: item.product.id,
+        price: Number(newRule.price),
+        priceType: "standard", unitType: "unit",
+        // Editing only adds a customer-tier price (never a branch one) — branch prices are set on
+        // add. Tenant-wide (branchId omitted), so the tier price applies wherever the product sells.
+        minCustomerTier: newRule.tier,
+        effectiveFrom: newRule.from ? new Date(newRule.from).toISOString() : undefined,
+        effectiveTo: newRule.to ? new Date(newRule.to).toISOString() : undefined,
+      });
+      setNewRule({ tier: "", price: "", from: "", to: "" });
+      await loadRules(item.product.id);
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to add the price."); }
+    finally { setRuleBusy(false); }
+  };
+
+  const deleteRule = async (id: string) => {
+    if (!item?.product?.id) return;
+    setRuleBusy(true);
+    try { await api.deletePriceList(id); await loadRules(item.product.id); }
+    catch (e) { setError(e instanceof Error ? e.message : "Failed to remove the price."); }
+    finally { setRuleBusy(false); }
   };
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -682,9 +984,25 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
           <FieldRow label="Purchase Price">
             <Input type="number" step="0.01" className="h-9" value={form.purchasePrice} onChange={set("purchasePrice")} placeholder="4.20" />
           </FieldRow>
-          <FieldRow label="Selling Price *">
+          <FieldRow label={form.saleUnitType === "pack" ? "Selling Price * (per pack)" : "Selling Price *"}>
             <Input type="number" step="0.01" className="h-9" value={form.sellingPrice} onChange={set("sellingPrice")} placeholder="6.50" />
           </FieldRow>
+          {/* Pack & unit pricing (FRD §12) */}
+          <FieldRow label="Sold as">
+            <Select value={form.saleUnitType} onValueChange={v => setForm(p => ({ ...p, saleUnitType: v as "single" | "pack" }))}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single">Single item</SelectItem>
+                <SelectItem value="pack">Pack of items</SelectItem>
+              </SelectContent>
+            </Select>
+          </FieldRow>
+          {form.saleUnitType === "pack" && (
+            <FieldRow label="Items per pack *">
+              <Input type="number" min={2} step={1} className="h-9" value={form.itemsPerPack}
+                onChange={e => setForm(p => ({ ...p, itemsPerPack: e.target.value }))} placeholder="12" />
+            </FieldRow>
+          )}
 
           {/* Discount */}
           <div className="col-span-2">
@@ -704,6 +1022,73 @@ function EditProductDialog({ item, onClose, categories, onDone }: {
                   value={form.discount} onChange={e => setForm(p => ({ ...p, discount: e.target.value }))} />
               </div>
             </FieldRow>
+          </div>
+
+          {/* Extra prices (FRD §12). Existing branch/tier rules are listed and can be removed here;
+              adding a new one from the edit form is customer-tier only (branch prices are set when
+              the product is added). Selling Price above is the default everywhere. */}
+          <div className="col-span-2 border-t border-border/60 pt-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mb-2">
+              <Tag className="h-3.5 w-3.5" /> Customer-tier &amp; scheduled prices
+            </p>
+
+            {rules.length > 0 && (
+              <div className="rounded-lg border border-border/60 divide-y divide-border/40 mb-2">
+                {rules.map(r => {
+                  const scope = r.branchId
+                    ? (branches.find(b => b.id === r.branchId)?.name ?? "Branch")
+                    : r.minCustomerTier
+                      ? `${r.minCustomerTier}+ customers`
+                      : "All customers";
+                  const when = r.effectiveTo
+                    ? `until ${new Date(r.effectiveTo).toISOString().slice(0, 10)}`
+                    : r.effectiveFrom && new Date(r.effectiveFrom) > new Date()
+                      ? `from ${new Date(r.effectiveFrom).toISOString().slice(0, 10)}`
+                      : "";
+                  return (
+                    <div key={r.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                      <span className="flex-1 truncate">{scope}{when && <span className="text-muted-foreground"> · {when}</span>}</span>
+                      <span className="font-semibold tabular-nums">SAR {r.price.toFixed(2)}</span>
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive"
+                        disabled={ruleBusy} onClick={() => deleteRule(r.id)} title="Remove this price">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Add a customer-tier price (+ optional schedule). Branch is intentionally not offered. */}
+            <div className="rounded-lg border border-dashed border-border/60 p-2 space-y-2">
+              <div className="flex gap-2">
+                <Select value={newRule.tier || "none"} onValueChange={v => setNewRule(p => ({ ...p, tier: v === "none" ? "" : (v as CustomerTier) }))}>
+                  <SelectTrigger className="h-8 text-xs flex-1"><SelectValue placeholder="Pick tier" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Pick customer tier…</SelectItem>
+                    <SelectItem value="silver">Silver and above</SelectItem>
+                    <SelectItem value="gold">Gold and above</SelectItem>
+                    <SelectItem value="platinum">Platinum only</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[10px] text-muted-foreground">SAR</span>
+                  <Input type="number" step="0.01" min={0} className="h-8 w-20 text-xs" placeholder="0.00"
+                    value={newRule.price} onChange={e => setNewRule(p => ({ ...p, price: e.target.value }))} />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input type="date" className="h-7 text-xs flex-1" value={newRule.from}
+                  onChange={e => setNewRule(p => ({ ...p, from: e.target.value }))} title="Valid from (optional)" />
+                <span className="text-[10px] text-muted-foreground">→</span>
+                <Input type="date" className="h-7 text-xs flex-1" value={newRule.to}
+                  onChange={e => setNewRule(p => ({ ...p, to: e.target.value }))} title="Until (optional)" />
+                <Button type="button" size="sm" variant="outline" className="h-7 gap-1 shrink-0"
+                  disabled={ruleBusy} onClick={addRule}>
+                  <Plus className="h-3 w-3" /> Add
+                </Button>
+              </div>
+            </div>
           </div>
 
           <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tax / fee fields</p>
@@ -968,6 +1353,7 @@ function Inventory() {
   const [q, setQ] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
+  const [productFilter, setProductFilter] = useState("all");
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
 
@@ -987,6 +1373,10 @@ function Inventory() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [incomingTransfers, setIncomingTransfers] = useState<StockTransfer[]>([]);
   const [receiveTransferTarget, setReceiveTransferTarget] = useState<StockTransfer | null>(null);
+  // `${productId}:${branchId}` → the branch's resolved walk-in price, only when it differs from
+  // the product's base selling price. Lets the Cost / Price column show the branch's special price
+  // (FRD §12) instead of always the tenant-wide selling price.
+  const [branchPrice, setBranchPrice] = useState<Map<string, number>>(new Map());
 
   // Only meaningful once a single branch is in view — a locked branch-scoped user, or an admin
   // who's picked one in the filter. "All branches" has no single destination to receive against.
@@ -1051,6 +1441,30 @@ function Inventory() {
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [lockedBranchId]);
+
+  // Resolve each branch's walk-in price (no customer tier) so the list can show a branch's special
+  // price where one is set. One call per distinct branch on screen; falls back silently to the
+  // base selling price if resolution fails.
+  useEffect(() => {
+    const branchIds = [...new Set(stock.map(s => s.branchId))].filter(Boolean);
+    if (branchIds.length === 0) { setBranchPrice(new Map()); return; }
+    let cancelled = false;
+    Promise.all(branchIds.map(bid =>
+      api.resolvePrices({ branchId: bid }).then(rows => ({ bid, rows })).catch(() => ({ bid, rows: [] }))
+    )).then(results => {
+      if (cancelled) return;
+      const m = new Map<string, number>();
+      for (const { bid, rows } of results) {
+        for (const r of rows) {
+          // Only record a genuine override — equal-to-base means "no special price here".
+          if (r.unitPrice !== r.basePrice) m.set(`${r.productId}:${bid}`, r.unitPrice);
+        }
+      }
+      setBranchPrice(m);
+    });
+    return () => { cancelled = true; };
+  }, [stock]);
+
   useEffect(() => {
     if (lockedBranchId) setBranchFilter(lockedBranchId);
   }, [lockedBranchId]);
@@ -1074,14 +1488,36 @@ function Inventory() {
     }
   }
 
+  // Product options come from the stock rows themselves, not the full catalogue: a product with
+  // no stock record here can never match, so offering it would just yield an empty table. Narrowed
+  // by the category filter for the same reason. Deduped by id — the same product appears once per
+  // branch in `stock`.
+  const productOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const s of stock) {
+      if (!s.productId || !s.product?.name) continue;
+      if (categoryFilter !== "all" && s.product?.category?.name !== categoryFilter) continue;
+      if (branchFilter !== "all" && s.branchId !== branchFilter) continue;
+      byId.set(s.productId, s.product.name);
+    }
+    return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [stock, categoryFilter, branchFilter]);
+
+  // Keep the selection honest when a category/branch change removes it from the list — otherwise
+  // the table silently shows nothing while a stale product name is still displayed in the picker.
+  useEffect(() => {
+    if (productFilter !== "all" && !productOptions.some(p => p.id === productFilter)) setProductFilter("all");
+  }, [productOptions, productFilter]);
+
   const filtered = useMemo(() => stock.filter(s => {
     const mq = !q || (s.product?.name?.toLowerCase().includes(q.toLowerCase()) || s.product?.sku?.toLowerCase().includes(q.toLowerCase()) || s.product?.barcode?.toLowerCase().includes(q.toLowerCase()));
     const mc = categoryFilter === "all" || s.product?.category?.name === categoryFilter;
     const mb = branchFilter === "all" || s.branchId === branchFilter;
+    const mp = productFilter === "all" || s.productId === productFilter;
     const mef = !expiryFrom || (!!s.expiryDate && s.expiryDate >= expiryFrom);
     const met = !expiryTo || (!!s.expiryDate && s.expiryDate <= expiryTo + "T23:59:59");
-    return mq && mc && mb && mef && met;
-  }), [stock, q, categoryFilter, branchFilter, expiryFrom, expiryTo]);
+    return mq && mc && mb && mp && mef && met;
+  }), [stock, q, categoryFilter, branchFilter, productFilter, expiryFrom, expiryTo]);
 
   // Metrics
   const totalSKUs = stock.length;
@@ -1207,6 +1643,13 @@ function Inventory() {
             {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={productFilter} onValueChange={setProductFilter}>
+          <SelectTrigger className="h-9 w-48"><SelectValue placeholder="All Products" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Products</SelectItem>
+            {productOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
         {!lockedBranchId && (
           <Select value={branchFilter} onValueChange={setBranchFilter}>
             <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
@@ -1245,6 +1688,7 @@ function Inventory() {
                 <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="w-8 px-2 py-3" />
                   <th className="px-3 py-3 font-semibold">Product</th>
+                  <th className="px-3 py-3 font-semibold">Unit</th>
                   <th className="px-3 py-3 font-semibold">Category</th>
                   <th className="px-3 py-3 font-semibold">Branch</th>
                   <th className="px-3 py-3 font-semibold">Qty</th>
@@ -1271,6 +1715,15 @@ function Inventory() {
                           <p className="font-semibold text-sm">{s.product?.name ?? "—"}</p>
                           <p className="text-xs text-muted-foreground font-mono">{s.product?.sku} · {s.product?.barcode}</p>
                         </td>
+                        <td className="px-3 py-3 text-xs">
+                          {s.product?.saleUnitType === "pack" ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-primary/10 text-primary px-1.5 py-0.5 font-medium">
+                              <Boxes className="h-3 w-3" />Pack ×{s.product.itemsPerPack ?? "?"}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">Single</span>
+                          )}
+                        </td>
                         <td className="px-3 py-3 text-xs">{s.product?.category?.name ?? "—"}</td>
                         <td className="px-3 py-3 text-xs">{s.branch?.name ?? "—"}</td>
                         <td className="px-3 py-3 font-bold tabular-nums">{s.quantity}</td>
@@ -1278,7 +1731,20 @@ function Inventory() {
                         <td className="px-3 py-3"><ExpiryCell date={s.expiryDate} /></td>
                         <td className="px-3 py-3 text-xs">
                           <p className="tabular-nums text-muted-foreground">{s.product?.costPrice == null ? "—" : <><SARIcon />{fmtPrice(s.product.costPrice)}</>}</p>
-                          <p className="tabular-nums font-semibold">{s.product?.basePrice == null ? "—" : <><SARIcon />{fmtPrice(s.product.basePrice)}</>}</p>
+                          {(() => {
+                            const special = branchPrice.get(`${s.productId}:${s.branchId}`);
+                            if (s.product?.basePrice == null) return <p className="tabular-nums font-semibold">—</p>;
+                            if (special != null && special !== s.product.basePrice) {
+                              // Branch-specific price (FRD §12): show it, with the base struck through.
+                              return (
+                                <p className="tabular-nums font-semibold flex items-center gap-1">
+                                  <span className="text-primary"><SARIcon />{fmtPrice(special)}</span>
+                                  <span className="text-[10px] font-normal text-muted-foreground line-through"><SARIcon />{fmtPrice(s.product.basePrice)}</span>
+                                </p>
+                              );
+                            }
+                            return <p className="tabular-nums font-semibold"><SARIcon />{fmtPrice(s.product.basePrice)}</p>;
+                          })()}
                         </td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">
                           <p>VAT {s.product?.taxPercentage ?? 15}%</p>
@@ -1317,7 +1783,7 @@ function Inventory() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={10} className="text-center py-12 text-muted-foreground text-sm">No items found.</td></tr>
+                  <tr><td colSpan={11} className="text-center py-12 text-muted-foreground text-sm">No items found.</td></tr>
                 )}
               </tbody>
             </table>
@@ -1334,7 +1800,7 @@ function Inventory() {
         onReceive={t => { setReceiveOpen(false); setReceiveTransferTarget(t); }}
       />
       <AddProductDialog open={addOpen} onClose={() => setAddOpen(false)} categories={categories} branches={branches} onDone={load} />
-      <EditProductDialog item={editItem} onClose={() => setEditItem(null)} categories={categories} onDone={load} />
+      <EditProductDialog item={editItem} onClose={() => setEditItem(null)} categories={categories} branches={branches} onDone={load} />
       <ViewSheet item={viewItem} suppliers={suppliers} onClose={() => setViewItem(null)} />
       <AdjustDialog item={adjustItem} batches={allBatches} onClose={() => setAdjustItem(null)} onDone={load} />
       <QuickReceiveTransferSheet

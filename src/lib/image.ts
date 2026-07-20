@@ -24,3 +24,15 @@ export function fileToCompressedDataUrl(file: File, maxDim = 400, quality = 0.72
     reader.readAsDataURL(file);
   });
 }
+
+// Reads any file (PDF, image, etc.) as a base64 data URL, unresized — used for document/contract
+// uploads where the file must stay byte-for-byte the same (fileToCompressedDataUrl above re-encodes
+// as JPEG, which only makes sense for a decorative profile photo).
+export function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.onload = () => resolve(reader.result as string);
+    reader.readAsDataURL(file);
+  });
+}

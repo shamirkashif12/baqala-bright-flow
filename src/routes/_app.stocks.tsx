@@ -69,9 +69,13 @@ function StBadge({ status }: { status: string }) {
     partial_received: "bg-orange-100 text-orange-700",
     fully_received: "bg-green-100 text-green-700",
     approved: "bg-emerald-100 text-emerald-700",
+    rejected: "bg-red-100 text-red-700",
     draft: "bg-gray-100 text-gray-600",
     expired: "bg-red-100 text-red-700",
     damage: "bg-red-100 text-red-700",
+    waste: "bg-amber-100 text-amber-700",
+    theft: "bg-rose-100 text-rose-700",
+    other: "bg-slate-100 text-slate-600",
     reduction: "bg-orange-100 text-orange-700",
     addition: "bg-green-100 text-green-700",
     transfer_in: "bg-blue-100 text-blue-700",
@@ -394,12 +398,25 @@ function GrnReceiveDialog({ po, onDone }: { po: PurchaseOrder; onDone: () => voi
 
 // ─── Wastage dialog ───────────────────────────────────────────────────────────
 
+// The wastage write-off types (FRD §2.3). Every one routes through the approval gate: stock isn't
+// deducted until an approver signs off. UI labels are grocery-friendly; the stored adjustment_type
+// is the value on the right ("Spoilage" is the existing "waste" type under the hood).
+const WASTAGE_TYPES = ["waste", "damage", "expired", "theft", "other"] as const;
+const WASTAGE_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "damage", label: "Damage" },
+  { value: "waste", label: "Spoilage" },
+  { value: "expired", label: "Expired" },
+  { value: "theft", label: "Theft / Loss" },
+  { value: "other", label: "Other" },
+];
+const wastageTypeLabel = (t: string) => WASTAGE_TYPE_OPTIONS.find(o => o.value === t)?.label ?? t;
+
 function WastageDialog({ branches, products, onDone }: { branches: Branch[]; products: Product[]; onDone: () => void }) {
   const { user } = useAuth();
   const { canCreate } = usePermission("Stocks");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ productId: "", branchId: "", batchId: "", quantity: "", reason: "" });
+  const [form, setForm] = useState({ productId: "", branchId: "", batchId: "", quantity: "", reason: "", type: "damage" });
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v, ...(k === "productId" || k === "branchId" ? { batchId: "" } : {}) })); }
 
@@ -417,16 +434,14 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
     if (qtyWholeUnitError) { toast.error(qtyWholeUnitError); return; }
     setSaving(true);
     try {
-      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "damage", reason: form.reason || undefined, adjustedBy: user?.id, batchId: form.batchId || undefined });
-      toast.success("Wastage recorded");
+      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: form.type, reason: form.reason || undefined, adjustedBy: user?.id, batchId: form.batchId || undefined });
+      toast.success("Wastage recorded — pending approval before stock is updated");
       const productName = products.find(p => p.id === form.productId)?.name ?? "item";
-      const isExpiry = /expir/i.test(form.reason);
-      api.notify("Wastage / Spoilage", isExpiry ? "Expired Stock Write-Off" : "Wastage Recorded",
-        isExpiry ? "Expired Stock Write-Off" : "Wastage Recorded",
-        isExpiry ? "Expired stock write-off completed" : `Wastage recorded for ${productName}`,
+      api.notify("Wastage / Spoilage", "Wastage Awaiting Approval", "Wastage Awaiting Approval",
+        `${wastageTypeLabel(form.type)} write-off recorded for ${productName} — needs approval`,
         { entityType: "Product", entityId: form.productId, branchId: form.branchId });
       setOpen(false);
-      setForm({ productId: "", branchId: "", batchId: "", quantity: "", reason: "" });
+      setForm({ productId: "", branchId: "", batchId: "", quantity: "", reason: "", type: "damage" });
       onDone();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to record wastage"); }
     finally { setSaving(false); }
@@ -448,6 +463,13 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
               <Select value={form.productId} onValueChange={v => set("productId", v)}>
                 <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
                 <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Wastage type *</Label>
+              <Select value={form.type} onValueChange={v => set("type", v)}>
+                <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                <SelectContent>{WASTAGE_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
@@ -489,6 +511,9 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
               <Textarea rows={2} value={form.reason} onChange={e => set("reason", e.target.value)} placeholder="e.g. expired, damaged in transit…" />
             </div>
           </div>
+          <p className="text-xs text-muted-foreground -mt-1">
+            This write-off is recorded as <span className="font-medium">Pending Approval</span> and does not reduce stock until an approver signs it off.
+          </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving || !!qtyWholeUnitError}>{saving ? "Saving…" : "Save"}</Button>
@@ -517,6 +542,11 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
   const [startOpen, setStartOpen] = useState(false);
   const [startBranch, setStartBranch] = useState(lockedBranchId ?? "");
   const [startCategory, setStartCategory] = useState("all");
+  // Why this count is being run. Required — the manager must consciously pick one of the three
+  // intents (no silent default), so the Stock Reconciliation report's Count Type filter always
+  // gets real data. "Unspecified" is not an option here; it only ever labels legacy pre-column
+  // sessions in the report.
+  const [startCountType, setStartCountType] = useState("");
   const [startNotes, setStartNotes] = useState("");
   const [starting, setStarting] = useState(false);
 
@@ -543,14 +573,15 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
 
   const handleStart = async () => {
     if (!startBranch) { toast.error("Select a branch"); return; }
+    if (!startCountType) { toast.error("Select a count type"); return; }
     setStarting(true);
     try {
       const session = await api.startStockCount({
         branchId: startBranch, categoryId: startCategory !== "all" ? startCategory : undefined,
-        startedBy: user?.id, notes: startNotes || undefined,
+        startedBy: user?.id, notes: startNotes || undefined, countType: startCountType,
       });
       toast.success(`Count session started — ${session.items?.length ?? 0} SKUs snapshotted`);
-      setStartOpen(false); setStartNotes(""); setStartCategory("all");
+      setStartOpen(false); setStartNotes(""); setStartCategory("all"); setStartCountType("");
       load();
       openSession(session.id);
     } catch (e) {
@@ -751,7 +782,7 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
       )}
 
       <Dialog open={startOpen} onOpenChange={setStartOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Start Stock Count</DialogTitle></DialogHeader>
           <div className="space-y-3">
             {!lockedBranchId && (
@@ -763,6 +794,26 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
                 </Select>
               </div>
             )}
+            <div>
+              {/* Recorded so the Stock Reconciliation report can tell a routine shelf check apart
+                  from a compliance audit — the FRD asks for those as separate filters. Required so
+                  every new session carries an intent (no "Unspecified" rows going forward). */}
+              <Label className="text-xs text-muted-foreground mb-1 block">Count type *</Label>
+              <Select value={startCountType} onValueChange={setStartCountType}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select count type" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="review">
+                    <span className="flex flex-col items-start"><span>Stock Review</span><span className="text-xs text-muted-foreground">Routine shelf check</span></span>
+                  </SelectItem>
+                  <SelectItem value="audit">
+                    <span className="flex flex-col items-start"><span>Stock Audit</span><span className="text-xs text-muted-foreground">Independent / compliance count</span></span>
+                  </SelectItem>
+                  <SelectItem value="reconciliation">
+                    <span className="flex flex-col items-start"><span>Inventory Reconciliation</span><span className="text-xs text-muted-foreground">Correcting a known discrepancy</span></span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div>
               <Label className="text-xs text-muted-foreground mb-1 block">Category (optional — leave blank for full count)</Label>
               <Select value={startCategory} onValueChange={setStartCategory}>
@@ -876,8 +927,10 @@ function Stocks() {
 
   async function fetchDamages() {
     setTabLoading(true);
-    const dm = await api.getAdjustments({ adjustmentType: "damage" }).catch(() => null);
-    if (dm) setDamages(dm); else setLoadError(true);
+    // Wastage now spans five types (damage/spoilage/expired/theft/other), so fetch all adjustments
+    // and keep just the write-off set rather than the single-type call this tab used before.
+    const dm = await api.getAdjustments().catch(() => null);
+    if (dm) setDamages(dm.filter(a => (WASTAGE_TYPES as readonly string[]).includes(a.adjustmentType))); else setLoadError(true);
     setTabLoading(false);
   }
 
@@ -1264,7 +1317,7 @@ function Stocks() {
               <div onClick={ensureDialogMetadata}><WastageDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
             </CardHeader>
             <CardContent className="p-0">
-              <AdjustmentTable rows={damages} branches={branches} loading={tabLoading} />
+              <AdjustmentTable rows={damages} branches={branches} loading={tabLoading} onReviewed={refreshCurrentTab} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -1392,7 +1445,39 @@ function ExpiryCell({ date }: { date: string }) {
   return <span className="text-xs text-muted-foreground">{new Date(date).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" })}</span>;
 }
 
-function AdjustmentTable({ rows, branches, loading }: { rows: InventoryAdjustment[]; branches: Branch[]; loading: boolean }) {
+// FRD §2.3 — the Wastage list doubles as the approval queue. A pending write-off shows a Pending
+// badge and (for approvers) Approve / Reject actions; approving is what actually deducts stock, so
+// the "Employee Who Created" and "Employee Who Approved" columns and the status live right here
+// next to where the wastage was recorded, not buried in a separate report.
+function AdjustmentTable({ rows, branches, loading, onReviewed }: { rows: InventoryAdjustment[]; branches: Branch[]; loading: boolean; onReviewed?: () => void }) {
+  const { canApprove } = usePermission("Stocks");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [rejectRow, setRejectRow] = useState<InventoryAdjustment | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  async function approve(row: InventoryAdjustment) {
+    setBusyId(row.id);
+    try {
+      await api.reviewAdjustment(row.id, true);
+      toast.success("Write-off approved — stock updated");
+      onReviewed?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to approve"); }
+    finally { setBusyId(null); }
+  }
+  async function confirmReject() {
+    if (!rejectRow) return;
+    if (!rejectReason.trim()) { toast.error("A rejection reason is required"); return; }
+    const id = rejectRow.id;
+    setBusyId(id);
+    try {
+      await api.reviewAdjustment(id, false, rejectReason.trim());
+      toast.success("Write-off rejected — stock left on hand");
+      setRejectRow(null); setRejectReason("");
+      onReviewed?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to reject"); }
+    finally { setBusyId(null); }
+  }
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -1403,16 +1488,21 @@ function AdjustmentTable({ rows, branches, loading }: { rows: InventoryAdjustmen
             <th className="px-4 py-2 text-right">Qty</th>
             <th className="px-4 py-2 text-left">Type</th>
             <th className="px-4 py-2 text-left">Reason</th>
+            <th className="px-4 py-2 text-left">Created By</th>
+            <th className="px-4 py-2 text-left">Approved By</th>
+            <th className="px-4 py-2 text-left">Status</th>
             <th className="px-4 py-2 text-left">Date</th>
+            <th className="px-4 py-2 text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
           {loading ? (
-            <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+            <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
           ) : rows.length === 0 ? (
-            <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No records found</td></tr>
+            <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">No records found</td></tr>
           ) : rows.map(a => {
             const branch = branches.find(b => b.id === a.branchId);
+            const pending = a.approvalStatus === "pending";
             return (
               <tr key={a.id} className="border-t hover:bg-muted/20">
                 <td className="px-4 py-2.5 font-medium">{a.product?.name ?? "—"}</td>
@@ -1420,12 +1510,37 @@ function AdjustmentTable({ rows, branches, loading }: { rows: InventoryAdjustmen
                 <td className="px-4 py-2.5 text-right">{fmt(a.quantity)}</td>
                 <td className="px-4 py-2.5"><StBadge status={a.adjustmentType} /></td>
                 <td className="px-4 py-2.5 text-muted-foreground text-xs">{a.reason ?? "—"}</td>
+                <td className="px-4 py-2.5 text-xs text-muted-foreground">{a.adjustedByUser?.fullName ?? "—"}</td>
+                <td className="px-4 py-2.5 text-xs text-muted-foreground">{a.approvedByUser?.fullName ?? "—"}</td>
+                <td className="px-4 py-2.5">{a.approvalStatus ? <StBadge status={a.approvalStatus} /> : <span className="text-xs text-muted-foreground">—</span>}</td>
                 <td className="px-4 py-2.5 text-xs text-muted-foreground">{new Date(a.createdAt).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                <td className="px-4 py-2.5 text-right">
+                  {pending && canApprove ? (
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Button size="sm" className="h-7 px-2 text-xs" onClick={() => approve(a)} disabled={busyId === a.id}>Approve</Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => { setRejectRow(a); setRejectReason(""); }} disabled={busyId === a.id}>Reject</Button>
+                    </div>
+                  ) : pending ? (
+                    <span className="text-xs text-muted-foreground">Awaiting approval</span>
+                  ) : <span className="text-xs text-muted-foreground">—</span>}
+                </td>
               </tr>
             );
           })}
         </tbody>
       </table>
+
+      <Dialog open={!!rejectRow} onOpenChange={o => { if (!o) { setRejectRow(null); setRejectReason(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Reject write-off</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">Rejecting keeps the stock on hand — this write-off will not reduce inventory.</p>
+          <Textarea rows={3} value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Reason for rejection (required)" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRejectRow(null); setRejectReason(""); }}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmReject} disabled={busyId === rejectRow?.id}>Reject</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

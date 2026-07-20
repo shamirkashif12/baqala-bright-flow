@@ -92,6 +92,12 @@ public class ProductsController(
         }
         product.Id = Guid.NewGuid();
         product.CreatedAt = product.UpdatedAt = DateTime.UtcNow;
+        // Pack & unit pricing (FRD §12): a "single" never carries a pack size, a "pack" always has
+        // one (default 1 if the client omitted it).
+        product.SaleUnitType = product.SaleUnitType == "pack" ? "pack" : "single";
+        product.ItemsPerPack = product.SaleUnitType == "pack"
+            ? (product.ItemsPerPack is > 0 ? product.ItemsPerPack : 1)
+            : null;
         db.Products.Add(product);
         await db.SaveChangesAsync();
         // "Added Items" in the Employee Audit Center — a new catalog item was previously written
@@ -106,11 +112,26 @@ public class ProductsController(
     {
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
+        // Sku/Barcode were never copied from `updated` below, so edits to either field silently
+        // did nothing — the request returned 200 with the product unchanged, no error shown.
+        // Same uniqueness checks as Create, scoped to exclude this product's own current row.
+        if (!string.Equals(product.Sku, updated.Sku, StringComparison.Ordinal) &&
+            await db.Products.AnyAsync(p => p.Id != id && p.Sku == updated.Sku))
+            return Conflict(new { message = $"SKU \"{updated.Sku}\" is already used by another product." });
+        if (!string.IsNullOrWhiteSpace(updated.Barcode) &&
+            !string.Equals(product.Barcode, updated.Barcode, StringComparison.Ordinal) &&
+            await db.Products.AnyAsync(p => p.Id != id && p.Barcode == updated.Barcode))
+        {
+            var existing = await db.Products.FirstAsync(p => p.Barcode == updated.Barcode);
+            return Conflict(new { message = $"Barcode {updated.Barcode} is already assigned to \"{existing.Name}\". Edit that product instead." });
+        }
         var previousPrice = product.BasePrice;
         // Snapshot before any field is overwritten — this is the "before" half of the audit row.
         var before = Snapshot(product);
         product.Name = updated.Name;
         product.NameAr = updated.NameAr;
+        product.Sku = updated.Sku;
+        product.Barcode = updated.Barcode;
         product.CategoryId = updated.CategoryId;
         product.Brand = updated.Brand;
         product.BasePrice = updated.BasePrice;
@@ -124,6 +145,12 @@ public class ProductsController(
         product.Discount = updated.Discount;
         product.DiscountType = updated.DiscountType;
         product.ImageUrl = updated.ImageUrl;
+        // Pack & unit pricing (FRD §12). Normalised so a "single" product never carries a stray
+        // pack size and a "pack" always has one — the same guard the create path applies.
+        product.SaleUnitType = updated.SaleUnitType == "pack" ? "pack" : "single";
+        product.ItemsPerPack = product.SaleUnitType == "pack"
+            ? (updated.ItemsPerPack is > 0 ? updated.ItemsPerPack : 1)
+            : null;
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 

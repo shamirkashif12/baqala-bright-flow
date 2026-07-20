@@ -233,6 +233,8 @@ public class ReturnsController(
         {
             var stock = await db.InventoryStocks
                 .FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == ret.BranchId);
+            // A product with no stock row at this branch was at 0 before the restock.
+            decimal quantityBefore = stock?.Quantity ?? 0;
             if (stock is not null)
             {
                 stock.Quantity += item.Quantity;
@@ -251,6 +253,16 @@ public class ReturnsController(
                     UpdatedAt = DateTime.UtcNow,
                 });
             }
+
+            // This branch mutated stock but recorded no ledger row at all, so a restocked return
+            // was invisible to the movement timeline and to the audit trail — units reappeared on
+            // hand with nothing saying where from. The non-restocked branch below always logged.
+            stockMovements.Record(
+                item.ProductId, ret.BranchId, warehouseId: null, movementType: "return_restock", quantity: item.Quantity,
+                referenceType: "customer_return", referenceId: ret.Id, referenceNumber: ret.ReturnNumber,
+                notes: $"Customer return {ret.ReturnNumber} restocked: {ret.Reason}",
+                createdBy: ret.ApprovedBy ?? CallerId(),
+                quantityBefore: quantityBefore, quantityAfter: quantityBefore + item.Quantity);
         }
 
         // Items NOT restocked (damaged/expired/otherwise non-sellable) previously vanished with no

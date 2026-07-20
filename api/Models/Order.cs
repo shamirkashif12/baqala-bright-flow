@@ -139,6 +139,24 @@ public class OrderItem
     [Column("total_price")]
     public decimal TotalPrice { get; set; }
 
+    // FIFO/FEFO costing. Actual cost of the units sold on this line, summed from the PurchaseCost of
+    // the specific batches the sale drew down (see IBatchConsumptionService). This is the only place
+    // per-batch cost survives: every report today derives COGS from Product.CostPrice, a single
+    // moving value, so a sale made when cost was 4 SAR is retroactively re-costed the moment
+    // purchase cost changes to 5. Recording it at sale time is what makes historic margin stable.
+    //
+    // Nullable, and null for every line predating this column or sold from batches with no recorded
+    // PurchaseCost — reports fall back to the old Product.CostPrice behaviour in that case, so
+    // nothing regresses where the data genuinely doesn't exist.
+    [Column("cost_amount")]
+    public decimal? CostAmount { get; set; }
+
+    // JSON breakdown of the batches consumed: [{"batchId":"…","quantity":2,"unitCost":4.5}, …].
+    // Kept as JSON rather than a child table because it is read for traceability ("which lot did
+    // this customer get?" — the question a recall asks) and never aggregated or joined against.
+    [Column("batch_breakdown")]
+    public string? BatchBreakdown { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

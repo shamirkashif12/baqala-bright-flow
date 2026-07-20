@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut, KeyRound, Copy } from "lucide-react";
+import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut, KeyRound, Copy, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Terminal, type Branch, type User, type CashierShift } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -243,6 +243,8 @@ function Terminals() {
   const [kioskTerm, setKioskTerm] = useState<Terminal | null>(null);
   const [kioskSecret, setKioskSecret] = useState<{ terminalCode: string; pairingSecret: string } | null>(null);
   const [kioskGenerating, setKioskGenerating] = useState(false);
+  const [lockdownPin, setLockdownPin] = useState("");
+  const [lockdownSaving, setLockdownSaving] = useState(false);
 
   // Load all terminals once (unfiltered) for the Session Logs dropdown
   useEffect(() => {
@@ -330,6 +332,29 @@ function Terminals() {
       setKioskSecret(res);
       load();
     } catch (e: any) { console.error(e); toast.error(e?.message || "Failed to generate kiosk pairing code."); } finally { setKioskGenerating(false); }
+  };
+
+  const handleSetLockdownPin = async () => {
+    if (!kioskTerm || lockdownPin.length < 4) return;
+    setLockdownSaving(true);
+    try {
+      const res = await api.setKioskLockdownPin(kioskTerm.id, lockdownPin);
+      setKioskTerm(prev => (prev ? { ...prev, kioskLockdownPinSetAt: res.setAt, kioskLockdownPinLength: res.length } : prev));
+      setLockdownPin("");
+      toast.success("Lockdown PIN saved.");
+      load();
+    } catch (e: any) { toast.error(e?.message || "Failed to save lockdown PIN."); } finally { setLockdownSaving(false); }
+  };
+
+  const handleClearLockdownPin = async () => {
+    if (!kioskTerm) return;
+    if (!confirm("Remove the kiosk lockdown PIN? The fullscreen-lockdown shortcut will do nothing on this kiosk until a new PIN is set.")) return;
+    setLockdownSaving(true);
+    try {
+      await api.clearKioskLockdownPin(kioskTerm.id);
+      setKioskTerm(prev => (prev ? { ...prev, kioskLockdownPinSetAt: undefined, kioskLockdownPinLength: undefined } : prev));
+      load();
+    } catch (e: any) { toast.error(e?.message || "Failed to clear lockdown PIN."); } finally { setLockdownSaving(false); }
   };
 
   const set = (k: keyof TerminalForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -424,6 +449,11 @@ function Terminals() {
                                 <KeyRound className="h-3 w-3 text-success" />
                               </span>
                             )}
+                            {t.kioskLockdownPinSetAt && (
+                              <span title={`Kiosk fullscreen-lockdown PIN set ${fmtDT(t.kioskLockdownPinSetAt)}`}>
+                                <Lock className="h-3 w-3 text-primary" />
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-3 py-3 font-medium">{t.name}</td>
@@ -464,7 +494,7 @@ function Terminals() {
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTerm(t)}><Eye className="h-3.5 w-3.5" /></Button>
                             {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>}
                             {canEdit && (
-                              <Button size="icon" variant="ghost" className="h-7 w-7" title="Self-checkout kiosk pairing" onClick={() => { setKioskTerm(t); setKioskSecret(null); }}>
+                              <Button size="icon" variant="ghost" className="h-7 w-7" title="Self-checkout kiosk pairing" onClick={() => { setKioskTerm(t); setKioskSecret(null); setLockdownPin(""); }}>
                                 <KeyRound className="h-3.5 w-3.5" />
                               </Button>
                             )}
@@ -698,7 +728,7 @@ function Terminals() {
       </Sheet>
 
       {/* Self-checkout kiosk pairing sheet */}
-      <Sheet open={!!kioskTerm} onOpenChange={v => { if (!v) { setKioskTerm(null); setKioskSecret(null); } }}>
+      <Sheet open={!!kioskTerm} onOpenChange={v => { if (!v) { setKioskTerm(null); setKioskSecret(null); setLockdownPin(""); } }}>
         <SheetContent>
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
@@ -726,6 +756,34 @@ function Terminals() {
             ) : (
               <Button className="w-full gradient-primary text-primary-foreground border-0" disabled={kioskGenerating} onClick={handleGenerateKioskCode}>
                 {kioskGenerating ? "Generating…" : kioskTerm?.pairingSecretSetAt ? "Regenerate Pairing Code" : "Generate Pairing Code"}
+              </Button>
+            )}
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-border/60 space-y-3">
+            <div>
+              <p className="text-sm font-semibold flex items-center gap-1.5"><Lock className="h-3.5 w-3.5 text-primary" /> Fullscreen Lockdown PIN</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {kioskTerm?.kioskLockdownPinSetAt
+                  ? `${kioskTerm.kioskLockdownPinLength ?? "?"}-digit PIN set ${fmtDT(kioskTerm.kioskLockdownPinSetAt)}. Staff enter this on the kiosk (via its hidden shortcut) to enter or exit fullscreen lockdown.`
+                  : "Not configured yet — the kiosk's fullscreen-lockdown shortcut won't do anything until a PIN is set here."}
+              </p>
+            </div>
+            <div className="flex gap-1.5">
+              <Input
+                value={lockdownPin}
+                onChange={e => setLockdownPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="4-6 digit PIN"
+                inputMode="numeric"
+                className="h-9 font-mono flex-1"
+              />
+              <Button size="sm" className="h-9 shrink-0" disabled={lockdownSaving || lockdownPin.length < 4} onClick={handleSetLockdownPin}>
+                {lockdownSaving ? "Saving…" : kioskTerm?.kioskLockdownPinSetAt ? "Update" : "Set PIN"}
+              </Button>
+            </div>
+            {kioskTerm?.kioskLockdownPinSetAt && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-destructive" disabled={lockdownSaving} onClick={handleClearLockdownPin}>
+                Remove PIN (disables lockdown)
               </Button>
             )}
           </div>
