@@ -43,6 +43,21 @@ public class Terminal
     [Column("pairing_secret_set_at")]
     public DateTime? PairingSecretSetAt { get; set; }
 
+    // Gates the self-checkout kiosk's fullscreen lockdown (enter AND exit) — a customer-facing
+    // kiosk shouldn't let anyone pop out to the OS/browser chrome without this. Null means the
+    // feature is simply unconfigured for this terminal. Hashed the same way as the pairing
+    // secret above; never retrievable in plaintext once set, only replaced.
+    [JsonIgnore, MaxLength(255), Column("kiosk_lockdown_pin_hash")]
+    public string? KioskLockdownPinHash { get; set; }
+
+    [Column("kiosk_lockdown_pin_set_at")]
+    public DateTime? KioskLockdownPinSetAt { get; set; }
+
+    // Not secret (unlike the hash) — just the digit count, so the kiosk's PIN pad can show
+    // exactly that many slots instead of always maxing out at 6.
+    [Column("kiosk_lockdown_pin_length")]
+    public int? KioskLockdownPinLength { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

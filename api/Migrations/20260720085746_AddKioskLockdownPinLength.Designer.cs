@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720085746_AddKioskLockdownPinLength")]
+    partial class AddKioskLockdownPinLength
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -40,10 +43,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid?>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
                     b.Property<Guid?>("EntityId")
                         .HasColumnType("char(36)")
                         .HasColumnName("entity_id");
@@ -57,11 +56,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)")
                         .HasColumnName("ip_address");
-
-                    b.Property<string>("Module")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("module");
 
                     b.Property<string>("NewValues")
                         .HasColumnType("longtext")
@@ -88,8 +82,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BranchId");
-
-                    b.HasIndex("EmployeeId");
 
                     b.HasIndex("UserId");
 
@@ -657,96 +649,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("customer_return_items");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.Department", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid?>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid?>("ManagerEmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("manager_employee_id");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("varchar(150)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("ManagerEmployeeId");
-
-                    b.HasIndex("Name", "BranchId")
-                        .IsUnique();
-
-                    b.ToTable("departments");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.Designation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid>("DepartmentId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("department_id");
-
-                    b.Property<string>("Grade")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("grade");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("varchar(150)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DepartmentId");
-
-                    b.ToTable("designations");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.Device", b =>
                 {
                     b.Property<Guid>("Id")
@@ -905,325 +807,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("discounts");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.Employee", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<DateTime?>("ContractEndDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("contract_end_date");
-
-                    b.Property<bool>("ContractOpenEnded")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("contract_open_ended");
-
-                    b.Property<DateTime?>("ContractStartDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("contract_start_date");
-
-                    b.Property<string>("ContractType")
-                        .HasMaxLength(30)
-                        .HasColumnType("varchar(30)")
-                        .HasColumnName("contract_type");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CurrentAddress")
-                        .HasColumnType("longtext")
-                        .HasColumnName("current_address");
-
-                    b.Property<DateTime?>("DateOfBirth")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("date_of_birth");
-
-                    b.Property<Guid?>("DepartmentId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("department_id");
-
-                    b.Property<Guid?>("DesignationId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("designation_id");
-
-                    b.Property<string>("Email")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("email");
-
-                    b.Property<string>("EmergencyContact")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("emergency_contact");
-
-                    b.Property<string>("EmployeeCode")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("employee_code");
-
-                    b.Property<string>("EmploymentStatus")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("employment_status");
-
-                    b.Property<string>("FullName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("full_name");
-
-                    b.Property<string>("Gender")
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("gender");
-
-                    b.Property<DateTime>("HireDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("hire_date");
-
-                    b.Property<DateTime?>("IqamaExpiry")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("iqama_expiry");
-
-                    b.Property<Guid?>("LeavePolicyId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("leave_policy_id");
-
-                    b.Property<string>("MaritalStatus")
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("marital_status");
-
-                    b.Property<string>("NationalId")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("national_id");
-
-                    b.Property<string>("Nationality")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("nationality");
-
-                    b.Property<string>("PermanentAddress")
-                        .HasColumnType("longtext")
-                        .HasColumnName("permanent_address");
-
-                    b.Property<string>("Phone")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("phone");
-
-                    b.Property<string>("ProfileImageUrl")
-                        .HasColumnType("longtext")
-                        .HasColumnName("profile_image_url");
-
-                    b.Property<Guid?>("RoleId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("role_id");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.Property<Guid?>("UserId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("DepartmentId");
-
-                    b.HasIndex("DesignationId");
-
-                    b.HasIndex("EmployeeCode")
-                        .IsUnique();
-
-                    b.HasIndex("LeavePolicyId");
-
-                    b.HasIndex("NationalId")
-                        .IsUnique();
-
-                    b.HasIndex("RoleId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("employees");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.EmployeeContract", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<string>("ContractType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("varchar(30)")
-                        .HasColumnName("contract_type");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<DateTime?>("EndDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("end_date");
-
-                    b.Property<string>("FileName")
-                        .HasColumnType("longtext")
-                        .HasColumnName("file_name");
-
-                    b.Property<string>("FileUrl")
-                        .HasColumnType("longtext")
-                        .HasColumnName("file_url");
-
-                    b.Property<bool>("OpenEnded")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("open_ended");
-
-                    b.Property<DateTime>("StartDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("start_date");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("uploaded_at");
-
-                    b.Property<Guid?>("UploadedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("uploaded_by");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("UploadedBy");
-
-                    b.ToTable("employee_contracts");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.EmployeeDocument", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<string>("DocumentType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("document_type");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<DateTime?>("ExpiryDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("expiry_date");
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("file_name");
-
-                    b.Property<string>("FileUrl")
-                        .IsRequired()
-                        .HasColumnType("longtext")
-                        .HasColumnName("file_url");
-
-                    b.Property<DateTime?>("IssueDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("issue_date");
-
-                    b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("uploaded_at");
-
-                    b.Property<Guid?>("UploadedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("uploaded_by");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("UploadedBy");
-
-                    b.ToTable("employee_documents");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.EmployeeShiftAssignment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("AssignedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("assigned_at");
-
-                    b.Property<Guid?>("AssignedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("assigned_by");
-
-                    b.Property<DateTime>("EffectiveFrom")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("effective_from");
-
-                    b.Property<DateTime?>("EffectiveTo")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("effective_to");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<Guid>("ShiftId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("shift_id");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AssignedBy");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("ShiftId");
-
-                    b.ToTable("employee_shift_assignments");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.Expense", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1337,58 +920,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("expense_types");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.Holiday", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid?>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateTime>("Date")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("date");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("longtext")
-                        .HasColumnName("description");
-
-                    b.Property<string>("HolidayType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("varchar(30)")
-                        .HasColumnName("holiday_type");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("varchar(150)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.ToTable("holidays");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.InventoryAdjustment", b =>
@@ -1612,155 +1143,6 @@ namespace BaqalaPOS.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("inventory_stock");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.LeavePolicy", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<int>("AnnualDays")
-                        .HasColumnType("int")
-                        .HasColumnName("annual_days");
-
-                    b.Property<int>("CasualDays")
-                        .HasColumnType("int")
-                        .HasColumnName("casual_days");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("varchar(150)")
-                        .HasColumnName("name");
-
-                    b.Property<int>("SickDays")
-                        .HasColumnType("int")
-                        .HasColumnName("sick_days");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("leave_policies");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.LeaveRequest", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime?>("ApprovedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("approved_at");
-
-                    b.Property<Guid?>("ApproverId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("approver_id");
-
-                    b.Property<string>("AttachmentUrl")
-                        .HasColumnType("longtext")
-                        .HasColumnName("attachment_url");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<DateTime>("FromDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("from_date");
-
-                    b.Property<Guid>("LeaveTypeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("leave_type_id");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasColumnType("longtext")
-                        .HasColumnName("reason");
-
-                    b.Property<string>("RejectionReason")
-                        .HasColumnType("longtext")
-                        .HasColumnName("rejection_reason");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("ToDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("to_date");
-
-                    b.Property<int>("TotalDays")
-                        .HasColumnType("int")
-                        .HasColumnName("total_days");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ApproverId");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("LeaveTypeId");
-
-                    b.ToTable("leave_requests");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.LeaveType", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("leave_types");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.LoyaltyTransaction", b =>
@@ -2230,108 +1612,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("OrderId");
 
                     b.ToTable("order_payments");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRun", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("EmployeeCount")
-                        .HasColumnType("int")
-                        .HasColumnName("employee_count");
-
-                    b.Property<int>("Month")
-                        .HasColumnType("int")
-                        .HasColumnName("month");
-
-                    b.Property<DateTime>("PayDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("pay_date");
-
-                    b.Property<DateTime?>("ProcessedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("processed_at");
-
-                    b.Property<Guid?>("ProcessedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("processed_by");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<decimal>("TotalAmount")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("total_amount");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("Year")
-                        .HasColumnType("int")
-                        .HasColumnName("year");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("ProcessedBy");
-
-                    b.ToTable("payroll_runs");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRunEmployee", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("BasicSalary")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("basic_salary");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<decimal>("GrossEarnings")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("gross_earnings");
-
-                    b.Property<decimal>("NetPayable")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("net_payable");
-
-                    b.Property<Guid>("PayrollRunId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("payroll_run_id");
-
-                    b.Property<decimal>("TotalDeductions")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("total_deductions");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("PayrollRunId");
-
-                    b.ToTable("payroll_run_employees");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PosSettings", b =>
@@ -3393,68 +2673,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("rules_engine");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.SalaryComponent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("amount");
-
-                    b.Property<string>("ComponentName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("component_name");
-
-                    b.Property<string>("ComponentType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("component_type");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateTime>("EffectiveFrom")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("effective_from");
-
-                    b.Property<DateTime?>("EffectiveTo")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("effective_to");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<string>("Frequency")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("frequency");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.ToTable("salary_components");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.ShiftCashMovement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3522,22 +2740,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
-                    b.Property<DateTime?>("Date")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("date");
-
-                    b.Property<int>("EarlyLeaveMinutes")
-                        .HasColumnType("int")
-                        .HasColumnName("early_leave_minutes");
-
-                    b.Property<Guid?>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<int>("LateMinutes")
-                        .HasColumnType("int")
-                        .HasColumnName("late_minutes");
-
                     b.Property<string>("Notes")
                         .HasColumnType("longtext")
                         .HasColumnName("notes");
@@ -3545,14 +2747,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<Guid?>("RecordedBy")
                         .HasColumnType("char(36)")
                         .HasColumnName("recorded_by");
-
-                    b.Property<string>("Remarks")
-                        .HasColumnType("longtext")
-                        .HasColumnName("remarks");
-
-                    b.Property<Guid?>("ShiftId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("shift_id");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -3564,7 +2758,7 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("updated_at");
 
-                    b.Property<Guid?>("UserId")
+                    b.Property<Guid>("UserId")
                         .HasColumnType("char(36)")
                         .HasColumnName("user_id");
 
@@ -3574,12 +2768,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasIndex("RecordedBy");
 
-                    b.HasIndex("ShiftId");
-
                     b.HasIndex("UserId");
-
-                    b.HasIndex("EmployeeId", "Date")
-                        .IsUnique();
 
                     b.ToTable("staff_attendance");
                 });
@@ -4846,86 +4035,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("warehouse_stock");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.WorkShift", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid?>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<string>("BreakEnd")
-                        .HasMaxLength(5)
-                        .HasColumnType("varchar(5)")
-                        .HasColumnName("break_end");
-
-                    b.Property<string>("BreakStart")
-                        .HasMaxLength(5)
-                        .HasColumnType("varchar(5)")
-                        .HasColumnName("break_start");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid?>("DepartmentId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("department_id");
-
-                    b.Property<string>("EndTime")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("varchar(5)")
-                        .HasColumnName("end_time");
-
-                    b.Property<int>("GraceInMinutes")
-                        .HasColumnType("int")
-                        .HasColumnName("grace_in_minutes");
-
-                    b.Property<int>("GraceOutMinutes")
-                        .HasColumnType("int")
-                        .HasColumnName("grace_out_minutes");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("varchar(150)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("StartTime")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("varchar(5)")
-                        .HasColumnName("start_time");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("WorkingDays")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("working_days");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("DepartmentId");
-
-                    b.ToTable("work_shifts");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.ZatcaIdentity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5232,18 +4341,11 @@ namespace BaqalaPOS.Api.Migrations
                         .WithMany()
                         .HasForeignKey("BranchId");
 
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BaqalaPOS.Api.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId");
 
                     b.Navigation("Branch");
-
-                    b.Navigation("Employee");
 
                     b.Navigation("User");
                 });
@@ -5380,34 +4482,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Return");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.Department", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "ManagerEmployee")
-                        .WithMany()
-                        .HasForeignKey("ManagerEmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("ManagerEmployee");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.Designation", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Department", "Department")
-                        .WithMany()
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Department");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.Device", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
@@ -5442,114 +4516,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Product");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.Employee", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.Department", "Department")
-                        .WithMany()
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BaqalaPOS.Api.Models.Designation", "Designation")
-                        .WithMany()
-                        .HasForeignKey("DesignationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BaqalaPOS.Api.Models.LeavePolicy", "LeavePolicy")
-                        .WithMany()
-                        .HasForeignKey("LeavePolicyId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BaqalaPOS.Api.Models.Role", "Role")
-                        .WithMany()
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BaqalaPOS.Api.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("Department");
-
-                    b.Navigation("Designation");
-
-                    b.Navigation("LeavePolicy");
-
-                    b.Navigation("Role");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.EmployeeContract", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.User", "UploadedByUser")
-                        .WithMany()
-                        .HasForeignKey("UploadedBy")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("UploadedByUser");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.EmployeeDocument", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.User", "UploadedByUser")
-                        .WithMany()
-                        .HasForeignKey("UploadedBy")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("UploadedByUser");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.EmployeeShiftAssignment", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.User", "AssignedByUser")
-                        .WithMany()
-                        .HasForeignKey("AssignedBy")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.WorkShift", "Shift")
-                        .WithMany("Assignments")
-                        .HasForeignKey("ShiftId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("AssignedByUser");
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("Shift");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.Expense", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.User", "ApprovedByUser")
@@ -5582,16 +4548,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("ExpenseType");
 
                     b.Navigation("RecordedByUser");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.Holiday", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.InventoryAdjustment", b =>
@@ -5683,32 +4639,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("Product");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.LeaveRequest", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.User", "Approver")
-                        .WithMany()
-                        .HasForeignKey("ApproverId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.LeaveType", "LeaveType")
-                        .WithMany()
-                        .HasForeignKey("LeaveTypeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Approver");
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("LeaveType");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.LoyaltyTransaction", b =>
@@ -5851,43 +4781,6 @@ namespace BaqalaPOS.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Order");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRun", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.User", "ProcessedByUser")
-                        .WithMany()
-                        .HasForeignKey("ProcessedBy")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("ProcessedByUser");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRunEmployee", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.PayrollRun", "PayrollRun")
-                        .WithMany()
-                        .HasForeignKey("PayrollRunId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("PayrollRun");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PosSettings", b =>
@@ -6074,17 +4967,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("CreatedByUser");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.SalaryComponent", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.ShiftCashMovement", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.User", "RecordedByUser")
@@ -6112,33 +4994,20 @@ namespace BaqalaPOS.Api.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BaqalaPOS.Api.Models.User", "RecordedByUser")
                         .WithMany()
                         .HasForeignKey("RecordedBy")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("BaqalaPOS.Api.Models.WorkShift", "Shift")
-                        .WithMany()
-                        .HasForeignKey("ShiftId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BaqalaPOS.Api.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Branch");
 
-                    b.Navigation("Employee");
-
                     b.Navigation("RecordedByUser");
-
-                    b.Navigation("Shift");
 
                     b.Navigation("User");
                 });
@@ -6545,23 +5414,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Warehouse");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.WorkShift", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("BaqalaPOS.Api.Models.Department", "Department")
-                        .WithMany()
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("Department");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.ZatcaInvoice", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
@@ -6720,11 +5572,6 @@ namespace BaqalaPOS.Api.Migrations
             modelBuilder.Entity("BaqalaPOS.Api.Models.WarehouseRequest", b =>
                 {
                     b.Navigation("Items");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.WorkShift", b =>
-                {
-                    b.Navigation("Assignments");
                 });
 #pragma warning restore 612, 618
         }

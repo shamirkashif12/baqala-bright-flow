@@ -355,6 +355,10 @@ app.Use(async (context, next) =>
             (method == "GET" && path.StartsWith("/api/compliance/zatca/settings/")) ||
             (method == "GET" && path.StartsWith("/api/customers/by-phone/")) ||
             (method == "POST" && path == "/api/customers") ||
+            // Lets the kiosk gate its own fullscreen lockdown without any staff-only data
+            // exposure — the endpoint only ever answers true/false against its own terminal.
+            (method == "POST" && path == "/api/kiosk/verify-lockdown-pin") ||
+            (method == "GET" && path == "/api/kiosk/lockdown-pin-info") ||
             (method == "POST" && path == "/api/orders");
 
         if (!allowed)

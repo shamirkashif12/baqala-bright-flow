@@ -112,11 +112,26 @@ public class ProductsController(
     {
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
+        // Sku/Barcode were never copied from `updated` below, so edits to either field silently
+        // did nothing — the request returned 200 with the product unchanged, no error shown.
+        // Same uniqueness checks as Create, scoped to exclude this product's own current row.
+        if (!string.Equals(product.Sku, updated.Sku, StringComparison.Ordinal) &&
+            await db.Products.AnyAsync(p => p.Id != id && p.Sku == updated.Sku))
+            return Conflict(new { message = $"SKU \"{updated.Sku}\" is already used by another product." });
+        if (!string.IsNullOrWhiteSpace(updated.Barcode) &&
+            !string.Equals(product.Barcode, updated.Barcode, StringComparison.Ordinal) &&
+            await db.Products.AnyAsync(p => p.Id != id && p.Barcode == updated.Barcode))
+        {
+            var existing = await db.Products.FirstAsync(p => p.Barcode == updated.Barcode);
+            return Conflict(new { message = $"Barcode {updated.Barcode} is already assigned to \"{existing.Name}\". Edit that product instead." });
+        }
         var previousPrice = product.BasePrice;
         // Snapshot before any field is overwritten — this is the "before" half of the audit row.
         var before = Snapshot(product);
         product.Name = updated.Name;
         product.NameAr = updated.NameAr;
+        product.Sku = updated.Sku;
+        product.Barcode = updated.Barcode;
         product.CategoryId = updated.CategoryId;
         product.Brand = updated.Brand;
         product.BasePrice = updated.BasePrice;
