@@ -11,21 +11,44 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService, INotificationService notifications) : ControllerBase
 {
+    // Mirrors the GetCallerContext pattern used across the other controllers.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     // ─── ZATCA Invoices ───────────────────────────────────────────────────────
+    // Invoices are compliance-module data (VAT registration, submission status) — unlike
+    // GetSettings below, this isn't a checkout-time dependency for every role, so it's safe to
+    // gate on the "Compliance" module the dedicated /zatca page already requires.
+    [RequirePermission("Compliance", PermAction.View)]
     [HttpGet("zatca/invoices")]
     public async Task<IActionResult> GetInvoices([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            branchId = callerBranchId;
+
         var query = db.ZatcaInvoices.AsQueryable();
         if (branchId.HasValue) query = query.Where(z => z.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(z => z.ZatcaStatus == status);
         return Ok(await query.OrderByDescending(z => z.IssueDate).Take(200).ToListAsync());
     }
 
+    [RequirePermission("Compliance", PermAction.View)]
     [HttpGet("zatca/invoices/{id:guid}")]
     public async Task<IActionResult> GetInvoiceById(Guid id)
     {
         var invoice = await db.ZatcaInvoices.FindAsync(id);
-        return invoice is null ? NotFound() : Ok(invoice);
+        if (invoice is null) return NotFound();
+
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && invoice.BranchId != callerBranchId)
+            return NotFound();
+
+        return Ok(invoice);
     }
 
     [RequirePermission("Compliance", PermAction.Create)]
@@ -57,9 +80,18 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     // Note: ZatcaSettings now also holds onboarding secrets (private key, CSID tokens/secrets —
     // encrypted at rest, but still never safe to echo back over the API), so these endpoints
     // project to ZatcaSettingsDto instead of returning the entity directly.
+    // Deliberately NOT gated on the "Compliance" module — POS checkout (_app.pos.tsx) and the Tax
+    // & Fees page call this for ANY role to print a compliant receipt, not just Compliance-module
+    // users. Branch-scoping below still closes the actual leak (a branch's VAT registration number
+    // was readable for any branchId by any authenticated caller); every real caller already only
+    // ever requests their own branch.
     [HttpGet("zatca/settings/{branchId:guid}")]
     public async Task<IActionResult> GetSettings(Guid branchId)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && branchId != callerBranchId)
+            return NotFound();
+
         var settings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branchId);
         if (settings is null) return NotFound();
         var identity = await db.ZatcaIdentities.FindAsync(ZatcaIdentity.SingletonId);
@@ -161,6 +193,9 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     // ─── ZATCA Invoice Submission ─────────────────────────────────────────────
+    // Previously had no permission check at all, unlike CreateInvoice/UpdateInvoiceStatus above —
+    // any authenticated user could trigger a real government e-invoice submission.
+    [RequirePermission("Compliance", PermAction.Edit)]
     [HttpPost("zatca/invoices/{id:guid}/submit")]
     public async Task<IActionResult> SubmitInvoice(Guid id)
     {

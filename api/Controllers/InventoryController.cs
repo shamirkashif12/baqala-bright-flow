@@ -65,6 +65,11 @@ public class InventoryController(
     [HttpGet("stock/{productId:guid}/{branchId:guid}")]
     public async Task<IActionResult> GetStockByProductBranch(Guid productId, Guid branchId)
     {
+        // Mirrors GetStock's branch scoping above, which this direct lookup previously skipped.
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && branchId != callerBranchId)
+            return NotFound();
+
         var stock = await db.InventoryStocks
             .FirstOrDefaultAsync(i => i.ProductId == productId && i.BranchId == branchId);
         return stock is null ? NotFound() : Ok(stock);
@@ -187,6 +192,10 @@ public class InventoryController(
         if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && callerBranchId != req.BranchId)
             return Forbid();
 
+        var product = await db.Products.FindAsync(req.ProductId);
+        var qtyError = QuantityValidation.ValidateWholeUnit(product, req.Quantity, "Received quantity");
+        if (qtyError is not null) return BadRequest(new { message = qtyError });
+
         var batchId = Guid.NewGuid();
         var batch = new InventoryBatch
         {
@@ -279,6 +288,10 @@ public class InventoryController(
         [FromQuery] Guid? batchId, [FromQuery] string? movementType, [FromQuery] DateTime? from, [FromQuery] DateTime? to,
         [FromQuery] int limit = 200)
     {
+        // Mirrors GetBatches/GetStock above — don't clobber branchId onto an explicit warehouse query.
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && !warehouseId.HasValue) branchId = callerBranchId;
+
         var query = db.StockMovements
             .Include(m => m.Product)
             .Include(m => m.Branch)
@@ -293,7 +306,18 @@ public class InventoryController(
         if (!string.IsNullOrEmpty(movementType)) query = query.Where(m => m.MovementType == movementType);
         if (from.HasValue) query = query.Where(m => m.CreatedAt >= from);
         if (to.HasValue) query = query.Where(m => m.CreatedAt <= to);
-        return Ok(await query.OrderByDescending(m => m.CreatedAt).Take(Math.Clamp(limit, 1, 1000)).ToListAsync());
+
+        // CreatedByUser was serialized whole (email, username, phone, status, last login) with no
+        // permission gate at all; the frontend type (src/lib/api.ts) only ever reads id+fullName.
+        var movements = await query.OrderByDescending(m => m.CreatedAt).Take(Math.Clamp(limit, 1, 1000))
+            .Select(m => new
+            {
+                m.Id, m.ProductId, m.BranchId, m.WarehouseId, m.BatchId, m.MovementType, m.Quantity,
+                m.ReferenceType, m.ReferenceId, m.ReferenceNumber, m.Notes, m.CreatedBy, m.CreatedAt,
+                m.Product, m.Branch, m.Warehouse, m.Batch,
+                CreatedByUser = m.CreatedByUser == null ? null : new { m.CreatedByUser.Id, m.CreatedByUser.FullName },
+            }).ToListAsync();
+        return Ok(movements);
     }
 
     [HttpGet("adjustments")]
@@ -302,6 +326,9 @@ public class InventoryController(
         [FromQuery] string? adjustmentType, [FromQuery] Guid? productId, [FromQuery] Guid? adjustedBy,
         [FromQuery] string? approvalStatus)
     {
+        var (role, callerBranchId) = GetCallerContext();
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && !warehouseId.HasValue) branchId = callerBranchId;
+
         var query = db.InventoryAdjustments
             .Include(a => a.Product)
             .Include(a => a.Branch)
@@ -318,13 +345,20 @@ public class InventoryController(
         if (!string.IsNullOrEmpty(adjustmentType)) query = query.Where(a => a.AdjustmentType == adjustmentType);
         if (!string.IsNullOrEmpty(approvalStatus)) query = query.Where(a => a.ApprovalStatus == approvalStatus);
 
-        // This endpoint had no branch scoping while every other read in this controller does —
-        // a branch-scoped user could enumerate every branch's write-off history through it.
-        var (role, callerBranchId) = GetCallerContext();
-        if (role != "tenant_admin" && callerBranchId.HasValue)
-            query = query.Where(a => a.BranchId == callerBranchId);
-
-        return Ok(await query.OrderByDescending(a => a.CreatedAt).ToListAsync());
+        // Branch scoping is applied at the top of the method (branchId is forced to the caller's
+        // branch for non-admins), so the query is already restricted here.
+        // Same redaction as GetMovements above — AdjustedByUser/ApprovedByUser were serialized whole.
+        var adjustments = await query.OrderByDescending(a => a.CreatedAt)
+            .Select(a => new
+            {
+                a.Id, a.ProductId, a.BranchId, a.WarehouseId, a.BatchId, a.AdjustmentType, a.Quantity,
+                a.Reason, a.Notes, a.AdjustedBy, a.CreatedAt,
+                a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt, a.RejectionReason,
+                a.Product, a.Branch, a.Warehouse, a.Batch,
+                AdjustedByUser = a.AdjustedByUser == null ? null : new { a.AdjustedByUser.Id, a.AdjustedByUser.FullName },
+                ApprovedByUser = a.ApprovedByUser == null ? null : new { a.ApprovedByUser.Id, a.ApprovedByUser.FullName },
+            }).ToListAsync();
+        return Ok(adjustments);
     }
 
     [RequirePermission("Stocks", PermAction.Create)]
@@ -336,6 +370,10 @@ public class InventoryController(
         // of defect (corrupt on-hand quantity), separate from the Receive Batch form.
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Adjustment quantity must be greater than zero." });
+
+        var adjustProduct = await db.Products.FindAsync(req.ProductId);
+        var adjustQtyError = QuantityValidation.ValidateWholeUnit(adjustProduct, req.Quantity, "Adjustment quantity");
+        if (adjustQtyError is not null) return BadRequest(new { message = adjustQtyError });
 
         var isIncrease = req.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in";
 

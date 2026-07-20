@@ -20,6 +20,7 @@ import { api, getUsbPrinter, type Product, type Coupon, type Customer, type Cash
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
@@ -480,6 +481,7 @@ function POS() {
   const [sellerName, setSellerName] = useState("");
   const [activeShift, setActiveShift] = useState<CashierShift | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   // ─── Cart ─────────────────────────────────────────────────────────────────────
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -551,31 +553,45 @@ function POS() {
   const autoPrintRef = useRef(false);
 
   // ─── Load products, tax rules, shifts on mount ────────────────────────────────
-  useEffect(() => {
-    Promise.all([
+  const loadCore = () => {
+    setLoading(true);
+    // allSettled, not all: one sibling call failing (e.g. tax rules) must not blank out the
+    // product grid a cashier was about to sell from — surface it via loadError instead.
+    Promise.allSettled([
       api.getProducts(),
       api.getTaxRules(),
       api.getActiveShifts(),
     ])
-      .then(([prods, taxRules, shifts]) => {
-        setProducts(prods);
+      .then(([prodsR, taxRulesR, shiftsR]) => {
+        if (prodsR.status === "fulfilled") setProducts(prodsR.value);
 
-        const vatRule = taxRules.find((r) => r.ruleType === "vat" && r.status === "active");
-        if (vatRule) {
-          setTaxRate(vatRule.vatPercentage / 100);
-          setTaxLabel(`VAT ${vatRule.vatPercentage}%`);
+        if (taxRulesR.status === "fulfilled") {
+          const taxRules = taxRulesR.value;
+          const vatRule = taxRules.find((r) => r.ruleType === "vat" && r.status === "active");
+          if (vatRule) {
+            setTaxRate(vatRule.vatPercentage / 100);
+            setTaxLabel(`VAT ${vatRule.vatPercentage}%`);
+          }
+
+          const tobaccoRule = taxRules.find((r) => r.ruleType === "tobacco_excise");
+          setTobaccoFeeEnabled(tobaccoRule ? tobaccoRule.status === "active" : true);
         }
 
-        const tobaccoRule = taxRules.find((r) => r.ruleType === "tobacco_excise");
-        setTobaccoFeeEnabled(tobaccoRule ? tobaccoRule.status === "active" : true);
+        if (shiftsR.status === "fulfilled") {
+          const shift = shiftsR.value.find((s) => s.status === "open" && s.cashierId === user?.id) ?? null;
+          setActiveShift(shift);
+        }
 
-        const shift = shifts.find((s) => s.status === "open" && s.cashierId === user?.id) ?? null;
-        setActiveShift(shift);
+        setLoadError([prodsR, taxRulesR, shiftsR].some(r => r.status === "rejected"));
       })
       .finally(() => {
         setLoading(false);
         searchRef.current?.focus();
       });
+  };
+
+  useEffect(() => {
+    loadCore();
 
     api.getActiveOffers().then(setActiveOffers).catch(() => {});
     api.getDiscounts({ isActive: true }).then(setActiveDiscounts).catch(() => {});
@@ -1574,6 +1590,7 @@ function POS() {
         </>
       }
     >
+      {loadError && <LoadErrorBanner onRetry={loadCore} />}
       {/* Two-column split starts at md (tablet) so the order panel + Charge button stay
           reachable without scrolling past the whole cart on tablet-sized POS hardware —
           previously this only kicked in at lg (1024px), leaving tablets stacked. */}

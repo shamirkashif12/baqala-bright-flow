@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -5,6 +6,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BaqalaPOS.Api.Controllers;
 
+// This controller had NO permission checks anywhere — every write here mutates real financial
+// state (a purchase order's PaidAmount/PaymentStatus, or mints a supplier credit/debit note) yet
+// was reachable by any authenticated user regardless of role. Gated to "Purchase Orders" Edit —
+// the same module/level PurchaseOrdersController.Receive/AddPayment already require, since these
+// four actions are part of the same PO receiving/reconciliation workflow (raise-shortage-debit-
+// note is the only one currently wired to the frontend, from the PO receive dialog in
+// _app.purchase-orders.tsx — the other three aren't called by any route yet). Reads (discrepancies/
+// credit-notes list) are left ungated: they're also read from the Suppliers profile drawer for
+// roles like Storekeeper that hold Suppliers view but not Purchase Orders.
 [ApiController]
 [Route("api/supply-chain")]
 public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
@@ -29,6 +39,7 @@ public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
         return Ok(await query.OrderByDescending(d => d.CreatedAt).ToListAsync());
     }
 
+    [RequirePermission("Purchase Orders", PermAction.Edit)]
     [HttpPatch("discrepancies/{id:guid}/status")]
     public async Task<IActionResult> UpdateDiscrepancyStatus(Guid id, [FromBody] DiscrepancyStatusRequest req)
     {
@@ -42,6 +53,7 @@ public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
     }
 
     // Raise a debit note (credit note from supplier shortage perspective) from a discrepancy
+    [RequirePermission("Purchase Orders", PermAction.Edit)]
     [HttpPost("discrepancies/{id:guid}/raise-debit-note")]
     public async Task<IActionResult> RaiseDebitNote(Guid id)
     {
@@ -74,6 +86,7 @@ public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
     }
 
     // Create a manual discrepancy + raise debit note in one shot (for PO items that were never sent in a receive payload)
+    [RequirePermission("Purchase Orders", PermAction.Edit)]
     [HttpPost("raise-shortage-debit-note")]
     public async Task<IActionResult> RaiseShortageDebitNote([FromBody] ManualShortageRequest req)
     {
@@ -144,6 +157,7 @@ public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
         return Ok(await query.OrderByDescending(c => c.CreatedAt).ToListAsync());
     }
 
+    [RequirePermission("Purchase Orders", PermAction.Edit)]
     [HttpPatch("credit-notes/{id:guid}/apply")]
     public async Task<IActionResult> ApplyCreditNote(Guid id, [FromQuery] Guid? applyToPoId)
     {

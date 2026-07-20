@@ -45,6 +45,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (from.HasValue) query = query.Where(o => o.CreatedAt >= from);
         if (to.HasValue) query = query.Where(o => o.CreatedAt <= to);
 
+        // MIMONY-PII-ORDERS-CROSSBRANCH-001: id+fullName alone (the fix below) still named a
+        // cashier who has since transferred to another branch — a branch-scoped viewer could see
+        // WHO a no-longer-local cashier is by name. Hide the cashier entirely (not just its PII
+        // fields) once their CURRENT branch differs from the caller's own; tenant_admin still
+        // sees everyone, matching every other cross-branch exemption in this controller.
+        var isAdmin = callerRole == "tenant_admin";
         var orders = await query.OrderByDescending(o => o.CreatedAt).Take(200)
             .Select(o => new
             {
@@ -52,12 +58,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 o.Subtotal, o.DiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
                 o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
                 Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
-                // Redacted: this used to embed the full Cashier User entity (email, username,
-                // phone, branchId, status, last login) via the EF Include below, exposing a
-                // cross-branch cashier's PII to anyone with ordinary access to a branch-scoped
-                // Orders list. id + display name is all the Orders page/CSV export/print/receipt
-                // actually use.
-                Cashier = o.Cashier == null ? null : new { o.Cashier.Id, o.Cashier.FullName },
+                Cashier = o.Cashier == null || (!isAdmin && callerBranchId.HasValue && o.Cashier.BranchId != callerBranchId)
+                    ? null
+                    : new { o.Cashier.Id, o.Cashier.FullName },
                 Items = o.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount }),
                 Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
             })
@@ -68,6 +71,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        var isAdmin = callerRole == "tenant_admin";
+
         var order = await db.Orders
             .Where(o => o.Id == id)
             .Select(o => new
@@ -76,9 +82,11 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 o.Subtotal, o.DiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
                 o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
                 Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
-                // Redacted — same reason as GetAll above: id + display name only, never the full
-                // cashier User record.
-                Cashier = o.Cashier == null ? null : new { o.Cashier.Id, o.Cashier.FullName },
+                // Redacted — same reason as GetAll above, plus MIMONY-PII-ORDERS-CROSSBRANCH-001:
+                // hide the cashier entirely once their current branch differs from the caller's.
+                Cashier = o.Cashier == null || (!isAdmin && callerBranchId.HasValue && o.Cashier.BranchId != callerBranchId)
+                    ? null
+                    : new { o.Cashier.Id, o.Cashier.FullName },
                 Customer = o.Customer == null ? null : new { o.Customer.Id, o.Customer.FullName, o.Customer.Phone, o.Customer.Email },
                 Items = o.Items.Select(i => new
                 {
@@ -93,7 +101,6 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // Branch-scoped roles may only look up an order from their own branch — mirrors GetAll's
         // filter, which this direct-by-id lookup previously bypassed entirely (any authenticated
         // caller could fetch any order, and its embedded cashier PII, given just its GUID).
-        var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && order.BranchId != callerBranchId)
             return NotFound();
 
@@ -612,6 +619,13 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (req.Status == "cancelled")
             return BadRequest(new { message = "Use Void to cancel an order — it reverses stock and shift totals; this endpoint only changes the status label." });
 
+        // MIMONY-RETURNS-ORDERSTATUS-001: "refunded" must only ever be set by ReturnsController.
+        // Complete, once a return is genuinely approved and completed — never as a raw status
+        // label here, which is exactly how an order previously ended up permanently marked
+        // "refunded" backed by a return that was later rejected (or never approved at all).
+        if (req.Status == "refunded")
+            return BadRequest(new { message = "An order can only become Refunded by completing an approved return — use the Returns workflow." });
+
         if (order.OrderStatus is "cancelled" or "refunded")
             return BadRequest(new { message = $"This order is already {order.OrderStatus} and cannot be changed further." });
 
@@ -624,6 +638,44 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         order.OrderStatus = req.Status;
         order.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+        return Ok(order);
+    }
+
+    // MIMONY-ORPHANED-CHECKOUT-001: an elevated-role checkout (Branch Manager/Supervisor/Admin)
+    // with no open shift is an intentional, documented exception (FR-SLS-05 — those roles
+    // structurally can't hold a shift), not a bug in itself. What QA correctly flagged as missing
+    // is a way to reconcile the resulting shiftless order afterward — there was no endpoint to
+    // retroactively attach one. This is that path: manager/admin-only, only for an order that's
+    // genuinely still unassigned, only to a shift in the SAME branch (never a cross-branch fix-up).
+    [RequirePermission("Orders", PermAction.Approve)]
+    [HttpPatch("{id:guid}/reconcile-shift")]
+    public async Task<IActionResult> ReconcileShift(Guid id, [FromBody] ReconcileShiftRequest req)
+    {
+        var order = await db.Orders.FindAsync(id);
+        if (order is null) return NotFound();
+        if (order.ShiftId.HasValue)
+            return BadRequest(new { message = "This order already has a shift assigned — nothing to reconcile." });
+
+        var shift = await db.CashierShifts.FindAsync(req.ShiftId);
+        if (shift is null) return BadRequest(new { message = "Shift not found." });
+        if (shift.BranchId != order.BranchId)
+            return BadRequest(new { message = "That shift belongs to a different branch than this order." });
+
+        var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new { order.ShiftId });
+        order.ShiftId = shift.Id;
+        order.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "reconcile_order_shift",
+            entityType: "Order",
+            entityId: order.Id,
+            userId: CallerId(),
+            branchId: order.BranchId,
+            beforeValue: beforeSnapshot,
+            details: System.Text.Json.JsonSerializer.Serialize(new { order.OrderNumber, ShiftId = shift.Id }),
+            severity: "warning");
+
         return Ok(order);
     }
 
@@ -913,6 +965,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 }
 
 public record UpdateStatusRequest(string Status);
+public record ReconcileShiftRequest(Guid ShiftId);
 public record OrderEditItemRequest(Guid? Id, Guid ProductId, decimal Quantity, decimal UnitPrice);
 public record OrderEditRequest(
     List<OrderEditItemRequest> Items,

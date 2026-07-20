@@ -59,7 +59,7 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         if (!string.IsNullOrEmpty(status)) query = query.Where(s => s.Status == status);
         if (dateFrom.HasValue) query = query.Where(s => s.OpenedAt >= dateFrom.Value);
         if (dateTo.HasValue)   query = query.Where(s => s.OpenedAt <= dateTo.Value.AddDays(1).AddTicks(-1));
-        return Ok(await query.OrderByDescending(s => s.OpenedAt).ToListAsync());
+        return Ok(await query.OrderByDescending(s => s.OpenedAt).Select(ShiftProjection).ToListAsync());
     }
 
     [HttpGet("active")]
@@ -69,18 +69,47 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
             branchId = callerBranchId;
 
-        var query = db.CashierShifts.Where(s => s.Status == "open").Include(s => s.Cashier).AsQueryable();
+        var query = db.CashierShifts.Where(s => s.Status == "open").Include(s => s.Cashier).Include(s => s.Terminal).AsQueryable();
         if (branchId.HasValue) query = query.Where(s => s.BranchId == branchId);
-        return Ok(await query.ToListAsync());
+        return Ok(await query.Select(ShiftProjection).ToListAsync());
     }
+
+    // Redacted the same way as GetAll/GetActiveShifts above — full Cashier User (email, username,
+    // phone, status, last login) was embedded on every shift with no permission gate at all,
+    // reachable even from a self-checkout kiosk token. Frontend only ever reads .cashier.fullName.
+    private static readonly System.Linq.Expressions.Expression<Func<CashierShift, object>> ShiftProjection = s => new
+    {
+        s.Id, s.CashierId, s.TerminalId, s.BranchId,
+        s.OpeningAmount, s.ClosingAmount, s.CashSales, s.CardSales, s.DigitalSales, s.TotalSales,
+        s.Variance, s.Status, s.OpenedAt, s.ClosedAt, s.Notes, s.RequiresApproval, s.ApprovedBy, s.ApprovedAt,
+        s.ClosedBy, s.CloseReason,
+        Cashier = s.Cashier == null ? null : new { s.Cashier.Id, s.Cashier.FullName },
+        Terminal = s.Terminal == null ? null : new { s.Terminal.Id, s.Terminal.TerminalCode, s.Terminal.Name },
+    };
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
         var shift = await db.CashierShifts
-            .Include(s => s.CashMovements)
+            .Include(s => s.Cashier).Include(s => s.Terminal)
             .FirstOrDefaultAsync(s => s.Id == id);
-        return shift is null ? NotFound() : Ok(shift);
+        if (shift is null) return NotFound();
+
+        // Branch-scoped roles may only look up their own branch's shift — mirrors GetAll/
+        // GetActiveShifts, which this direct-by-id lookup previously bypassed entirely.
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && shift.BranchId != callerBranchId)
+            return NotFound();
+
+        return Ok(new
+        {
+            shift.Id, shift.CashierId, shift.TerminalId, shift.BranchId,
+            shift.OpeningAmount, shift.ClosingAmount, shift.CashSales, shift.CardSales, shift.DigitalSales, shift.TotalSales,
+            shift.Variance, shift.Status, shift.OpenedAt, shift.ClosedAt, shift.Notes, shift.RequiresApproval, shift.ApprovedBy, shift.ApprovedAt,
+            shift.ClosedBy, shift.CloseReason,
+            Cashier = shift.Cashier == null ? null : new { shift.Cashier.Id, shift.Cashier.FullName },
+            Terminal = shift.Terminal == null ? null : new { shift.Terminal.Id, shift.Terminal.TerminalCode, shift.Terminal.Name },
+        });
     }
 
     [HttpPost("open")]
@@ -300,8 +329,25 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
     [HttpPost("{id:guid}/cash-movements")]
     public async Task<IActionResult> AddCashMovement(Guid id, [FromBody] ShiftCashMovement movement)
     {
-        if (!await db.CashierShifts.AnyAsync(s => s.Id == id && s.Status == "open"))
-            return NotFound("Open shift not found.");
+        var shift = await db.CashierShifts.FirstOrDefaultAsync(s => s.Id == id && s.Status == "open");
+        if (shift is null) return NotFound("Open shift not found.");
+
+        // Previously had no permission check and no ownership/branch check at all — any
+        // authenticated user could inject a cash movement into any cashier's open shift, any
+        // branch. Mirrors CloseShift's isManagerOverride pattern above: the shift's own cashier
+        // may record their own cash drop/pickup; anyone else needs Cashier Shifts Edit, and only
+        // within their own branch (tenant_admin exempt).
+        var actorId = CallerId();
+        var isOwnShift = actorId.HasValue && actorId.Value == shift.CashierId;
+        if (!isOwnShift)
+        {
+            var (callerRole, callerBranchId) = GetCallerContext();
+            if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && shift.BranchId != callerBranchId)
+                return NotFound("Open shift not found.");
+            if (!await PermissionCheck.HasPermissionAsync(User, db, "Cashier Shifts", PermAction.Edit))
+                return Forbid();
+        }
+
         movement.Id = Guid.NewGuid();
         movement.ShiftId = id;
         movement.CreatedAt = DateTime.UtcNow;

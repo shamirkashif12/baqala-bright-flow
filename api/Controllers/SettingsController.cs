@@ -179,6 +179,11 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
         return Ok(new { message = "Settings updated successfully.", updatedCount = settings.Count });
     }
 
+    // Not called by any frontend route today (the Attendance & Shift report reads from
+    // ReportsController's own, already-projected endpoint instead) — gated + redacted for
+    // defense in depth, zero flow impact. User was previously serialized whole (email, username,
+    // phone, status, last login) with no permission check at all.
+    [RequirePermission("Settings", PermAction.View)]
     [HttpGet("attendance")]
     public async Task<IActionResult> GetAttendance([FromQuery] Guid? branchId, [FromQuery] DateOnly? date)
     {
@@ -187,7 +192,13 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
         if (date.HasValue)
             query = query.Where(a => a.CheckIn != null &&
                 DateOnly.FromDateTime(a.CheckIn.Value) == date);
-        return Ok(await query.ToListAsync());
+
+        var attendance = await query.Select(a => new
+        {
+            a.Id, a.UserId, a.BranchId, a.CheckIn, a.CheckOut, a.Status, a.Notes, a.RecordedBy, a.CreatedAt, a.UpdatedAt,
+            User = a.User == null ? null : new { a.User.Id, a.User.FullName },
+        }).ToListAsync();
+        return Ok(attendance);
     }
 
     [HttpPost("attendance")]

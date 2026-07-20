@@ -39,7 +39,15 @@ public class DevicesController(BaqalaDbContext db) : ControllerBase
     public async Task<IActionResult> GetById(Guid id)
     {
         var device = await db.Devices.Include(d => d.Branch).Include(d => d.Terminal).FirstOrDefaultAsync(d => d.Id == id);
-        return device is null ? NotFound() : Ok(device);
+        if (device is null) return NotFound();
+
+        // Branch-scoped roles may only look up their own branch's device — mirrors GetAll, which
+        // this direct-by-id lookup previously bypassed entirely.
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && device.BranchId != callerBranchId)
+            return NotFound();
+
+        return Ok(device);
     }
 
     [RequirePermission("Devices", PermAction.Create)]

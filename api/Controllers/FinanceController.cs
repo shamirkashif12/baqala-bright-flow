@@ -10,7 +10,18 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class FinanceController(BaqalaDbContext db) : ControllerBase
 {
+    // Mirrors the GetCallerContext pattern used across the other controllers.
+    private (string? Role, Guid? BranchId) GetCallerContext()
+    {
+        var role = User.FindFirst("role")?.Value;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        return (role, branchId);
+    }
+
     // ─── Expenses ─────────────────────────────────────────────────────────────
+    // Only used by the dedicated /expenses page — safe to gate on "Accounting & Finance" View
+    // (unlike GetTaxRules below, nothing at checkout depends on this).
+    [RequirePermission("Accounting & Finance", PermAction.View)]
     [HttpGet("expenses")]
     public async Task<IActionResult> GetExpenses(
         [FromQuery] Guid? branchId,
@@ -18,6 +29,10 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         [FromQuery] string? paymentMethod,
         [FromQuery] Guid? expenseTypeId)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            branchId = callerBranchId;
+
         var query = db.Expenses.Include(e => e.ExpenseType).Include(e => e.Branch).AsQueryable();
         if (branchId.HasValue) query = query.Where(e => e.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(e => e.Status == status);
@@ -128,6 +143,9 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
     }
 
     // ─── Coupons ──────────────────────────────────────────────────────────────
+    // Only used by the dedicated /coupons page — ValidateCoupon below stays open for POS's
+    // by-code lookup, which is the legitimate any-role checkout path.
+    [RequirePermission("Coupons", PermAction.View)]
     [HttpGet("coupons")]
     public async Task<IActionResult> GetCoupons([FromQuery] string? status)
     {
@@ -195,6 +213,11 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
     }
 
     // ─── Tax/Fee Rules ────────────────────────────────────────────────────────
+    // Deliberately NOT gated on "Tax & Fees" — POS checkout (_app.pos.tsx) calls this for every
+    // cashier to compute VAT/custom fees on a sale, and Compliance's Tax & ZATCA panel also reads
+    // it; neither role necessarily holds the Tax & Fees module. Rule definitions (VAT %, custom
+    // fee amounts) aren't per-branch-sensitive data the way expenses/coupons are, so leaving this
+    // open doesn't reintroduce a real leak.
     [HttpGet("tax-rules")]
     public async Task<IActionResult> GetTaxRules([FromQuery] Guid? branchId)
     {

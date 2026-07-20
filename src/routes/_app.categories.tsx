@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -161,6 +162,7 @@ function DeleteDialog({ category, onClose, onDone }: {
 function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [editItem, setEditItem] = useState<Category | null>(null);
@@ -169,8 +171,8 @@ function CategoriesPage() {
   const load = () => {
     setLoading(true);
     api.getCategories()
-      .then(setCategories)
-      .catch(() => {})
+      .then((cats) => { setCategories(cats); setLoadError(false); })
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -193,6 +195,7 @@ function CategoriesPage() {
         </Button>
       }
     >
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ── Metrics ── */}
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-2xl border border-border/60 bg-card shadow-card p-4 flex items-center gap-4">

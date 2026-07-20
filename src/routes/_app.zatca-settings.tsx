@@ -25,6 +25,7 @@ import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 
 export const Route = createFileRoute("/_app/zatca-settings")({
   component: () => (
@@ -83,6 +84,7 @@ function ZatcaSettings() {
   const [zatca, setZatca] = useState<ZatcaSettings>(defaultZatca);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const enabled = zatca.phase2Enabled;
 
   const [otp, setOtp] = useState("");
@@ -96,8 +98,8 @@ function ZatcaSettings() {
     if (!branch?.id) return;
     setLoading(true);
     api.getZatcaSettings(branch.id)
-      .then((data) => setZatca({ ...defaultZatca, ...data }))
-      .catch(() => setZatca({ ...defaultZatca, branchId: branch.id }))
+      .then((data) => { setZatca({ ...defaultZatca, ...data }); setLoadError(false); })
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }
 
@@ -193,6 +195,7 @@ function ZatcaSettings() {
       title="ZATCA Phase 2 — Billing & Orders"
       subtitle="Company billing info, invoice rules, credit/debit/refund notes and integration health"
     >
+      {loadError && <LoadErrorBanner onRetry={loadSettings} message="Failed to load ZATCA settings — the onboarding status and fields below may not reflect saved values. Do not save until this is resolved." />}
       {/* Health row */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Phase 2 Status" value={enabled ? "Enabled" : "Disabled"} icon={ShieldCheck} accent={enabled ? "success" : "warning"} />

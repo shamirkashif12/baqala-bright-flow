@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
@@ -135,6 +136,7 @@ function TicketFormFields({
 function Maintenance() {
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
 
   // Ticket dialog
@@ -146,7 +148,10 @@ function Maintenance() {
 
   const reload = () => {
     setLoading(true);
-    api.getDevices().then(setDevices).finally(() => setLoading(false));
+    api.getDevices()
+      .then(d => { setDevices(d); setLoadError(false); })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { reload(); }, []);
@@ -205,6 +210,7 @@ function Maintenance() {
         </Button>
       }
     >
+      {loadError && <LoadErrorBanner onRetry={reload} />}
       {/* Metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Total Devices"        value={loading ? "—" : String(devices.length)} icon={Monitor}      accent="primary" />

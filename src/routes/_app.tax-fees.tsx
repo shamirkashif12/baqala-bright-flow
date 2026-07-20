@@ -21,6 +21,7 @@ import { useBranch } from "@/lib/branch-context";
 import { localDateStr } from "@/lib/utils";
 import { BranchFilter } from "@/components/branch-filter";
 import { SARIcon, fmtSAR } from "@/lib/currency";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 
 export const Route = createFileRoute("/_app/tax-fees")({ component: TaxFees });
 
@@ -88,8 +89,11 @@ function TaxFees() {
   const [editRule, setEditRule] = useState<TaxFeeRule | null>(null);
   const [form, setForm] = useState<FeeForm>(emptyFeeForm);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  const load = () => api.getTaxRules().then(setRules);
+  const load = () => api.getTaxRules()
+    .then(rules => { setRules(rules); setLoadError(false); })
+    .catch(() => setLoadError(true));
 
   useEffect(() => {
     load();
@@ -206,6 +210,7 @@ function TaxFees() {
 
   return (
     <PageShell title="Tax, Fees & Tobacco" subtitle="ZATCA-2 enablement, custom fees and tobacco excise">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ─── Metric cards ─────────────────────────────────────────────────── */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="ZATCA Status" value={zatca.phase2Enabled ? "Enabled" : "Disabled"} icon={ShieldCheck} accent={zatca.phase2Enabled ? "success" : "warning"} />

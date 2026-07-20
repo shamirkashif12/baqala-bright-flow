@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api, type Branch, type Terminal, type User, type CashierShift } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
 
@@ -86,22 +87,28 @@ function ControlTower() {
   const [users, setUsers]         = useState<User[]>([]);
   const [shifts, setShifts]       = useState<CashierShift[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAll = useCallback((silent = false) => {
     if (!silent) setLoading(true);
-    Promise.all([
+    // allSettled, not all: this also runs on a 30s poll — one transient sibling failure must
+    // not blank out branches/terminals/users/shifts that DID load moments earlier (86eyag3ny).
+    Promise.allSettled([
       api.getBranches(),
       api.getTerminals({ branchId: lockedBranchId ?? undefined }),
       api.getUsers(),
       api.getShifts({ branchId: lockedBranchId ?? undefined }),
     ])
       .then(([b, t, u, s]) => {
-        setBranches(b); setTerminals(t); setUsers(u); setShifts(s);
+        if (b.status === "fulfilled") setBranches(b.value);
+        if (t.status === "fulfilled") setTerminals(t.value);
+        if (u.status === "fulfilled") setUsers(u.value);
+        if (s.status === "fulfilled") setShifts(s.value);
+        setLoadError([b, t, u, s].some(r => r.status === "rejected"));
         setLastRefresh(new Date());
       })
-      .catch(() => {})
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockedBranchId]);
@@ -190,6 +197,7 @@ function ControlTower() {
         </div>
       }
     >
+      {loadError && <LoadErrorBanner onRetry={() => loadAll()} />}
       {/* Hero banner */}
       <div className="relative overflow-hidden rounded-3xl border border-border/60 gradient-primary text-primary-foreground p-6 md:p-7 shadow-elegant">
         <div className="absolute inset-0 opacity-[0.15] pointer-events-none"

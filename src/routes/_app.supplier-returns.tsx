@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -599,6 +600,7 @@ function SupplierReturns() {
   const { user } = useAuth();
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -607,7 +609,8 @@ function SupplierReturns() {
   const load = () => {
     setLoading(true);
     api.getStockTransfers({ transferType: "warehouse_to_supplier" })
-      .then(setTransfers)
+      .then(ts => { setTransfers(ts); setLoadError(false); })
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   };
 
@@ -659,6 +662,7 @@ function SupplierReturns() {
 
   return (
     <PageShell title="Supplier Returns (RTS)" subtitle="Warehouse-to-supplier return transfers and credit notes">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <MetricCard label="Total RTS" value={String(transfers.length)} icon={RotateCcw} accent="default" />
         <MetricCard label="Completed" value={String(completed.length)} icon={RotateCcw} accent="success" />

@@ -21,13 +21,12 @@ const ROLE_DEFAULT_ROUTES: Record<AppRole, string> = {
   finance_user:   "/sales",
   marketing_user: "/customers",
   picker:         "/stocks",
-  // Added when AppRole gained these three roles — Record<AppRole, string> is exhaustive, so the
-  // type broke without them. "/dashboard" is deliberate rather than a guess at intent: the lookup
-  // below already falls back to "/dashboard" for any unmapped role, so these entries preserve the
-  // exact behaviour these roles have today. Point them somewhere better (e.g. auditor →
-  // /audit-logs, warehouse_* → /warehouses) once their module permissions are settled.
-  auditor:           "/dashboard",
-  warehouse_staff:   "/dashboard",
+  // DataSeeder.SeedName treats these as renames of Marketing User/Picker (same permission
+  // profile) — mirror their landing routes. Warehouse Manager has no seeded permissions yet
+  // (not in BuildPermissions' role-name switch), so it gets the same safe fallback as the
+  // other manager-tier roles.
+  auditor:           "/customers",
+  warehouse_staff:   "/stocks",
   warehouse_manager: "/dashboard",
 };
 
@@ -48,6 +47,10 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/stocks",              module: "Stocks" },
   { url: "/inventory",           module: "Inventory" },
   { url: "/batches",             module: "Batches" },
+  // /batch-tracking had no entry at all — ROUTE_RULES.find() returned undefined and the guard
+  // never even ran, so every logged-in role (regardless of Batches.canView) could reach it
+  // directly. Worse than a wrong-module gate: no gate at all.
+  { url: "/batch-tracking",      module: "Batches" },
   { url: "/warehouses",          module: "Warehouses" },
   { url: "/stock-transfers",     module: "Stock Transfers" },
   // Finance

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, ScanLine, Loader2 } from "lucide-react";
 import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type OrderItem } from "@/lib/api";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
@@ -218,6 +219,7 @@ function Returns() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -238,10 +240,15 @@ function Returns() {
 
   const load = useCallback(() => {
     setLoading(true);
+    // Keep whatever returns list is already on screen if this fails — previously had no
+    // .catch() at all, so a failed fetch left `returns` in whatever state it was in with no
+    // signal to the cashier that the tiles/table might be stale (86eyag3ny).
     api.getReturns({
       branchId: branchFilter !== "all" ? branchFilter : undefined,
       status: statusFilter !== "all" ? statusFilter : undefined,
-    }).then(setReturns).finally(() => setLoading(false));
+    }).then(r => { setReturns(r); setLoadError(false); })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   }, [branchFilter, statusFilter]);
   useEffect(() => { load(); }, [load]);
 
@@ -275,7 +282,11 @@ function Returns() {
         setForm(p => ({
           ...p, orderId: v,
           branchId: order.branchId,
-          customerId: order.customerId ?? p.customerId,
+          // Always take the freshly-looked-up order's own customerId, never fall back to
+          // whatever was in the form before — switching from a customer's order to an
+          // anonymous/walk-in one within the same open sheet used to leave the PREVIOUS
+          // order's customerId attached, misattributing the return to an unrelated customer.
+          customerId: order.customerId ?? "",
           refundAmount: order.totalAmount.toFixed(2),
         }));
         setItemRows((order.items ?? []).map((oi: OrderItem) => ({
@@ -338,7 +349,8 @@ function Returns() {
         allBranches.find(b => b.id === order!.branchId)?.name ??
         "Unknown branch";
       setMatchedBranchName(branchName);
-      setForm(p => ({ ...p, orderId: order!.id, branchId: order!.branchId, customerId: order!.customerId ?? p.customerId }));
+      // Same fix as the orderId-select path above — always take this order's own customerId.
+      setForm(p => ({ ...p, orderId: order!.id, branchId: order!.branchId, customerId: order!.customerId ?? "" }));
       const rows: ItemRow[] = (order.items ?? []).map((oi: OrderItem) => ({
         orderItemId: oi.id ?? "",
         productId: oi.productId,
@@ -405,6 +417,7 @@ function Returns() {
 
   return (
     <PageShell title="Returns" subtitle="Customer return requests and refund processing">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-3 mb-2">
         {[

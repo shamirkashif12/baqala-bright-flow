@@ -49,7 +49,15 @@ public class StockCountsController(
         var count = await WithIncludes()
             .Include(c => c.Items).ThenInclude(i => i.Product)
             .FirstOrDefaultAsync(c => c.Id == id);
-        return count is null ? NotFound() : Ok(count);
+        if (count is null) return NotFound();
+
+        // Branch-scoped roles may only look up their own branch's count session — mirrors
+        // GetAll, which this direct-by-id lookup previously bypassed entirely.
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && count.BranchId != callerBranchId)
+            return NotFound();
+
+        return Ok(count);
     }
 
     // Snapshots every in-stock product at the branch (optionally scoped to one category) as a

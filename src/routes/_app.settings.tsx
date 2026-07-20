@@ -18,6 +18,7 @@ import { useI18n } from "@/lib/i18n";
 import { isLang } from "@/locales/languages";
 import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 
 export const Route = createFileRoute("/_app/settings")({
   component: () => (
@@ -71,13 +72,14 @@ function Settings() {
   // ── Key-value store (tenant_settings) ────────────────────────────────────
   const [kv, setKv] = useState<Record<string, string | null>>({});
   const [kvLoading, setKvLoading] = useState(false);
+  const [kvLoadError, setKvLoadError] = useState(false);
 
   const loadKv = useCallback(() => {
     if (!branchId) return;
     setKvLoading(true);
     api.getTenantSettings(branchId)
-      .then(setKv)
-      .catch(() => {})
+      .then(kv => { setKv(kv); setKvLoadError(false); })
+      .catch(() => setKvLoadError(true))
       .finally(() => setKvLoading(false));
   }, [branchId]);
 
@@ -134,20 +136,29 @@ function Settings() {
   const [zatca, setZatca] = useState({ vatRegistrationNumber: "", sellerName: "", environment: "sandbox", phase2Enabled: false });
   const [zatcaLoading, setZatcaLoading] = useState(false);
   const [zatcaSaving, setZatcaSaving] = useState(false);
+  const [zatcaLoadError, setZatcaLoadError] = useState(false);
+
+  const loadZatca = useCallback(() => {
+    if (!branchId) return;
+    setZatcaLoading(true);
+    api.getZatcaSettings(branchId)
+      .then((data: ZatcaSettings) => {
+        setZatca({
+          vatRegistrationNumber: data.vatRegistrationNumber ?? "",
+          sellerName: data.sellerName ?? "",
+          environment: data.environment ?? "sandbox",
+          phase2Enabled: data.phase2Enabled ?? false,
+        });
+        setZatcaLoadError(false);
+      })
+      .catch(() => setZatcaLoadError(true))
+      .finally(() => setZatcaLoading(false));
+  }, [branchId]);
 
   useEffect(() => {
     if (!branchId || activeSection !== "Tax & ZATCA") return;
-    setZatcaLoading(true);
-    api.getZatcaSettings(branchId)
-      .then((data: ZatcaSettings) => setZatca({
-        vatRegistrationNumber: data.vatRegistrationNumber ?? "",
-        sellerName: data.sellerName ?? "",
-        environment: data.environment ?? "sandbox",
-        phase2Enabled: data.phase2Enabled ?? false,
-      }))
-      .catch(() => {})
-      .finally(() => setZatcaLoading(false));
-  }, [branchId, activeSection]);
+    loadZatca();
+  }, [branchId, activeSection, loadZatca]);
 
   async function saveZatca() {
     if (!branchId) return;
@@ -186,6 +197,7 @@ function Settings() {
       subtitle="Business · tax · operations · security"
       actions={<BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />}
     >
+      {kvLoadError && <LoadErrorBanner onRetry={loadKv} />}
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
 
         {/* Sidebar */}
@@ -269,6 +281,11 @@ function Settings() {
             <Card className="p-6 border-border/60 shadow-card">
               <h3 className="font-semibold text-lg">Tax & ZATCA</h3>
               <p className="text-sm text-muted-foreground mt-1">e-Invoice phase 2 settings for ZATCA compliance.</p>
+              {zatcaLoadError && (
+                <div className="mt-4">
+                  <LoadErrorBanner onRetry={loadZatca} message="Failed to load ZATCA settings — fields below may not reflect saved values. Do not save until this is resolved." />
+                </div>
+              )}
               {zatcaLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground mt-6">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading ZATCA settings…

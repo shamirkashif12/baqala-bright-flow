@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -331,6 +332,7 @@ function Batches() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
   const [warehouseFilter, setWarehouseFilter] = useState("all");
@@ -390,6 +392,9 @@ function Batches() {
         status: statusFilter !== "all" ? statusFilter : undefined,
       });
       setBatches((data ?? []).filter(b => b.status === "near_expiry" || b.status === "expired"));
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -447,6 +452,7 @@ function Batches() {
 
   return (
     <PageShell title="Batches & Expiry" subtitle="Wastage watch-list · near-expiry, expired & recalled stock">
+      {loadError && <LoadErrorBanner onRetry={loadBatches} />}
       {/* Metrics */}
       <div className="grid gap-4 md:grid-cols-3">
         <MetricCard label="Near Expiry" value={String(nearExpiry)} icon={CalendarClock} accent="warning" />

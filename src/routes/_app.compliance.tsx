@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -14,6 +14,7 @@ import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 
 export const Route = createFileRoute("/_app/compliance")({ component: Compliance });
 
@@ -58,12 +59,18 @@ function Compliance() {
   const [settingsId, setSettingsId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [rulesLoadError, setRulesLoadError] = useState(false);
+  const [togglesLoadError, setTogglesLoadError] = useState(false);
 
-  useEffect(() => {
-    api.getTaxRules().then(setRules).catch(() => {});
+  const loadRules = useCallback(() => {
+    api.getTaxRules()
+      .then(rules => { setRules(rules); setRulesLoadError(false); })
+      .catch(() => setRulesLoadError(true));
   }, []);
 
-  useEffect(() => {
+  useEffect(() => { loadRules(); }, [loadRules]);
+
+  const loadToggles = useCallback(() => {
     if (!branchId) return;
     setLoading(true);
     api.getPosSettings(branchId)
@@ -75,10 +82,13 @@ function Compliance() {
           requireManagerApprovalForRefund: data.requireManagerApprovalForRefund ?? TOGGLE_DEFAULTS.requireManagerApprovalForRefund,
           blockNonpermissibleItems:        data.blockNonpermissibleItems        ?? TOGGLE_DEFAULTS.blockNonpermissibleItems,
         });
+        setTogglesLoadError(false);
       })
-      .catch(() => {})
+      .catch(() => setTogglesLoadError(true))
       .finally(() => setLoading(false));
   }, [branchId]);
+
+  useEffect(() => { loadToggles(); }, [loadToggles]);
 
   function toggle(key: keyof Toggles) {
     return (v: boolean) => setToggles(prev => ({ ...prev, [key]: v }));
@@ -102,6 +112,7 @@ function Compliance() {
 
   return (
     <PageShell title="Compliance — Permissible Items" subtitle="Rules that the POS enforces in real time">
+      {rulesLoadError && <LoadErrorBanner onRetry={loadRules} />}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Active Rules" value={String(activeCount)} icon={ShieldCheck} accent="primary" />
         <MetricCard label="Blocked SKUs" value={String(inactiveCount)} icon={Ban} accent="destructive" />
@@ -117,6 +128,7 @@ function Compliance() {
             <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
           </div>
         </div>
+        {togglesLoadError && <div className="mb-4"><LoadErrorBanner onRetry={loadToggles} /></div>}
         <div className="grid sm:grid-cols-2 gap-3">
           <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
             <div>

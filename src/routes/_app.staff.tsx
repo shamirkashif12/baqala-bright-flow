@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
+import { LoadErrorBanner } from "@/components/load-error-banner";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { Users, UserCheck, Clock, ShieldCheck } from "lucide-react";
@@ -35,18 +36,24 @@ function roleColor(roleName?: string): string {
 function Staff() {
   const [staff, setStaff] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true);
     api.getUsers()
-      .then(setStaff)
+      .then(u => { setStaff(u); setLoadError(false); })
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { load(); }, []);
 
   const active = staff.filter(u => u.status === "active").length;
   const roles = new Set(staff.map(u => u.roleId)).size;
 
   return (
     <PageShell title="Staff & Roles" subtitle="People · permissions · shifts · attendance">
+      {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Total Staff" value={String(staff.length)} icon={Users} accent="primary" />
         <MetricCard label="Active" value={String(active)} icon={UserCheck} accent="success" />
