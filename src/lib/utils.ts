@@ -12,6 +12,16 @@ export function localDateStr(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Mirrors api/Services/QuantityValidation.ValidateWholeUnit server-side — a count-based
+// product (weightBased === false, the default, e.g. "piece") has no meaningful fractional
+// unit; only a weight/volume-based product can legitimately move a fractional quantity.
+// Client-side check so the UI can reject before the round-trip, not just show the 400 toast.
+export function wholeUnitQuantityError(product: { weightBased: boolean; name: string } | null | undefined, quantity: number): string | null {
+  if (!product || product.weightBased) return null;
+  if (!Number.isFinite(quantity) || Number.isInteger(quantity)) return null;
+  return `${product.name} is tracked by piece — quantity must be a whole number.`;
+}
+
 // crypto.randomUUID() only exists in secure contexts (HTTPS/localhost); on plain-HTTP
 // deployments it's undefined and throws. Fall back to a Math.random-based v4 UUID there.
 export function uuid(): string {

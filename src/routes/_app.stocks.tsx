@@ -25,6 +25,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
+import { wholeUnitQuantityError } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/stocks")({ component: Stocks });
 
@@ -168,8 +169,11 @@ function BarcodeStockInDialog({
     setPurchaseCost("");
   }
 
+  const qtyWholeUnitError = product ? wholeUnitQuantityError(product, Number(quantity)) : null;
+
   async function handleSave() {
     if (!product || !branchId || !quantity) { toast.error("Branch and quantity are required"); return; }
+    if (qtyWholeUnitError) { toast.error(qtyWholeUnitError); return; }
     setSaving(true);
     try {
       await api.receiveBatch({
@@ -266,12 +270,16 @@ function BarcodeStockInDialog({
                   <Input
                     type="number"
                     min="1"
-                    className="h-9 text-lg font-semibold"
+                    step={product.weightBased ? "0.001" : "1"}
+                    className={`h-9 text-lg font-semibold ${qtyWholeUnitError ? "border-destructive ring-1 ring-destructive" : ""}`}
                     value={quantity}
                     onChange={e => setQuantity(e.target.value)}
                     autoFocus
                     onKeyDown={e => { if (e.key === "Enter") handleSave(); }}
                   />
+                  {qtyWholeUnitError && (
+                    <p className="text-[10px] text-destructive leading-tight mt-0.5">Must be a whole number</p>
+                  )}
                 </div>
                 <div>
                   <Label>Purchase Cost (SAR)</Label>
@@ -293,7 +301,7 @@ function BarcodeStockInDialog({
             <Button variant="outline" onClick={handleClose}>Cancel</Button>
             <Button
               onClick={handleSave}
-              disabled={saving || !product || !branchId || !quantity}
+              disabled={saving || !product || !branchId || !quantity || !!qtyWholeUnitError}
               className="gradient-primary text-primary-foreground border-0"
             >
               {saving ? "Adding…" : `Add ${quantity || 0} Units`}
@@ -318,6 +326,14 @@ function GrnReceiveDialog({ po, onDone }: { po: PurchaseOrder; onDone: () => voi
     setQuantities(init);
   }
 
+  function qtyErrorFor(productId: string): string | null {
+    const it = (po.items ?? []).find(x => x.productId === productId);
+    const q = Number(quantities[productId]);
+    if (!it || !quantities[productId] || !(q > 0)) return null;
+    return wholeUnitQuantityError(it.product, q);
+  }
+  const hasInvalidQty = (po.items ?? []).some(it => qtyErrorFor(it.productId) !== null);
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -325,6 +341,8 @@ function GrnReceiveDialog({ po, onDone }: { po: PurchaseOrder; onDone: () => voi
         .filter(([, q]) => Number(q) > 0)
         .map(([productId, q]) => ({ productId, quantity: Number(q) }));
       if (!items.length) { toast.error("No quantities entered"); setSaving(false); return; }
+      const invalid = items.find(i => wholeUnitQuantityError((po.items ?? []).find(x => x.productId === i.productId)?.product, i.quantity));
+      if (invalid) { toast.error(wholeUnitQuantityError((po.items ?? []).find(x => x.productId === invalid.productId)?.product, invalid.quantity)!); setSaving(false); return; }
       await api.receivePurchaseOrder(po.id, items);
       toast.success(`GRN recorded for ${po.poNumber}`);
       setOpen(false);
@@ -341,18 +359,31 @@ function GrnReceiveDialog({ po, onDone }: { po: PurchaseOrder; onDone: () => voi
           <DialogHeader><DialogTitle>Receive PO — {po.poNumber}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground mb-2">Enter quantities received for each item.</p>
           <div className="space-y-2 max-h-64 overflow-y-auto">
-            {(po.items ?? []).map(it => (
+            {(po.items ?? []).map(it => {
+              const qtyError = qtyErrorFor(it.productId);
+              return (
               <div key={it.productId} className="flex items-center gap-3">
                 <span className="flex-1 text-sm">{it.product?.name ?? it.productId}</span>
                 <span className="text-xs text-muted-foreground">Ordered: {it.orderedQuantity} / Rcvd: {it.receivedQuantity}</span>
-                <Input className="w-24" type="number" min="0" max={it.orderedQuantity - it.receivedQuantity}
-                  value={quantities[it.productId] ?? ""} onChange={e => setQuantities(q => ({ ...q, [it.productId]: e.target.value }))} />
+                <div>
+                  <Input
+                    className={`w-24 ${qtyError ? "border-destructive ring-1 ring-destructive" : ""}`}
+                    type="number"
+                    min="0"
+                    max={it.orderedQuantity - it.receivedQuantity}
+                    step={it.product?.weightBased ? "0.001" : "1"}
+                    value={quantities[it.productId] ?? ""}
+                    onChange={e => setQuantities(q => ({ ...q, [it.productId]: e.target.value }))}
+                  />
+                  {qtyError && <p className="text-[10px] text-destructive leading-tight">Whole number only</p>}
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Confirm Receive"}</Button>
+            <Button onClick={handleSave} disabled={saving || hasInvalidQty}>{saving ? "Saving…" : "Confirm Receive"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -378,8 +409,12 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
   }, [form.productId, form.branchId]);
   const eligibleBatches = batches.filter(b => b.status !== "expired").sort((a, b) => (a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity) - (b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity));
 
+  const selectedProduct = products.find(p => p.id === form.productId);
+  const qtyWholeUnitError = form.quantity ? wholeUnitQuantityError(selectedProduct, Number(form.quantity)) : null;
+
   async function handleSave() {
     if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
+    if (qtyWholeUnitError) { toast.error(qtyWholeUnitError); return; }
     setSaving(true);
     try {
       await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "damage", reason: form.reason || undefined, adjustedBy: user?.id, batchId: form.batchId || undefined });
@@ -424,7 +459,16 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
             </div>
             <div>
               <Label>Quantity *</Label>
-              <Input type="number" min="1" value={form.quantity} onChange={e => set("quantity", e.target.value)} placeholder="0" />
+              <Input
+                type="number"
+                min="1"
+                step={selectedProduct?.weightBased ? "0.001" : "1"}
+                className={qtyWholeUnitError ? "border-destructive ring-1 ring-destructive" : ""}
+                value={form.quantity}
+                onChange={e => set("quantity", e.target.value)}
+                placeholder="0"
+              />
+              {qtyWholeUnitError && <p className="text-[10px] text-destructive leading-tight mt-0.5">Must be a whole number</p>}
             </div>
             <div className="col-span-2">
               <Label>Batch (optional)</Label>
@@ -447,7 +491,7 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+            <Button onClick={handleSave} disabled={saving || !!qtyWholeUnitError}>{saving ? "Saving…" : "Save"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

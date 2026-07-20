@@ -18,7 +18,7 @@ import {
   ChevronDown, Check,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn, localDateStr, uuid } from "@/lib/utils";
+import { cn, localDateStr, uuid, wholeUnitQuantityError } from "@/lib/utils";
 import {
   api,
   type StockTransfer, type StockTransferItem, type PurchaseOrder,
@@ -535,6 +535,8 @@ function ItemsStep({
           const maxQty = selectedBatch ? selectedBatch.remainingQuantity : poItems?.find(x => x.productId === item.productId)?.maxQty;
           const qtyExceeded = maxQty !== undefined && item.requestedQuantity > maxQty;
           const qtyInvalid = item.requestedQuantity < 1;
+          const product = products.find(p => p.id === item.productId);
+          const qtyWholeUnitError = wholeUnitQuantityError(product, item.requestedQuantity);
           return (
             <Card key={i} className="border-border/60">
               <CardContent className="p-3 space-y-2">
@@ -560,12 +562,16 @@ function ItemsStep({
                       type="number"
                       min={1}
                       max={maxQty}
-                      className={cn("h-8 text-xs", (qtyExceeded || qtyInvalid) && "border-destructive ring-1 ring-destructive")}
+                      step={product?.weightBased ? "0.001" : "1"}
+                      className={cn("h-8 text-xs", (qtyExceeded || qtyInvalid || qtyWholeUnitError) && "border-destructive ring-1 ring-destructive")}
                       value={item.requestedQuantity}
                       onChange={e => updateItem(i, { requestedQuantity: Number(e.target.value) })}
                     />
                     {qtyExceeded && (
                       <p className="text-[10px] text-destructive leading-tight">Exceeds available ({maxQty})</p>
+                    )}
+                    {!qtyExceeded && qtyWholeUnitError && (
+                      <p className="text-[10px] text-destructive leading-tight">Must be a whole number</p>
                     )}
                     {!qtyExceeded && qtyInvalid && (
                       <p className="text-[10px] text-destructive leading-tight">Quantity must be at least 1</p>
@@ -1039,7 +1045,11 @@ function CreateTransferSheet({
     const pi = fetchedPo.items.find(x => x.productId === item.productId);
     return pi !== undefined && item.requestedQuantity > pi.maxQty;
   });
-  const hasInvalidQty = items.some(item => item.productId && item.requestedQuantity < 1);
+  const hasInvalidQty = items.some(item => {
+    if (!item.productId) return false;
+    if (item.requestedQuantity < 1) return true;
+    return wholeUnitQuantityError(products.find(p => p.id === item.productId), item.requestedQuantity) !== null;
+  });
 
   const stepTitle = step === 1 ? "Step 1: Transfer Type" : step === 2 ? "Step 2: Source & Destination" : "Step 3: Items & Details";
 
@@ -1219,7 +1229,7 @@ function CreateTransferSheet({
 
 // ─── Receive Items Sheet ──────────────────────────────────────────────────────
 
-interface ReceiveItemRow { itemId: string; productName: string; requestedQty: number; receivedQty: number; notes: string }
+interface ReceiveItemRow { itemId: string; productName: string; weightBased: boolean; requestedQty: number; receivedQty: number; notes: string }
 
 function ReceiveItemsSheet({
   transfer,
@@ -1238,6 +1248,7 @@ function ReceiveItemsSheet({
       setRows((transfer.items ?? []).map(i => ({
         itemId: i.id,
         productName: i.product?.name ?? "Unknown",
+        weightBased: i.product?.weightBased ?? false,
         requestedQty: i.requestedQuantity,
         receivedQty: i.approvedQuantity ?? i.requestedQuantity,
         notes: "",
@@ -1248,6 +1259,9 @@ function ReceiveItemsSheet({
 
   const update = (itemId: string, patch: Partial<ReceiveItemRow>) =>
     setRows(r => r.map(row => row.itemId === itemId ? { ...row, ...patch } : row));
+
+  const hasInvalidReceivedQty = rows.some(row =>
+    wholeUnitQuantityError({ weightBased: row.weightBased, name: row.productName }, row.receivedQty) !== null);
 
   const handleSubmit = async () => {
     if (!transfer) return;
@@ -1293,7 +1307,9 @@ function ReceiveItemsSheet({
         </SheetHeader>
         <div className="mt-5 space-y-4">
           <p className="text-xs text-muted-foreground">Enter the actual quantities received. Leave unchanged to confirm the approved quantity.</p>
-          {rows.map(row => (
+          {rows.map(row => {
+            const qtyWholeUnitError = wholeUnitQuantityError({ weightBased: row.weightBased, name: row.productName }, row.receivedQty);
+            return (
             <Card key={row.itemId} className="border-border/60">
               <CardContent className="p-3 space-y-2">
                 <div className="flex items-center justify-between gap-3">
@@ -1307,10 +1323,14 @@ function ReceiveItemsSheet({
                       type="number"
                       min={0}
                       max={row.requestedQty * 2}
-                      className="h-8 w-24 text-sm text-center"
+                      step={row.weightBased ? "0.001" : "1"}
+                      className={cn("h-8 w-24 text-sm text-center", qtyWholeUnitError && "border-destructive ring-1 ring-destructive")}
                       value={row.receivedQty}
                       onChange={e => update(row.itemId, { receivedQty: Number(e.target.value) || 0 })}
                     />
+                    {qtyWholeUnitError && (
+                      <p className="text-[10px] text-destructive leading-tight">Whole number only</p>
+                    )}
                   </div>
                 </div>
                 {row.receivedQty !== row.requestedQty && (
@@ -1328,11 +1348,12 @@ function ReceiveItemsSheet({
                 )}
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex gap-2 pt-2 border-t border-border/60">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleSubmit} disabled={saving}>
+            <Button className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleSubmit} disabled={saving || hasInvalidReceivedQty}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
               {saving ? "Confirming…" : "Confirm Receipt"}
             </Button>
