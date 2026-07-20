@@ -49,6 +49,40 @@ public class KioskAuthController(BaqalaDbContext db, IConfiguration config, IHos
         });
     }
 
+    // Lets the kiosk size its on-screen PIN pad to the actual configured PIN length instead of
+    // always showing a 6-slot max — length isn't secret (unlike the PIN itself), it just saves
+    // staff from typing padding digits for a shorter PIN.
+    [HttpGet("lockdown-pin-info")]
+    public async Task<IActionResult> GetLockdownPinInfo()
+    {
+        if (!Guid.TryParse(User.FindFirst("terminalId")?.Value, out var terminalId))
+            return Unauthorized();
+
+        var terminal = await db.Terminals.FindAsync(terminalId);
+        if (terminal is null) return NotFound();
+
+        return Ok(new { configured = terminal.KioskLockdownPinHash is not null, length = terminal.KioskLockdownPinLength });
+    }
+
+    // Checked before the kiosk enters OR exits its fullscreen lockdown — same PIN both ways,
+    // set by staff from the Terminals admin page. "configured: false" lets the kiosk tell a
+    // blank setup apart from a wrong guess, since there's nothing correct to type yet.
+    [HttpPost("verify-lockdown-pin")]
+    public async Task<IActionResult> VerifyLockdownPin([FromBody] VerifyLockdownPinRequest req)
+    {
+        if (!Guid.TryParse(User.FindFirst("terminalId")?.Value, out var terminalId))
+            return Unauthorized();
+
+        var terminal = await db.Terminals.FindAsync(terminalId);
+        if (terminal is null) return NotFound();
+
+        if (terminal.KioskLockdownPinHash is null)
+            return Ok(new { valid = false, configured = false });
+
+        var valid = terminal.KioskLockdownPinHash == HashSecret(req.Pin ?? "");
+        return Ok(new { valid, configured = true });
+    }
+
     private string GenerateJwt(BaqalaPOS.Api.Models.Terminal terminal, Guid kioskRoleId)
     {
         var jwtConfig = config.GetSection("Jwt");
@@ -89,3 +123,4 @@ public class KioskAuthController(BaqalaDbContext db, IConfiguration config, IHos
 }
 
 public record KioskPairRequest(string TerminalCode, string PairingSecret);
+public record VerifyLockdownPinRequest(string Pin);

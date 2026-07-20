@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720082005_AddKioskLockdownPin")]
+    partial class AddKioskLockdownPin
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3591,10 +3594,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("varchar(255)")
                         .HasColumnName("kiosk_lockdown_pin_hash");
-
-                    b.Property<int?>("KioskLockdownPinLength")
-                        .HasColumnType("int")
-                        .HasColumnName("kiosk_lockdown_pin_length");
 
                     b.Property<DateTime?>("KioskLockdownPinSetAt")
                         .HasColumnType("datetime(6)")

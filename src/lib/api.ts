@@ -324,6 +324,11 @@ export const api = {
   // so there's no "view existing secret" endpoint, only regenerate (which invalidates the old one).
   generateKioskPairingCode: (id: string) =>
     request<{ terminalCode: string; pairingSecret: string }>(`/api/terminals/${id}/kiosk-pairing-code`, { method: "POST" }),
+  // Same one-time-set shape as the pairing secret above — no "view current PIN" endpoint.
+  setKioskLockdownPin: (id: string, pin: string) =>
+    request<{ setAt: string; length: number }>(`/api/terminals/${id}/kiosk-lockdown-pin`, { method: "POST", body: JSON.stringify({ pin }) }),
+  clearKioskLockdownPin: (id: string) =>
+    request<void>(`/api/terminals/${id}/kiosk-lockdown-pin`, { method: "DELETE" }),
 
   // Suppliers
   getSuppliers: (params?: { status?: string; supplyType?: string }) => {
@@ -1085,6 +1090,8 @@ export interface Terminal {
   id: string; terminalCode: string; name: string; branchId: string;
   assignedCashierId?: string; status: string; lastSync?: string; uptimeMinutes?: number;
   pairingSecretSetAt?: string;
+  kioskLockdownPinSetAt?: string;
+  kioskLockdownPinLength?: number;
   branch?: { id: string; name: string };
   assignedCashier?: { id: string; fullName: string };
 }

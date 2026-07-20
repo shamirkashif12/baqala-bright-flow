@@ -180,6 +180,19 @@ export interface KioskPairResponse {
   terminalName: string;
 }
 
+// Checked before entering OR exiting the kiosk's fullscreen lockdown (see kiosk-lockdown.tsx).
+// "configured: false" means no PIN was ever set for this terminal in the Terminals admin
+// page — the lockdown shortcut is a no-op until staff set one there.
+export function verifyLockdownPin(pin: string): Promise<{ valid: boolean; configured: boolean }> {
+  return request("/api/kiosk/verify-lockdown-pin", { method: "POST", body: JSON.stringify({ pin }) });
+}
+
+// Fetched right before the PIN pad opens so it can show exactly as many digit slots as the
+// configured PIN, rather than always maxing out at 6 — length isn't secret, only the PIN is.
+export function getLockdownPinInfo(): Promise<{ configured: boolean; length: number | null }> {
+  return request("/api/kiosk/lockdown-pin-info");
+}
+
 export function pairKiosk(terminalCode: string, pairingSecret: string): Promise<KioskPairResponse> {
   // Pairing is anonymous — never attach a stale/foreign token here. If this device is
   // already paired to a different terminal, sending its old kiosk JWT alongside a

@@ -127,7 +127,49 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
         return Ok(new { terminalCode = terminal.TerminalCode, pairingSecret = secret });
     }
 
+    // Sets/changes the PIN a self-checkout kiosk demands before entering OR exiting its
+    // fullscreen lockdown. Same one-time-set, hash-only storage as the pairing secret above —
+    // there's no "view current PIN" endpoint, only replace. A terminal with no PIN configured
+    // simply has the lockdown feature unavailable on its kiosk.
+    [RequirePermission("Terminals", PermAction.Edit)]
+    [HttpPost("{id:guid}/kiosk-lockdown-pin")]
+    public async Task<IActionResult> SetKioskLockdownPin(Guid id, [FromBody] SetLockdownPinRequest req)
+    {
+        var terminal = await db.Terminals.FindAsync(id);
+        if (terminal is null) return NotFound();
+        if (string.IsNullOrEmpty(req.Pin) || req.Pin.Length < 4 || req.Pin.Length > 6 || !req.Pin.All(char.IsDigit))
+            return BadRequest(new { message = "PIN must be 4-6 digits." });
+
+        terminal.KioskLockdownPinHash = HashSecret(req.Pin);
+        terminal.KioskLockdownPinSetAt = DateTime.UtcNow;
+        terminal.KioskLockdownPinLength = req.Pin.Length;
+        terminal.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return Ok(new { setAt = terminal.KioskLockdownPinSetAt, length = terminal.KioskLockdownPinLength });
+    }
+
+    // Removes the lockdown PIN — disables the fullscreen-lockdown feature on this kiosk
+    // entirely (rather than leaving a guessable/forgotten PIN in place).
+    [RequirePermission("Terminals", PermAction.Edit)]
+    [HttpDelete("{id:guid}/kiosk-lockdown-pin")]
+    public async Task<IActionResult> ClearKioskLockdownPin(Guid id)
+    {
+        var terminal = await db.Terminals.FindAsync(id);
+        if (terminal is null) return NotFound();
+
+        terminal.KioskLockdownPinHash = null;
+        terminal.KioskLockdownPinSetAt = null;
+        terminal.KioskLockdownPinLength = null;
+        terminal.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return NoContent();
+    }
+
     private static string HashSecret(string plain) =>
         Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(plain + "baqala_salt")));
 }
+
+public record SetLockdownPinRequest(string Pin);

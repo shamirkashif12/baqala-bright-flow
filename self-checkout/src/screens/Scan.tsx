@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Minus, Plus, ScanBarcode, ShoppingCart, Tag, Trash2, X, QrCode, User, Loader2, Gift,
+  Minus, Plus, RotateCcw, ScanBarcode, ShoppingCart, Tag, Trash2, X, QrCode, User, Loader2, Gift,
 } from "lucide-react";
 import { useCart } from "../lib/cart";
 import { useSession } from "../lib/session";
@@ -11,6 +11,7 @@ import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { SARIcon } from "../lib/currency";
 import { PaymentDialog } from "../components/PaymentDialog";
 import { InvoiceDialog, getZatcaQr, printInvoice, type InvoiceSnapshot } from "../components/InvoiceDialog";
@@ -28,6 +29,7 @@ export default function ScanScreen() {
   const [invOpen, setInvOpen] = useState(false);
   const [invoice, setInvoice] = useState<InvoiceSnapshot | null>(null);
   const [doneOpen, setDoneOpen] = useState(false);
+  const [newOrderConfirmOpen, setNewOrderConfirmOpen] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
   const autoPrintRef = useRef(false);
 
@@ -239,6 +241,19 @@ export default function ScanScreen() {
     navigate("/", { replace: true });
   }
 
+  // Manual reset for a customer who scanned items and walked away without paying — clears
+  // the cart plus every bit of local UI state (coupon input, phone lookup, banner) so the
+  // next shopper starts from a truly blank screen instead of inheriting leftovers.
+  function abandonOrder() {
+    cart.clear();
+    removeCustomer();
+    setCouponCode("");
+    setQuery("");
+    setMessage(null);
+    setNewOrderConfirmOpen(false);
+    navigate("/", { replace: true });
+  }
+
   return (
     <div className="h-full overflow-y-auto bg-muted/30 p-3 sm:p-4 md:p-6 pb-44 md:pb-6">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -293,8 +308,8 @@ export default function ScanScreen() {
                 </Badge>
               </div>
               {cart.lines.length > 0 && (
-                <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={cart.clear}>
-                  Clear all
+                <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-destructive" onClick={() => setNewOrderConfirmOpen(true)}>
+                  <RotateCcw className="h-3.5 w-3.5" /> New Order
                 </Button>
               )}
             </div>
@@ -557,6 +572,21 @@ export default function ScanScreen() {
       <PaymentDialog open={payOpen} onOpenChange={setPayOpen} total={cart.totalAmount} onCharge={handleCharge} onDone={onPaymentDone} />
       <InvoiceDialog open={invOpen} onOpenChange={setInvOpen} invoice={invoice} onNewOrder={startNewOrder} onPrinted={onReceiptPrinted} />
       <CompleteDialog open={doneOpen} onNewOrder={startNewOrder} />
+
+      <Dialog open={newOrderConfirmOpen} onOpenChange={setNewOrderConfirmOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Start a new order?</DialogTitle>
+            <DialogDescription>
+              This clears every scanned item, the coupon, and the customer for this order — use it when a shopper has left without paying.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewOrderConfirmOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={abandonOrder}>Start New Order</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
