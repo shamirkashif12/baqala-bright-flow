@@ -30,6 +30,23 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         return (role, branchId);
     }
 
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                      ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    // Cashier-sales and attendance-shift double as a Cashier's OWN self-service "My Shift
+    // Report"/check-in history — real Cashier permission rows have Reports.View = false (that
+    // gates the manager-facing branch/mart-wide reports), which previously 403'd every single
+    // attempt to view their own shift, permanently — the mobile app's "My Shift Report" screen
+    // had no way to ever succeed for the exact role it's built for. Allow the narrower case: no
+    // "Reports" permission, but the request is scoped to the caller's own id.
+    private async Task<bool> CanViewReportOrSelfAsync(Guid? selfScopedId)
+    {
+        if (await PermissionCheck.HasPermissionAsync(HttpContext.User, db, "Reports", PermAction.View)) return true;
+        var callerId = CallerId();
+        return callerId != null && selfScopedId == callerId;
+    }
+
     // ───────────────────────────────────────────────────────────────────────
     // 1. Daily Sales (RPT-SALES-DAILY)
     // ───────────────────────────────────────────────────────────────────────
@@ -399,11 +416,16 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     // ───────────────────────────────────────────────────────────────────────
 
     [HttpGet("cashier-sales")]
-    [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetCashierSales(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
         [FromQuery] Guid? cashierId, [FromQuery] Guid? terminalId)
     {
+        // See CanViewReportOrSelfAsync — a Cashier with no "Reports" permission can still call
+        // this scoped to their own cashierId ("My Shift Report"); anyone else needs the real
+        // permission.
+        if (!await CanViewReportOrSelfAsync(cashierId))
+            return StatusCode(403, new { message = "You do not have permission to view Reports." });
+
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: false);
         if (error != null) return BadRequest(new { message = error });
 
@@ -1756,11 +1778,15 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     // ───────────────────────────────────────────────────────────────────────
 
     [HttpGet("attendance-shift")]
-    [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetAttendanceShift(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? staffId, [FromQuery] string? status,
         [FromQuery] Guid? roleId, [FromQuery] Guid? terminalId)
     {
+        // See CanViewReportOrSelfAsync — same self-scoped carve-out as cashier-sales, for a
+        // staff member viewing only their own check-in/out history.
+        if (!await CanViewReportOrSelfAsync(staffId))
+            return StatusCode(403, new { message = "You do not have permission to view Reports." });
+
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: false);
         if (error != null) return BadRequest(new { message = error });
         return Ok(await BuildAttendanceShiftAsync(rangeFrom, rangeTo, branchId, staffId, status, roleId, terminalId));
