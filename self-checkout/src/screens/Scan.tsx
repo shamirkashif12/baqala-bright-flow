@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Minus, Plus, RotateCcw, ScanBarcode, ShoppingCart, Tag, Trash2, X, Pause, QrCode, Search, User, Loader2, Gift,
+  Minus, Plus, ScanBarcode, ShoppingCart, Tag, Trash2, X, QrCode, User, Loader2, Gift,
 } from "lucide-react";
 import { useCart } from "../lib/cart";
 import { useSession } from "../lib/session";
@@ -22,7 +22,6 @@ export default function ScanScreen() {
   const cart = useCart();
   const { branchId, branchName, sellerName, vatNumber } = useSession();
   const [query, setQuery] = useState("");
-  const [showResults, setShowResults] = useState(false);
   const [couponCode, setCouponCode] = useState("");
   const [message, setMessage] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const [payOpen, setPayOpen] = useState(false);
@@ -51,18 +50,6 @@ export default function ScanScreen() {
     navigate("/", { replace: true });
   }, 90_000);
 
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return cart.products
-      .filter(
-        (p) =>
-          p.status === "active" &&
-          (p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || p.barcode?.toLowerCase().includes(q)),
-      )
-      .slice(0, 8);
-  }, [query, cart.products]);
-
   function addProductToCart(product: Product) {
     if (!product.allowSelfCheckout || product.status !== "active") {
       setMessage({ text: `"${product.name}" needs an attendant — please ask for help.`, tone: "error" });
@@ -71,12 +58,10 @@ export default function ScanScreen() {
     cartRef.current.addProduct(product);
     setMessage(null);
     setQuery("");
-    setShowResults(false);
   }
 
-  // Mirrors the staff POS's own scan handler: exact barcode/SKU match first (what a hardware
-  // scanner emits followed by Enter), falling back to the first live-search match only for
-  // typed text — a scanned barcode that matches nothing should say so, not silently guess.
+  // Scan-only: exact barcode/SKU match, same as the global scanner listener below. No
+  // free-text/name search — self-checkout only accepts what a hardware scanner emits.
   function handleScan(e: FormEvent) {
     e.preventDefault();
     const trimmed = query.trim();
@@ -85,13 +70,8 @@ export default function ScanScreen() {
     if (byBarcode) return addProductToCart(byBarcode);
     const bySku = cart.products.find((p) => p.sku === trimmed);
     if (bySku) return addProductToCart(bySku);
-
-    const looksLikeBarcode = /^\d{6,}$/.test(trimmed);
-    if (!looksLikeBarcode && matches[0]) return addProductToCart(matches[0]);
-    if (looksLikeBarcode) {
-      setMessage({ text: `Barcode "${trimmed}" not found.`, tone: "error" });
-      setQuery("");
-    }
+    setMessage({ text: `Barcode "${trimmed}" not found.`, tone: "error" });
+    setQuery("");
   }
 
   // Global USB barcode scanner listener — works anywhere on this page, not only while the
@@ -274,16 +254,13 @@ export default function ScanScreen() {
           <Card className="p-3 sm:p-4 border-border/60 shadow-card">
             <form onSubmit={handleScan} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <div className="relative flex-1 min-w-0">
-                <Search className="h-5 w-5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <ScanBarcode className="h-5 w-5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   ref={scanInputRef}
                   autoFocus
                   value={query}
-                  onChange={(e) => { setQuery(e.target.value); setShowResults(true); }}
-                  onFocus={() => setShowResults(true)}
-                  onBlur={() => setTimeout(() => setShowResults(false), 150)}
-                  onKeyDown={(e) => e.key === "Escape" && setShowResults(false)}
-                  placeholder="Scan barcode or search product…"
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Scan barcode…"
                   className="pl-10 h-12 sm:h-14 text-base bg-background shadow-none border-border/70"
                 />
               </div>
@@ -291,40 +268,6 @@ export default function ScanScreen() {
                 <ScanBarcode className="h-5 w-5" /> Scan
               </Button>
             </form>
-
-            {showResults && matches.length > 0 && (
-              <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden">
-                {matches.map((p) => {
-                  const blocked = !p.allowSelfCheckout;
-                  return (
-                    <button
-                      key={p.sku}
-                      type="button"
-                      onMouseDown={(e) => { e.preventDefault(); addProductToCart(p); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${blocked ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/60"}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          SKU {p.sku}{p.barcode ? ` · ${p.barcode}` : ""}
-                        </p>
-                      </div>
-                      {blocked && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
-                          Needs attendant
-                        </span>
-                      )}
-                      <span className="font-bold text-primary tabular-nums w-20 text-right">
-                        <SARIcon />{p.basePrice.toFixed(2)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {showResults && query && matches.length === 0 && (
-              <p className="mt-2 text-sm text-muted-foreground px-1">No product matches "{query}"</p>
-            )}
 
             {message && (
               <p className={`mt-2 text-sm px-1 font-medium ${message.tone === "error" ? "text-destructive" : "text-success"}`}>
@@ -409,52 +352,6 @@ export default function ScanScreen() {
             )}
           </Card>
 
-          {cart.holds.length > 0 && (
-            <Card className="border-border/60 shadow-card overflow-hidden">
-              <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/60 bg-muted/30">
-                <RotateCcw className="h-3.5 w-3.5 text-primary" />
-                <span className="text-sm font-semibold">Paused Orders</span>
-                <Badge className="text-[10px] px-1.5 py-0 h-5 bg-primary/10 text-primary border-primary/20 hover:bg-primary/10 ml-1">
-                  {cart.holds.length}
-                </Badge>
-                <span className="ml-auto text-[11px] text-muted-foreground">Tap to resume</span>
-              </div>
-              <div className="divide-y divide-border/40">
-                {cart.holds.map((h) => (
-                  <div
-                    key={h.id}
-                    onClick={() => cart.reopen(h.id)}
-                    className="group relative flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-primary/5"
-                  >
-                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                      <ShoppingCart className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-primary">{h.id}</span>
-                        <span className="text-[11px] text-muted-foreground">· {h.at}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {h.lines.slice(0, 3).map((l) => l.product.name).join(", ")}
-                        {h.lines.length > 3 ? ` +${h.lines.length - 3} more` : ""}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-bold tabular-nums"><SARIcon />{h.total.toFixed(2)}</p>
-                      <p className="text-[11px] text-muted-foreground">{h.lines.length} item{h.lines.length !== 1 ? "s" : ""}</p>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); cart.discardHold(h.id); }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/10 text-destructive"
-                      title="Discard"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
         </div>
 
         {/* ─── Right: order panel ──────────────────────────────────────── */}
@@ -647,12 +544,6 @@ export default function ScanScreen() {
                 onClick={() => setPayOpen(true)}
               >
                 Charge <SARIcon />{cart.totalAmount.toFixed(2)}
-              </Button>
-            </div>
-
-            <div className="md:px-3 md:pb-2">
-              <Button variant="ghost" size="sm" className="w-full h-9 md:h-8 text-xs gap-1" onClick={cart.hold} disabled={cart.lines.length === 0}>
-                <Pause className="h-3 w-3" />Hold Order
               </Button>
             </div>
           </div>

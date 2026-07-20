@@ -19,20 +19,10 @@ export interface CartLine {
   quantity: number;
 }
 
-export interface HeldOrder {
-  id: string;
-  lines: CartLine[];
-  coupon: Coupon | null;
-  customer: Customer | null;
-  total: number;
-  at: string;
-}
-
 interface CartContextValue extends PricingResult {
   lines: CartLine[];
   coupon: Coupon | null;
   customer: Customer | null;
-  holds: HeldOrder[];
   products: Product[];
   taxLabel: string;
   addProduct: (product: Product) => void;
@@ -42,9 +32,6 @@ interface CartContextValue extends PricingResult {
   removeCoupon: () => void;
   setCustomer: (customer: Customer | null) => void;
   clear: () => void;
-  hold: () => void;
-  reopen: (id: string) => void;
-  discardHold: (id: string) => void;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -54,7 +41,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [lines, setLines] = useState<CartLine[]>([]);
   const [coupon, setCoupon] = useState<Coupon | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [holds, setHolds] = useState<HeldOrder[]>([]);
 
   // Reference data — pricing rules configured by staff elsewhere in the app. Preloaded once
   // per session rather than re-fetched per scan/keystroke (same reasoning as the product
@@ -125,43 +111,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
     [lines, coupon, products, activeDiscounts, activeOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled],
   );
 
-  function hold() {
-    if (lines.length === 0) return;
-    const holdId = `HOLD-${String(101 + holds.length).padStart(3, "0")}`;
-    setHolds((h) => [
-      {
-        id: holdId,
-        lines,
-        coupon,
-        customer,
-        total: pricing.totalAmount,
-        at: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
-      },
-      ...h,
-    ]);
-    clear();
-  }
-
-  function reopen(id: string) {
-    const h = holds.find((x) => x.id === id);
-    if (!h) return;
-    setLines(h.lines);
-    setCoupon(h.coupon);
-    setCustomer(h.customer);
-    setHolds((hs) => hs.filter((x) => x.id !== id));
-  }
-
-  function discardHold(id: string) {
-    setHolds((hs) => hs.filter((x) => x.id !== id));
-  }
-
   return (
     <CartContext.Provider
       value={{
         lines,
         coupon,
         customer,
-        holds,
         products,
         taxLabel,
         addProduct,
@@ -171,9 +126,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
         removeCoupon: () => setCoupon(null),
         setCustomer,
         clear,
-        hold,
-        reopen,
-        discardHold,
         ...pricing,
       }}
     >
