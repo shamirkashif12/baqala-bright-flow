@@ -297,6 +297,7 @@ app.UseExceptionHandler(handler =>
         {
             context.RequestServices.GetRequiredService<ILogger<Program>>()
                 .LogError(ex, "Unhandled exception [{ReferenceId}] on {Path}", referenceId, feature.Path);
+            BaqalaPOS.Api.Diagnostics.RecentErrors.Record(referenceId, feature.Path, ex);
         }
 
         // This branch is a separate mini-pipeline that does NOT include CorsMiddleware

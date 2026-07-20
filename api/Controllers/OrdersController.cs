@@ -516,14 +516,36 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
-            db.ZatcaInvoices.Add(zatcaInvoice);
-            await db.SaveChangesAsync();
+
+            // Creating the invoice row itself was the one step in this block NOT covered by the
+            // "a ZATCA failure must never fail the sale" guarantee below — a save failure here
+            // (e.g. a schema mismatch on the ZatcaInvoices table) previously threw all the way out
+            // to the global exception handler and 500'd an already-completed, already-paid sale.
+            bool invoiceSaved;
+            try
+            {
+                db.ZatcaInvoices.Add(zatcaInvoice);
+                await db.SaveChangesAsync();
+                invoiceSaved = true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to create ZATCA invoice row for order {OrderId}", order.Id);
+                db.Entry(zatcaInvoice).State = EntityState.Detached;
+                invoiceSaved = false;
+
+                await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                    "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
+                    $"ZATCA invoice creation failed for Invoice {order.OrderNumber}",
+                    severity: "error", entityType: "Order", entityId: order.Id);
+            }
 
             // Submitted synchronously (not fire-and-forget) so the checkout response — and thus
             // the printed receipt — carries the real ZATCA-signed QR code, not a client-side
             // approximation. A ZATCA failure must not fail the sale itself; the invoice is left
             // in whatever status SubmitInvoiceAsync set (e.g. "rejected") for later retry via
             // POST zatca/invoices/{id}/submit.
+            if (invoiceSaved)
             try
             {
                 var submitted = await zatcaService.SubmitInvoiceAsync(zatcaInvoice.Id);
