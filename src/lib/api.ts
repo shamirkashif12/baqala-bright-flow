@@ -837,6 +837,131 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ toSign }),
     }).then(r => r.text()),
+
+  // Employees (HRM)
+  getEmployees: (params?: { branchId?: string; departmentId?: string; designationId?: string; roleId?: string; status?: string; search?: string }) =>
+    request<Employee[]>(`/api/employees${toQuery(params)}`),
+  getEmployee: (id: string) => request<Employee>(`/api/employees/${id}`),
+  createEmployee: (data: Partial<Employee>) =>
+    request<Employee>("/api/employees", { method: "POST", body: JSON.stringify(data) }),
+  updateEmployee: (id: string, data: Partial<Employee>) =>
+    request<Employee>(`/api/employees/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteEmployee: (id: string) => request<void>(`/api/employees/${id}`, { method: "DELETE" }),
+
+  // Departments (HRM)
+  getDepartments: (params?: { branchId?: string; status?: string; search?: string }) =>
+    request<Department[]>(`/api/departments${toQuery(params)}`),
+  createDepartment: (data: Partial<Department>) =>
+    request<Department>("/api/departments", { method: "POST", body: JSON.stringify(data) }),
+  updateDepartment: (id: string, data: Partial<Department>) =>
+    request<Department>(`/api/departments/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteDepartment: (id: string) => request<void>(`/api/departments/${id}`, { method: "DELETE" }),
+
+  // Designations (HRM)
+  getDesignations: (params?: { departmentId?: string; status?: string; search?: string }) =>
+    request<Designation[]>(`/api/designations${toQuery(params)}`),
+  createDesignation: (data: Partial<Designation>) =>
+    request<Designation>("/api/designations", { method: "POST", body: JSON.stringify(data) }),
+  updateDesignation: (id: string, data: Partial<Designation>) =>
+    request<Designation>(`/api/designations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteDesignation: (id: string) => request<void>(`/api/designations/${id}`, { method: "DELETE" }),
+
+  // Holidays (HRM)
+  getHolidays: (params?: { branchId?: string; year?: number; holidayType?: string; status?: string; search?: string }) =>
+    request<Holiday[]>(`/api/holidays${toQuery(params)}`),
+  createHoliday: (data: Partial<Holiday>) =>
+    request<Holiday>("/api/holidays", { method: "POST", body: JSON.stringify(data) }),
+  updateHoliday: (id: string, data: Partial<Holiday>) =>
+    request<Holiday>(`/api/holidays/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteHoliday: (id: string) => request<void>(`/api/holidays/${id}`, { method: "DELETE" }),
+
+  // Work Shifts (HRM)
+  getWorkShifts: (params?: { branchId?: string; departmentId?: string; status?: string }) =>
+    request<WorkShift[]>(`/api/work-shifts${toQuery(params)}`),
+  getWorkShift: (id: string) => request<WorkShift>(`/api/work-shifts/${id}`),
+  createWorkShift: (data: Partial<WorkShift>) =>
+    request<WorkShift>("/api/work-shifts", { method: "POST", body: JSON.stringify(data) }),
+  updateWorkShift: (id: string, data: Partial<WorkShift>) =>
+    request<WorkShift>(`/api/work-shifts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteWorkShift: (id: string) => request<void>(`/api/work-shifts/${id}`, { method: "DELETE" }),
+  assignWorkShift: (id: string, data: { employeeIds: string[]; effectiveFrom: string; effectiveTo?: string }) =>
+    request<{ assigned: number }>(`/api/work-shifts/${id}/assign`, { method: "POST", body: JSON.stringify(data) }),
+  getEmployeeShiftHistory: (employeeId: string) =>
+    request<EmployeeShiftAssignment[]>(`/api/employees/${employeeId}/shifts`),
+
+  // HRM Attendance
+  getHrAttendance: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; dateFrom?: string; dateTo?: string }) =>
+    request<StaffAttendance[]>(`/api/hrm/attendance${toQuery(params)}`),
+  markAttendance: (data: { employeeId: string; date: string; shiftId?: string; checkInTime?: string; checkOutTime?: string; status: string; remarks?: string }) =>
+    request<StaffAttendance>("/api/hrm/attendance", { method: "POST", body: JSON.stringify(data) }),
+  correctAttendance: (id: string, data: { checkInTime?: string; checkOutTime?: string; status: string; correctionReason: string; correctionNote?: string }) =>
+    request<StaffAttendance>(`/api/hrm/attendance/${id}/correction`, { method: "POST", body: JSON.stringify(data) }),
+
+  // Leave (HRM)
+  getLeaveTypes: (params?: { status?: string }) => request<LeaveType[]>(`/api/leave-types${toQuery(params)}`),
+  createLeaveType: (data: Partial<LeaveType>) => request<LeaveType>("/api/leave-types", { method: "POST", body: JSON.stringify(data) }),
+  updateLeaveType: (id: string, data: Partial<LeaveType>) => request<LeaveType>(`/api/leave-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteLeaveType: (id: string) => request<void>(`/api/leave-types/${id}`, { method: "DELETE" }),
+
+  getLeavePolicies: (params?: { status?: string }) => request<LeavePolicy[]>(`/api/leave-policies${toQuery(params)}`),
+  createLeavePolicy: (data: Partial<LeavePolicy>) => request<LeavePolicy>("/api/leave-policies", { method: "POST", body: JSON.stringify(data) }),
+  updateLeavePolicy: (id: string, data: Partial<LeavePolicy>) => request<LeavePolicy>(`/api/leave-policies/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteLeavePolicy: (id: string) => request<void>(`/api/leave-policies/${id}`, { method: "DELETE" }),
+
+  getLeaves: (params?: { branchId?: string; departmentId?: string; employeeId?: string; leaveTypeId?: string; status?: string; dateFrom?: string; dateTo?: string }) =>
+    request<LeaveRequest[]>(`/api/leaves${toQuery(params)}`),
+  applyLeave: (data: { employeeId: string; leaveTypeId: string; fromDate: string; toDate: string; reason: string; attachmentUrl?: string }) =>
+    request<LeaveRequest>("/api/leaves", { method: "POST", body: JSON.stringify(data) }),
+  approveLeave: (id: string) => request<LeaveRequest>(`/api/leaves/${id}/approve`, { method: "POST" }),
+  rejectLeave: (id: string, rejectionReason: string) =>
+    request<LeaveRequest>(`/api/leaves/${id}/reject`, { method: "POST", body: JSON.stringify({ rejectionReason }) }),
+  cancelLeave: (id: string) => request<LeaveRequest>(`/api/leaves/${id}/cancel`, { method: "POST" }),
+  getEmployeeLeaves: (employeeId: string) => request<LeaveRequest[]>(`/api/employees/${employeeId}/leaves`),
+
+  // Documents & Contracts (HRM)
+  getEmployeeDocuments: (employeeId: string) => request<EmployeeDocument[]>(`/api/employees/${employeeId}/documents`),
+  uploadEmployeeDocument: (employeeId: string, data: Partial<EmployeeDocument>) =>
+    request<EmployeeDocument>(`/api/employees/${employeeId}/documents`, { method: "POST", body: JSON.stringify(data) }),
+  deleteEmployeeDocument: (employeeId: string, documentId: string) =>
+    request<void>(`/api/employees/${employeeId}/documents/${documentId}`, { method: "DELETE" }),
+
+  getEmployeeContracts: (employeeId: string) => request<EmployeeContract[]>(`/api/employees/${employeeId}/contracts`),
+  uploadEmployeeContract: (employeeId: string, data: Partial<EmployeeContract>) =>
+    request<EmployeeContract>(`/api/employees/${employeeId}/contracts`, { method: "POST", body: JSON.stringify(data) }),
+  terminateEmployeeContract: (employeeId: string, contractId: string) =>
+    request<EmployeeContract>(`/api/employees/${employeeId}/contracts/${contractId}/terminate`, { method: "POST" }),
+
+  // Payroll (HRM)
+  getPayrollRuns: (params?: { branchId?: string; year?: number; month?: number; status?: string }) =>
+    request<PayrollRun[]>(`/api/payroll-runs${toQuery(params)}`),
+  getPayrollRun: (id: string) => request<PayrollRunDetail>(`/api/payroll-runs/${id}`),
+  createPayrollRun: (data: { branchId: string; year: number; month: number; payDate: string }) =>
+    request<PayrollRun>("/api/payroll-runs", { method: "POST", body: JSON.stringify(data) }),
+  processPayrollRun: (id: string) => request<PayrollRun>(`/api/payroll-runs/${id}/process`, { method: "POST" }),
+
+  getEmployeeSalaryComponents: (employeeId: string) => request<SalaryComponent[]>(`/api/employees/${employeeId}/salary-components`),
+  addSalaryComponent: (employeeId: string, data: Partial<SalaryComponent>) =>
+    request<SalaryComponent>(`/api/employees/${employeeId}/salary-components`, { method: "POST", body: JSON.stringify(data) }),
+  updateSalaryComponent: (employeeId: string, componentId: string, data: Partial<SalaryComponent>) =>
+    request<SalaryComponent>(`/api/employees/${employeeId}/salary-components/${componentId}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteSalaryComponent: (employeeId: string, componentId: string) =>
+    request<void>(`/api/employees/${employeeId}/salary-components/${componentId}`, { method: "DELETE" }),
+
+  // HRM Reports
+  getHrAttendanceReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; dateFrom?: string; dateTo?: string }) =>
+    request<StaffAttendance[]>(`/api/hrm/reports/attendance${toQuery(params)}`),
+  exportHrAttendanceReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; dateFrom?: string; dateTo?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/hrm/reports/attendance/export${toQuery(params)}`),
+
+  getShiftClosingReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; closingStatus?: string; dateFrom?: string; dateTo?: string }) =>
+    request<ShiftClosingRow[]>(`/api/hrm/reports/shift-closing${toQuery(params)}`),
+  exportShiftClosingReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; closingStatus?: string; dateFrom?: string; dateTo?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/hrm/reports/shift-closing/export${toQuery(params)}`),
+
+  getEmployeeActivityReport: (params?: { branchId?: string; employeeId?: string; module?: string; activityType?: string; performedBy?: string; referenceId?: string; dateFrom?: string; dateTo?: string }) =>
+    request<EmployeeActivityRow[]>(`/api/hrm/reports/employee-activity${toQuery(params)}`),
+  exportEmployeeActivityReport: (params?: { branchId?: string; employeeId?: string; module?: string; activityType?: string; performedBy?: string; referenceId?: string; dateFrom?: string; dateTo?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/hrm/reports/employee-activity/export${toQuery(params)}`),
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -853,6 +978,93 @@ export interface Role {
   isSystem: boolean; createdAt: string;
   userCount?: number;
   permissions?: RolePermission[];
+}
+
+// HRM — Employee Management
+export interface Employee {
+  id: string; employeeCode: string; fullName: string; email?: string; phone: string;
+  emergencyContact?: string; nationalId: string; iqamaExpiry?: string; dateOfBirth?: string;
+  gender?: string; nationality?: string; maritalStatus?: string; profileImageUrl?: string;
+  branchId: string; departmentId?: string; designationId?: string; roleId?: string; userId?: string;
+  hireDate: string; employmentStatus: string;
+  currentAddress?: string; permanentAddress?: string;
+  contractType?: string; contractStartDate?: string; contractEndDate?: string; contractOpenEnded: boolean;
+  createdAt: string; updatedAt: string;
+  branch?: Branch; department?: Department; designation?: Designation; role?: Role;
+  leavePolicyId?: string; leavePolicy?: LeavePolicy;
+  currentShift?: { shiftId: string; shiftName: string; startTime: string; endTime: string; effectiveFrom: string };
+  hasDocuments: boolean; onLeaveToday: boolean;
+}
+
+// HRM — Leave
+export interface LeaveType { id: string; name: string; status: string; createdAt: string; updatedAt: string }
+export interface LeavePolicy { id: string; name: string; annualDays: number; sickDays: number; casualDays: number; status: string; createdAt: string; updatedAt: string }
+export interface LeaveRequest {
+  id: string; employeeId: string; leaveTypeId: string; fromDate: string; toDate: string; totalDays: number;
+  reason: string; attachmentUrl?: string; status: string; approverId?: string; approvedAt?: string; rejectionReason?: string;
+  createdAt: string; updatedAt: string;
+  employee?: Employee; leaveType?: LeaveType; approver?: { id: string; fullName: string };
+}
+
+// HRM — Payroll
+export interface SalaryComponent {
+  id: string; employeeId: string; componentName: string; componentType: string; amount: number;
+  frequency: string; effectiveFrom: string; effectiveTo?: string; status: string; createdAt: string; updatedAt: string;
+}
+export interface PayrollRun {
+  id: string; branchId: string; year: number; month: number; payDate: string; status: string;
+  employeeCount: number; totalAmount?: number; processedBy?: string; processedAt?: string;
+  branch?: Branch;
+}
+export interface PayrollRunEmployeeRow {
+  id: string; employeeId: string; employee?: { id: string; fullName: string; employeeCode: string };
+  basicSalary?: number; grossEarnings?: number; totalDeductions?: number; netPayable?: number;
+}
+export interface PayrollRunDetail extends PayrollRun { employees: PayrollRunEmployeeRow[] }
+
+// HRM — Reports
+export interface ShiftClosingRow {
+  id: string; date?: string; employeeId?: string;
+  employee?: { id: string; fullName: string; employeeCode: string };
+  department?: string; branchId?: string;
+  shift?: { id: string; name: string; startTime: string; endTime: string };
+  scheduledStart?: string; scheduledEnd?: string;
+  actualCheckIn?: string; actualCheckOut?: string;
+  closingStatus: string; closedBy?: string; closingTime?: string; remarks?: string;
+}
+export interface EmployeeActivityRow {
+  id: string; createdAt: string; action: string; entityType?: string; entityId?: string; module?: string;
+  employee?: { id: string; fullName: string; employeeCode: string };
+  performedBy?: { id: string; fullName: string };
+  oldValues?: string; newValues?: string; notes?: string; ipAddress?: string; severity: string;
+}
+
+// HRM — Documents & Contracts
+export interface EmployeeDocument {
+  id: string; employeeId: string; documentType: string; fileName: string; fileUrl: string;
+  issueDate?: string; expiryDate?: string; uploadedBy?: string; uploadedAt: string;
+}
+export interface EmployeeContract {
+  id: string; employeeId: string; contractType: string; startDate: string; endDate?: string;
+  openEnded: boolean; status: string; fileName?: string; fileUrl?: string; uploadedBy?: string; uploadedAt: string;
+}
+
+export interface Department {
+  id: string; name: string; branchId?: string; managerEmployeeId?: string; status: string;
+  createdAt: string; updatedAt: string;
+  branch?: Branch; managerEmployee?: Employee;
+}
+
+export interface Designation {
+  id: string; name: string; departmentId: string; grade?: string; status: string;
+  createdAt: string; updatedAt: string;
+  department?: Department;
+}
+
+export interface Holiday {
+  id: string; name: string; holidayType: string; date: string; branchId?: string;
+  description?: string; status: string; createdAt: string; updatedAt: string;
+  branch?: Branch;
 }
 
 export interface RolePermission {
@@ -1214,9 +1426,29 @@ export interface ZatcaInvoice {
 }
 
 export interface StaffAttendance {
-  id: string; userId: string; branchId: string;
+  id: string; userId?: string; branchId: string;
   checkIn?: string; checkOut?: string; status: string; createdAt: string;
   user?: { id: string; fullName: string; roleName?: string };
+  // HRM Attendance module fields
+  employeeId?: string; date?: string; shiftId?: string;
+  lateMinutes: number; earlyLeaveMinutes: number; remarks?: string;
+  employee?: Employee; shift?: WorkShift;
+}
+
+// HRM — Shifts
+export interface WorkShift {
+  id: string; name: string; branchId?: string; departmentId?: string;
+  workingDays: string; startTime: string; endTime: string;
+  breakStart?: string; breakEnd?: string; graceInMinutes: number; graceOutMinutes: number;
+  status: string; createdAt: string; updatedAt: string;
+  branch?: Branch; department?: Department; assignedEmployees?: number;
+}
+
+export interface EmployeeShiftAssignment {
+  id: string; employeeId: string; shiftId: string;
+  effectiveFrom: string; effectiveTo?: string; status: string;
+  assignedBy?: string; assignedAt: string;
+  employee?: Employee; shift?: WorkShift;
 }
 
 export interface AuditLog {

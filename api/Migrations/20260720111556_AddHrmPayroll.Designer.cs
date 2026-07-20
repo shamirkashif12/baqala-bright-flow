@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720111556_AddHrmPayroll")]
+    partial class AddHrmPayroll
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -40,10 +43,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid?>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
                     b.Property<Guid?>("EntityId")
                         .HasColumnType("char(36)")
                         .HasColumnName("entity_id");
@@ -57,11 +56,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)")
                         .HasColumnName("ip_address");
-
-                    b.Property<string>("Module")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("module");
 
                     b.Property<string>("NewValues")
                         .HasColumnType("longtext")
@@ -88,8 +82,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BranchId");
-
-                    b.HasIndex("EmployeeId");
 
                     b.HasIndex("UserId");
 
@@ -5219,18 +5211,11 @@ namespace BaqalaPOS.Api.Migrations
                         .WithMany()
                         .HasForeignKey("BranchId");
 
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BaqalaPOS.Api.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId");
 
                     b.Navigation("Branch");
-
-                    b.Navigation("Employee");
 
                     b.Navigation("User");
                 });

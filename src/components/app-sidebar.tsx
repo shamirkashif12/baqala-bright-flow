@@ -42,6 +42,11 @@ import {
   ClipboardList,
   ArrowLeftRight,
   PackageSearch,
+  Building,
+  IdCard,
+  CalendarDays,
+  Clock,
+  Plane,
 } from "lucide-react";
 import {
   Sidebar,
@@ -143,6 +148,19 @@ const navGroups: NavGroup[] = [
       { title: "Reports",               url: "/reports",  icon: FileBarChart, module: "Reports" },
       { title: "KPI Evaluation",        url: "/kpi",      icon: Gauge,        module: "Reports" },
       { title: "Business Intelligence", url: "/bi",       icon: BarChart3,    module: "Reports" },
+    ],
+  },
+  {
+    label: "Human Resources",
+    items: [
+      { title: "Employees",    url: "/employees",    icon: Users,        module: "Employees" },
+      { title: "Attendance",   url: "/hrm-attendance", icon: ClipboardCheck, module: "HR Attendance" },
+      { title: "Shifts",       url: "/work-shifts",  icon: Clock,        module: "HR Shifts" },
+      { title: "Leave Requests", url: "/leaves",     icon: Plane,        module: "Leave Management" },
+      { title: "Payroll",      url: "/payroll",      icon: Wallet,       module: "Payroll" },
+      { title: "Departments",  url: "/departments",  icon: Building,     module: "HR Master Data" },
+      { title: "Designations", url: "/designations", icon: IdCard,       module: "HR Master Data" },
+      { title: "Holidays",     url: "/holidays",      icon: CalendarDays,module: "HR Master Data" },
     ],
   },
   {

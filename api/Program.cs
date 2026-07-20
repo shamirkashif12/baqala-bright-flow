@@ -223,6 +223,14 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchTrimExportAuditNoiseAsync(db);
     await DataSeeder.PatchBackfillMissingOrderTaxAsync(db);
     await DataSeeder.PatchBackfillShiftRollupsAsync(db);
+    await DataSeeder.PatchBackfillEmployeesFromUsersAsync(db);
+    await DataSeeder.PatchSeedHrmOrgDataAsync(db);
+    await DataSeeder.PatchSeedHrmEmployeeContractDefaultsAsync(db);
+    await DataSeeder.PatchSeedHrmHolidaysAsync(db);
+    await DataSeeder.PatchSeedHrmShiftsAsync(db);
+    await DataSeeder.PatchSeedHrmAttendanceAsync(db);
+    await DataSeeder.PatchSeedHrmLeaveDataAsync(db);
+    await DataSeeder.PatchSeedHrmPayrollDataAsync(db);
     await DataSeeder.PatchEnsureFreshDemoDataAsync(db);
     app.MapOpenApi();
 }

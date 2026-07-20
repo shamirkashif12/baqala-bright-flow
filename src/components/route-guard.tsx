@@ -70,6 +70,15 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/supplier-returns",    module: "Supplier Returns" },
   { url: "/mart-suppliers",      module: "Suppliers" },
   { url: "/warehouse-suppliers", module: "Suppliers" },
+  // Human Resources
+  { url: "/employees",           module: "Employees" },
+  { url: "/hrm-attendance",      module: "HR Attendance" },
+  { url: "/work-shifts",         module: "HR Shifts" },
+  { url: "/leaves",              module: "Leave Management" },
+  { url: "/payroll",              module: "Payroll" },
+  { url: "/departments",         module: "HR Master Data" },
+  { url: "/designations",        module: "HR Master Data" },
+  { url: "/holidays",            module: "HR Master Data" },
   // Network
   { url: "/branches",            module: "Branches" },
   { url: "/terminals",           module: "Terminals" },

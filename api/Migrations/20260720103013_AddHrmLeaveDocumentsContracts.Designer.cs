@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720103013_AddHrmLeaveDocumentsContracts")]
+    partial class AddHrmLeaveDocumentsContracts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -40,10 +43,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid?>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
                     b.Property<Guid?>("EntityId")
                         .HasColumnType("char(36)")
                         .HasColumnName("entity_id");
@@ -57,11 +56,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)")
                         .HasColumnName("ip_address");
-
-                    b.Property<string>("Module")
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
-                        .HasColumnName("module");
 
                     b.Property<string>("NewValues")
                         .HasColumnType("longtext")
@@ -88,8 +82,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BranchId");
-
-                    b.HasIndex("EmployeeId");
 
                     b.HasIndex("UserId");
 
@@ -2232,108 +2224,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("order_payments");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRun", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("EmployeeCount")
-                        .HasColumnType("int")
-                        .HasColumnName("employee_count");
-
-                    b.Property<int>("Month")
-                        .HasColumnType("int")
-                        .HasColumnName("month");
-
-                    b.Property<DateTime>("PayDate")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("pay_date");
-
-                    b.Property<DateTime?>("ProcessedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("processed_at");
-
-                    b.Property<Guid?>("ProcessedBy")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("processed_by");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<decimal>("TotalAmount")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("total_amount");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("Year")
-                        .HasColumnType("int")
-                        .HasColumnName("year");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("ProcessedBy");
-
-                    b.ToTable("payroll_runs");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRunEmployee", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("BasicSalary")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("basic_salary");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<decimal>("GrossEarnings")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("gross_earnings");
-
-                    b.Property<decimal>("NetPayable")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("net_payable");
-
-                    b.Property<Guid>("PayrollRunId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("payroll_run_id");
-
-                    b.Property<decimal>("TotalDeductions")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("total_deductions");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.HasIndex("PayrollRunId");
-
-                    b.ToTable("payroll_run_employees");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.PosSettings", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3391,68 +3281,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("CreatedBy");
 
                     b.ToTable("rules_engine");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.SalaryComponent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("amount");
-
-                    b.Property<string>("ComponentName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("component_name");
-
-                    b.Property<string>("ComponentType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("component_type");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateTime>("EffectiveFrom")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("effective_from");
-
-                    b.Property<DateTime?>("EffectiveTo")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("effective_to");
-
-                    b.Property<Guid>("EmployeeId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("employee_id");
-
-                    b.Property<string>("Frequency")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("frequency");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeId");
-
-                    b.ToTable("salary_components");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ShiftCashMovement", b =>
@@ -5219,18 +5047,11 @@ namespace BaqalaPOS.Api.Migrations
                         .WithMany()
                         .HasForeignKey("BranchId");
 
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("BaqalaPOS.Api.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId");
 
                     b.Navigation("Branch");
-
-                    b.Navigation("Employee");
 
                     b.Navigation("User");
                 });
@@ -5840,43 +5661,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Order");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRun", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.User", "ProcessedByUser")
-                        .WithMany()
-                        .HasForeignKey("ProcessedBy")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("ProcessedByUser");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRunEmployee", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.PayrollRun", "PayrollRun")
-                        .WithMany()
-                        .HasForeignKey("PayrollRunId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-
-                    b.Navigation("PayrollRun");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.PosSettings", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
@@ -6059,17 +5843,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("CreatedByUser");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.SalaryComponent", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ShiftCashMovement", b =>

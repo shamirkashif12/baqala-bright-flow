@@ -15,7 +15,14 @@ public interface IAuditService
         string? details = null,
         string severity = "info",
         string? beforeValue = null,
-        string? notes = null);
+        string? notes = null,
+        // HRM Employee Activity Report additions — the HR-facing "module" label (e.g.
+        // "Employees", "HR Attendance") and the employee the activity concerns, which is often
+        // NOT the same as userId (e.g. an admin editing employee X's record: userId = admin,
+        // employeeId = X). Both optional/nullable so every existing POS call site (which predates
+        // these) keeps compiling unchanged.
+        string? module = null,
+        Guid? employeeId = null);
 }
 
 public class AuditService(BaqalaDbContext db, IHttpContextAccessor httpContextAccessor) : IAuditService
@@ -29,7 +36,9 @@ public class AuditService(BaqalaDbContext db, IHttpContextAccessor httpContextAc
         string? details = null,
         string severity = "info",
         string? beforeValue = null,
-        string? notes = null)
+        string? notes = null,
+        string? module = null,
+        Guid? employeeId = null)
     {
         // The FRD's Audit Trail "IP Address" column was always blank — nothing ever captured
         // it. The caller's HttpContext is available here (this runs inside a request), so read
@@ -57,6 +66,8 @@ public class AuditService(BaqalaDbContext db, IHttpContextAccessor httpContextAc
             Severity = severity,
             IpAddress = ipAddress,
             CreatedAt = DateTime.UtcNow,
+            Module = module,
+            EmployeeId = employeeId,
         });
         await db.SaveChangesAsync();
     }

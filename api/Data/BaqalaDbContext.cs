@@ -88,6 +88,22 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<RulesEngine> RulesEngine { get; set; }
     public DbSet<StaffAttendance> StaffAttendances { get; set; }
 
+    // HRM / Employee Management
+    public DbSet<Employee> Employees { get; set; }
+    public DbSet<Department> Departments { get; set; }
+    public DbSet<Designation> Designations { get; set; }
+    public DbSet<Holiday> Holidays { get; set; }
+    public DbSet<WorkShift> WorkShifts { get; set; }
+    public DbSet<EmployeeShiftAssignment> EmployeeShiftAssignments { get; set; }
+    public DbSet<LeaveType> LeaveTypes { get; set; }
+    public DbSet<LeavePolicy> LeavePolicies { get; set; }
+    public DbSet<LeaveRequest> LeaveRequests { get; set; }
+    public DbSet<EmployeeDocument> EmployeeDocuments { get; set; }
+    public DbSet<EmployeeContract> EmployeeContracts { get; set; }
+    public DbSet<SalaryComponent> SalaryComponents { get; set; }
+    public DbSet<PayrollRun> PayrollRuns { get; set; }
+    public DbSet<PayrollRunEmployee> PayrollRunEmployees { get; set; }
+
     // Audit
     public DbSet<AuditLog> AuditLogs { get; set; }
 
@@ -149,6 +165,10 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
         modelBuilder.Entity<TenantSetting>()
             .HasIndex(t => new { t.BranchId, t.SettingKey }).IsUnique();
+
+        modelBuilder.Entity<Employee>().HasIndex(e => e.EmployeeCode).IsUnique();
+        modelBuilder.Entity<Employee>().HasIndex(e => e.NationalId).IsUnique();
+        modelBuilder.Entity<Department>().HasIndex(d => new { d.Name, d.BranchId }).IsUnique();
 
         // ─── Self-referential: Category ───────────────────────────────────────
         modelBuilder.Entity<Category>()
@@ -417,6 +437,204 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasOne(st => st.DestWarehouse)
             .WithMany()
             .HasForeignKey(st => st.DestWarehouseId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── Employee: Branch/Department/Designation/Role/User FKs ──────────
+        modelBuilder.Entity<Employee>()
+            .HasOne(e => e.Branch)
+            .WithMany()
+            .HasForeignKey(e => e.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Employee>()
+            .HasOne(e => e.Department)
+            .WithMany()
+            .HasForeignKey(e => e.DepartmentId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Employee>()
+            .HasOne(e => e.Designation)
+            .WithMany()
+            .HasForeignKey(e => e.DesignationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Employee>()
+            .HasOne(e => e.Role)
+            .WithMany()
+            .HasForeignKey(e => e.RoleId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Employee>()
+            .HasOne(e => e.User)
+            .WithMany()
+            .HasForeignKey(e => e.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── Department: optional Branch + manager Employee FKs ─────────────
+        modelBuilder.Entity<Department>()
+            .HasOne(d => d.Branch)
+            .WithMany()
+            .HasForeignKey(d => d.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Department>()
+            .HasOne(d => d.ManagerEmployee)
+            .WithMany()
+            .HasForeignKey(d => d.ManagerEmployeeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── Designation: required Department FK ─────────────────────────────
+        modelBuilder.Entity<Designation>()
+            .HasOne(d => d.Department)
+            .WithMany()
+            .HasForeignKey(d => d.DepartmentId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── Holiday: optional Branch FK ──────────────────────────────────────
+        modelBuilder.Entity<Holiday>()
+            .HasOne(h => h.Branch)
+            .WithMany()
+            .HasForeignKey(h => h.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── WorkShift: optional Branch/Department FKs ───────────────────────
+        modelBuilder.Entity<WorkShift>()
+            .HasOne(s => s.Branch)
+            .WithMany()
+            .HasForeignKey(s => s.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<WorkShift>()
+            .HasOne(s => s.Department)
+            .WithMany()
+            .HasForeignKey(s => s.DepartmentId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── EmployeeShiftAssignment: Employee/WorkShift/AssignedBy FKs ──────
+        modelBuilder.Entity<EmployeeShiftAssignment>()
+            .HasOne(a => a.Employee)
+            .WithMany()
+            .HasForeignKey(a => a.EmployeeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<EmployeeShiftAssignment>()
+            .HasOne(a => a.Shift)
+            .WithMany(s => s.Assignments)
+            .HasForeignKey(a => a.ShiftId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<EmployeeShiftAssignment>()
+            .HasOne(a => a.AssignedByUser)
+            .WithMany()
+            .HasForeignKey(a => a.AssignedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── StaffAttendance: optional Employee/WorkShift FKs (HRM additions) ─
+        modelBuilder.Entity<StaffAttendance>()
+            .HasOne(a => a.Employee)
+            .WithMany()
+            .HasForeignKey(a => a.EmployeeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StaffAttendance>()
+            .HasOne(a => a.Shift)
+            .WithMany()
+            .HasForeignKey(a => a.ShiftId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StaffAttendance>()
+            .HasIndex(a => new { a.EmployeeId, a.Date }).IsUnique();
+
+        // ─── Employee: optional LeavePolicy FK ────────────────────────────────
+        modelBuilder.Entity<Employee>()
+            .HasOne(e => e.LeavePolicy)
+            .WithMany()
+            .HasForeignKey(e => e.LeavePolicyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── LeaveRequest: Employee/LeaveType/Approver FKs ───────────────────
+        modelBuilder.Entity<LeaveRequest>()
+            .HasOne(l => l.Employee)
+            .WithMany()
+            .HasForeignKey(l => l.EmployeeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<LeaveRequest>()
+            .HasOne(l => l.LeaveType)
+            .WithMany()
+            .HasForeignKey(l => l.LeaveTypeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<LeaveRequest>()
+            .HasOne(l => l.Approver)
+            .WithMany()
+            .HasForeignKey(l => l.ApproverId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── EmployeeDocument: Employee/UploadedBy FKs ───────────────────────
+        modelBuilder.Entity<EmployeeDocument>()
+            .HasOne(d => d.Employee)
+            .WithMany()
+            .HasForeignKey(d => d.EmployeeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<EmployeeDocument>()
+            .HasOne(d => d.UploadedByUser)
+            .WithMany()
+            .HasForeignKey(d => d.UploadedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── EmployeeContract: Employee/UploadedBy FKs ───────────────────────
+        modelBuilder.Entity<EmployeeContract>()
+            .HasOne(c => c.Employee)
+            .WithMany()
+            .HasForeignKey(c => c.EmployeeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<EmployeeContract>()
+            .HasOne(c => c.UploadedByUser)
+            .WithMany()
+            .HasForeignKey(c => c.UploadedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── AuditLog: optional Employee FK (HRM Employee Activity Report) ──
+        modelBuilder.Entity<AuditLog>()
+            .HasOne(a => a.Employee)
+            .WithMany()
+            .HasForeignKey(a => a.EmployeeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── SalaryComponent: Employee FK ─────────────────────────────────────
+        modelBuilder.Entity<SalaryComponent>()
+            .HasOne(s => s.Employee)
+            .WithMany()
+            .HasForeignKey(s => s.EmployeeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── PayrollRun: Branch/ProcessedBy FKs ───────────────────────────────
+        modelBuilder.Entity<PayrollRun>()
+            .HasOne(p => p.Branch)
+            .WithMany()
+            .HasForeignKey(p => p.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PayrollRun>()
+            .HasOne(p => p.ProcessedByUser)
+            .WithMany()
+            .HasForeignKey(p => p.ProcessedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── PayrollRunEmployee: PayrollRun/Employee FKs ─────────────────────
+        modelBuilder.Entity<PayrollRunEmployee>()
+            .HasOne(p => p.PayrollRun)
+            .WithMany()
+            .HasForeignKey(p => p.PayrollRunId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PayrollRunEmployee>()
+            .HasOne(p => p.Employee)
+            .WithMany()
+            .HasForeignKey(p => p.EmployeeId)
             .OnDelete(DeleteBehavior.Restrict);
 
         // ─── DateOnly → DateTime converters (MySql.Data doesn't support DateOnly) ─

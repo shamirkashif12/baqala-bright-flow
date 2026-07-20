@@ -48,7 +48,15 @@ public class AuditLog
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    // HRM Employee Activity Report additions — see IAuditService.LogAsync's doc comment.
+    [MaxLength(50), Column("module")]
+    public string? Module { get; set; }
+
+    [Column("employee_id")]
+    public Guid? EmployeeId { get; set; }
+
     // Navigation
     public User? User { get; set; }
     public Branch? Branch { get; set; }
+    public Employee? Employee { get; set; }
 }

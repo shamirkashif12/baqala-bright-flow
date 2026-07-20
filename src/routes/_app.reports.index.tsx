@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
   FileBarChart, Download, TrendingUp, Calendar, Building2, ShoppingCart, Tag, Truck, Boxes,
   Ban, RotateCcw, Percent, CreditCard, ShieldCheck, DollarSign, AlertTriangle, Cigarette, Coins,
-  ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass,
+  ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, UserCheck, CalendarCheck, History,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/")({ component: Reports });
@@ -84,6 +84,12 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/tobacco-excise", exportFile: () => api.exportTobaccoExciseReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "profit-margin", name: "Profit Margin", desc: "Gross & net margin by product", icon: DollarSign, color: "success",
       href: "/reports/profit-margin", exportFile: () => api.exportProfitMarginReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "hrm-attendance", name: "Attendance Report", desc: "Employee attendance across dates and branches", icon: UserCheck, color: "primary",
+      href: "/reports/hrm-attendance", exportFile: () => api.exportHrAttendanceReport({ dateFrom: todayStr(), dateTo: todayStr(), exportedBy }) },
+    { code: "shift-closing", name: "Shift Closing Report", desc: "Shift closing completion and exceptions", icon: CalendarCheck, color: "primary",
+      href: "/reports/shift-closing", exportFile: () => api.exportShiftClosingReport({ dateFrom: todayStr(), dateTo: todayStr(), exportedBy }) },
+    { code: "employee-activity", name: "Employee Activity Report", desc: "Audit trail of employee actions across HRM and POS", icon: History, color: "primary",
+      href: "/reports/employee-activity", exportFile: () => api.exportEmployeeActivityReport({ dateFrom: `${firstOfMonthStr()}T00:00:00`, dateTo: `${todayStr()}T23:59:59`, exportedBy }) },
   ];
 }
 
@@ -158,7 +164,7 @@ function Reports() {
       </div>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <FileBarChart className="h-3.5 w-3.5" />
-        All 21 reports are live.
+        All {reports.length} reports are live.
       </div>
     </PageShell>
   );
