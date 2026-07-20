@@ -242,8 +242,10 @@ export default function ScanScreen() {
   }
 
   // Manual reset for a customer who scanned items and walked away without paying — clears
-  // the cart plus every bit of local UI state (coupon input, phone lookup, banner) so the
-  // next shopper starts from a truly blank screen instead of inheriting leftovers.
+  // the cart plus every bit of local UI state (coupon input, phone lookup, banner) and puts
+  // the scanner focus back so the next shopper can start scanning immediately. Stays on this
+  // screen rather than bouncing to Welcome — that's an extra tap this lane doesn't need
+  // between customers, unlike the idle-timeout reset which is meant to send it there.
   function abandonOrder() {
     cart.clear();
     removeCustomer();
@@ -251,7 +253,7 @@ export default function ScanScreen() {
     setQuery("");
     setMessage(null);
     setNewOrderConfirmOpen(false);
-    navigate("/", { replace: true });
+    scanInputRef.current?.focus();
   }
 
   return (
@@ -261,7 +263,18 @@ export default function ScanScreen() {
           <h1 className="font-display text-lg sm:text-xl font-bold truncate">Self-Checkout</h1>
           <p className="text-xs text-muted-foreground truncate">{branchName ?? "—"}</p>
         </div>
-        <PrinterSetupDialog />
+        <div className="flex items-center gap-2 shrink-0">
+          {cart.lines.length > 0 && (
+            <Button
+              variant="outline"
+              className="h-10 gap-2 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setNewOrderConfirmOpen(true)}
+            >
+              <RotateCcw className="h-4 w-4" /> New Order
+            </Button>
+          )}
+          <PrinterSetupDialog />
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-[1fr_320px] lg:grid-cols-[1fr_420px] gap-4">
         {/* ─── Left: scanner + cart ─────────────────────────────────────── */}
@@ -307,11 +320,6 @@ export default function ScanScreen() {
                   {cart.displayLines.reduce((s, l) => s + l.quantity, 0)} units
                 </Badge>
               </div>
-              {cart.lines.length > 0 && (
-                <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-destructive" onClick={() => setNewOrderConfirmOpen(true)}>
-                  <RotateCcw className="h-3.5 w-3.5" /> New Order
-                </Button>
-              )}
             </div>
 
             {cart.displayLines.length === 0 ? (
