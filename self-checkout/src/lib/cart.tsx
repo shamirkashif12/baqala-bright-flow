@@ -4,6 +4,7 @@ import {
   getActiveOffers,
   getTaxRules,
   listActiveProducts,
+  resolvePrices,
   type Coupon,
   type Customer,
   type Discount,
@@ -64,6 +65,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [activeOffers, setActiveOffers] = useState<Offer[]>([]);
   const [taxRules, setTaxRules] = useState<TaxFeeRule[]>([]);
 
+  // productId → resolved unit price (FRD §12). Kept in the same shape the staff POS uses so the
+  // kiosk charges what the till charges: branch, customer-tier and scheduled price rules, falling
+  // back to Product.BasePrice for any product with no rule.
+  const [priceMap, setPriceMap] = useState<Map<string, number>>(new Map());
+
   useEffect(() => {
     if (!paired) return;
     listActiveProducts().then(setProducts).catch(() => {});
@@ -71,6 +77,20 @@ export function CartProvider({ children }: { children: ReactNode }) {
     getActiveOffers().then(setActiveOffers).catch(() => {});
     getTaxRules().then(setTaxRules).catch(() => {});
   }, [paired]);
+
+  // Re-resolved when the shopper identifies themselves, since tier-gated prices can't be decided
+  // until we know who's buying. An empty map on failure means every product falls back to
+  // basePrice — the behaviour before price rules existed — rather than blocking the lane.
+  useEffect(() => {
+    if (!paired) return;
+    let cancelled = false;
+    resolvePrices(branchId, customer?.tier)
+      .then((rows) => {
+        if (!cancelled) setPriceMap(new Map(rows.map((r) => [r.productId, r.unitPrice])));
+      })
+      .catch(() => { if (!cancelled) setPriceMap(new Map()); });
+    return () => { cancelled = true; };
+  }, [paired, branchId, customer?.tier]);
 
   const vatRule = taxRules.find((r) => r.ruleType === "vat" && r.status === "active");
   const taxRate = vatRule ? vatRule.vatPercentage / 100 : 0.15;
@@ -121,8 +141,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
         branchId,
         customer,
         tobaccoFeeEnabled,
+        priceMap,
       }),
-    [lines, coupon, products, activeDiscounts, activeOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled],
+    [lines, coupon, products, activeDiscounts, activeOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled, priceMap],
   );
 
   function hold() {

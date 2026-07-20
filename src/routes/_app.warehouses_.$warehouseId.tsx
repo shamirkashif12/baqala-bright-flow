@@ -5,6 +5,7 @@ import { MetricCard } from "@/components/metric-card";
 import { Card } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,6 +47,7 @@ function WarehouseDetail() {
   const [notFoundFlag, setNotFoundFlag] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
+  const [productFilter, setProductFilter] = useState("all");
   const [stock, setStock] = useState<WarehouseStock[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
@@ -82,13 +84,31 @@ function WarehouseDetail() {
     }).finally(() => setLoadingLedger(false));
   }, [warehouse?.id]);
 
+  // Options come from this warehouse's own stock rows — a product held elsewhere can never match
+  // here, so listing the whole catalogue would only offer choices that return nothing.
+  const productOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const s of stock) {
+      if (s.productId && s.product?.name) byId.set(s.productId, s.product.name);
+    }
+    return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [stock]);
+
+  // Stock reloads when the warehouse changes; drop a selection that isn't held here.
+  useEffect(() => {
+    if (productFilter !== "all" && !productOptions.some(p => p.id === productFilter)) setProductFilter("all");
+  }, [productOptions, productFilter]);
+
   const filteredStock = useMemo(() => {
-    if (!q.trim()) return stock;
-    const needle = q.toLowerCase();
-    return stock.filter(s =>
-      s.product?.name.toLowerCase().includes(needle) || s.product?.sku?.toLowerCase().includes(needle)
-    );
-  }, [stock, q]);
+    const needle = q.trim().toLowerCase();
+    return stock.filter(s => {
+      const mq = !needle
+        || s.product?.name.toLowerCase().includes(needle)
+        || s.product?.sku?.toLowerCase().includes(needle);
+      const mp = productFilter === "all" || s.productId === productFilter;
+      return mq && mp;
+    });
+  }, [stock, q, productFilter]);
 
   const totalStock = stock.reduce((s, r) => s + r.quantity, 0);
   const totalReserved = stock.reduce((s, r) => s + r.reservedQuantity, 0);
@@ -186,7 +206,16 @@ function WarehouseDetail() {
           <Card className="p-5 border-border/60 shadow-card">
             <div className="flex items-center justify-between gap-3 mb-4">
               <h3 className="font-bold text-sm flex items-center gap-2"><Package className="h-4 w-4 text-primary" /> Stock by Product</h3>
-              <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product name or SKU…" className="h-8 w-64 text-xs" />
+              <div className="flex items-center gap-2">
+                <Select value={productFilter} onValueChange={setProductFilter}>
+                  <SelectTrigger className="h-8 w-48 text-xs"><SelectValue placeholder="All Products" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Products</SelectItem>
+                    {productOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product name or SKU…" className="h-8 w-64 text-xs" />
+              </div>
             </div>
             {loadingStock ? (
               <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 rounded-xl" />)}</div>

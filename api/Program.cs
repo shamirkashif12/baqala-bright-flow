@@ -52,6 +52,7 @@ builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IStockAlertService, StockAlertService>();
 builder.Services.AddScoped<IBatchConsumptionService, BatchConsumptionService>();
+builder.Services.AddScoped<IPriceResolutionService, PriceResolutionService>();
 builder.Services.AddScoped<IStockMovementService, StockMovementService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 builder.Services.AddHostedService<UsbPrinterAutoInstallService>();
@@ -332,6 +333,13 @@ app.Use(async (context, next) =>
         var method = context.Request.Method;
         var allowed =
             (method == "GET" && path.StartsWith("/api/products")) ||
+            // The kiosk must price a basket exactly as the staffed till does. Without this the
+            // kiosk's resolve call 403s, its price map falls back to Product.BasePrice, and a
+            // branch/tier/scheduled price would apply at the till but not at the lane — a silent,
+            // customer-facing disagreement. Read-only, and PricingController.Resolve scopes a
+            // non-tenant_admin caller to its own branch regardless of the branchId it asks for.
+            // Note this is the *resolve* endpoint only; /api/pricing/lists (rule admin) stays denied.
+            (method == "GET" && path.StartsWith("/api/pricing/resolve")) ||
             (method == "GET" && path.StartsWith("/api/finance/coupons/validate/")) ||
             (method == "GET" && path.StartsWith("/api/finance/tax-rules")) ||
             (method == "GET" && path.StartsWith("/api/discounts")) ||

@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
   FileBarChart, Download, TrendingUp, Calendar, Building2, ShoppingCart, Tag, Truck, Boxes,
   Ban, RotateCcw, Percent, CreditCard, ShieldCheck, DollarSign, AlertTriangle, Cigarette, Coins,
-  ClipboardList, Clock, Lock, ExternalLink,
+  ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/")({ component: Reports });
@@ -52,8 +52,14 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/category-performance", exportFile: () => api.exportCategoryPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "supplier-performance", name: "Supplier Performance", desc: "Lead time, fill rate, dues", icon: Truck, color: "warning",
       href: "/reports/supplier-performance", exportFile: () => api.exportSupplierPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
-    { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch", icon: Boxes, color: "warning",
+    { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch & warehouse", icon: Boxes, color: "warning",
       href: "/reports/inventory-snapshot", exportFile: () => api.exportInventorySnapshotReport({ exportedBy }) },
+    { code: "stock-reconciliation", name: "Stock Reconciliation", desc: "Stock review / audit — system vs counted", icon: ClipboardCheck, color: "primary",
+      href: "/reports/stock-reconciliation", exportFile: () => api.exportStockReconciliationReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    // KPI dashboard rather than a tabular report — there is no row set to export, so it opts out
+    // of the export affordance the others share.
+    { code: "inventory-dashboard", name: "Inventory Aging", desc: "Product age, days since movement, slow-moving & dead stock", icon: Hourglass, color: "primary",
+      href: "/reports/inventory-dashboard" },
     { code: "low-stock", name: "Low Stock Report", desc: "Items below reorder thresholds", icon: AlertTriangle, color: "destructive",
       href: "/reports/low-stock", exportFile: () => api.exportLowStockReport({ onlyLowStock: true, exportedBy }) },
     { code: "waste-spoilage", name: "Waste / Spoilage Report", desc: "Expired & damaged write-offs", icon: Ban, color: "destructive",

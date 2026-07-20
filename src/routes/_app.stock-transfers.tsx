@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
@@ -22,7 +22,7 @@ import { cn, localDateStr, uuid } from "@/lib/utils";
 import {
   api,
   type StockTransfer, type StockTransferItem, type PurchaseOrder,
-  type Branch, type Warehouse as WarehouseType, type Supplier, type Product, type InventoryBatch,
+  type Branch, type Warehouse as WarehouseType, type Supplier, type Product, type InventoryBatch, type User,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -1821,6 +1821,16 @@ function StockTransfers() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // FRD §2.4. Branch/warehouse match a transfer at EITHER end, and product matches inside items —
+  // none of which can be done client-side here, because a transfer's items only arrive on the row
+  // and matching "either end" against six nullable location FKs is exactly what the server query
+  // now expresses. So these are pushed to the API rather than filtered off `transfers`.
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [warehouseFilter, setWarehouseFilter] = useState("all");
+  const [productFilter, setProductFilter] = useState("all");
+  const [createdByFilter, setCreatedByFilter] = useState("all");
+  const [approvedByFilter, setApprovedByFilter] = useState("all");
+  const [employees, setEmployees] = useState<User[]>([]);
   const [loadError, setLoadError] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -1829,22 +1839,33 @@ function StockTransfers() {
   const [receiveTarget, setReceiveTarget] = useState<StockTransfer | null>(null);
   const [receiveGroup, setReceiveGroup] = useState<StockTransfer[]>([]);
 
-  const load = () => {
+  const serverFilters = useMemo(() => ({
+    branchId: branchFilter !== "all" ? branchFilter : undefined,
+    warehouseId: warehouseFilter !== "all" ? warehouseFilter : undefined,
+    productId: productFilter !== "all" ? productFilter : undefined,
+    createdBy: createdByFilter !== "all" ? createdByFilter : undefined,
+    approvedBy: approvedByFilter !== "all" ? approvedByFilter : undefined,
+  }), [branchFilter, warehouseFilter, productFilter, createdByFilter, approvedByFilter]);
+
+  const load = useCallback(() => {
     setLoading(true);
-    api.getStockTransfers()
+    api.getStockTransfers(serverFilters)
       .then(t => { setTransfers(t); setLoadError(false); })
       // Keep previously loaded transfers on failure — an unhandled rejection here used to
       // render zero tiles / an empty list as if loaded (86eyag3ny).
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
-  };
+  }, [serverFilters]);
+
+  // Refetch whenever a server-side filter changes; the lookup lists load once.
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    load();
     api.getBranches().then(setBranches).catch(() => {});
     api.getWarehouses().then(setWarehouses).catch(() => {});
     api.getSuppliers().then(setSuppliers).catch(() => {});
     api.getProducts().then(setProducts).catch(() => {});
+    api.getUsers().then(u => setEmployees(u.filter(x => x.status === "active"))).catch(() => {});
   }, []);
 
   const handleStatusAction = async (ids: string | string[], status: string) => {
@@ -1976,6 +1997,43 @@ function StockTransfers() {
                 ))}
               </SelectContent>
             </Select>
+            {/* Branch and Warehouse match a transfer at either end (source OR destination) —
+                they are not the directional Sending/Receiving Warehouse pickers. */}
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="w-40 h-9"><SelectValue placeholder="All Branches" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+              <SelectTrigger className="w-44 h-9"><SelectValue placeholder="All Warehouses" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Warehouses</SelectItem>
+                {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={productFilter} onValueChange={setProductFilter}>
+              <SelectTrigger className="w-44 h-9"><SelectValue placeholder="All Products" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Products</SelectItem>
+                {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={createdByFilter} onValueChange={setCreatedByFilter}>
+              <SelectTrigger className="w-40 h-9"><SelectValue placeholder="Created By" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Created By: Any</SelectItem>
+                {employees.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={approvedByFilter} onValueChange={setApprovedByFilter}>
+              <SelectTrigger className="w-40 h-9"><SelectValue placeholder="Approved By" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Approved By: Any</SelectItem>
+                {employees.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <div className="flex items-center gap-1">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
               <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
@@ -2011,6 +2069,8 @@ function StockTransfers() {
                       <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Destination</th>
                       <th className="text-center py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</th>
                       <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Created By</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approved By</th>
                       <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
                       <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
                       <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
@@ -2062,10 +2122,22 @@ function StockTransfers() {
                               : <span className="text-muted-foreground">—</span>}
                           </td>
                           <td className="py-3 px-4">
+                            <span className="text-xs">{t.createdByUser?.fullName ?? <span className="text-muted-foreground">—</span>}</span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {/* Only set once a transfer is actually approved — a dash here means
+                                nobody has signed it off yet, not missing data. */}
+                            <span className="text-xs">{t.approvedByUser?.fullName ?? <span className="text-muted-foreground">—</span>}</span>
+                          </td>
+                          <td className="py-3 px-4">
                             <StatusBadge status={t.status} />
                           </td>
                           <td className="py-3 px-4">
-                            <span className="text-xs text-muted-foreground">{new Date(t.createdAt).toLocaleDateString()}</span>
+                            {/* Date AND time — a transfer's audit value depends on when in the day
+                                it moved, and two transfers on the same date were indistinguishable. */}
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              {new Date(t.createdAt).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" })}
+                            </span>
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center justify-end gap-2">

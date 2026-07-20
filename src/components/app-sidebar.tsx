@@ -102,6 +102,9 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Stocks" },
       { title: "Inventory",            url: "/inventory",       icon: Package,       module: "Inventory" },
+      // Gated on Inventory, matching PricingController — see the comment there on why price rules
+      // deliberately don't get a permission module of their own.
+      { title: "Pricing",              url: "/pricing",         icon: TicketPercent, module: "Inventory" },
       { title: "Expiry & Perishable",  url: "/batches",         icon: CalendarClock, module: "Batches" },
       { title: "Batch Tracking",       url: "/batch-tracking",  icon: PackageSearch, module: "Batches" },
       { title: "Warehouses",           url: "/warehouses",      icon: Warehouse,     module: "Warehouses" },

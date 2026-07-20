@@ -163,6 +163,56 @@ export const api = {
   deleteProduct: (id: string) =>
     request<void>(`/api/products/${id}`, { method: "DELETE" }),
 
+  // Pricing (FRD §12) — branch / customer-tier / scheduled / pack price rules.
+  //
+  // resolvePrices is the one the POS cares about: it returns the effective unit price for every
+  // active product given a branch and (optionally) the cart's customer tier, plus any pack buying
+  // options. Products with no rules come back at their basePrice, so callers can key the result by
+  // productId and use it unconditionally.
+  resolvePrices: (params?: { branchId?: string; customerTier?: string; priceType?: string; at?: string }) =>
+    request<ResolvedPrice[]>(`/api/pricing/resolve${toQuery(params)}`),
+  resolveProductPrice: (productId: string, params?: { branchId?: string; customerTier?: string; priceType?: string; at?: string }) =>
+    request<ResolvedPrice>(`/api/pricing/resolve/${productId}${toQuery(params)}`),
+  getPriceLists: (params?: { productId?: string; branchId?: string; priceType?: string; unitType?: "unit" | "pack"; isActive?: boolean }) =>
+    request<ProductPriceList[]>(`/api/pricing/lists${toQuery(params)}`),
+  createPriceList: (data: PriceListPayload) =>
+    request<ProductPriceList>("/api/pricing/lists", { method: "POST", body: JSON.stringify(data) }),
+  // One round trip, all-or-nothing — what the Add Product dialog posts when several branches each
+  // get their own price, so a partial failure can't leave a product priced in some branches only.
+  createPriceListsBulk: (rules: PriceListPayload[]) =>
+    request<ProductPriceList[]>("/api/pricing/lists/bulk", { method: "POST", body: JSON.stringify({ rules }) }),
+  updatePriceList: (id: string, data: PriceListPayload) =>
+    request<ProductPriceList>(`/api/pricing/lists/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  togglePriceList: (id: string) =>
+    request<ProductPriceList>(`/api/pricing/lists/${id}/toggle`, { method: "PATCH" }),
+  deletePriceList: (id: string) =>
+    request<void>(`/api/pricing/lists/${id}`, { method: "DELETE" }),
+
+  // Recalls (FRD §13)
+  //
+  // The product ids a till must refuse to sell, for the POS's scan-time block. Separate from
+  // getRecalls because that one is gated on Batches:View, which the Cashier role does not have —
+  // the POS would 403, silently never block, and collect an "Unauthorized Action Attempt" warning
+  // on every load. Lot-scoped recalls are resolved against on-hand stock server-side.
+  getBlockedProducts: (branchId?: string) =>
+    request<Array<{ productId: string; recallNumber: string }>>(`/api/recalls/blocked-products${toQuery({ branchId })}`),
+  getRecalls: (params?: { productId?: string; branchId?: string; batchId?: string; status?: "open" | "closed"; severity?: string }) =>
+    request<ProductRecall[]>(`/api/recalls${toQuery(params)}`),
+  getRecall: (id: string) => request<ProductRecall>(`/api/recalls/${id}`),
+  // What's still on the shelf and who already bought the recalled lot.
+  getRecallImpact: (id: string) => request<RecallImpact>(`/api/recalls/${id}/impact`),
+  createRecall: (data: RecallPayload) =>
+    request<ProductRecall>("/api/recalls", { method: "POST", body: JSON.stringify(data) }),
+  updateRecall: (id: string, data: Partial<Pick<RecallPayload, "reason" | "recallType" | "severity" | "notes">>) =>
+    request<ProductRecall>(`/api/recalls/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  // Withdraws the recalled stock, writing ordinary "damage" adjustments so it lands in the
+  // Wastage report and the movement timeline like any other write-off.
+  quarantineRecall: (id: string) =>
+    request<{ id: string; recallNumber: string; quarantined: number; quantityQuarantined: number }>(
+      `/api/recalls/${id}/quarantine`, { method: "POST" }),
+  closeRecall: (id: string, resolution?: string) =>
+    request<ProductRecall>(`/api/recalls/${id}/close`, { method: "POST", body: JSON.stringify({ resolution }) }),
+
   // Categories
   getCategories: () => request<Category[]>("/api/categories"),
   createCategory: (data: Partial<Category>) =>
@@ -194,10 +244,17 @@ export const api = {
     request<InventoryBatch>("/api/inventory/batches", { method: "POST", body: JSON.stringify(data) }),
   adjustInventory: (data: AdjustInventoryPayload) =>
     request<{ id: string }>("/api/inventory/adjustments", { method: "POST", body: JSON.stringify(data) }),
-  getAdjustments: (params?: { branchId?: string; warehouseId?: string; batchId?: string; adjustmentType?: string }) => {
+  getAdjustments: (params?: { branchId?: string; warehouseId?: string; batchId?: string; adjustmentType?: string; productId?: string; adjustedBy?: string; approvalStatus?: string }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v))).toString();
     return request<InventoryAdjustment[]>(`/api/inventory/adjustments${q ? `?${q}` : ""}`);
   },
+  // Sign-off on a held write-off (FRD §2.3). A pending write-off hasn't touched stock: APPROVE
+  // applies the deduction now; REJECT leaves stock on hand. (Legacy rows deducted before gating
+  // shipped are given back via a compensating movement on reject.) Reason is required to reject.
+  reviewAdjustment: (id: string, approved: boolean, reason?: string) =>
+    request<InventoryAdjustment>(`/api/inventory/adjustments/${id}/approval`, {
+      method: "PATCH", body: JSON.stringify({ approved, reason }),
+    }),
   getStockMovements: (params?: { productId?: string; branchId?: string; warehouseId?: string; batchId?: string; movementType?: string; from?: string; to?: string; limit?: number }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<StockMovement[]>(`/api/inventory/movements${q ? `?${q}` : ""}`);
@@ -207,7 +264,9 @@ export const api = {
   getStockCounts: (params?: { branchId?: string; status?: string }) =>
     request<StockCount[]>(`/api/stock-counts${toQuery(params)}`),
   getStockCount: (id: string) => request<StockCount>(`/api/stock-counts/${id}`),
-  startStockCount: (data: { branchId: string; categoryId?: string; startedBy?: string; notes?: string }) =>
+  // countType records WHY the count is being run (review | audit | reconciliation) — the FRD's
+  // three filters read it back. Optional: omitting it records no intent rather than guessing one.
+  startStockCount: (data: { branchId: string; categoryId?: string; startedBy?: string; notes?: string; countType?: string }) =>
     request<StockCount>("/api/stock-counts", { method: "POST", body: JSON.stringify(data) }),
   recordStockCount: (id: string, data: { productId: string; countedQuantity: number }) =>
     request<StockCountItem>(`/api/stock-counts/${id}/count`, { method: "POST", body: JSON.stringify(data) }),
@@ -379,7 +438,9 @@ export const api = {
     request<SupplierPayment>(`/api/purchase-orders/${poId}/payments`, { method: "POST", body: JSON.stringify(data) }),
 
   // Stock Transfers
-  getStockTransfers: (params?: { transferType?: string; status?: string; sourceWarehouseId?: string; destWarehouseId?: string; sourceBranchId?: string; destBranchId?: string; purchaseOrderId?: string; sourceSupplierId?: string }) => {
+  // branchId/warehouseId match a transfer at EITHER end (source or destination); the directional
+  // source*/dest* params remain for the Sending/Receiving Warehouse filters that mean one side.
+  getStockTransfers: (params?: { transferType?: string; status?: string; sourceWarehouseId?: string; destWarehouseId?: string; sourceBranchId?: string; destBranchId?: string; purchaseOrderId?: string; sourceSupplierId?: string; branchId?: string; warehouseId?: string; productId?: string; createdBy?: string; approvedBy?: string }) => {
     const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
     const q = new URLSearchParams(filtered).toString();
     return request<StockTransfer[]>(`/api/stock-transfers${q ? `?${q}` : ""}`);
@@ -557,10 +618,25 @@ export const api = {
   exportLowStockReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean; onlyLowStock?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/low-stock/export${toQuery(params)}`),
 
-  getInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean }) =>
+  getInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean; warehouseId?: string; locationType?: string }) =>
     request<InventorySnapshotReport>(`/api/reports/inventory-snapshot${toQuery(params)}`),
-  exportInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean; exportedBy?: string; format?: ReportExportFormat; warehouseId?: string; locationType?: string }) =>
     requestBlob(`/api/reports/inventory-snapshot/export${toQuery(params)}`),
+  getInventorySnapshotScope: () =>
+    request<InventorySnapshotScope>("/api/reports/inventory-snapshot/scope"),
+
+  getInventoryDashboardReport: (params?: { from?: string; to?: string; branchId?: string; warehouseId?: string; categoryId?: string; locationType?: string; moverLimit?: number }) =>
+    request<InventoryDashboardReport>(`/api/reports/inventory-dashboard${toQuery(params)}`),
+
+  // FRD §2.1 — the "Stock Review" / "Stock Audit" / "Inventory Reconciliation" filters all describe
+  // StockCount sessions, which are one report. countedBy matches either end of a session (whoever
+  // started it or completed it).
+  // countType: review | audit | reconciliation | unspecified — the FRD's three named filters, plus
+  // sessions that predate the column.
+  getStockReconciliationReport: (params?: { from?: string; to?: string; branchId?: string; productId?: string; categoryId?: string; countedBy?: string; status?: string; varianceOnly?: boolean; countType?: string }) =>
+    request<StockReconciliationReport>(`/api/reports/stock-reconciliation${toQuery(params)}`),
+  exportStockReconciliationReport: (params?: { from?: string; to?: string; branchId?: string; productId?: string; categoryId?: string; countedBy?: string; status?: string; varianceOnly?: boolean; countType?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/stock-reconciliation/export${toQuery(params)}`),
 
   getBranchSalesReport: (params?: { from?: string; to?: string; city?: string; branchId?: string; customerType?: string; cashierId?: string; terminalId?: string; productId?: string; categoryId?: string; hasTobaccoFee?: boolean }) =>
     request<BranchSalesReport>(`/api/reports/branch-sales${toQuery(params)}`),
@@ -587,9 +663,9 @@ export const api = {
   exportSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string; branchId?: string; productId?: string; createdBy?: string; approvedBy?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/supplier-performance/export${toQuery(params)}`),
 
-  getWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; productId?: string; categoryId?: string; adjustedBy?: string; isTobacco?: boolean }) =>
+  getWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; productId?: string; categoryId?: string; adjustedBy?: string; isTobacco?: boolean; warehouseId?: string; approvedBy?: string; approvalStatus?: string }) =>
     request<WasteSpoilageReport>(`/api/reports/waste-spoilage${toQuery(params)}`),
-  exportWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; productId?: string; categoryId?: string; adjustedBy?: string; isTobacco?: boolean; exportedBy?: string; includeCost?: boolean; format?: ReportExportFormat }) =>
+  exportWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; productId?: string; categoryId?: string; adjustedBy?: string; isTobacco?: boolean; exportedBy?: string; includeCost?: boolean; format?: ReportExportFormat; warehouseId?: string; approvedBy?: string; approvalStatus?: string }) =>
     requestBlob(`/api/reports/waste-spoilage/export${toQuery(params)}`),
 
   getReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; customerType?: string; reason?: string; productId?: string; processedBy?: string }) =>
@@ -816,6 +892,10 @@ export interface Product {
   status: string; weightBased: boolean; isTobacco: boolean;
   discount?: number; discountType?: "percentage" | "fixed";
   imageUrl?: string;
+  // Pack & unit pricing (FRD §12): "single" (default) or "pack". A pack is sold as one unit at its
+  // own basePrice; itemsPerPack is informational (items inside one pack).
+  saleUnitType?: "single" | "pack";
+  itemsPerPack?: number | null;
   category?: { id: string; name: string; nameAr?: string };
 }
 
@@ -840,6 +920,116 @@ export interface ReceiveBatchPayload {
   quantity: number; purchaseCost?: number; expiryDate?: string;
   batchNumber?: string; notes?: string; reorderLevel?: number;
   damagedOrReturnReason?: string;
+}
+
+// ─── Pricing (FRD §12) ───────────────────────────────────────────────────────
+
+export type PriceType = "standard" | "online" | "aggregator" | "wholesale";
+export type CustomerTier = "standard" | "silver" | "gold" | "platinum";
+
+// One price rule. branchId null = every branch; minCustomerTier null = every customer;
+// effectiveTo null = open-ended.
+export interface ProductPriceList {
+  id: string; productId: string; branchId?: string | null;
+  priceType: PriceType; price: number;
+  effectiveFrom: string; effectiveTo?: string | null;
+  minCustomerTier?: CustomerTier | null;
+  unitType: "unit" | "pack";
+  packSize?: number | null; packBarcode?: string | null;
+  label?: string | null; priority: number; isActive: boolean;
+  createdAt: string; updatedAt: string;
+  product?: Product;
+  branch?: { id: string; name: string };
+}
+
+export interface PriceListPayload {
+  id?: string;
+  productId: string;
+  branchId?: string | null;
+  priceType?: PriceType;
+  price: number;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  minCustomerTier?: CustomerTier | null;
+  unitType?: "unit" | "pack";
+  packSize?: number | null;
+  packBarcode?: string | null;
+  label?: string | null;
+  priority?: number;
+  isActive?: boolean;
+}
+
+// A pack buying option. unitPrice is packPrice/packSize — a pack is sold as packSize ordinary
+// units at that derived price, never as a distinct kind of line, which is what keeps stock,
+// batches, tax and reporting working unchanged.
+export interface PackOption {
+  priceListId: string;
+  label?: string | null;
+  packSize: number;
+  packPrice: number;
+  unitPrice: number;
+  packBarcode?: string | null;
+}
+
+// source explains which rule won: "base" (no rule — basePrice), "branch", "tier", "branch_tier",
+// "scheduled", "list".
+export interface ResolvedPrice {
+  productId: string;
+  unitPrice: number;
+  basePrice: number;
+  priceListId?: string | null;
+  source: "base" | "branch" | "tier" | "branch_tier" | "scheduled" | "list";
+  packs: PackOption[];
+}
+
+// ─── Recalls (FRD §13) ───────────────────────────────────────────────────────
+
+export type RecallStatus = "open" | "closed";
+export type RecallSeverity = "low" | "medium" | "high" | "critical";
+export type RecallType =
+  | "supplier_notice" | "quality_issue" | "contamination"
+  | "mislabeling" | "regulatory" | "other";
+
+// batchId null = every batch of the product; branchId null = tenant-wide.
+export interface ProductRecall {
+  id: string; recallNumber: string;
+  productId: string; batchId?: string | null; branchId?: string | null; supplierId?: string | null;
+  reason: string; recallType: RecallType; severity: RecallSeverity; status: RecallStatus;
+  quantityQuarantined: number;
+  notes?: string | null; resolution?: string | null;
+  initiatedBy?: string | null; closedBy?: string | null;
+  closedAt?: string | null; createdAt: string; updatedAt: string;
+  product?: Product;
+  batch?: InventoryBatch;
+  branch?: { id: string; name: string };
+  supplier?: { id: string; name: string };
+  initiatedByUser?: { id: string; fullName?: string };
+  closedByUser?: { id: string; fullName?: string };
+}
+
+export interface RecallPayload {
+  productId: string; batchId?: string | null; branchId?: string | null; supplierId?: string | null;
+  reason: string; recallType?: RecallType; severity?: RecallSeverity; notes?: string;
+}
+
+export interface RecallImpact {
+  recallId: string; recallNumber: string; status: RecallStatus;
+  quantityQuarantined: number;
+  totalOnHand: number;
+  locations: Array<{
+    batchId: string; batchNumber?: string | null;
+    branchId?: string | null; branchName?: string | null;
+    warehouseId?: string | null; warehouseName?: string | null;
+    remainingQuantity: number; expiryDate?: string | null;
+  }>;
+  soldUnits: number;
+  // Sales lists cap at 500 rows; this says so rather than silently truncating an outreach list.
+  affectedSalesTruncated: boolean;
+  affectedSales: Array<{
+    orderId: string; orderNumber: string; soldAt: string; quantity: number;
+    batchId?: string | null;
+    customerId?: string | null; customerName?: string | null; customerPhone?: string | null;
+  }>;
 }
 
 export interface Order {
@@ -1107,10 +1297,16 @@ export interface InventoryAdjustment {
   id: string; productId: string; branchId?: string; warehouseId?: string; batchId?: string;
   quantity: number; adjustmentType: string; reason?: string;
   adjustedBy?: string; createdAt: string;
+  // null = not subject to review (every adjustment raised before the approval flow shipped, plus
+  // non-write-off types). Only waste/damage enter the flow.
+  approvalStatus?: "pending" | "approved" | "rejected" | null;
+  approvedBy?: string; approvedAt?: string; rejectionReason?: string;
   product?: Product;
   branch?: { id: string; name: string };
   warehouse?: { id: string; name: string };
+  batch?: InventoryBatch;
   adjustedByUser?: { id: string; fullName: string };
+  approvedByUser?: { id: string; fullName: string };
 }
 
 // Signed ledger entry (positive = stock increase, negative = decrease) — the single source of
@@ -1138,6 +1334,8 @@ export interface StockCountItem {
 
 export interface StockCount {
   id: string; branchId: string; categoryId?: string;
+  // Why the count was run — null for sessions started before this was recorded.
+  countType?: "review" | "audit" | "reconciliation" | null;
   status: string; // draft | completed | cancelled
   startedBy?: string; completedBy?: string; notes?: string;
   startedAt: string; completedAt?: string;
@@ -1198,7 +1396,7 @@ export interface StockTransfer {
   id: string; transferNumber: string; transferType: string;
   sourceBranchId?: string; sourceWarehouseId?: string; sourceSupplierId?: string;
   destBranchId?: string; destWarehouseId?: string; destSupplierId?: string;
-  purchaseOrderId?: string; createdBy: string; approvedBy?: string;
+  purchaseOrderId?: string; createdBy: string; approvedBy?: string; receivedBy?: string;
   status: string; returnReason?: string; notes?: string; batchId?: string;
   expectedDate?: string; completedDate?: string; createdAt: string; updatedAt: string;
   sourceBranch?: { id: string; name: string };
@@ -1207,6 +1405,9 @@ export interface StockTransfer {
   destBranch?: { id: string; name: string };
   destWarehouse?: { id: string; name: string; code: string };
   destSupplier?: { id: string; name: string };
+  createdByUser?: { id: string; fullName: string };
+  approvedByUser?: { id: string; fullName: string };
+  receivedByUser?: { id: string; fullName: string };
   items?: StockTransferItem[];
 }
 
@@ -1327,10 +1528,86 @@ export interface LowStockReport {
 }
 
 export interface InventorySnapshotRow {
-  sku: string; productName: string; category: string; branch: string; isTobacco: boolean;
+  sku: string; productName: string; category: string; isTobacco: boolean;
+  // This report spans both stock pools (inventory_stock and warehouse_stock), so a row names
+  // whichever location holds it. Replaces the old branch-only `branch` field.
+  locationType: "branch" | "warehouse"; location: string; locationId: string;
   onHandQty: number; reservedQty: number; availableQty: number; reorderLevel: number;
   costPrice: number; stockCostValue: number; retailValue: number;
   lastMovementDate: string; stockStatus: "negative" | "out of stock" | "low" | "in stock";
+}
+// FRD §2.6 / §2.7 — inventory KPIs + aging. Turnover and movers read stock_movements, so
+// `dataWindow` reports how much of the period the ledger actually covers.
+export interface InventoryMoverRow {
+  productId: string; sku: string; productName: string; unitsMoved: number; cogsValue: number;
+}
+export interface InventoryAgingBucket {
+  bucket: string; skuCount: number; onHandQty: number; stockValue: number;
+}
+export interface InventoryDataWindow {
+  ledgerStart?: string | null; from: string; to: string;
+  // False when the ledger starts after the requested period — movement figures cover only its tail.
+  coversFullPeriod: boolean;
+  saleMovementsInPeriod: number;
+}
+// FRD §2.7 — one row per product at one location.
+export interface InventoryAgingRow {
+  productId: string; sku: string; productName: string; category: string;
+  location: string; locationType: "branch" | "warehouse";
+  onHandQty: number; stockValue: number;
+  // Null when no batch record exists — the stock row alone can't say when goods arrived.
+  productAgeDays?: number | null;
+  daysSinceLastMovement: number;
+  lastMovementDate: string;
+  // "ledger" = a real recorded movement; "stock_row" = fallback approximation from LastUpdated.
+  lastMovementSource: "ledger" | "stock_row";
+  unitsMovedInPeriod: number;
+  ageBucket: string;
+  isDeadStock: boolean;
+}
+export interface InventoryDashboardReport {
+  kpis: {
+    totalStockValue: number; availableStockQty: number; outOfStockProducts: number;
+    negativeInventoryItems: number; lowStockProducts: number; pendingPurchaseOrders: number;
+    wastageValue: number; inventoryTurnover: number; cogsValue: number;
+  };
+  topMoving: InventoryMoverRow[];
+  slowMoving: InventoryMoverRow[];
+  aging: InventoryAgingBucket[];
+  agingRows: InventoryAgingRow[];
+  deadStockSkus: number;
+  deadStockValue: number;
+  dataWindow: InventoryDataWindow;
+}
+
+export interface StockReconciliationRow {
+  countId: string; stockCountId: string;
+  // null for sessions started before count_type existed — shown as "Unspecified".
+  countType?: "review" | "audit" | "reconciliation" | null;
+  startedAt: string; completedAt?: string | null;
+  branch: string; sku: string; productName: string; category: string;
+  systemQty: number;
+  // null while the line is still pending — render "—", never 0.
+  countedQty?: number | null; variance?: number | null;
+  varianceValue: number;
+  startedBy: string; completedBy?: string | null;
+  status: string; countedAt?: string | null;
+}
+export interface StockReconciliationReport {
+  kpis: {
+    sessionCount: number; itemsCounted: number; itemsPending: number; itemsWithVariance: number;
+    accuracyPct: number; netVarianceUnits: number; netVarianceValue: number; absVarianceValue: number;
+  };
+  rows: StockReconciliationRow[];
+}
+
+// Which pools/filters this caller may use. Resolved server-side because the rule depends on
+// branch_warehouses, and AuthUser has no warehouse field to derive it from client-side.
+export interface InventorySnapshotScope {
+  canFilterBranch: boolean;
+  canFilterWarehouse: boolean;
+  forcedBranchId?: string | null;
+  warehouses: { id: string; name: string }[];
 }
 export interface InventorySnapshotReport {
   kpis: { totalStockValue: number; skuCount: number; availableQty: number; reservedQty: number; outOfStockSkus: number; negativeStockExceptions: number };
@@ -1392,6 +1669,17 @@ export interface WasteSpoilageRow {
   wasteId: string; dateTime: string; sku: string; productName: string; category: string; branch: string;
   isTobacco: boolean;
   qty: number; reason: string; costValue: number; notes?: string; batchNumber?: string; expiryDate?: string;
+  // adjustmentId is the real Guid — wasteId is a truncated display string and cannot be used to
+  // call the approval endpoint.
+  adjustmentId: string;
+  createdBy: string;
+  // Used to disable Approve on your own write-off — the API blocks self-approval, so offering the
+  // button would just produce a 403.
+  createdById?: string | null;
+  approvedBy?: string;
+  approvalStatus?: "pending" | "approved" | "rejected" | null;
+  approvedAt?: string;
+  rejectionReason?: string;
 }
 export interface WasteSpoilageReport {
   kpis: { totalWriteOffValue: number; expiredItems: number; damagedItems: number; topWasteCategory?: string; wastePctOfSales: number };

@@ -30,6 +30,50 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         return (role, branchId);
     }
 
+    // Roles whose stock lives in a warehouse rather than a shop floor. Deliberately NOT including
+    // "storekeeper" or "picker": storekeeper is branch-side inventory staff (DataSeeder gives it
+    // full Stocks CRUD at the branch), and picker is a fulfilment role — neither owns warehouse
+    // stock, and silently flipping them to the warehouse pool would empty a report they use today.
+    private static readonly string[] WarehouseScopedRoles = ["warehouse_staff", "warehouse_manager"];
+
+    /// <summary>
+    /// Which stock pool(s) a caller may see, and which locations within them.
+    ///
+    /// The system has two disjoint ledgers — inventory_stock (branch) and warehouse_stock
+    /// (warehouse) — so "inventory" means a different set of rows depending on who is asking.
+    /// There is no warehouse claim on the JWT (User has no warehouse_id column at all), so a
+    /// warehouse user's warehouses are resolved through branch_warehouses from their branch claim:
+    /// that M2M is the only link between a user and a warehouse this schema has.
+    /// </summary>
+    /// <param name="WarehouseScopeBranchId">
+    /// When set, warehouses are limited to those linked to this branch. Carried as the branch id
+    /// rather than a resolved List&lt;Guid&gt; of warehouse ids on purpose: the MySQL EF provider
+    /// cannot translate a parameterized list into an IN clause ("Expression … does not have a type
+    /// mapping assigned"), a limitation this file already works around at BuildLowStockAsync. Kept
+    /// as a scalar, the restriction composes into the query as a correlated EXISTS instead.
+    /// </param>
+    private sealed record InventoryScope(
+        bool IncludeBranchStock, bool IncludeWarehouseStock, Guid? ForcedBranchId, Guid? WarehouseScopeBranchId);
+
+    private InventoryScope ResolveInventoryScope()
+    {
+        var (role, branchId) = GetCallerContext();
+
+        if (role is null || role == "tenant_admin")
+            return new InventoryScope(true, true, null, null);
+
+        if (WarehouseScopedRoles.Contains(role))
+            // No branch claim means there is nothing to resolve warehouses from. Mirrors the
+            // existing convention elsewhere in this controller (`branchId.HasValue` guards every
+            // scope override) — an unscoped claim is left unscoped rather than fenced to zero rows,
+            // because the permission matrix, not the claim, is the authorization boundary here.
+            return new InventoryScope(false, true, null, branchId);
+
+        // Everyone else (cashier, branch_manager, storekeeper, …) is a branch user: branch pool
+        // only, fenced to their own branch. They get no warehouse rows and no warehouse filter.
+        return new InventoryScope(true, false, branchId, null);
+    }
+
     // ───────────────────────────────────────────────────────────────────────
     // 1. Daily Sales (RPT-SALES-DAILY)
     // ───────────────────────────────────────────────────────────────────────
@@ -783,34 +827,61 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("inventory-snapshot")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetInventorySnapshot(
-        [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] Guid? productId, [FromQuery] bool isTobacco = false)
+        [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] Guid? productId, [FromQuery] bool isTobacco = false,
+        [FromQuery] Guid? warehouseId = null, [FromQuery] string? locationType = null)
     {
-        var result = await BuildInventorySnapshotAsync(branchId, categoryId, productId, isTobacco);
+        var result = await BuildInventorySnapshotAsync(branchId, categoryId, productId, isTobacco, warehouseId, locationType);
         if (!await CanViewFinanceAsync()) MaskInventorySnapshotCost(result);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Tells the client which pools and filters this caller may use, so the UI can render the right
+    /// controls instead of guessing from the role string. Without this the frontend would need its
+    /// own copy of the scoping rules — and `AuthUser` has no warehouse field to base one on.
+    /// </summary>
+    [HttpGet("inventory-snapshot/scope")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetInventorySnapshotScope()
+    {
+        var scope = ResolveInventoryScope();
+        var warehouseQ = db.Warehouses.AsQueryable();
+        if (scope.WarehouseScopeBranchId is { } wsb)
+            warehouseQ = warehouseQ.Where(w => db.BranchWarehouses.Any(bw => bw.BranchId == wsb && bw.WarehouseId == w.Id));
+        var warehouses = scope.IncludeWarehouseStock
+            ? await warehouseQ.OrderBy(w => w.Name).Select(w => new { w.Id, w.Name }).ToListAsync()
+            : [];
+        return Ok(new
+        {
+            canFilterBranch = scope.IncludeBranchStock,
+            canFilterWarehouse = scope.IncludeWarehouseStock,
+            forcedBranchId = scope.ForcedBranchId,
+            warehouses,
+        });
     }
 
     [HttpGet("inventory-snapshot/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportInventorySnapshot(
         [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] Guid? productId, [FromQuery] bool isTobacco = false,
-        [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv")
+        [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv",
+        [FromQuery] Guid? warehouseId = null, [FromQuery] string? locationType = null)
     {
-        var result = await BuildInventorySnapshotAsync(branchId, categoryId, productId, isTobacco);
+        var result = await BuildInventorySnapshotAsync(branchId, categoryId, productId, isTobacco, warehouseId, locationType);
         var includeCost = await CanViewFinanceAsync();
         if (!includeCost) MaskInventorySnapshotCost(result);
         var headers = includeCost
-            ? new[] { "SKU", "Product Name", "Category", "Branch", "Tobacco", "On Hand Qty", "Reserved Qty", "Available Qty", "Reorder Level", "Cost Price", "Stock Cost Value", "Retail Value", "Last Movement Date", "Stock Status" }
-            : new[] { "SKU", "Product Name", "Category", "Branch", "Tobacco", "On Hand Qty", "Reserved Qty", "Available Qty", "Reorder Level", "Retail Value", "Last Movement Date", "Stock Status" };
+            ? new[] { "SKU", "Product Name", "Category", "Location", "Location Type", "Tobacco", "On Hand Qty", "Reserved Qty", "Available Qty", "Reorder Level", "Cost Price", "Stock Cost Value", "Retail Value", "Last Movement Date", "Stock Status" }
+            : new[] { "SKU", "Product Name", "Category", "Location", "Location Type", "Tobacco", "On Hand Qty", "Reserved Qty", "Available Qty", "Reorder Level", "Retail Value", "Last Movement Date", "Stock Status" };
         var rows = result.Rows.Select(r => includeCost
             ? new object?[]
               {
-                  r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.OnHandQty, r.ReservedQty, r.AvailableQty, r.ReorderLevel,
+                  r.Sku, r.ProductName, r.Category, r.Location, r.LocationType, r.IsTobacco ? "Yes" : "No", r.OnHandQty, r.ReservedQty, r.AvailableQty, r.ReorderLevel,
                   r.CostPrice, r.StockCostValue, r.RetailValue, r.LastMovementDate, r.StockStatus,
               }
             : new object?[]
               {
-                  r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.OnHandQty, r.ReservedQty, r.AvailableQty, r.ReorderLevel,
+                  r.Sku, r.ProductName, r.Category, r.Location, r.LocationType, r.IsTobacco ? "Yes" : "No", r.OnHandQty, r.ReservedQty, r.AvailableQty, r.ReorderLevel,
                   r.RetailValue, r.LastMovementDate, r.StockStatus,
               }
         ).ToList();
@@ -832,49 +903,65 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         foreach (var row in r.Rows) { row.CostPrice = 0; row.StockCostValue = 0; }
     }
 
-    private async Task<InventorySnapshotResult> BuildInventorySnapshotAsync(Guid? branchId, Guid? categoryId, Guid? productId = null, bool isTobacco = false)
+    private async Task<InventorySnapshotResult> BuildInventorySnapshotAsync(
+        Guid? branchId, Guid? categoryId, Guid? productId = null, bool isTobacco = false,
+        Guid? warehouseId = null, string? locationType = null)
     {
-        var (scopeRole, scopeBranchId) = GetCallerContext();
-        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
-        var stockQ = db.InventoryStocks
-            .Include(s => s.Product).ThenInclude(p => p!.Category)
-            .Include(s => s.Branch)
-            .Where(s => s.Product != null && s.Branch != null);
-        if (branchId.HasValue) stockQ = stockQ.Where(s => s.BranchId == branchId);
-        if (categoryId.HasValue) stockQ = stockQ.Where(s => s.Product!.CategoryId == categoryId);
-        if (productId.HasValue) stockQ = stockQ.Where(s => s.ProductId == productId);
-        if (isTobacco) stockQ = stockQ.Where(s => s.Product!.IsTobacco);
+        var scope = ResolveInventoryScope();
+        if (scope.ForcedBranchId.HasValue) branchId = scope.ForcedBranchId;
 
-        var stocks = await stockQ.ToListAsync();
+        // An explicit warehouseId means "only that warehouse", which is a warehouse-pool question —
+        // asking for it must not also return every branch row. Same for the explicit locationType
+        // tab. Scope wins over both: a branch user passing ?warehouseId= still gets nothing from a
+        // pool they can't see, rather than a filter that quietly widens their access.
+        var wantBranch = scope.IncludeBranchStock && locationType != "warehouse" && !warehouseId.HasValue;
+        var wantWarehouse = scope.IncludeWarehouseStock && locationType != "branch";
 
-        var rows = stocks.Select(s =>
+        var rows = new List<InventorySnapshotRow>();
+
+        if (wantBranch)
         {
-            var available = s.Quantity - s.ReservedQuantity;
-            var costPrice = s.Product!.CostPrice ?? s.Product.BasePrice;
-            var status = s.Quantity < 0 ? "negative" : available <= 0 ? "out of stock" : available <= s.ReorderLevel ? "low" : "in stock";
-            return new InventorySnapshotRow
-            {
-                Sku = s.Product.Sku,
-                ProductName = s.Product.Name,
-                Category = s.Product.Category?.Name ?? "—",
-                Branch = s.Branch!.Name,
-                IsTobacco = s.Product.IsTobacco,
-                OnHandQty = s.Quantity,
-                ReservedQty = s.ReservedQuantity,
-                AvailableQty = available,
-                ReorderLevel = s.ReorderLevel,
-                CostPrice = costPrice,
-                StockCostValue = s.Quantity * costPrice,
-                RetailValue = s.Quantity * s.Product.BasePrice,
-                // This system tracks branch-level stock (InventoryStock) separately from warehouse stock
-                // (WarehouseStock) — they are different pools, not one snapshot, so LastUpdated is the closest
-                // available proxy for "last movement" at the branch-stock granularity the FRD's snapshot covers.
-                LastMovementDate = s.LastUpdated,
-                StockStatus = status,
-            };
-        })
-        .OrderByDescending(r => r.StockCostValue)
-        .ToList();
+            var stockQ = db.InventoryStocks
+                .Include(s => s.Product).ThenInclude(p => p!.Category)
+                .Include(s => s.Branch)
+                .Where(s => s.Product != null && s.Branch != null);
+            if (branchId.HasValue) stockQ = stockQ.Where(s => s.BranchId == branchId);
+            if (categoryId.HasValue) stockQ = stockQ.Where(s => s.Product!.CategoryId == categoryId);
+            if (productId.HasValue) stockQ = stockQ.Where(s => s.ProductId == productId);
+            if (isTobacco) stockQ = stockQ.Where(s => s.Product!.IsTobacco);
+
+            // LastUpdated is a proxy for "last movement" — the stock row records when it last
+            // changed, not why. stock_movements has the real history but only since the ledger
+            // shipped, so joining it would regress this column for older rows.
+            rows.AddRange((await stockQ.ToListAsync()).Select(s => BuildSnapshotRow(
+                s.Product!, "branch", s.Branch!.Name, s.Branch.Id,
+                s.Quantity, s.ReservedQuantity, s.ReorderLevel, s.LastUpdated)));
+        }
+
+        if (wantWarehouse)
+        {
+            var whQ = db.WarehouseStocks
+                .Include(s => s.Product).ThenInclude(p => p!.Category)
+                .Include(s => s.Warehouse)
+                .Where(s => s.Product != null && s.Warehouse != null);
+            if (warehouseId.HasValue) whQ = whQ.Where(s => s.WarehouseId == warehouseId);
+            // Correlated EXISTS rather than an id list — see InventoryScope.WarehouseScopeBranchId.
+            if (scope.WarehouseScopeBranchId is { } wsb)
+                whQ = whQ.Where(s => db.BranchWarehouses.Any(bw => bw.BranchId == wsb && bw.WarehouseId == s.WarehouseId));
+            // A branch filter narrows warehouses to those linked to that branch — branch_warehouses
+            // is the only branch↔warehouse relation, and WarehouseStock itself has no BranchId.
+            if (branchId.HasValue)
+                whQ = whQ.Where(s => db.BranchWarehouses.Any(bw => bw.BranchId == branchId && bw.WarehouseId == s.WarehouseId));
+            if (categoryId.HasValue) whQ = whQ.Where(s => s.Product!.CategoryId == categoryId);
+            if (productId.HasValue) whQ = whQ.Where(s => s.ProductId == productId);
+            if (isTobacco) whQ = whQ.Where(s => s.Product!.IsTobacco);
+
+            rows.AddRange((await whQ.ToListAsync()).Select(s => BuildSnapshotRow(
+                s.Product!, "warehouse", s.Warehouse!.Name, s.Warehouse.Id,
+                s.Quantity, s.ReservedQuantity, s.ReorderLevel, s.LastUpdated)));
+        }
+
+        rows = [.. rows.OrderByDescending(r => r.StockCostValue)];
 
         return new InventorySnapshotResult
         {
@@ -889,6 +976,311 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             },
             Rows = rows,
         };
+    }
+
+    // Shared by both pools so a branch row and a warehouse row can never disagree on how status,
+    // availability or valuation are derived — InventoryStock and WarehouseStock are structurally
+    // identical (quantity / reserved_quantity / reorder_level) but share no base type.
+    private static InventorySnapshotRow BuildSnapshotRow(
+        Models.Product product, string locationType, string locationName, Guid locationId,
+        decimal quantity, decimal reserved, int reorderLevel, DateTime lastUpdated)
+    {
+        var available = quantity - reserved;
+        var costPrice = product.CostPrice ?? product.BasePrice;
+        var status = quantity < 0 ? "negative"
+            : available <= 0 ? "out of stock"
+            : available <= reorderLevel ? "low"
+            : "in stock";
+        return new InventorySnapshotRow
+        {
+            ProductId = product.Id,
+            Sku = product.Sku,
+            ProductName = product.Name,
+            Category = product.Category?.Name ?? "—",
+            LocationType = locationType,
+            Location = locationName,
+            LocationId = locationId,
+            IsTobacco = product.IsTobacco,
+            OnHandQty = quantity,
+            ReservedQty = reserved,
+            AvailableQty = available,
+            ReorderLevel = reorderLevel,
+            CostPrice = costPrice,
+            StockCostValue = quantity * costPrice,
+            RetailValue = quantity * product.BasePrice,
+            LastMovementDate = lastUpdated,
+            StockStatus = status,
+        };
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // 6b. Inventory Dashboard — KPIs (§2.6) + Aging (§2.7)
+    //
+    // Both sections read stock_movements, which is why they share an endpoint: turnover, top/slow
+    // movers and days-since-last-movement are all the same scan.
+    //
+    // ⚠ The ledger only records movements written since it shipped. Anything older is genuinely
+    // absent, so turnover and mover ranks understate until the ledger has a full period behind it.
+    // Rather than present that as fact, the response carries a DataWindow the UI renders as a
+    // caveat — a silently-low turnover number is worse than an explicitly-partial one.
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("inventory-dashboard")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetInventoryDashboard(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
+        [FromQuery] Guid? warehouseId, [FromQuery] Guid? categoryId, [FromQuery] string? locationType,
+        [FromQuery] int moverLimit = 10)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildInventoryDashboardAsync(rangeFrom, rangeTo, branchId, warehouseId, categoryId, locationType, moverLimit);
+        if (!await CanViewFinanceAsync())
+        {
+            result.Kpis.TotalStockValue = 0;
+            result.Kpis.WastageValue = 0;
+            result.DeadStockValue = 0;
+            foreach (var b in result.Aging) b.StockValue = 0;
+            foreach (var r in result.AgingRows) r.StockValue = 0;
+        }
+        return Ok(result);
+    }
+
+    private async Task<InventoryDashboardResult> BuildInventoryDashboardAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? warehouseId,
+        Guid? categoryId, string? locationType, int moverLimit)
+    {
+        var scope = ResolveInventoryScope();
+        if (scope.ForcedBranchId.HasValue) branchId = scope.ForcedBranchId;
+        moverLimit = Math.Clamp(moverLimit, 1, 50);
+
+        // Reuse the snapshot builder so the dashboard's stock figures can never disagree with the
+        // Inventory report's — same scoping, same two-pool union, same status ladder.
+        var snapshot = await BuildInventorySnapshotAsync(branchId, categoryId, null, false, warehouseId, locationType);
+
+        var ledgerStart = await db.StockMovements.OrderBy(m => m.CreatedAt).Select(m => (DateTime?)m.CreatedAt).FirstOrDefaultAsync();
+
+        // Sales are the only movement type that represents genuine outbound demand — transfers just
+        // relocate stock, and counting them would rank a heavily-restocked SKU as "fast moving".
+        var salesQ = db.StockMovements.Where(m =>
+            m.MovementType == "sale" && m.CreatedAt >= rangeFrom && m.CreatedAt < rangeToExclusive);
+        if (branchId.HasValue) salesQ = salesQ.Where(m => m.BranchId == branchId);
+        if (warehouseId.HasValue) salesQ = salesQ.Where(m => m.WarehouseId == warehouseId);
+
+        var soldByProduct = await salesQ
+            .GroupBy(m => m.ProductId)
+            // Sale quantities are stored negative (outbound); negate so "units moved" reads positive.
+            .Select(g => new { ProductId = g.Key, Units = g.Sum(x => -x.Quantity) })
+            .ToListAsync();
+
+        var productIds = soldByProduct.Select(x => x.ProductId).ToList();
+        var productMeta = new Dictionary<Guid, (string Sku, string Name, decimal Cost)>();
+        foreach (var pid in productIds)
+        {
+            var p = await db.Products.Where(x => x.Id == pid)
+                .Select(x => new { x.Sku, x.Name, x.CostPrice, x.BasePrice }).FirstOrDefaultAsync();
+            if (p != null) productMeta[pid] = (p.Sku, p.Name, p.CostPrice ?? p.BasePrice);
+        }
+
+        var movers = soldByProduct
+            .Where(x => productMeta.ContainsKey(x.ProductId))
+            .Select(x => new InventoryMoverRow
+            {
+                ProductId = x.ProductId,
+                Sku = productMeta[x.ProductId].Sku,
+                ProductName = productMeta[x.ProductId].Name,
+                UnitsMoved = x.Units,
+                CogsValue = x.Units * productMeta[x.ProductId].Cost,
+            })
+            .ToList();
+
+        // Cost of goods sold over the period, from the ledger.
+        var cogs = movers.Sum(m => m.CogsValue);
+        var stockValue = snapshot.Rows.Sum(r => r.StockCostValue);
+
+        // Turnover = COGS ÷ average inventory at cost. There are no historical stock snapshots, so
+        // *current* value stands in for the average — it drifts from the textbook figure whenever
+        // stock levels have moved a lot across the period. Reported as an approximation, not a
+        // headline accounting number.
+        var turnover = stockValue <= 0 ? 0 : Math.Round(cogs / stockValue, 2);
+
+        var wastageQ = db.InventoryAdjustments.Include(a => a.Product).Where(a =>
+            (a.AdjustmentType == "waste" || a.AdjustmentType == "damage" || a.AdjustmentType == "expired"
+                || a.AdjustmentType == "theft" || a.AdjustmentType == "other")
+            // Only value that has actually left inventory: auto/immediate write-offs (approval_status
+            // null) or approved ones. A pending write-off hasn't been signed off or reduced stock yet.
+            && (a.ApprovalStatus == null || a.ApprovalStatus == "approved")
+            && a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive);
+        if (branchId.HasValue) wastageQ = wastageQ.Where(a => a.BranchId == branchId);
+        if (warehouseId.HasValue) wastageQ = wastageQ.Where(a => a.WarehouseId == warehouseId);
+        if (categoryId.HasValue) wastageQ = wastageQ.Where(a => a.Product != null && a.Product.CategoryId == categoryId);
+        var wastage = await wastageQ.ToListAsync();
+        var wastageValue = wastage.Sum(a => a.Quantity * (a.Product?.CostPrice ?? a.Product?.BasePrice ?? 0));
+
+        // "Pending" = raised but not yet fully received — the POs someone is still waiting on.
+        // Cancelled and fully_received are settled and deliberately excluded.
+        var poQ = db.PurchaseOrders.Where(p =>
+            p.Status == "draft" || p.Status == "sent" || p.Status == "partial_received");
+        if (branchId.HasValue) poQ = poQ.Where(p => p.BranchId == branchId);
+        if (warehouseId.HasValue) poQ = poQ.Where(p => p.WarehouseId == warehouseId);
+        var pendingPos = await poQ.CountAsync();
+
+        var aging = BuildAgingBuckets(snapshot.Rows);
+
+        // §2.7 — per-product aging. "Days since last movement" comes from the ledger where the
+        // ledger has a row for that product+location, and falls back to the stock row's LastUpdated
+        // otherwise. The two are distinguished by LastMovementSource so the UI can say which it is:
+        // a ledger-backed number is a real movement, a stock-row one is only "last time this row
+        // changed", and conflating them would make pre-ledger stock look freshly moved.
+        var lastMoves = await db.StockMovements
+            .GroupBy(m => new { m.ProductId, m.BranchId, m.WarehouseId })
+            .Select(g => new { g.Key.ProductId, g.Key.BranchId, g.Key.WarehouseId, Last = g.Max(x => x.CreatedAt) })
+            .ToListAsync();
+        var lastMoveByKey = lastMoves.ToDictionary(
+            x => (x.ProductId, x.BranchId ?? x.WarehouseId ?? Guid.Empty), x => x.Last);
+
+        // Product age in stock = age of the oldest batch still holding quantity at that location.
+        // Batches are where a received date exists at all; the stock row only knows when it last
+        // changed, which is not the same thing.
+        var oldestBatches = await db.InventoryBatches
+            .Where(b => b.RemainingQuantity > 0)
+            .GroupBy(b => new { b.ProductId, b.BranchId, b.WarehouseId })
+            .Select(g => new { g.Key.ProductId, g.Key.BranchId, g.Key.WarehouseId, Oldest = g.Min(x => x.ReceivedDate) })
+            .ToListAsync();
+        var oldestByKey = oldestBatches.ToDictionary(
+            x => (x.ProductId, x.BranchId ?? x.WarehouseId ?? Guid.Empty), x => x.Oldest);
+
+        var nowUtc = DateTime.UtcNow;
+        var soldLookup = soldByProduct.ToDictionary(x => x.ProductId, x => x.Units);
+
+        var agingRows = snapshot.Rows
+            .Where(r => r.OnHandQty > 0)
+            .Select(r =>
+            {
+                var key = (r.ProductId, r.LocationId);
+                var hasLedger = lastMoveByKey.TryGetValue(key, out var ledgerLast);
+                var lastMovement = hasLedger ? ledgerLast : r.LastMovementDate;
+                var daysSince = (int)(nowUtc - lastMovement).TotalDays;
+                int? ageDays = oldestByKey.TryGetValue(key, out var received)
+                    ? (int)(nowUtc - received).TotalDays
+                    : null;
+                var unitsMoved = soldLookup.TryGetValue(r.ProductId, out var u) ? u : 0;
+                return new InventoryAgingRow
+                {
+                    ProductId = r.ProductId,
+                    Sku = r.Sku,
+                    ProductName = r.ProductName,
+                    Category = r.Category,
+                    Location = r.Location,
+                    LocationType = r.LocationType,
+                    OnHandQty = r.OnHandQty,
+                    StockValue = r.StockCostValue,
+                    ProductAgeDays = ageDays,
+                    DaysSinceLastMovement = daysSince,
+                    LastMovementDate = lastMovement,
+                    LastMovementSource = hasLedger ? "ledger" : "stock_row",
+                    UnitsMovedInPeriod = unitsMoved,
+                    AgeBucket = BucketFor(daysSince),
+                    // Dead stock: on hand, and nothing recorded moving it in the whole period.
+                    // Distinct from slow-moving (moved, just not much) — dead stock is capital that
+                    // hasn't turned at all.
+                    IsDeadStock = unitsMoved <= 0,
+                };
+            })
+            .OrderByDescending(r => r.DaysSinceLastMovement).ThenByDescending(r => r.StockValue)
+            .ToList();
+
+        // Rank once; Top takes the busiest, Slow takes the least-busy of what's LEFT, so a product
+        // can never appear in both cards (see the comment at the assignment below).
+        var rankedMovers = movers.Where(m => m.UnitsMoved > 0).OrderByDescending(m => m.UnitsMoved).ToList();
+        var topMovers = rankedMovers.Take(moverLimit).ToList();
+        var topMoverIds = topMovers.Select(m => m.ProductId).ToHashSet();
+
+        return new InventoryDashboardResult
+        {
+            Kpis = new InventoryDashboardKpis
+            {
+                TotalStockValue = stockValue,
+                // On-hand minus reserved — what could actually be sold or shipped right now.
+                AvailableStockQty = snapshot.Rows.Sum(r => r.AvailableQty),
+                OutOfStockProducts = snapshot.Rows.Count(r => r.StockStatus == "out of stock"),
+                // Reported as they are: stock is allowed to go negative (sales don't clamp, and a
+                // missing row is created negative), so this is a real exception count to chase,
+                // not a decorative zero.
+                NegativeInventoryItems = snapshot.Rows.Count(r => r.StockStatus == "negative"),
+                LowStockProducts = snapshot.Rows.Count(r => r.StockStatus == "low"),
+                PendingPurchaseOrders = pendingPos,
+                WastageValue = wastageValue,
+                InventoryTurnover = turnover,
+                CogsValue = cogs,
+            },
+            // Top and slow movers are drawn from the same ranked list but must never overlap — with
+            // fewer than 2×moverLimit products that moved, the single busiest product was otherwise
+            // both the #1 top mover and (ordered the other way) the #1 slow mover, showing the same
+            // item in both cards. Slow excludes anything already claimed by Top, and only ranks
+            // products that actually moved (a zero-sales product has no ledger row and belongs in
+            // DeadStockSkus below, not here).
+            TopMoving = [.. topMovers],
+            SlowMoving = [.. rankedMovers.Where(m => !topMoverIds.Contains(m.ProductId)).OrderBy(m => m.UnitsMoved).Take(moverLimit)],
+            Aging = aging,
+            AgingRows = agingRows,
+            DeadStockSkus = agingRows.Count(r => r.IsDeadStock),
+            DeadStockValue = agingRows.Where(r => r.IsDeadStock).Sum(r => r.StockValue),
+            DataWindow = new InventoryDataWindow
+            {
+                LedgerStart = ledgerStart,
+                From = rangeFrom,
+                To = rangeToExclusive.AddDays(-1),
+                // True only when the ledger predates the requested period — i.e. the movement-based
+                // figures cover the whole window rather than just the tail of it.
+                CoversFullPeriod = ledgerStart.HasValue && ledgerStart.Value <= rangeFrom,
+                SaleMovementsInPeriod = movers.Count,
+            },
+        };
+    }
+
+    // Aging by time since the location's stock row last changed. LastMovementDate is InventoryStock/
+    // WarehouseStock.LastUpdated — see BuildInventorySnapshotAsync for why the ledger isn't used
+    // here: it only reaches back to the ledger's start, which would age every older row into "90+"
+    // regardless of whether it actually moved.
+    // Single source of truth for the bucket boundaries, so the chart and the per-product rows can
+    // never label the same stock differently.
+    private static readonly (string Label, int MinDays, int? MaxDays)[] AgingBucketDefs =
+    [
+        ("0-30 days", 0, 30), ("31-60 days", 31, 60), ("61-90 days", 61, 90), ("90+ days", 91, null),
+    ];
+
+    private static string BucketFor(int days)
+    {
+        foreach (var d in AgingBucketDefs)
+            if (days >= d.MinDays && (d.MaxDays == null || days <= d.MaxDays)) return d.Label;
+        // Only reachable for a negative age (a future-dated row) — clamp into the youngest bucket
+        // rather than returning an empty label the UI would render as a blank cell.
+        return AgingBucketDefs[0].Label;
+    }
+
+    private static List<InventoryAgingBucket> BuildAgingBuckets(List<InventorySnapshotRow> rows)
+    {
+        var now = DateTime.UtcNow;
+        var defs = AgingBucketDefs;
+        return [.. defs.Select(d =>
+        {
+            var inBucket = rows.Where(r =>
+            {
+                // Stock that isn't on hand isn't aging — a zero/negative row would otherwise pile
+                // into "90+" and overstate dead stock.
+                if (r.OnHandQty <= 0) return false;
+                var days = (int)(now - r.LastMovementDate).TotalDays;
+                return days >= d.MinDays && (d.MaxDays == null || days <= d.MaxDays);
+            }).ToList();
+            return new InventoryAgingBucket
+            {
+                Bucket = d.Label,
+                SkuCount = inBucket.Count,
+                OnHandQty = inBucket.Sum(r => r.OnHandQty),
+                StockValue = inBucket.Sum(r => r.StockCostValue),
+            };
+        })];
     }
 
     // ───────────────────────────────────────────────────────────────────────
@@ -1548,11 +1940,12 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetWasteSpoilage(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] string? reason,
-        [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? adjustedBy, [FromQuery] bool isTobacco = false)
+        [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? adjustedBy, [FromQuery] bool isTobacco = false,
+        [FromQuery] Guid? warehouseId = null, [FromQuery] Guid? approvedBy = null, [FromQuery] string? approvalStatus = null)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildWasteSpoilageAsync(rangeFrom, rangeTo, branchId, reason, productId, categoryId, adjustedBy, isTobacco);
+        var result = await BuildWasteSpoilageAsync(rangeFrom, rangeTo, branchId, reason, productId, categoryId, adjustedBy, isTobacco, warehouseId, approvedBy, approvalStatus);
         if (!await CanViewFinanceAsync()) MaskWasteSpoilageCost(result);
         return Ok(result);
     }
@@ -1562,19 +1955,20 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     public async Task<IActionResult> ExportWasteSpoilage(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] string? reason,
         [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? adjustedBy, [FromQuery] bool isTobacco = false,
-        [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv")
+        [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv",
+        [FromQuery] Guid? warehouseId = null, [FromQuery] Guid? approvedBy = null, [FromQuery] string? approvalStatus = null)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildWasteSpoilageAsync(rangeFrom, rangeTo, branchId, reason, productId, categoryId, adjustedBy, isTobacco);
+        var result = await BuildWasteSpoilageAsync(rangeFrom, rangeTo, branchId, reason, productId, categoryId, adjustedBy, isTobacco, warehouseId, approvedBy, approvalStatus);
         var includeCost = await CanViewFinanceAsync();
         if (!includeCost) MaskWasteSpoilageCost(result);
         var headers = includeCost
-            ? new[] { "Waste ID", "Date/Time", "SKU", "Product Name", "Category", "Branch", "Tobacco", "Batch/Lot", "Expiry Date", "Qty", "Reason", "Cost Value", "Notes" }
-            : new[] { "Waste ID", "Date/Time", "SKU", "Product Name", "Category", "Branch", "Tobacco", "Batch/Lot", "Expiry Date", "Qty", "Reason", "Notes" };
+            ? new[] { "Waste ID", "Date/Time", "SKU", "Product Name", "Category", "Branch", "Tobacco", "Batch/Lot", "Expiry Date", "Qty", "Reason", "Created By", "Approved By", "Approval Status", "Cost Value", "Notes" }
+            : new[] { "Waste ID", "Date/Time", "SKU", "Product Name", "Category", "Branch", "Tobacco", "Batch/Lot", "Expiry Date", "Qty", "Reason", "Created By", "Approved By", "Approval Status", "Notes" };
         var rows = result.Rows.Select(r => includeCost
-            ? new object?[] { r.WasteId, r.DateTime, r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.BatchNumber ?? "—", r.ExpiryDate, r.Qty, r.Reason, r.CostValue, r.Notes }
-            : new object?[] { r.WasteId, r.DateTime, r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.BatchNumber ?? "—", r.ExpiryDate, r.Qty, r.Reason, r.Notes }
+            ? new object?[] { r.WasteId, r.DateTime, r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.BatchNumber ?? "—", r.ExpiryDate, r.Qty, r.Reason, r.CreatedBy, r.ApprovedBy ?? "—", r.ApprovalStatus ?? "—", r.CostValue, r.Notes }
+            : new object?[] { r.WasteId, r.DateTime, r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.BatchNumber ?? "—", r.ExpiryDate, r.Qty, r.Reason, r.CreatedBy, r.ApprovedBy ?? "—", r.ApprovalStatus ?? "—", r.Notes }
         ).ToList();
         await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
             $"{{\"report\":\"waste-spoilage\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
@@ -1594,19 +1988,199 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         foreach (var row in r.Rows) row.CostValue = 0;
     }
 
+    // ───────────────────────────────────────────────────────────────────────
+    // 12b. Stock Reconciliation (RPT-INV-RECON)
+    //
+    // The FRD names three filters — "Stock Review", "Stock Audit", "Inventory Reconciliation" —
+    // which in this schema are one thing: a StockCount session (start → count → complete, posting
+    // variance as adjustments). stock_count_items already carries system_quantity, counted_quantity
+    // and variance; nothing has ever read them. This report is that read.
+    //
+    // Branch-only by design: StockCount has no warehouse_id, so there is genuinely no warehouse
+    // stock-take to report on. A warehouse filter here would be a control over data that does not
+    // exist. See the two-pool note at BuildInventorySnapshotAsync.
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("stock-reconciliation")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetStockReconciliation(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
+        [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? countedBy,
+        [FromQuery] string? status, [FromQuery] bool varianceOnly = false, [FromQuery] string? countType = null)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildStockReconciliationAsync(rangeFrom, rangeTo, branchId, productId, categoryId, countedBy, status, varianceOnly, countType);
+        if (!await CanViewFinanceAsync()) MaskStockReconciliationCost(result);
+        return Ok(result);
+    }
+
+    [HttpGet("stock-reconciliation/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportStockReconciliation(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
+        [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? countedBy,
+        [FromQuery] string? status, [FromQuery] bool varianceOnly = false, [FromQuery] string? countType = null,
+        [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildStockReconciliationAsync(rangeFrom, rangeTo, branchId, productId, categoryId, countedBy, status, varianceOnly, countType);
+        var includeCost = await CanViewFinanceAsync();
+        if (!includeCost) MaskStockReconciliationCost(result);
+        var headers = includeCost
+            ? new[] { "Count ID", "Count Type", "Started At", "Completed At", "Branch", "SKU", "Product Name", "Category", "System Qty", "Counted Qty", "Variance", "Variance Value", "Started By", "Completed By", "Status" }
+            : new[] { "Count ID", "Count Type", "Started At", "Completed At", "Branch", "SKU", "Product Name", "Category", "System Qty", "Counted Qty", "Variance", "Started By", "Completed By", "Status" };
+        var rows = result.Rows.Select(r => includeCost
+            ? new object?[] { r.CountId, r.CountType ?? "unspecified", r.StartedAt, r.CompletedAt, r.Branch, r.Sku, r.ProductName, r.Category, r.SystemQty, r.CountedQty, r.Variance, r.VarianceValue, r.StartedBy, r.CompletedBy ?? "—", r.Status }
+            : new object?[] { r.CountId, r.CountType ?? "unspecified", r.StartedAt, r.CompletedAt, r.Branch, r.Sku, r.ProductName, r.Category, r.SystemQty, r.CountedQty, r.Variance, r.StartedBy, r.CompletedBy ?? "—", r.Status }
+        ).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+            $"{{\"report\":\"stock-reconciliation\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
+        var kpis = new List<(string, string)> {
+            ("Count Sessions", result.Kpis.SessionCount.ToString()),
+            ("Items Counted", result.Kpis.ItemsCounted.ToString()),
+            ("Items With Variance", result.Kpis.ItemsWithVariance.ToString()),
+            ("Count Accuracy %", result.Kpis.AccuracyPct.ToString("0.00")),
+            ("Net Variance Units", result.Kpis.NetVarianceUnits.ToString("0.##")),
+        };
+        if (includeCost) kpis.Add(("Net Variance Value", result.Kpis.NetVarianceValue.ToString("0.##")));
+        return BuildExportFile(format, "Stock Reconciliation Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            kpis.ToArray(), headers, rows, $"stock-reconciliation-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    private static void MaskStockReconciliationCost(StockReconciliationResult r)
+    {
+        r.Kpis.NetVarianceValue = 0; r.Kpis.AbsVarianceValue = 0;
+        foreach (var row in r.Rows) row.VarianceValue = 0;
+    }
+
+    private async Task<StockReconciliationResult> BuildStockReconciliationAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? productId,
+        Guid? categoryId, Guid? countedBy, string? status, bool varianceOnly, string? countType = null)
+    {
+        var (scopeRole, scopeBranchId) = GetCallerContext();
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+
+        // Ranged on StartedAt, not CompletedAt: an open session has no completion date, and a
+        // reconciliation report that hides in-progress counts is exactly the one you can't use to
+        // chase them up.
+        var countQ = db.StockCounts
+            .Include(c => c.Branch)
+            .Where(c => c.StartedAt >= rangeFrom && c.StartedAt < rangeToExclusive);
+        if (branchId.HasValue) countQ = countQ.Where(c => c.BranchId == branchId);
+        if (!string.IsNullOrEmpty(status)) countQ = countQ.Where(c => c.Status == status);
+        // The FRD's three filters. "unspecified" selects sessions that predate count_type — they
+        // are a real group a user needs to find, not an absence to hide.
+        if (countType == "unspecified") countQ = countQ.Where(c => c.CountType == null);
+        else if (!string.IsNullOrEmpty(countType)) countQ = countQ.Where(c => c.CountType == countType);
+        // Either end of the session — whoever opened it or whoever signed it off.
+        if (countedBy.HasValue) countQ = countQ.Where(c => c.StartedBy == countedBy || c.CompletedBy == countedBy);
+
+        var counts = await countQ.ToListAsync();
+        var countIds = counts.Select(c => c.Id).ToList();
+
+        // One query per session rather than a `countIds.Contains(...)` IN-list: the MySQL EF
+        // provider can't translate a parameterized Guid list (see InventoryScope). Sessions are
+        // few — a branch runs a handful a month — so this stays cheap.
+        var items = new List<Models.StockCountItem>();
+        foreach (var id in countIds)
+        {
+            var itemQ = db.StockCountItems
+                .Include(i => i.Product).ThenInclude(p => p!.Category)
+                .Where(i => i.StockCountId == id && i.Product != null);
+            if (productId.HasValue) itemQ = itemQ.Where(i => i.ProductId == productId);
+            if (categoryId.HasValue) itemQ = itemQ.Where(i => i.Product!.CategoryId == categoryId);
+            if (varianceOnly) itemQ = itemQ.Where(i => i.Variance != null && i.Variance != 0);
+            items.AddRange(await itemQ.ToListAsync());
+        }
+
+        // Resolve the two actor columns to names in one pass. StockCount has no user navigation
+        // (started_by/completed_by are bare Guids with no FK), so this is a manual join.
+        var userIds = counts.SelectMany(c => new[] { c.StartedBy, c.CompletedBy })
+            .Where(g => g.HasValue).Select(g => g!.Value).Distinct().ToList();
+        var userNames = new Dictionary<Guid, string>();
+        foreach (var uid in userIds)
+        {
+            var name = await db.Users.Where(u => u.Id == uid).Select(u => u.FullName).FirstOrDefaultAsync();
+            if (name != null) userNames[uid] = name;
+        }
+        string NameOf(Guid? id) => id.HasValue && userNames.TryGetValue(id.Value, out var n) ? n : "—";
+
+        var countsById = counts.ToDictionary(c => c.Id);
+        var rows = items.Select(i =>
+        {
+            var c = countsById[i.StockCountId];
+            var costPrice = i.Product!.CostPrice ?? i.Product.BasePrice;
+            return new StockReconciliationRow
+            {
+                CountId = c.Id.ToString()[..8],
+                StockCountId = c.Id,
+                CountType = c.CountType,
+                StartedAt = c.StartedAt,
+                CompletedAt = c.CompletedAt,
+                Branch = c.Branch?.Name ?? "—",
+                Sku = i.Product.Sku,
+                ProductName = i.Product.Name,
+                Category = i.Product.Category?.Name ?? "—",
+                SystemQty = i.SystemQuantity,
+                CountedQty = i.CountedQuantity,
+                Variance = i.Variance,
+                // Signed: a negative variance is stock that was there on paper and isn't on the
+                // shelf, i.e. a loss. Summing these nets shrinkage against overage, which is the
+                // number finance actually wants.
+                VarianceValue = (i.Variance ?? 0) * costPrice,
+                StartedBy = NameOf(c.StartedBy),
+                CompletedBy = c.CompletedBy.HasValue ? NameOf(c.CompletedBy) : null,
+                Status = c.Status,
+                CountedAt = i.CountedAt,
+            };
+        })
+        .OrderByDescending(r => r.StartedAt).ThenBy(r => r.ProductName)
+        .ToList();
+
+        // Accuracy is over *counted* lines only — a pending line is not evidence of accuracy, and
+        // counting it as a match would flatter an unfinished session towards 100%.
+        var counted = rows.Where(r => r.CountedQty != null).ToList();
+        var withVariance = counted.Count(r => (r.Variance ?? 0) != 0);
+        return new StockReconciliationResult
+        {
+            Kpis = new StockReconciliationKpis
+            {
+                SessionCount = rows.Select(r => r.StockCountId).Distinct().Count(),
+                ItemsCounted = counted.Count,
+                ItemsPending = rows.Count - counted.Count,
+                ItemsWithVariance = withVariance,
+                AccuracyPct = counted.Count == 0 ? 0 : Math.Round((decimal)(counted.Count - withVariance) / counted.Count * 100, 2),
+                NetVarianceUnits = counted.Sum(r => r.Variance ?? 0),
+                NetVarianceValue = counted.Sum(r => r.VarianceValue),
+                AbsVarianceValue = counted.Sum(r => Math.Abs(r.VarianceValue)),
+            },
+            Rows = rows,
+        };
+    }
+
     private async Task<WasteSpoilageResult> BuildWasteSpoilageAsync(
         DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, string? reasonFilter,
-        Guid? productId = null, Guid? categoryId = null, Guid? adjustedBy = null, bool isTobacco = false)
+        Guid? productId = null, Guid? categoryId = null, Guid? adjustedBy = null, bool isTobacco = false,
+        Guid? warehouseId = null, Guid? approvedBy = null, string? approvalStatus = null)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
         if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
         var adjQ = db.InventoryAdjustments.Include(a => a.Product).ThenInclude(p => p!.Category).Include(a => a.Branch).Include(a => a.Batch)
-            .Where(a => (a.AdjustmentType == "waste" || a.AdjustmentType == "damage" || a.AdjustmentType == "expired") && a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive);
+            // Both user navigations are needed for the FRD's "created by" / "approved by" columns —
+            // without them the projection below only has Guids to render.
+            .Include(a => a.AdjustedByUser).Include(a => a.ApprovedByUser)
+            .Where(a => (a.AdjustmentType == "waste" || a.AdjustmentType == "damage" || a.AdjustmentType == "expired"
+                || a.AdjustmentType == "theft" || a.AdjustmentType == "other") && a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive);
         if (branchId.HasValue) adjQ = adjQ.Where(a => a.BranchId == branchId);
+        if (warehouseId.HasValue) adjQ = adjQ.Where(a => a.WarehouseId == warehouseId);
         if (!string.IsNullOrEmpty(reasonFilter)) adjQ = adjQ.Where(a => a.AdjustmentType == reasonFilter);
         if (productId.HasValue) adjQ = adjQ.Where(a => a.ProductId == productId);
         if (categoryId.HasValue) adjQ = adjQ.Where(a => a.Product != null && a.Product.CategoryId == categoryId);
         if (adjustedBy.HasValue) adjQ = adjQ.Where(a => a.AdjustedBy == adjustedBy);
+        if (approvedBy.HasValue) adjQ = adjQ.Where(a => a.ApprovedBy == approvedBy);
+        if (!string.IsNullOrEmpty(approvalStatus)) adjQ = adjQ.Where(a => a.ApprovalStatus == approvalStatus);
         if (isTobacco) adjQ = adjQ.Where(a => a.Product != null && a.Product.IsTobacco);
         var adjustments = await adjQ.OrderByDescending(a => a.CreatedAt).ToListAsync();
 
@@ -1626,10 +2200,20 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 // Reason narrative when no separate note was recorded, since Notes is optional and often unset.
                 CostValue = a.Quantity * costOrPrice, Notes = a.Notes ?? a.Reason,
                 BatchNumber = a.Batch?.BatchNumber, ExpiryDate = a.Batch?.ExpiryDate,
+                AdjustmentId = a.Id,
+                CreatedBy = a.AdjustedByUser?.FullName ?? "—",
+                CreatedById = a.AdjustedBy,
+                ApprovedBy = a.ApprovedByUser?.FullName,
+                ApprovalStatus = a.ApprovalStatus,
+                ApprovedAt = a.ApprovedAt,
+                RejectionReason = a.RejectionReason,
             };
         }).ToList();
 
-        var totalWriteOff = rows.Sum(r => r.CostValue);
+        // Headline value counts only write-offs that actually left inventory (immediate/auto or
+        // approved). Pending rows still appear in the list below so they can be reviewed, but they
+        // haven't destroyed value yet, so they must not inflate the total or the %-of-sales figure.
+        var totalWriteOff = rows.Where(r => r.ApprovalStatus == null || r.ApprovalStatus == "approved").Sum(r => r.CostValue);
         return new WasteSpoilageResult
         {
             Kpis = new WasteSpoilageKpis
@@ -2783,12 +3367,147 @@ public sealed class LowStockResult
     public List<LowStockRow> Rows { get; init; } = [];
 }
 
-public sealed class InventorySnapshotRow
+// FRD §2.6 / §2.7 — inventory KPIs and aging.
+public sealed class InventoryDashboardKpis
 {
+    public decimal TotalStockValue { get; set; }
+    public decimal AvailableStockQty { get; init; }
+    public int OutOfStockProducts { get; init; }
+    public int NegativeInventoryItems { get; init; }
+    public int LowStockProducts { get; init; }
+    public int PendingPurchaseOrders { get; init; }
+    public decimal WastageValue { get; set; }
+    public decimal InventoryTurnover { get; init; }
+    public decimal CogsValue { get; init; }
+}
+
+public sealed class InventoryMoverRow
+{
+    public Guid ProductId { get; init; }
+    public string Sku { get; init; } = "";
+    public string ProductName { get; init; } = "";
+    public decimal UnitsMoved { get; init; }
+    public decimal CogsValue { get; init; }
+}
+
+public sealed class InventoryAgingBucket
+{
+    public string Bucket { get; init; } = "";
+    public int SkuCount { get; init; }
+    public decimal OnHandQty { get; init; }
+    public decimal StockValue { get; set; }
+}
+
+/// <summary>
+/// How much of the requested period the movement ledger actually covers. The UI renders this as a
+/// caveat next to turnover/movers so a partial figure is never mistaken for a complete one.
+/// </summary>
+public sealed class InventoryDataWindow
+{
+    public DateTime? LedgerStart { get; init; }
+    public DateTime From { get; init; }
+    public DateTime To { get; init; }
+    public bool CoversFullPeriod { get; init; }
+    public int SaleMovementsInPeriod { get; init; }
+}
+
+/// <summary>
+/// FRD §2.7 — one row per product held at one location. Covers all four required items: Product Age
+/// in Stock (<see cref="ProductAgeDays"/>), Days Since Last Movement, Slow Moving
+/// (<see cref="UnitsMovedInPeriod"/>), and Dead Stock Analysis (<see cref="IsDeadStock"/>).
+/// </summary>
+public sealed class InventoryAgingRow
+{
+    public Guid ProductId { get; init; }
     public string Sku { get; init; } = "";
     public string ProductName { get; init; } = "";
     public string Category { get; init; } = "";
+    public string Location { get; init; } = "";
+    public string LocationType { get; init; } = "";
+    public decimal OnHandQty { get; init; }
+    public decimal StockValue { get; set; }
+    // Age of the oldest batch still holding stock here. Null when no batch record exists — the
+    // stock row alone cannot say when the goods arrived.
+    public int? ProductAgeDays { get; init; }
+    public int DaysSinceLastMovement { get; init; }
+    public DateTime LastMovementDate { get; init; }
+    // "ledger" = a real recorded movement. "stock_row" = fallback to the stock row's LastUpdated,
+    // which predates the ledger and is only an approximation.
+    public string LastMovementSource { get; init; } = "";
+    public decimal UnitsMovedInPeriod { get; init; }
+    public string AgeBucket { get; init; } = "";
+    public bool IsDeadStock { get; init; }
+}
+
+public sealed class InventoryDashboardResult
+{
+    public InventoryDashboardKpis Kpis { get; init; } = new();
+    public List<InventoryMoverRow> TopMoving { get; init; } = [];
+    public List<InventoryMoverRow> SlowMoving { get; init; } = [];
+    public List<InventoryAgingBucket> Aging { get; init; } = [];
+    public List<InventoryAgingRow> AgingRows { get; init; } = [];
+    public int DeadStockSkus { get; init; }
+    public decimal DeadStockValue { get; set; }
+    public InventoryDataWindow DataWindow { get; init; } = new();
+}
+
+// FRD §2.1 — "Stock Review" / "Stock Audit" / "Inventory Reconciliation" are one report over
+// StockCount + StockCountItem. One row per counted line, not per session.
+public sealed class StockReconciliationRow
+{
+    // Truncated for display; StockCountId is the real key for drilling into the session.
+    public string CountId { get; init; } = "";
+    public Guid StockCountId { get; init; }
+    // review | audit | reconciliation, or null for sessions predating the column ("unspecified").
+    public string? CountType { get; init; }
+    public DateTime StartedAt { get; init; }
+    public DateTime? CompletedAt { get; init; }
     public string Branch { get; init; } = "";
+    public string Sku { get; init; } = "";
+    public string ProductName { get; init; } = "";
+    public string Category { get; init; } = "";
+    public decimal SystemQty { get; init; }
+    // Null while a line is still pending — rendered as "—", never as a 0 that would read as
+    // "counted, found nothing".
+    public decimal? CountedQty { get; init; }
+    public decimal? Variance { get; init; }
+    public decimal VarianceValue { get; set; }
+    public string StartedBy { get; init; } = "";
+    public string? CompletedBy { get; init; }
+    public string Status { get; init; } = "";
+    public DateTime? CountedAt { get; init; }
+}
+
+public sealed class StockReconciliationKpis
+{
+    public int SessionCount { get; init; }
+    public int ItemsCounted { get; init; }
+    public int ItemsPending { get; init; }
+    public int ItemsWithVariance { get; init; }
+    public decimal AccuracyPct { get; init; }
+    public decimal NetVarianceUnits { get; init; }
+    public decimal NetVarianceValue { get; set; }
+    public decimal AbsVarianceValue { get; set; }
+}
+
+public sealed class StockReconciliationResult
+{
+    public StockReconciliationKpis Kpis { get; init; } = new();
+    public List<StockReconciliationRow> Rows { get; init; } = [];
+}
+
+public sealed class InventorySnapshotRow
+{
+    public Guid ProductId { get; init; }
+    public string Sku { get; init; } = "";
+    public string ProductName { get; init; } = "";
+    public string Category { get; init; } = "";
+    // Replaces the old branch-only `Branch` field: this report now spans both stock pools, so a row
+    // names whichever location holds it and says which kind that is. LocationId lets the UI filter
+    // without matching on display names.
+    public string LocationType { get; init; } = "";
+    public string Location { get; init; } = "";
+    public Guid LocationId { get; init; }
     public bool IsTobacco { get; init; }
     public decimal OnHandQty { get; init; }
     public decimal ReservedQty { get; init; }
@@ -3004,6 +3723,19 @@ public sealed class WasteSpoilageRow
     public string? Notes { get; init; }
     public string? BatchNumber { get; init; }
     public DateTime? ExpiryDate { get; init; }
+    // FRD §2.3 — the report must name both the employee who raised the write-off and the one who
+    // approved it. AdjustmentId is the real Guid (WasteId above is a truncated display string and
+    // can't be used to call the approval endpoint).
+    public Guid AdjustmentId { get; init; }
+    public string CreatedBy { get; init; } = "";
+    // The raiser's id, so the UI can disable Approve on a write-off the viewer raised themselves
+    // rather than offering a button the endpoint will 403. Separate from the display name because
+    // matching on names would break for two staff who share one.
+    public Guid? CreatedById { get; init; }
+    public string? ApprovedBy { get; init; }
+    public string? ApprovalStatus { get; init; }
+    public DateTime? ApprovedAt { get; init; }
+    public string? RejectionReason { get; init; }
 }
 
 public sealed class WasteSpoilageKpis

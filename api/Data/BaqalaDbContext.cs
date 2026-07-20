@@ -34,6 +34,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<InventoryStock> InventoryStocks { get; set; }
     public DbSet<InventoryBatch> InventoryBatches { get; set; }
     public DbSet<InventoryAdjustment> InventoryAdjustments { get; set; }
+    public DbSet<ProductRecall> ProductRecalls { get; set; }
     public DbSet<StockCount> StockCounts { get; set; }
     public DbSet<StockCountItem> StockCountItems { get; set; }
     public DbSet<StockMovement> StockMovements { get; set; }
@@ -189,12 +190,41 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasForeignKey(o => o.CashierId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // ─── InventoryAdjustment: adjusted_by ────────────────────────────────
+        // ─── InventoryAdjustment: adjusted_by / approved_by ──────────────────
         modelBuilder.Entity<InventoryAdjustment>()
             .HasOne(a => a.AdjustedByUser)
             .WithMany()
             .HasForeignKey(a => a.AdjustedBy)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<InventoryAdjustment>()
+            .HasOne(a => a.ApprovedByUser)
+            .WithMany()
+            .HasForeignKey(a => a.ApprovedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── ProductRecall: two User FKs + optional batch/branch/supplier ────
+        modelBuilder.Entity<ProductRecall>()
+            .HasOne(r => r.InitiatedByUser)
+            .WithMany()
+            .HasForeignKey(r => r.InitiatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ProductRecall>()
+            .HasOne(r => r.ClosedByUser)
+            .WithMany()
+            .HasForeignKey(r => r.ClosedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Recall lookup is per-(product, status) on the POS hot path — see
+        // OrdersController's sale guard, which runs this for every line of every order.
+        modelBuilder.Entity<ProductRecall>()
+            .HasIndex(r => new { r.ProductId, r.Status });
+
+        // ─── ProductPriceList: resolution index ──────────────────────────────
+        // IPriceResolutionService always filters (product, price_type, is_active) first.
+        modelBuilder.Entity<ProductPriceList>()
+            .HasIndex(p => new { p.ProductId, p.PriceType, p.IsActive });
 
         // ─── WarehouseRequest: two Branch FKs ────────────────────────────────
         modelBuilder.Entity<WarehouseRequest>()
@@ -310,6 +340,12 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasOne(st => st.ApprovedByUser)
             .WithMany()
             .HasForeignKey(st => st.ApprovedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockTransfer>()
+            .HasOne(st => st.ReceivedByUser)
+            .WithMany()
+            .HasForeignKey(st => st.ReceivedBy)
             .OnDelete(DeleteBehavior.Restrict);
 
         // ─── StockTransfer: multiple Branch FKs ──────────────────────────────

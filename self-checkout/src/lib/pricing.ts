@@ -64,8 +64,18 @@ export function computePricing(args: {
   branchId: string | null;
   customer: Customer | null;
   tobaccoFeeEnabled: boolean;
+  // productId → resolved unit price (FRD §12). Optional and empty-by-default on purpose: an absent
+  // entry means "no price rule applies", which resolves to basePrice — exactly what this engine
+  // did before price rules existed. So a failed/omitted fetch degrades to the old prices rather
+  // than to zero.
+  priceMap?: Map<string, number>;
 }): PricingResult {
-  const { lines, coupon, products, activeDiscounts, activeOffers: allActiveOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled } = args;
+  const { lines, coupon, products, activeDiscounts, activeOffers: allActiveOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled, priceMap } = args;
+
+  // The single place a unit price is sourced in this engine. Every site that used to read
+  // `product.basePrice` directly now goes through here, so the kiosk and the staffed till
+  // (src/routes/_app.pos.tsx, which resolves the same map) can't drift apart on price.
+  const priceOf = (p: Product) => priceMap?.get(p.id) ?? p.basePrice;
 
   // ─── Barcode-specific offers — mirrors the staff POS (src/routes/_app.pos.tsx). An offer keyed
   // to an exact barcode fires only when the trigger product carries that barcode; the kiosk reads
@@ -111,12 +121,12 @@ export function computePricing(args: {
   const bundleRows: PricingRow[] = [];
   for (const c of bonusContributions) {
     const product = products.find((p) => p.id === c.productId);
-    const amount = c.bonusQty * Math.max(0, (product?.basePrice ?? 0) - c.payPerUnit);
+    const amount = c.bonusQty * Math.max(0, (product ? priceOf(product) : 0) - c.payPerUnit);
     if (amount > 0) bundleRows.push({ key: c.offerId, label: `${c.offerName} (+${c.bonusQty} ${product?.name ?? "free"})`, amount });
   }
   const bundleDiscount = bundleRows.reduce((s, r) => s + r.amount, 0);
 
-  const subtotal = displayLines.reduce((s, l) => s + l.quantity * l.product.basePrice, 0);
+  const subtotal = displayLines.reduce((s, l) => s + l.quantity * priceOf(l.product), 0);
 
   // ─── KSA tobacco excise — min 25 SAR or 100% of base price, whichever is higher, per unit.
   // Bonus units still leave the shelf and are still excisable, so this runs over displayLines
@@ -126,7 +136,7 @@ export function computePricing(args: {
     return basePrice <= 25 ? 25 : basePrice;
   }
   const tobaccoExcise = tobaccoFeeEnabled
-    ? displayLines.reduce((sum, l) => (l.product.isTobacco ? sum + l.quantity * calcTobaccoFee(l.product.basePrice) : sum), 0)
+    ? displayLines.reduce((sum, l) => (l.product.isTobacco ? sum + l.quantity * calcTobaccoFee(priceOf(l.product)) : sum), 0)
     : 0;
 
   // ─── Coupon ────────────────────────────────────────────────────────────────
@@ -154,20 +164,20 @@ export function computePricing(args: {
     let amount = 0;
     if (d.appliesTo === "all" || d.appliesTo === "branch") {
       const eligible = displayLines.filter((l) => !excludedIds.has(l.product.id));
-      const eligibleSubtotal = eligible.reduce((s, l) => s + l.quantity * l.product.basePrice, 0);
+      const eligibleSubtotal = eligible.reduce((s, l) => s + l.quantity * priceOf(l.product), 0);
       if (eligibleSubtotal > 0) {
         amount = d.discountType === "percentage" ? eligibleSubtotal * (d.value / 100) : Math.min(d.value, eligibleSubtotal);
       }
     } else if (d.appliesTo === "product" && d.productId && !excludedIds.has(d.productId)) {
       const line = displayLines.find((l) => l.product.id === d.productId);
       if (line) {
-        const lineTotal = line.quantity * line.product.basePrice;
+        const lineTotal = line.quantity * priceOf(line.product);
         amount = d.discountType === "percentage" ? lineTotal * (d.value / 100) : Math.min(d.value * line.quantity, lineTotal);
       }
     } else if (d.appliesTo === "category" && d.categoryId) {
       const catLines = displayLines.filter((l) => !excludedIds.has(l.product.id) && l.product.categoryId === d.categoryId);
       amount = catLines.reduce((s, l) => {
-        const lineTotal = l.quantity * l.product.basePrice;
+        const lineTotal = l.quantity * priceOf(l.product);
         return s + (d.discountType === "percentage" ? lineTotal * (d.value / 100) : Math.min(d.value * l.quantity, lineTotal));
       }, 0);
     }
@@ -188,7 +198,7 @@ export function computePricing(args: {
       const getQty = o.getQuantity || 1;
       const amount = lines.reduce((s, l) => {
         const sets = Math.floor(l.quantity / (triggerQty + getQty));
-        return s + sets * getQty * l.product.basePrice;
+        return s + sets * getQty * priceOf(l.product);
       }, 0);
       if (amount > 0) offerRows.push({ key: o.id, label: o.name, amount });
       continue;
@@ -197,9 +207,9 @@ export function computePricing(args: {
       const line = lines.find((l) => l.product.id === o.triggerProductId);
       if (!line) continue;
       const amount = o.discountPercentage
-        ? line.quantity * line.product.basePrice * (o.discountPercentage / 100)
+        ? line.quantity * priceOf(line.product) * (o.discountPercentage / 100)
         : o.offerPrice != null
-          ? line.quantity * Math.max(0, line.product.basePrice - o.offerPrice)
+          ? line.quantity * Math.max(0, priceOf(line.product) - o.offerPrice)
           : 0;
       if (amount > 0) offerRows.push({ key: o.id, label: o.name, amount });
       continue;
@@ -208,7 +218,10 @@ export function computePricing(args: {
       const ids = parseComboIds(o.itemsDescription);
       if (ids.length < 2 || !ids.every((id) => lines.some((l) => l.product.id === id))) continue;
       if (o.offerPrice == null) continue;
-      const retailTotal = ids.reduce((s, id) => s + (lines.find((l) => l.product.id === id)?.product.basePrice ?? 0), 0);
+      const retailTotal = ids.reduce((s, id) => {
+        const found = lines.find((l) => l.product.id === id);
+        return s + (found ? priceOf(found.product) : 0);
+      }, 0);
       const amount = Math.max(0, retailTotal - o.offerPrice);
       if (amount > 0) offerRows.push({ key: o.id, label: o.name, amount });
       continue;
@@ -223,7 +236,7 @@ export function computePricing(args: {
   const productDiscountRows: PricingRow[] = [];
   for (const l of displayLines) {
     if (!l.product.discount || l.product.discount <= 0) continue;
-    const lineTotal = l.quantity * l.product.basePrice;
+    const lineTotal = l.quantity * priceOf(l.product);
     const amount =
       l.product.discountType === "percentage"
         ? lineTotal * (l.product.discount / 100)

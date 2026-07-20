@@ -19,6 +19,16 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(20);
 
+    // The one definition of "near expiry" for this service — matches DashboardController's
+    // "expiring soon" tile, so the Bell, the dashboard and the daily digest all agree on what
+    // counts. (Note InventoryController's /batches/expiring endpoint takes a caller-supplied
+    // daysAhead defaulting to 30 — that's an ad-hoc lookahead query, not this standing threshold.)
+    private const int NearExpiryDays = 7;
+
+    // Notification.Type for the daily digest. Also the dedup key that keeps it to once a day —
+    // see SendDailyExpiryDigestAsync.
+    private const string DigestType = "Daily Expiry Digest";
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try { await Task.Delay(InitialDelay, stoppingToken); } catch (OperationCanceledException) { return; }
@@ -47,7 +57,100 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
 
         await ScanStockLevelsAsync(db, notifications, ct);
         await ScanExpiringBatchesAsync(db, notifications, stockMovements, ct);
+        await SendDailyExpiryDigestAsync(db, notifications, ct);
         await ScanOfflineTerminalsAsync(db, notifications, ct);
+    }
+
+    // ─── Daily near-expiry digest (FRD §13) ──────────────────────────────────
+    //
+    // ScanExpiringBatchesAsync already alerts per product as batches cross the 7-day horizon, but
+    // those fire once and then stay silent while unread — deliberately, so the Bell isn't spammed
+    // every 15 minutes. The consequence is that a near-expiry item nobody actions never surfaces
+    // again: the alert is a one-shot on the *transition*, not a standing reminder of the backlog.
+    //
+    // This is that standing reminder: one summary per branch per day, listing everything currently
+    // near expiry or expired, so the wastage watch-list gets looked at on a predictable cadence.
+    //
+    // "Once a day" is enforced against the Notifications table rather than a timer or an in-memory
+    // flag: the scan loop is 15-minutely and the process restarts freely, so anything held in
+    // memory would re-send the digest on every deploy. Asking the table "did today's digest already
+    // go out for this branch?" is the same dedup approach the rest of this service uses, just
+    // scoped by date instead of by unread.
+    private const int DigestHourUtc = 5;      // 08:00 in Riyadh (UTC+3, no DST) — the tenant's morning.
+    private const int NamesInDigest = 5;      // Beyond this the message becomes unreadable; the rest are counted.
+
+    private async Task SendDailyExpiryDigestAsync(BaqalaDbContext db, INotificationService notifications, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        if (now.Hour < DigestHourUtc) return;
+
+        var horizon = now.AddDays(NearExpiryDays);
+        var todayStart = now.Date;
+
+        // Note the RemainingQuantity filter deliberately does NOT apply to the expired side.
+        // ScanExpiringBatchesAsync runs earlier in this same scan and writes an expired batch down
+        // to RemainingQuantity = 0, so filtering on > 0 across the board would make the "expired"
+        // half of this digest permanently empty — the summary would silently only ever report
+        // near-expiry. An expired batch is counted if it was written off today, which is exactly
+        // the thing the morning summary exists to report.
+        var atRisk = await db.InventoryBatches
+            .Include(b => b.Product)
+            .Where(b => b.ExpiryDate != null && b.ExpiryDate <= horizon &&
+                        (
+                            // Near expiry: still sellable, still on the shelf.
+                            (b.Status != "consumed" && b.Status != "expired" && b.RemainingQuantity > 0) ||
+                            // Expired: written off (or awaiting write-off) today.
+                            (b.Status == "expired" && b.UpdatedAt >= todayStart)
+                        ))
+            .ToListAsync(ct);
+
+        if (atRisk.Count == 0) return;
+
+        foreach (var group in atRisk.GroupBy(b => b.BranchId))
+        {
+            var branchId = group.Key;
+
+            // One digest per branch per day. A branch whose digest already went out is skipped even
+            // if new batches have since crossed the horizon — those already got their own per-product
+            // alert from ScanExpiringBatchesAsync; this is a summary, not a second alert channel.
+            var alreadySent = await db.Notifications.AnyAsync(n =>
+                n.Type == DigestType && n.BranchId == branchId && n.CreatedAt >= todayStart, ct);
+            if (alreadySent) continue;
+
+            var expired = group.Where(b => b.ExpiryDate!.Value.Date < now.Date).ToList();
+            var nearExpiry = group.Where(b => b.ExpiryDate!.Value.Date >= now.Date).ToList();
+
+            var parts = new List<string>();
+            if (nearExpiry.Count > 0)
+                parts.Add($"{nearExpiry.Count} batch(es) expiring within {NearExpiryDays} days ({Describe(nearExpiry)})");
+            if (expired.Count > 0)
+                parts.Add($"{expired.Count} expired batch(es) ({Describe(expired)})");
+            if (parts.Count == 0) continue;
+
+            var units = group.Sum(b => b.RemainingQuantity);
+
+            await notifications.NotifyRoleAsync(
+                ["Manager", "Admin"], branchId,
+                "Expiry / Perishable", DigestType, "Daily Expiry Summary",
+                $"{string.Join("; ", parts)}. {units:0.##} unit(s) at risk — review the Batches watch-list.",
+                severity: expired.Count > 0 ? "error" : "warning",
+                entityType: "InventoryBatch");
+        }
+    }
+
+    // "Milk, Labneh, Yoghurt +3 more" — enough to recognise the problem from the Bell without
+    // opening the page, without pasting a hundred SKUs into a notification body.
+    private static string Describe(List<Models.InventoryBatch> batches)
+    {
+        var names = batches
+            .Select(b => b.Product?.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct()
+            .ToList();
+
+        if (names.Count == 0) return "unnamed items";
+        var shown = string.Join(", ", names.Take(NamesInDigest));
+        return names.Count > NamesInDigest ? $"{shown} +{names.Count - NamesInDigest} more" : shown;
     }
 
     private async Task ScanStockLevelsAsync(BaqalaDbContext db, INotificationService notifications, CancellationToken ct)
@@ -88,7 +191,7 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
     private async Task ScanExpiringBatchesAsync(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
-        var horizon = now.AddDays(7); // matches DashboardController's "expiring soon" tile
+        var horizon = now.AddDays(NearExpiryDays);
 
         var batches = await db.InventoryBatches
             .Include(b => b.Product)
@@ -103,15 +206,32 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
 
             if (isExpired)
             {
+                // On-hand either side of the write-off, for the audit trail. Read from the stock row
+                // rather than derived from writtenOff: the removal clamps at zero, so a location
+                // already short moves by less than the batch's remaining quantity.
+                decimal? quantityBefore = null, quantityAfter = null;
+
                 if (batch.BranchId.HasValue)
                 {
                     var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == batch.BranchId && s.ProductId == batch.ProductId, ct);
-                    if (stock != null) { stock.Quantity = Math.Max(0, stock.Quantity - writtenOff); stock.LastUpdated = stock.UpdatedAt = now; }
+                    if (stock != null)
+                    {
+                        quantityBefore = stock.Quantity;
+                        stock.Quantity = Math.Max(0, stock.Quantity - writtenOff);
+                        quantityAfter = stock.Quantity;
+                        stock.LastUpdated = stock.UpdatedAt = now;
+                    }
                 }
                 else if (batch.WarehouseId.HasValue)
                 {
                     var stock = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == batch.WarehouseId && s.ProductId == batch.ProductId, ct);
-                    if (stock != null) { stock.Quantity = Math.Max(0, stock.Quantity - writtenOff); stock.LastUpdated = stock.UpdatedAt = now; }
+                    if (stock != null)
+                    {
+                        quantityBefore = stock.Quantity;
+                        stock.Quantity = Math.Max(0, stock.Quantity - writtenOff);
+                        quantityAfter = stock.Quantity;
+                        stock.LastUpdated = stock.UpdatedAt = now;
+                    }
                 }
 
                 db.InventoryAdjustments.Add(new Models.InventoryAdjustment
@@ -135,7 +255,8 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
                 stockMovements.Record(
                     batch.ProductId, batch.BranchId, batch.WarehouseId, "expired", -writtenOff,
                     batchId: batch.Id, referenceType: "batch_expiry", referenceId: batch.Id,
-                    notes: "Automatic write-off: batch expired");
+                    notes: "Automatic write-off: batch expired",
+                    quantityBefore: quantityBefore, quantityAfter: quantityAfter);
             }
             else if (batch.Status == "active")
             {

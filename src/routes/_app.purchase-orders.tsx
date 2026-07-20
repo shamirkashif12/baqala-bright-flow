@@ -833,6 +833,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                   <thead className="bg-muted/40">
                     <tr>
                       <th className="text-left px-3 py-2">Product</th>
+                      <th className="text-left px-2 py-2">SKU</th>
                       <th className="text-right px-2 py-2">Ordered</th>
                       <th className="text-right px-2 py-2">Received</th>
                       <th className="text-right px-2 py-2">Delta</th>
@@ -847,6 +848,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                       return (
                         <tr key={it.id} className={`border-t border-border/40 ${hasDiscrepancy ? "bg-warning/5" : ""}`}>
                           <td className="px-3 py-2">{it.product?.name ?? it.productId}</td>
+                          <td className="px-2 py-2 font-mono text-[11px] text-muted-foreground">{it.product?.sku ?? "—"}</td>
                           <td className="px-2 py-2 text-right">{it.orderedQuantity}</td>
                           <td className="px-2 py-2 text-right">{it.receivedQuantity > 0 ? it.receivedQuantity : <span className="text-muted-foreground">—</span>}</td>
                           <td className="px-2 py-2 text-right">

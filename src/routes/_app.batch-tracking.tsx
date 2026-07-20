@@ -8,10 +8,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
-import { Boxes, PackageCheck, CalendarClock, Download, X, Loader2, Eye, Building2, Warehouse as WarehouseIcon } from "lucide-react";
+import { Boxes, PackageCheck, CalendarClock, Download, X, Loader2, Eye, Building2, Warehouse as WarehouseIcon, ArrowDownUp, Lock } from "lucide-react";
+import { toast } from "sonner";
 import { api, type InventoryBatch, type Branch, type Warehouse, type StockMovement, type InventoryAdjustment } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge } from "@/components/batch-status-badge";
+
+// Per-branch picking strategy — mirrors BatchConsumptionService.StrategySettingKey on the backend.
+// Absent/unrecognised means FEFO (the grocery-safe default), matching the service's Normalize().
+const PICKING_STRATEGY_KEY = "inventory_picking_strategy";
+const STRATEGIES = [
+  { value: "fefo", label: "FEFO", full: "First Expired, First Out", hint: "Picks whatever spoils soonest. Best for perishables — the default." },
+  { value: "fifo", label: "FIFO", full: "First In, First Out", hint: "Picks whatever was received earliest, regardless of expiry." },
+] as const;
 
 export const Route = createFileRoute("/_app/batch-tracking")({ component: BatchTracking });
 
@@ -216,6 +226,109 @@ function BatchDetailSheet({ batch, branches, warehouses, onClose }: {
   );
 }
 
+// ─── Picking-strategy control (FIFO / FEFO) ───────────────────────────────────
+// Replaces the raw "PUT /api/settings/tenant/{branchId}" workaround with an in-app toggle.
+// Edit is gated on the Settings module's canEdit flag — the same permission the backend's
+// [RequirePermission("Settings", Edit)] enforces on the underlying endpoint — so only higher
+// roles can flip a branch's strategy; everyone else sees it read-only.
+function PickingStrategyCard({ branchId, branchName, canEdit }: {
+  branchId: string | null;
+  branchName: string;
+  canEdit: boolean;
+}) {
+  const [strategy, setStrategy] = useState<string>("fefo");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  useEffect(() => {
+    // No branch resolved yet (e.g. admin viewing "All Branches") — nothing to load; the card
+    // still renders with a "select a branch" prompt so users can see where the control lives.
+    if (!branchId) { setStrategy("fefo"); setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    api.getTenantSettings(branchId)
+      .then(s => { if (!cancelled) setStrategy((s[PICKING_STRATEGY_KEY] ?? "fefo").toLowerCase() === "fifo" ? "fifo" : "fefo"); })
+      .catch(() => { if (!cancelled) setStrategy("fefo"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [branchId]);
+
+  async function choose(next: string) {
+    if (!branchId || !canEdit || next === strategy || saving) return;
+    const prev = strategy;
+    setStrategy(next); // optimistic
+    setSaving(next);
+    try {
+      await api.updateTenantSettings(branchId, { [PICKING_STRATEGY_KEY]: next });
+      toast.success(`${branchName}: picking strategy set to ${next.toUpperCase()}`);
+    } catch (e) {
+      setStrategy(prev); // revert on failure
+      toast.error(e instanceof Error ? e.message : "Failed to update picking strategy");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const active = STRATEGIES.find(s => s.value === strategy) ?? STRATEGIES[0];
+  // Buttons are inert until a branch is picked AND the user may edit — but the toggle stays
+  // visible in both cases so the control is always discoverable.
+  const disabled = !branchId || !canEdit || saving !== null;
+
+  return (
+    <div className="rounded-xl border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary"><ArrowDownUp className="h-4 w-4" /></div>
+          <div>
+            <p className="text-sm font-semibold flex items-center gap-1.5">
+              Picking Strategy
+              {branchId && !canEdit && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground"><Lock className="h-3 w-3" /> View only</span>}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {branchId
+                ? <>How stock is drawn from batches at <span className="font-medium text-foreground">{branchName}</span> for sales, returns &amp; transfers.</>
+                : <>Controls whether stock is drawn First-Expired (FEFO) or First-In (FIFO) at a branch — for sales, returns &amp; transfers.</>}
+            </p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…</div>
+        ) : (
+          <div className={`inline-flex rounded-lg border bg-muted/40 p-0.5 ${!branchId ? "opacity-60" : ""}`} role="group" aria-label="Picking strategy">
+            {STRATEGIES.map(s => {
+              const isActive = branchId ? s.value === strategy : false;
+              return (
+                <button
+                  key={s.value}
+                  type="button"
+                  disabled={disabled}
+                  title={`${s.full} — ${s.hint}`}
+                  onClick={() => choose(s.value)}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  } ${disabled ? "cursor-not-allowed" : ""}`}
+                >
+                  {saving === s.value && <Loader2 className="h-3 w-3 animate-spin" />}
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <p className="mt-2 text-[11px] text-muted-foreground border-t border-dashed border-border/50 pt-2">
+        {!branchId
+          ? <span className="inline-flex items-center gap-1"><Building2 className="h-3 w-3" /> Select a branch below to view or change its picking strategy.</span>
+          : !loading
+            ? <><span className="font-medium text-foreground">{active.label}</span> — {active.full}. {active.hint}{!canEdit && " Ask an admin/manager to change it."}</>
+            : null}
+      </p>
+    </div>
+  );
+}
+
 // ─── Per-location-type panel (one for Branches, one for Warehouses) ───────────
 
 function BatchLocationPanel({
@@ -228,6 +341,7 @@ function BatchLocationPanel({
   warehouses: Warehouse[];
   onView: (b: InventoryBatch) => void;
 }) {
+  const { canEdit: canEditStrategy } = usePermission("Settings");
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -312,6 +426,13 @@ function BatchLocationPanel({
 
   const locationLabel = locationType === "branch" ? "Branch" : "Warehouse";
 
+  // Picking strategy is a per-branch setting (a warehouse has no tenant_settings row to hang it off,
+  // matching GetStrategyAsync on the backend), so the card only appears for a single, resolved branch.
+  const resolvedBranchId = locationType === "branch"
+    ? (lockedLocationId ?? (locationFilter !== "all" ? locationFilter : null))
+    : null;
+  const resolvedBranchName = resolvedBranchId ? locations.find(l => l.id === resolvedBranchId)?.name ?? "this branch" : "";
+
   return (
     <div className="space-y-4">
       {/* Metrics */}
@@ -320,6 +441,12 @@ function BatchLocationPanel({
         <MetricCard label="Active" value={String(active)} icon={PackageCheck} accent="success" />
         <MetricCard label="Near Expiry / Expired" value={String(wastageRisk)} icon={CalendarClock} accent="warning" />
       </div>
+
+      {/* Per-branch FIFO / FEFO picking strategy — always shown on the Branches tab so the control
+          is discoverable; it prompts to pick a branch when none is resolved (e.g. admin on "All"). */}
+      {locationType === "branch" && (
+        <PickingStrategyCard branchId={resolvedBranchId} branchName={resolvedBranchName} canEdit={canEditStrategy} />
+      )}
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">

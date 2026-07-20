@@ -231,7 +231,9 @@ public class InventoryController(
 
         stockMovements.Record(
             req.ProductId, req.BranchId, warehouseId: null, movementType: "manual_receive", quantity: req.Quantity,
-            batchId: batch.Id, referenceType: "manual_receive", referenceId: batch.Id, notes: req.DamagedOrReturnReason);
+            batchId: batch.Id, referenceType: "manual_receive", referenceId: batch.Id, notes: req.DamagedOrReturnReason,
+            createdBy: CallerId(),
+            quantityBefore: quantityBefore, quantityAfter: quantityBefore + req.Quantity);
 
         await db.SaveChangesAsync();
 
@@ -295,18 +297,33 @@ public class InventoryController(
     }
 
     [HttpGet("adjustments")]
-    public async Task<IActionResult> GetAdjustments([FromQuery] Guid? branchId, [FromQuery] Guid? warehouseId, [FromQuery] Guid? batchId, [FromQuery] string? adjustmentType)
+    public async Task<IActionResult> GetAdjustments(
+        [FromQuery] Guid? branchId, [FromQuery] Guid? warehouseId, [FromQuery] Guid? batchId,
+        [FromQuery] string? adjustmentType, [FromQuery] Guid? productId, [FromQuery] Guid? adjustedBy,
+        [FromQuery] string? approvalStatus)
     {
         var query = db.InventoryAdjustments
             .Include(a => a.Product)
             .Include(a => a.Branch)
             .Include(a => a.Warehouse)
+            .Include(a => a.Batch)
             .Include(a => a.AdjustedByUser)
+            .Include(a => a.ApprovedByUser)
             .AsQueryable();
         if (branchId.HasValue) query = query.Where(a => a.BranchId == branchId);
         if (warehouseId.HasValue) query = query.Where(a => a.WarehouseId == warehouseId);
         if (batchId.HasValue) query = query.Where(a => a.BatchId == batchId);
+        if (productId.HasValue) query = query.Where(a => a.ProductId == productId);
+        if (adjustedBy.HasValue) query = query.Where(a => a.AdjustedBy == adjustedBy);
         if (!string.IsNullOrEmpty(adjustmentType)) query = query.Where(a => a.AdjustmentType == adjustmentType);
+        if (!string.IsNullOrEmpty(approvalStatus)) query = query.Where(a => a.ApprovalStatus == approvalStatus);
+
+        // This endpoint had no branch scoping while every other read in this controller does —
+        // a branch-scoped user could enumerate every branch's write-off history through it.
+        var (role, callerBranchId) = GetCallerContext();
+        if (role != "tenant_admin" && callerBranchId.HasValue)
+            query = query.Where(a => a.BranchId == callerBranchId);
+
         return Ok(await query.OrderByDescending(a => a.CreatedAt).ToListAsync());
     }
 
@@ -362,6 +379,8 @@ public class InventoryController(
         // an authenticated user's claim always wins over whatever the body asserts.
         var actingUserId = CallerId() ?? req.AdjustedBy;
 
+        var requiresApproval = RequiresApproval(req.AdjustmentType);
+
         var adjustment = new InventoryAdjustment
         {
             Id = Guid.NewGuid(),
@@ -372,45 +391,38 @@ public class InventoryController(
             AdjustmentType = req.AdjustmentType,
             Reason = req.Reason ?? "",
             AdjustedBy = actingUserId,
+            // FRD §2.3: wastage write-offs (waste/damage/expired/theft/other) are held for sign-off
+            // and DON'T touch on-hand until approved — same maker-checker gate as a stock transfer.
+            // Everything else (cycle-count corrections, transfer legs) applies immediately.
+            // Auto-expiry write-offs are raised directly by OperationalAlertsService, not through
+            // this endpoint, so they never enter this queue.
+            ApprovalStatus = requiresApproval ? "pending" : null,
+            StockApplied = !requiresApproval,
             CreatedAt = DateTime.UtcNow,
         };
-
-        // Captured before the mutation below — InventoryAdjustment itself only stores the delta,
-        // so the on-hand quantity before/after the change exists nowhere else and is exactly what
-        // the audit trail needs to make an adjustment reviewable.
-        var quantityBefore = stock.Quantity;
-
-        if (isIncrease)
-            stock.Quantity += req.Quantity;
-        else
-            // Clamp at zero rather than letting a removal push stock negative — same
-            // convention OrdersController.Create already uses when a sale reduces stock.
-            stock.Quantity = Math.Max(0, stock.Quantity - req.Quantity);
-        stock.LastUpdated = DateTime.UtcNow;
-
-        if (batch != null)
-        {
-            // Increases only ever credit RemainingQuantity, never the original received Quantity
-            // — same convention StockTransfersController.RestoreSourceAsync already uses when
-            // giving stock back to a batch; Quantity stays an immutable "originally received" fact.
-            batch.RemainingQuantity = isIncrease
-                ? batch.RemainingQuantity + req.Quantity
-                : Math.Max(0, batch.RemainingQuantity - req.Quantity);
-            batch.UpdatedAt = DateTime.UtcNow;
-            if (!isIncrease && batch.RemainingQuantity == 0) batch.Status = "consumed";
-            // A correction crediting stock back into a batch that was previously fully consumed
-            // makes it live again — leaving Status stuck at "consumed" would misrepresent it
-            // everywhere that reads Status (badges, BatchExpandRow's exclusion, etc.) despite it
-            // now genuinely having stock on hand.
-            else if (isIncrease && batch.Status == "consumed" && batch.RemainingQuantity > 0) batch.Status = "active";
-        }
-
         db.InventoryAdjustments.Add(adjustment);
 
-        stockMovements.Record(
-            req.ProductId, req.BranchId, warehouseId: null, movementType: $"adjustment_{req.AdjustmentType}",
-            quantity: isIncrease ? req.Quantity : -req.Quantity,
-            batchId: req.BatchId, referenceType: "adjustment", referenceId: adjustment.Id, notes: req.Reason);
+        // Captured before any mutation — InventoryAdjustment stores only the delta, so the on-hand
+        // before/after exists nowhere else and is exactly what the audit trail (and the eventual
+        // approval) needs. For a pending write-off nothing moves yet, so after == before.
+        var quantityBefore = stock.Quantity;
+        var quantityAfter = quantityBefore;
+
+        if (!requiresApproval)
+        {
+            ApplyAdjustmentToStock(adjustment, stock, batch);
+            quantityAfter = stock.Quantity;
+
+            stockMovements.Record(
+                req.ProductId, req.BranchId, warehouseId: null, movementType: $"adjustment_{req.AdjustmentType}",
+                quantity: isIncrease ? req.Quantity : -req.Quantity,
+                batchId: req.BatchId, referenceType: "adjustment", referenceId: adjustment.Id, notes: req.Reason,
+                createdBy: actingUserId,
+                // stock.Quantity is already mutated above, so it IS the after value. Not recomputed
+                // from the delta — a clamped removal (Math.Max(0, …)) moves stock by less than the
+                // requested quantity, and the audit trail must show what actually happened on hand.
+                quantityBefore: quantityBefore, quantityAfter: quantityAfter);
+        }
 
         await db.SaveChangesAsync();
 
@@ -418,27 +430,32 @@ public class InventoryController(
         // the stock write is already committed, so a failed audit write must not 500 the caller.
         try
         {
+            // Denormalise the product name into the audit payload so the trail says WHAT was adjusted
+            // ("Coca-Cola 330ml"), not just a GUID — reviewers and the CSV export shouldn't need a
+            // second lookup, and a product later renamed/deleted still reads correctly at audit time.
+            var productName = await db.Products.Where(p => p.Id == req.ProductId)
+                .Select(p => p.Name).FirstOrDefaultAsync();
             await audit.LogAsync(
                 action: "inventory_adjustment",
                 entityType: "InventoryAdjustment",
                 entityId: adjustment.Id,
                 userId: actingUserId,
                 branchId: req.BranchId,
+                notes: productName is null ? null : $"{productName}",
                 details: System.Text.Json.JsonSerializer.Serialize(new
                 {
-                    req.ProductId, req.AdjustmentType, req.Quantity, Reason = req.Reason ?? "",
-                    QuantityAfter = stock.Quantity,
+                    req.ProductId, ProductName = productName, req.AdjustmentType, req.Quantity,
+                    Reason = req.Reason ?? "", QuantityAfter = quantityAfter, adjustment.ApprovalStatus,
                 }),
                 // Write-offs are the adjustments worth surfacing to a reviewer.
-                severity: req.AdjustmentType is "waste" or "damage" ? "warning" : "info",
+                severity: requiresApproval ? "warning" : "info",
                 beforeValue: System.Text.Json.JsonSerializer.Serialize(new { QuantityBefore = quantityBefore }));
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for adjustment {AdjustmentId}", adjustment.Id); }
 
-        // Removal adjustments (wastage, damage, stock-out, transfer-out) can push on-hand below the
-        // reorder threshold — check immediately so the Low Stock / Out of Stock alert fires now
-        // instead of waiting for the 15-minute background sweep. Best-effort: never fail the write.
-        if (req.AdjustmentType is not ("addition" or "return_to_supplier" or "transfer_in"))
+        // Low-stock re-check only when on-hand actually dropped just now. A pending write-off hasn't
+        // moved stock yet — that check runs when it's approved. Best-effort: never fail the write.
+        if (!requiresApproval && req.AdjustmentType is not ("addition" or "return_to_supplier" or "transfer_in"))
         {
             try { await stockAlerts.CheckStockLevelAsync(req.ProductId, req.BranchId); }
             catch (Exception ex) { logger.LogError(ex, "Low-stock check failed after adjustment for product {ProductId}", req.ProductId); }
@@ -446,7 +463,170 @@ public class InventoryController(
 
         return Created($"/api/inventory/adjustments/{adjustment.Id}", adjustment);
     }
+
+    // Which adjustment types are held for human review before stock moves (FRD §2.3). The wastage
+    // write-off set — value is being destroyed, so a second person signs off. Manually-recorded
+    // "expired" IS reviewed (a person chose it); auto-expiry bypasses this endpoint entirely.
+    private static bool RequiresApproval(string adjustmentType) =>
+        adjustmentType is "waste" or "damage" or "expired" or "theft" or "other";
+
+    // Applies an adjustment's delta to on-hand: aggregate stock first (clamped at zero on a
+    // removal, matching OrdersController.Create), then the selected batch's RemainingQuantity
+    // (never its immutable received Quantity). Reused by Adjust (immediate) and ReviewAdjustment
+    // (on approval of a held write-off) so the two paths can never drift apart.
+    private static void ApplyAdjustmentToStock(InventoryAdjustment adj, InventoryStock stock, InventoryBatch? batch)
+    {
+        var isIncrease = adj.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in";
+        stock.Quantity = isIncrease ? stock.Quantity + adj.Quantity : Math.Max(0, stock.Quantity - adj.Quantity);
+        stock.LastUpdated = DateTime.UtcNow;
+        stock.UpdatedAt = DateTime.UtcNow;
+
+        if (batch != null)
+        {
+            batch.RemainingQuantity = isIncrease
+                ? batch.RemainingQuantity + adj.Quantity
+                : Math.Max(0, batch.RemainingQuantity - adj.Quantity);
+            batch.UpdatedAt = DateTime.UtcNow;
+            if (!isIncrease && batch.RemainingQuantity == 0) batch.Status = "consumed";
+            // A correction crediting stock back into a fully-consumed batch makes it live again —
+            // leaving Status stuck at "consumed" would misrepresent it everywhere Status is read.
+            else if (isIncrease && batch.Status == "consumed" && batch.RemainingQuantity > 0) batch.Status = "active";
+        }
+    }
+
+    /// <summary>
+    /// FRD §2.3 — sign-off on a held write-off. A pending wastage adjustment has NOT touched on-hand
+    /// yet (StockApplied=false), same maker-checker gate as a stock transfer: APPROVING applies the
+    /// deduction now; REJECTING just records the decision and leaves stock untouched. Legacy rows
+    /// raised before gating were deducted immediately (StockApplied=true) — for those, rejection
+    /// still gives the stock back via a compensating movement, preserving history rather than
+    /// editing it. The creator may approve their own write-off (per configured policy).
+    /// </summary>
+    [HttpPatch("adjustments/{id:guid}/approval")]
+    [RequirePermission("Stocks", PermAction.Approve)]
+    public async Task<IActionResult> ReviewAdjustment(Guid id, [FromBody] ReviewAdjustmentRequest req)
+    {
+        var adjustment = await db.InventoryAdjustments
+            .Include(a => a.Batch)
+            .FirstOrDefaultAsync(a => a.Id == id);
+        if (adjustment is null) return NotFound(new { message = "Adjustment not found." });
+
+        if (adjustment.ApprovalStatus is null)
+            return BadRequest(new { message = "This adjustment is not subject to approval." });
+        if (adjustment.ApprovalStatus != "pending")
+            return BadRequest(new { message = $"This adjustment was already {adjustment.ApprovalStatus}." });
+
+        var (role, callerBranchId) = GetCallerContext();
+        if (role != "tenant_admin" && callerBranchId.HasValue && adjustment.BranchId != callerBranchId)
+            return StatusCode(403, new { message = "You may only review adjustments at your own branch." });
+
+        var reviewerId = CallerId();
+
+        if (!req.Approved && string.IsNullOrWhiteSpace(req.Reason))
+            return BadRequest(new { message = "A rejection reason is required." });
+
+        adjustment.ApprovalStatus = req.Approved ? "approved" : "rejected";
+        adjustment.ApprovedBy = reviewerId;
+        adjustment.ApprovedAt = DateTime.UtcNow;
+        adjustment.RejectionReason = req.Approved ? null : req.Reason;
+
+        decimal? quantityBefore = null, quantityAfter = null;
+
+        if (req.Approved && !adjustment.StockApplied && adjustment.BranchId.HasValue)
+        {
+            // The write-off was held pending review — apply the deduction now, on approval.
+            var stock = await db.InventoryStocks.FirstOrDefaultAsync(
+                s => s.ProductId == adjustment.ProductId && s.BranchId == adjustment.BranchId);
+            if (stock is null)
+            {
+                // A write-off is legitimate even with nothing on hand — create a zero row and let
+                // the removal clamp at zero, mirroring Adjust's upsert.
+                stock = new InventoryStock
+                {
+                    Id = Guid.NewGuid(), ProductId = adjustment.ProductId, BranchId = adjustment.BranchId.Value,
+                    Quantity = 0, LastUpdated = DateTime.UtcNow, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+                };
+                db.InventoryStocks.Add(stock);
+            }
+            quantityBefore = stock.Quantity;
+            ApplyAdjustmentToStock(adjustment, stock, adjustment.Batch);
+            quantityAfter = stock.Quantity;
+            adjustment.StockApplied = true;
+
+            stockMovements.Record(
+                adjustment.ProductId, adjustment.BranchId, adjustment.WarehouseId,
+                movementType: $"adjustment_{adjustment.AdjustmentType}", quantity: -adjustment.Quantity,
+                batchId: adjustment.BatchId, referenceType: "adjustment", referenceId: adjustment.Id,
+                notes: $"Write-off approved: {adjustment.Reason}", createdBy: reviewerId,
+                quantityBefore: quantityBefore, quantityAfter: quantityAfter);
+        }
+        else if (!req.Approved && adjustment.StockApplied && adjustment.BranchId.HasValue)
+        {
+            // Legacy row: stock was deducted immediately before gating shipped. Give it back via a
+            // compensating movement rather than editing history — the original row/ledger stay intact.
+            var stock = await db.InventoryStocks.FirstOrDefaultAsync(
+                s => s.ProductId == adjustment.ProductId && s.BranchId == adjustment.BranchId);
+            if (stock != null)
+            {
+                quantityBefore = stock.Quantity;
+                stock.Quantity += adjustment.Quantity;
+                quantityAfter = stock.Quantity;
+                stock.LastUpdated = DateTime.UtcNow;
+                stock.UpdatedAt = DateTime.UtcNow;
+            }
+
+            if (adjustment.Batch is { } batch)
+            {
+                batch.RemainingQuantity += adjustment.Quantity;
+                batch.UpdatedAt = DateTime.UtcNow;
+                if (batch.Status == "consumed" && batch.RemainingQuantity > 0) batch.Status = "active";
+            }
+            adjustment.StockApplied = false;
+
+            stockMovements.Record(
+                adjustment.ProductId, adjustment.BranchId, adjustment.WarehouseId,
+                movementType: "adjustment_reversal", quantity: adjustment.Quantity,
+                batchId: adjustment.BatchId, referenceType: "adjustment", referenceId: adjustment.Id,
+                notes: $"Write-off rejected: {req.Reason}", createdBy: reviewerId,
+                quantityBefore: quantityBefore, quantityAfter: quantityAfter);
+        }
+
+        await db.SaveChangesAsync();
+
+        // An approval that just deducted stock can cross the reorder threshold — fire the alert now.
+        if (req.Approved && quantityAfter.HasValue && adjustment.BranchId.HasValue)
+        {
+            try { await stockAlerts.CheckStockLevelAsync(adjustment.ProductId, adjustment.BranchId.Value); }
+            catch (Exception ex) { logger.LogError(ex, "Low-stock check failed after adjustment approval {AdjustmentId}", adjustment.Id); }
+        }
+
+        try
+        {
+            await audit.LogAsync(
+                action: req.Approved ? "approve_inventory_adjustment" : "reject_inventory_adjustment",
+                entityType: "InventoryAdjustment",
+                entityId: adjustment.Id,
+                userId: reviewerId,
+                branchId: adjustment.BranchId,
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    adjustment.ProductId, adjustment.AdjustmentType, adjustment.Quantity,
+                    ApprovalStatus = adjustment.ApprovalStatus, QuantityAfter = quantityAfter,
+                }),
+                severity: req.Approved ? "info" : "warning",
+                beforeValue: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    ApprovalStatus = "pending", QuantityBefore = quantityBefore,
+                }),
+                notes: req.Reason);
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for adjustment review {AdjustmentId}", adjustment.Id); }
+
+        return Ok(adjustment);
+    }
 }
+
+public record ReviewAdjustmentRequest(bool Approved, string? Reason);
 
 public record AdjustRequest(
     Guid ProductId,

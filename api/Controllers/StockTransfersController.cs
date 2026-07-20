@@ -9,10 +9,36 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/stock-transfers")]
-public class StockTransfersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements) : ControllerBase
+public class StockTransfersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, IAuditService audit, ILogger<StockTransfersController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    // FRD §2.4 — the audit trail's payload for a transfer: sender, approver, receiver, status,
+    // dates, and per-line product + requested/approved/received quantities. Serialized into the
+    // audit log's NewValues so the Employee Audit Center and Audit Trail Report can render
+    // Transaction Details / Created By / Received By / Transfer Status / Product Details / Quantities.
+    private static string TransferAuditDetails(StockTransfer t) =>
+        System.Text.Json.JsonSerializer.Serialize(new
+        {
+            t.TransferNumber, t.TransferType, t.Status,
+            t.CreatedBy, t.ApprovedBy, t.ReceivedBy,
+            t.CreatedAt, t.CompletedDate, t.ExpectedDate,
+            t.SourceBranchId, t.DestBranchId, t.SourceWarehouseId, t.DestWarehouseId,
+            t.SourceSupplierId, t.DestSupplierId,
+            Items = t.Items.Select(i => new { i.ProductId, i.RequestedQuantity, i.ApprovedQuantity, i.ReceivedQuantity }),
+        });
+
+    private async Task LogTransferAsync(string action, StockTransfer t, Guid? userId, string severity = "info", string? beforeValue = null)
+    {
+        try
+        {
+            await audit.LogAsync(action: action, entityType: "StockTransfer", entityId: t.Id,
+                userId: userId, branchId: t.DestBranchId ?? t.SourceBranchId,
+                details: TransferAuditDetails(t), severity: severity, beforeValue: beforeValue);
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for transfer {TransferId} ({Action})", t.Id, action); }
+    }
 
     // Mirrors InventoryController.GetCallerContext — branch-scoped roles may only see transfers
     // touching their own branch (as source or destination). GetAll previously had no scoping at
@@ -112,22 +138,41 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             }
         }
 
+        // On-hand at the source either side of the deduction — the audit trail's before/after.
+        // Not derived from `qty`: the removal below clamps at zero, so a source that was short
+        // moves by less than requested and the trail must show what actually happened.
+        decimal? quantityBefore = null, quantityAfter = null;
+
         if (transfer.SourceBranchId.HasValue)
         {
             var src = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.SourceBranchId && s.ProductId == item.ProductId);
-            if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+            if (src != null)
+            {
+                quantityBefore = src.Quantity;
+                src.Quantity = Math.Max(0, src.Quantity - qty);
+                quantityAfter = src.Quantity;
+                src.LastUpdated = src.UpdatedAt = DateTime.UtcNow;
+            }
         }
         else if (transfer.SourceWarehouseId.HasValue)
         {
             var src = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.SourceWarehouseId && s.ProductId == item.ProductId);
-            if (src != null) { src.Quantity = Math.Max(0, src.Quantity - qty); src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+            if (src != null)
+            {
+                quantityBefore = src.Quantity;
+                src.Quantity = Math.Max(0, src.Quantity - qty);
+                quantityAfter = src.Quantity;
+                src.LastUpdated = src.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         item.BatchId = sourceBatch?.Id;
 
         stockMovements.Record(
             item.ProductId, transfer.SourceBranchId, transfer.SourceWarehouseId, "transfer_out", -qty,
-            batchId: sourceBatch?.Id, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber);
+            batchId: sourceBatch?.Id, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber,
+            createdBy: CallerId(), notes: transfer.ReturnReason ?? transfer.Notes,
+            quantityBefore: quantityBefore, quantityAfter: quantityAfter);
     }
 
     // Phase 2 — goods arrive at the destination. Reads the batch DeductSourceAsync already
@@ -143,17 +188,24 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             ? await db.InventoryBatches.FirstOrDefaultAsync(b => b.Id == item.BatchId)
             : null;
 
+        // On-hand at the destination either side of the credit — the audit trail's before/after.
+        decimal? quantityBefore = null, quantityAfter = null;
+
         if (transfer.DestBranchId.HasValue)
         {
             var dst = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.DestBranchId && s.ProductId == item.ProductId);
             if (dst is null) { dst = new InventoryStock { Id = Guid.NewGuid(), BranchId = transfer.DestBranchId.Value, ProductId = item.ProductId }; db.InventoryStocks.Add(dst); }
+            quantityBefore = dst.Quantity;
             dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
+            quantityAfter = dst.Quantity;
         }
         else
         {
             var dst = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.DestWarehouseId && s.ProductId == item.ProductId);
             if (dst is null) { dst = new WarehouseStock { Id = Guid.NewGuid(), WarehouseId = transfer.DestWarehouseId!.Value, ProductId = item.ProductId }; db.WarehouseStocks.Add(dst); }
+            quantityBefore = dst.Quantity;
             dst.Quantity += qty; dst.LastUpdated = dst.UpdatedAt = DateTime.UtcNow;
+            quantityAfter = dst.Quantity;
         }
 
         // transfer.TransferNumber already carries a type-appropriate prefix ("TRF-..." or,
@@ -207,7 +259,9 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
 
         stockMovements.Record(
             item.ProductId, transfer.DestBranchId, transfer.DestWarehouseId, "transfer_in", qty,
-            batchId: creditedBatchId, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber, notes: damagedOrReturnReason);
+            batchId: creditedBatchId, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber,
+            notes: damagedOrReturnReason, createdBy: CallerId(),
+            quantityBefore: quantityBefore, quantityAfter: quantityAfter);
     }
 
     // Phase 1 reversal — a transfer that shipped (deducted from source) but was then
@@ -215,15 +269,30 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     // its stock and its batch's remaining quantity back rather than leaving it debited forever.
     private async Task RestoreSourceAsync(StockTransfer transfer, StockTransferItem item, decimal qty)
     {
+        // On-hand at the source either side of the restore — the audit trail's before/after.
+        decimal? quantityBefore = null, quantityAfter = null;
+
         if (transfer.SourceBranchId.HasValue)
         {
             var src = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == transfer.SourceBranchId && s.ProductId == item.ProductId);
-            if (src != null) { src.Quantity += qty; src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+            if (src != null)
+            {
+                quantityBefore = src.Quantity;
+                src.Quantity += qty;
+                quantityAfter = src.Quantity;
+                src.LastUpdated = src.UpdatedAt = DateTime.UtcNow;
+            }
         }
         else if (transfer.SourceWarehouseId.HasValue)
         {
             var src = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == transfer.SourceWarehouseId && s.ProductId == item.ProductId);
-            if (src != null) { src.Quantity += qty; src.LastUpdated = src.UpdatedAt = DateTime.UtcNow; }
+            if (src != null)
+            {
+                quantityBefore = src.Quantity;
+                src.Quantity += qty;
+                quantityAfter = src.Quantity;
+                src.LastUpdated = src.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         if (item.BatchId.HasValue)
@@ -234,7 +303,9 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
 
         stockMovements.Record(
             item.ProductId, transfer.SourceBranchId, transfer.SourceWarehouseId, "transfer_restore", qty,
-            batchId: item.BatchId, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber);
+            batchId: item.BatchId, referenceType: "stock_transfer", referenceId: transfer.Id, referenceNumber: transfer.TransferNumber,
+            createdBy: CallerId(), notes: transfer.ReturnReason ?? transfer.Notes,
+            quantityBefore: quantityBefore, quantityAfter: quantityAfter);
     }
 
     [HttpGet]
@@ -247,11 +318,23 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         [FromQuery] Guid? destBranchId,
         [FromQuery] string? batchId,
         [FromQuery] Guid? purchaseOrderId,
-        [FromQuery] Guid? sourceSupplierId)
+        [FromQuery] Guid? sourceSupplierId,
+        // FRD §2.4 — a transfer has a source AND a destination, so "show me Riyadh's transfers"
+        // can't be expressed by the directional sourceBranchId/destBranchId pair above: it means
+        // either end. These match on either side; the directional params stay for callers that
+        // genuinely mean one direction (the Sending/Receiving Warehouse filters).
+        [FromQuery] Guid? branchId,
+        [FromQuery] Guid? warehouseId,
+        [FromQuery] Guid? productId,
+        [FromQuery] Guid? createdBy,
+        [FromQuery] Guid? approvedBy)
     {
         var query = db.StockTransfers
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
             .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
+            // Without these the report's Created By / Approved By columns have no name to render
+            // — the FK alone only yields a Guid.
+            .Include(t => t.CreatedByUser).Include(t => t.ApprovedByUser).Include(t => t.ReceivedByUser)
             .Include(t => t.Items).ThenInclude(i => i.Product)
             .Include(t => t.Items).ThenInclude(i => i.Batch)
             .AsQueryable();
@@ -261,6 +344,11 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         if (destWarehouseId.HasValue) query = query.Where(t => t.DestWarehouseId == destWarehouseId);
         if (sourceBranchId.HasValue) query = query.Where(t => t.SourceBranchId == sourceBranchId);
         if (destBranchId.HasValue) query = query.Where(t => t.DestBranchId == destBranchId);
+        if (branchId.HasValue) query = query.Where(t => t.SourceBranchId == branchId || t.DestBranchId == branchId);
+        if (warehouseId.HasValue) query = query.Where(t => t.SourceWarehouseId == warehouseId || t.DestWarehouseId == warehouseId);
+        if (productId.HasValue) query = query.Where(t => t.Items.Any(i => i.ProductId == productId));
+        if (createdBy.HasValue) query = query.Where(t => t.CreatedBy == createdBy);
+        if (approvedBy.HasValue) query = query.Where(t => t.ApprovedBy == approvedBy);
         if (!string.IsNullOrEmpty(batchId)) query = query.Where(t => t.BatchId == batchId);
         if (purchaseOrderId.HasValue) query = query.Where(t => t.PurchaseOrderId == purchaseOrderId);
         if (sourceSupplierId.HasValue) query = query.Where(t => t.SourceSupplierId == sourceSupplierId);
@@ -304,6 +392,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         var t = await db.StockTransfers
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
             .Include(t => t.DestBranch).Include(t => t.DestWarehouse).Include(t => t.DestSupplier)
+            .Include(t => t.CreatedByUser).Include(t => t.ApprovedByUser).Include(t => t.ReceivedByUser)
             .Include(t => t.Items).ThenInclude(i => i.Product)
             .Include(t => t.Items).ThenInclude(i => i.Batch)
             .FirstOrDefaultAsync(t => t.Id == id);
@@ -368,6 +457,10 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 SupplierId = req.SourceSupplierId.Value,
                 WarehouseId = req.DestWarehouseId,
                 OrderedBy = req.CreatedBy ?? Guid.Empty,
+                // Required FK to users — was never set here, so it defaulted to Guid.Empty and every
+                // supplier_to_warehouse transfer 500'd on FK_purchase_orders_users_created_by.
+                // Mirrors OrderedBy: the person who raised the transfer is who created its PO.
+                CreatedBy = req.CreatedBy ?? Guid.Empty,
                 Status = "ordered",
                 TotalAmount = poItems.Sum(i => i.Subtotal),
                 BatchId = req.BatchId,
@@ -424,6 +517,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 entityType: "StockTransfer", entityId: transfer.Id);
         }
 
+        await LogTransferAsync("create_stock_transfer", transfer, transfer.CreatedBy == Guid.Empty ? CallerId() : transfer.CreatedBy);
+
         return CreatedAtAction(nameof(GetById), new { id = transfer.Id }, transfer);
     }
 
@@ -465,6 +560,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         transfer.CompletedDate = DateTime.UtcNow;
         transfer.UpdatedAt = DateTime.UtcNow;
         if (req.ApprovedBy.HasValue) transfer.ApprovedBy = req.ApprovedBy;
+        // Whoever confirmed receipt is the "Received By" for the audit trail (FRD §2.4).
+        transfer.ReceivedBy = CallerId() ?? req.ApprovedBy;
 
         var reasonsByItemId = (req.Items ?? []).ToDictionary(r => r.ItemId, r => r.DamagedOrReturnReason);
 
@@ -559,6 +656,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
         }
 
+        await LogTransferAsync("receive_stock_transfer", transfer, transfer.ReceivedBy);
+
         return Ok(transfer);
     }
 
@@ -593,6 +692,9 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         if (req.Status == "completed" && prev != "completed")
         {
             transfer.CompletedDate = DateTime.UtcNow;
+            // Completing via the status patch (rather than the receive endpoint) still records who
+            // received it, so "Received By" is populated in the audit trail either way.
+            transfer.ReceivedBy = CallerId() ?? req.ApprovedBy;
 
             if (prev != "in_transit")
             {
@@ -682,6 +784,22 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                     entityType: "StockTransfer", entityId: transfer.Id, branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
             }
         }
+
+        // FRD §2.4 — record the status transition in the audit trail. One action per lifecycle step
+        // so the Employee Audit Center reads clearly (approved / rejected / shipped / received / cancelled).
+        var action = req.Status switch
+        {
+            "approved" => "approve_stock_transfer",
+            "rejected" => "reject_stock_transfer",
+            "in_transit" => "ship_stock_transfer",
+            "completed" => "receive_stock_transfer",
+            "cancelled" => "cancel_stock_transfer",
+            _ => null,
+        };
+        if (action != null && prev != req.Status)
+            await LogTransferAsync(action, transfer, CallerId() ?? req.ApprovedBy,
+                severity: req.Status is "rejected" or "cancelled" ? "warning" : "info",
+                beforeValue: System.Text.Json.JsonSerializer.Serialize(new { Status = prev }));
 
         return Ok(transfer);
     }

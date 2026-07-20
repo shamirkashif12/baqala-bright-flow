@@ -12,8 +12,14 @@ namespace BaqalaPOS.Api.Controllers;
 // through the existing InventoryAdjustment pipeline, rather than a parallel one.
 [ApiController]
 [Route("api/stock-counts")]
-public class StockCountsController(BaqalaDbContext db, IAuditService audit, IStockAlertService stockAlerts, ILogger<StockCountsController> logger) : ControllerBase
+public class StockCountsController(
+    BaqalaDbContext db, IAuditService audit, IStockAlertService stockAlerts,
+    IStockMovementService stockMovements, ILogger<StockCountsController> logger) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id)
+            ? id : null;
+
     private (string? Role, Guid? BranchId) GetCallerContext()
     {
         var role = User.FindFirst("role")?.Value;
@@ -53,6 +59,9 @@ public class StockCountsController(BaqalaDbContext db, IAuditService audit, ISto
     [HttpPost]
     public async Task<IActionResult> Start([FromBody] StartStockCountRequest req)
     {
+        if (req.CountType is not null and not ("review" or "audit" or "reconciliation"))
+            return BadRequest(new { message = "countType must be one of: review, audit, reconciliation." });
+
         var stockQ = db.InventoryStocks.Include(s => s.Product).Where(s => s.BranchId == req.BranchId);
         if (req.CategoryId.HasValue) stockQ = stockQ.Where(s => s.Product!.CategoryId == req.CategoryId);
         var stocks = await stockQ.ToListAsync();
@@ -62,8 +71,9 @@ public class StockCountsController(BaqalaDbContext db, IAuditService audit, ISto
             Id = Guid.NewGuid(),
             BranchId = req.BranchId,
             CategoryId = req.CategoryId,
+            CountType = req.CountType,
             Status = "draft",
-            StartedBy = req.StartedBy,
+            StartedBy = CallerId() ?? req.StartedBy,
             Notes = req.Notes,
             StartedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
@@ -133,6 +143,12 @@ public class StockCountsController(BaqalaDbContext db, IAuditService audit, ISto
         if (count is null) return NotFound();
         if (count.Status != "draft") return BadRequest(new { message = "This count session is already closed." });
 
+        // The JWT wins over the body, matching InventoryController.Adjust — the body value is kept
+        // only as a fallback for kiosk/service tokens that carry no usable claim. Reconciliation
+        // rewrites on-hand stock, so a client naming an arbitrary user as the counter would make
+        // the resulting audit trail attest to nothing.
+        var completedBy = CallerId() ?? req.CompletedBy;
+
         var adjustments = new List<InventoryAdjustment>();
         var reducedProductIds = new List<Guid>();
         foreach (var item in count.Items.Where(i => i.CountedQuantity.HasValue && i.Variance != 0))
@@ -142,7 +158,7 @@ public class StockCountsController(BaqalaDbContext db, IAuditService audit, ISto
             if (stock is null) continue;
             if (variance < 0) reducedProductIds.Add(item.ProductId);
 
-            adjustments.Add(new InventoryAdjustment
+            var adjustment = new InventoryAdjustment
             {
                 Id = Guid.NewGuid(),
                 ProductId = item.ProductId,
@@ -150,21 +166,36 @@ public class StockCountsController(BaqalaDbContext db, IAuditService audit, ISto
                 Quantity = Math.Abs(variance),
                 AdjustmentType = variance > 0 ? "addition" : "subtraction",
                 Reason = $"Stocking review reconciliation (session {count.Id})",
-                AdjustedBy = req.CompletedBy,
+                AdjustedBy = completedBy,
                 CreatedAt = DateTime.UtcNow,
-            });
+            };
+            adjustments.Add(adjustment);
+
+            var quantityBefore = stock.Quantity;
             stock.Quantity = Math.Max(0, item.CountedQuantity!.Value);
             stock.LastUpdated = DateTime.UtcNow;
+
+            // Reconciliation rewrote on-hand stock but recorded no ledger row, so the one event
+            // that reconciles the system to physical reality was the one event the movement
+            // timeline and audit trail couldn't see. Signed by the variance's direction.
+            stockMovements.Record(
+                item.ProductId, count.BranchId, warehouseId: null,
+                movementType: variance > 0 ? "reconciliation_addition" : "reconciliation_subtraction",
+                quantity: variance,
+                referenceType: "stock_count", referenceId: count.Id,
+                notes: $"Stocking review reconciliation (session {count.Id})",
+                createdBy: completedBy,
+                quantityBefore: quantityBefore, quantityAfter: stock.Quantity);
         }
         db.InventoryAdjustments.AddRange(adjustments);
 
         count.Status = "completed";
-        count.CompletedBy = req.CompletedBy;
+        count.CompletedBy = completedBy;
         count.CompletedAt = DateTime.UtcNow;
         count.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
-        await audit.LogAsync("complete_stock_count", "StockCount", count.Id, req.CompletedBy, count.BranchId,
+        await audit.LogAsync("complete_stock_count", "StockCount", count.Id, completedBy, count.BranchId,
             $"{{\"itemsCounted\":{count.Items.Count(i => i.CountedQuantity.HasValue)},\"adjustments\":{adjustments.Count}}}",
             adjustments.Count > 0 ? "warning" : "info");
 
@@ -196,6 +227,8 @@ public class StockCountsController(BaqalaDbContext db, IAuditService audit, ISto
     }
 }
 
-public record StartStockCountRequest(Guid BranchId, Guid? CategoryId, Guid? StartedBy, string? Notes);
+// CountType: review | audit | reconciliation. Optional — an omitted value records no intent rather
+// than defaulting to one, so the report can't claim a session was an "audit" nobody said it was.
+public record StartStockCountRequest(Guid BranchId, Guid? CategoryId, Guid? StartedBy, string? Notes, string? CountType = null);
 public record RecordCountRequest(Guid ProductId, decimal CountedQuantity);
 public record CompleteStockCountRequest(Guid? CompletedBy);

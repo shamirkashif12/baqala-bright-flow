@@ -51,6 +51,12 @@ public class StockTransfer
     [Column("approved_by")]
     public Guid? ApprovedBy { get; set; }
 
+    // Who physically received the transfer at the destination (set when it's marked completed/
+    // received). Distinct from ApprovedBy (who authorised it) and CreatedBy (the sender) — the FRD
+    // §2.4 audit trail requires "Received By" as its own column.
+    [Column("received_by")]
+    public Guid? ReceivedBy { get; set; }
+
     // draft | pending_approval | approved | in_transit | completed | rejected | cancelled
     [Required, MaxLength(25), Column("status")]
     public string Status { get; set; } = "draft";
@@ -88,6 +94,7 @@ public class StockTransfer
     public PurchaseOrder? PurchaseOrder { get; set; }
     public User? CreatedByUser { get; set; }
     public User? ApprovedByUser { get; set; }
+    public User? ReceivedByUser { get; set; }
     public ICollection<StockTransferItem> Items { get; set; } = [];
 }
 

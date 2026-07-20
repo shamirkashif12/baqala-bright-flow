@@ -100,6 +100,90 @@ public class InventoryBatch
     public Supplier? Supplier { get; set; }
 }
 
+// A recall withdraws stock from sale — either a whole product or one specific batch/lot of it.
+//
+// Scope is deliberately (ProductId, BatchId?) rather than a free-form list: BatchId == null means
+// "every batch of this product", which is the supplier-notice case, while a set BatchId means "only
+// lot X", which is the far more common food-safety case and the reason InventoryBatch exists at all.
+//
+// An open recall is enforced at the point of sale (OrdersController blocks the line, alongside the
+// existing expired-batch guard) rather than by zeroing stock, so the physical count stays honest
+// while the item becomes unsellable. Quarantining the stock is a separate, explicit act
+// (POST /recalls/{id}/quarantine) that writes ordinary "damage" adjustments through the existing
+// adjustment pipeline — recalls never invent a second way to move stock.
+[Table("product_recalls")]
+public class ProductRecall
+{
+    [Key, Column("id")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    // Human reference, e.g. RCL-20260717-a1b2. Generated server-side.
+    [Required, MaxLength(50), Column("recall_number")]
+    public string RecallNumber { get; set; } = default!;
+
+    [Required, Column("product_id")]
+    public Guid ProductId { get; set; }
+
+    // null = all batches of the product.
+    [Column("batch_id")]
+    public Guid? BatchId { get; set; }
+
+    // null = tenant-wide. Set to confine a recall to one branch's stock.
+    [Column("branch_id")]
+    public Guid? BranchId { get; set; }
+
+    [Column("supplier_id")]
+    public Guid? SupplierId { get; set; }
+
+    [Required, MaxLength(500), Column("reason")]
+    public string Reason { get; set; } = default!;
+
+    // supplier_notice | quality_issue | contamination | mislabeling | regulatory | other
+    [Required, MaxLength(30), Column("recall_type")]
+    public string RecallType { get; set; } = "other";
+
+    // low | medium | high | critical — drives notification severity, not behaviour.
+    [Required, MaxLength(20), Column("severity")]
+    public string Severity { get; set; } = "high";
+
+    // open (blocking sales) | closed (resolved, no longer blocks)
+    [Required, MaxLength(20), Column("status")]
+    public string Status { get; set; } = "open";
+
+    // Units pulled from sale via the quarantine action. Cumulative across quarantine calls.
+    [Column("quantity_quarantined")]
+    public decimal QuantityQuarantined { get; set; } = 0;
+
+    [Column("notes")]
+    public string? Notes { get; set; }
+
+    [Column("initiated_by")]
+    public Guid? InitiatedBy { get; set; }
+
+    [Column("closed_by")]
+    public Guid? ClosedBy { get; set; }
+
+    [MaxLength(500), Column("resolution")]
+    public string? Resolution { get; set; }
+
+    [Column("closed_at")]
+    public DateTime? ClosedAt { get; set; }
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    // Navigation
+    public Product? Product { get; set; }
+    public InventoryBatch? Batch { get; set; }
+    public Branch? Branch { get; set; }
+    public Supplier? Supplier { get; set; }
+    public User? InitiatedByUser { get; set; }
+    public User? ClosedByUser { get; set; }
+}
+
 [Table("inventory_adjustments")]
 public class InventoryAdjustment
 {
@@ -121,7 +205,8 @@ public class InventoryAdjustment
     [Column("batch_id")]
     public Guid? BatchId { get; set; }
 
-    // addition | subtraction | waste | damage | return_to_supplier | transfer_in | transfer_out | expired
+    // addition | subtraction | waste | damage | theft | other | return_to_supplier | transfer_in | transfer_out | expired
+    // Wastage write-off types (FRD §2.3): waste (spoilage) | damage | expired | theft | other — all routed for approval.
     [Required, MaxLength(30), Column("adjustment_type")]
     public string AdjustmentType { get; set; } = default!;
 
@@ -137,6 +222,36 @@ public class InventoryAdjustment
     [Column("adjusted_by")]
     public Guid? AdjustedBy { get; set; }
 
+    // Distinct from AdjustedBy (who raised it). The FRD's Wastage Report requires both the
+    // employee who created and the employee who approved a write-off, and there is nowhere else
+    // to record the approver — StockTransfer/PurchaseOrder each have their own approved_by, but
+    // an adjustment had none.
+    [Column("approved_by")]
+    public Guid? ApprovedBy { get; set; }
+
+    // null = not subject to review. Deliberately the default, and NOT backfilled onto existing
+    // rows: marking historic write-offs "pending" would invent a review queue nobody agreed to,
+    // and marking them "approved" would fabricate sign-offs that never happened. Only waste/damage
+    // raised through /adjustments after this shipped enter the flow as "pending".
+    // pending | approved | rejected
+    [MaxLength(20), Column("approval_status")]
+    public string? ApprovalStatus { get; set; }
+
+    [Column("approved_at")]
+    public DateTime? ApprovedAt { get; set; }
+
+    [MaxLength(500), Column("rejection_reason")]
+    public string? RejectionReason { get; set; }
+
+    // Whether this adjustment's stock movement has actually been applied to on-hand. true for
+    // every immediate adjustment and every row that predates approval-gating (the default). false
+    // only for a wastage write-off still "pending" review under FRD §2.3 — its stock is NOT
+    // deducted until an approver signs off. Approval then APPLIES the deduction and flips this to
+    // true; rejection of a not-yet-applied row is a no-op, while a legacy pending row (deducted
+    // immediately, StockApplied already true) still reverses on rejection.
+    [Column("stock_applied")]
+    public bool StockApplied { get; set; } = true;
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -146,6 +261,7 @@ public class InventoryAdjustment
     public Warehouse? Warehouse { get; set; }
     public InventoryBatch? Batch { get; set; }
     public User? AdjustedByUser { get; set; }
+    public User? ApprovedByUser { get; set; }
 }
 
 // Stock Filters — "Stocking review": a physical count session that snapshots system quantity per
@@ -164,6 +280,19 @@ public class StockCount
     // Optional scope — count just one category instead of the whole branch.
     [Column("category_id")]
     public Guid? CategoryId { get; set; }
+
+    // What this count session is FOR. The FRD asks for three separate filters — "Stock Review",
+    // "Stock Audit" and "Inventory Reconciliation" — which all describe the same start → count →
+    // complete session; the only thing that distinguishes them is intent, which nothing recorded.
+    // This column is that intent, so the three filters select genuinely different rows instead of
+    // being three names for one unfiltered list.
+    //   review         — routine shelf check by branch staff
+    //   audit          — independent/compliance count, typically by an auditor or head office
+    //   reconciliation — correcting a known discrepancy
+    // Nullable: sessions predating this column have no recorded intent, and guessing one would
+    // misfile real history. They surface under "Unspecified".
+    [MaxLength(20), Column("count_type")]
+    public string? CountType { get; set; }
 
     // draft (open, still counting) | completed | cancelled
     [Required, MaxLength(20), Column("status")]
@@ -267,6 +396,17 @@ public class StockMovement
     // timeline and any future "net movement" rollup sum directly without a type lookup.
     [Column("quantity")]
     public decimal Quantity { get; set; }
+
+    // On-hand at this location immediately before/after the mutation this row records. The FRD's
+    // Inventory Transaction Audit Trail requires both, and neither is derivable after the fact:
+    // summing Quantity forward only works if the ledger has every movement since the location's
+    // stock row was created, which is untrue for any row predating the ledger. Nullable because
+    // historic rows genuinely have no answer — a null renders as "—", not as a misleading 0.
+    [Column("quantity_before")]
+    public decimal? QuantityBefore { get; set; }
+
+    [Column("quantity_after")]
+    public decimal? QuantityAfter { get; set; }
 
     // "PurchaseOrder" | "Order" | "StockTransfer" | "InventoryAdjustment" | "InventoryBatch"
     [MaxLength(30), Column("reference_type")]

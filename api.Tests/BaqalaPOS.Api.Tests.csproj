@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- In-memory provider: these tests exercise resolution/picking logic, not SQL translation, so
+         they must not need a live MySQL server to run.
+         Version matches the API's other EF packages (Design/Tools 10.0.9). Builds emit an MSB3277
+         conflict on EntityFrameworkCore.Relational (10.0.7 via MySql.EntityFrameworkCore vs 10.0.9
+         via EF Design/Tools) — that split predates this project and lives in the API's own
+         references, so it is not resolvable from here; MSBuild unifies on 10.0.7 and the tests pass. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\api\BaqalaPOS.Api.csproj" />
+  </ItemGroup>
+
+</Project>

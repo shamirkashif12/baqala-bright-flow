@@ -100,6 +100,14 @@ export function describeChanges(log: AuditLog, productName?: (id: string) => str
 
   // Inventory adjustment — the only action that records a true on-hand quantity before/after.
   if (before?.quantityBefore != null || after?.quantityAfter != null) {
+    // Which product was adjusted — shown first so a reviewer reads the item before the numbers.
+    // Prefer the name denormalised into the payload (InventoryController.Adjust); fall back to the
+    // productName resolver, then to a shortened id, so older rows without the name still resolve.
+    const adjProductId = (after as { productId?: string }).productId;
+    const adjProductName = (after as { productName?: string }).productName;
+    if (adjProductName || adjProductId) {
+      changes.push({ kind: "other", label: "Product", after: adjProductName ?? nameOf(adjProductId) });
+    }
     changes.push({
       kind: "quantity_on_hand",
       label: "Quantity on hand",

@@ -209,6 +209,47 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             }
         }
 
+        // Block sale of recalled items (FRD §13). Same rationale as the expired guard above:
+        // enforced server-side because checkout must not rely on the client having refreshed its
+        // recall list. A recall withdraws goods from sale without zeroing stock, so the block lives
+        // here rather than in the quantity check — the stock is physically still on the shelf, it
+        // just must not go out the door.
+        //
+        // A recall with no batch_id covers every lot of the product; one with a batch_id covers only
+        // that lot, and can only be judged against what the sale actually consumes. Since picking
+        // happens after this point (and is best-effort), a batch-scoped recall blocks the product at
+        // this branch whenever any of the recalled lot is still on hand — the safe direction to err
+        // for a food-safety control.
+        foreach (var productId in order.Items.Select(i => i.ProductId).Distinct())
+        {
+            var recalls = await db.ProductRecalls
+                .Where(r => r.ProductId == productId && r.Status == "open" &&
+                            (r.BranchId == null || r.BranchId == order.BranchId))
+                .Select(r => new { r.RecallNumber, r.BatchId, r.Reason })
+                .ToListAsync();
+            if (recalls.Count == 0) continue;
+
+            var blocking = recalls.FirstOrDefault(r => r.BatchId == null);
+            if (blocking is null)
+            {
+                var recalledBatchIds = recalls.Select(r => r.BatchId!.Value).ToList();
+                var stillOnHand = await db.InventoryBatches
+                    .Where(b => recalledBatchIds.Contains(b.Id) && b.BranchId == order.BranchId && b.RemainingQuantity > 0)
+                    .Select(b => b.Id)
+                    .ToListAsync();
+                blocking = recalls.FirstOrDefault(r => stillOnHand.Contains(r.BatchId!.Value));
+            }
+
+            if (blocking is not null)
+            {
+                var product = await db.Products.FindAsync(productId);
+                return BadRequest(new
+                {
+                    message = $"Cannot sell '{product?.Name ?? "item"}' — under active recall {blocking.RecallNumber} ({blocking.Reason}).",
+                });
+            }
+        }
+
         // Terminal binding: derive the shift/terminal from the cashier's actual open shift
         // server-side rather than trusting client input (which never sent these at all) —
         // otherwise a sale has no verifiable link back to the terminal/shift that rang it up.
@@ -294,6 +335,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             // branch had none, corrupting that other branch's inventory on every such sale.
             var stock = await db.InventoryStocks
                 .FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == order.BranchId);
+            // Captured before the mutation — the ledger's before/after is the audit trail's only
+            // record of on-hand either side of a sale. A product with no stock row yet was at 0.
+            var quantityBefore = stock?.Quantity ?? 0;
             if (stock != null)
             {
                 stock.Quantity -= item.Quantity;
@@ -316,7 +360,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
             stockMovements.Record(
                 item.ProductId, order.BranchId, warehouseId: null, movementType: "sale", quantity: -item.Quantity,
-                referenceType: "order", referenceId: order.Id, referenceNumber: order.OrderNumber);
+                referenceType: "order", referenceId: order.Id, referenceNumber: order.OrderNumber,
+                quantityBefore: quantityBefore, quantityAfter: quantityBefore - item.Quantity);
         }
 
         await db.SaveChangesAsync();
@@ -330,14 +375,53 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             catch (Exception ex) { logger.LogError(ex, "Low-stock check failed after sale for product {ProductId}", productId); }
         }
 
-        // Keep each sold product's batch(es) in sync with the aggregate stock write above (FEFO —
-        // oldest expiry first) so the batch drill-down UI reflects what actually sold instead of a
-        // static "still full" quantity. Same best-effort treatment as the low-stock check: batch
-        // remaining-quantity is traceability data, never allowed to fail or slow down the sale.
+        // Keep each sold product's batch(es) in sync with the aggregate stock write above, in the
+        // branch's configured picking order (FEFO by default, FIFO if configured), so the batch
+        // drill-down UI reflects what actually sold instead of a static "still full" quantity.
+        // Same best-effort treatment as the low-stock check: batch remaining-quantity is
+        // traceability data, never allowed to fail or slow down the sale.
+        //
+        // The consumption result additionally gives this line its true cost — the specific lots'
+        // purchase costs — which is recorded below. Every report today derives COGS from the
+        // product's *current* CostPrice, so a sale made when cost was 4 is silently re-costed the
+        // moment purchase cost moves to 5. Capturing it here is what makes historic margin stable.
+        var costed = false;
         foreach (var item in order.Items)
         {
-            try { await batchConsumption.ConsumeFefoAsync(item.ProductId, order.BranchId, warehouseId: null, item.Quantity); }
-            catch (Exception ex) { logger.LogError(ex, "Batch FEFO consumption failed after sale for product {ProductId}", item.ProductId); }
+            try
+            {
+                var consumed = await batchConsumption.ConsumeFefoAsync(
+                    item.ProductId, order.BranchId, warehouseId: null, item.Quantity);
+                if (consumed.Count == 0) continue;
+
+                // Only cost the line when every consumed lot knew its purchase cost. A partial sum
+                // would understate COGS and inflate margin — worse than leaving it null and letting
+                // reports fall back to the existing Product.CostPrice path, which is what they do
+                // for every pre-existing row anyway.
+                if (consumed.All(c => c.UnitCost.HasValue))
+                    item.CostAmount = Math.Round(consumed.Sum(c => c.LineCost!.Value), 4, MidpointRounding.AwayFromZero);
+
+                // Traceability: which lot did this customer actually get? This is the question a
+                // recall asks, and it was previously unanswerable — order_items.batch_id has
+                // existed all along and was never written.
+                item.BatchId = consumed[0].BatchId;
+                item.BatchBreakdown = System.Text.Json.JsonSerializer.Serialize(
+                    consumed.Select(c => new { batchId = c.BatchId, batchNumber = c.BatchNumber, quantity = c.Quantity, unitCost = c.UnitCost }));
+                costed = true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Batch consumption failed after sale for product {ProductId}", item.ProductId);
+            }
+        }
+
+        // Persist the costing/traceability fields written above. Separate from the sale's own
+        // SaveChanges (line 326) on purpose — the sale is already committed and paid for by this
+        // point, so a failure here must lose only the analytics, never the order.
+        if (costed)
+        {
+            try { await db.SaveChangesAsync(); }
+            catch (Exception ex) { logger.LogError(ex, "Persisting batch cost/traceability failed for order {OrderId}", order.Id); }
         }
 
         // Employee Audit Center — the sale itself is an employee action and has to appear on the
@@ -752,9 +836,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             }
         }
 
-        // Best-effort, mirrors the same restore Create's ConsumeFefoAsync call needs undoing —
-        // without this the specific batch a voided sale drew down never gets its RemainingQuantity
-        // (and therefore its expiry visibility in the Inventory batch drill-down) back.
+        // Best-effort, mirrors the same restore Create's ConsumeFefoAsync call needs undoing — without
+        // this the specific batch a voided sale drew down never gets its RemainingQuantity (and
+        // therefore its expiry visibility in the Inventory batch drill-down) back.
         foreach (var item in order.Items)
         {
             try { await batchConsumption.RestoreFefoAsync(item.ProductId, order.BranchId, warehouseId: null, item.Quantity); }

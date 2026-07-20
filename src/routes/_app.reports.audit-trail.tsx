@@ -149,9 +149,11 @@ function AuditTrail() {
                 Product among them — had no option at all and were unfilterable. */}
             <SelectItem value="Order">Order</SelectItem>
             <SelectItem value="Product">Product</SelectItem>
-            <SelectItem value="InventoryAdjustment">Inventory Adjustment</SelectItem>
+            <SelectItem value="InventoryAdjustment">Inventory Adjustment / Wastage</SelectItem>
             <SelectItem value="InventoryBatch">Stock Received</SelectItem>
-            <SelectItem value="StockCount">Stock Count</SelectItem>
+            <SelectItem value="StockTransfer">Stock Transfer / Supplier Return</SelectItem>
+            <SelectItem value="PurchaseOrder">Purchase Receipt</SelectItem>
+            <SelectItem value="StockCount">Stock Count / Reconciliation</SelectItem>
             <SelectItem value="CustomerReturn">Return / Refund</SelectItem>
             <SelectItem value="CashierShift">Cashier Shift</SelectItem>
             <SelectItem value="User">User</SelectItem>

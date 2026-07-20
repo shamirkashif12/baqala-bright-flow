@@ -9,7 +9,7 @@ import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type InventorySnapshotReport, type InventorySnapshotRow, type ReportExportFormat } from "@/lib/api";
+import { api, type InventorySnapshotReport, type InventorySnapshotRow, type InventorySnapshotScope, type ReportExportFormat } from "@/lib/api";
 import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -31,11 +31,20 @@ function InventorySnapshot() {
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [categoryId, setCategoryId] = useState("all");
   const [productId, setProductId] = useState("all");
+  const [warehouseId, setWarehouseId] = useState("all");
+  const [locationType, setLocationType] = useState("all");
   const [isTobacco, setIsTobacco] = useState(false);
   const [data, setData] = useState<InventorySnapshotReport | null>(null);
   const [loading, setLoading] = useState(true);
+  // Which pools this user may see. Null until loaded — the filter bar renders nothing
+  // pool-specific until the server has answered, rather than flashing controls it may revoke.
+  const [scope, setScope] = useState<InventorySnapshotScope | null>(null);
 
   const { categories, products } = useReportFilterOptions(branchId, categoryId);
+
+  useEffect(() => {
+    api.getInventorySnapshotScope().then(setScope).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
@@ -45,8 +54,13 @@ function InventorySnapshot() {
     branchId: branchId !== "all" ? branchId : undefined,
     categoryId: categoryId !== "all" ? categoryId : undefined,
     productId: productId !== "all" ? productId : undefined,
+    warehouseId: warehouseId !== "all" ? warehouseId : undefined,
+    locationType: locationType !== "all" ? locationType : undefined,
     isTobacco: isTobacco || undefined,
-  }), [branchId, categoryId, productId, isTobacco]);
+  }), [branchId, categoryId, productId, warehouseId, locationType, isTobacco]);
+
+  // Only meaningful when both pools are visible; a single-pool user has nothing to switch between.
+  const showLocationType = !!scope?.canFilterBranch && !!scope?.canFilterWarehouse;
 
   const load = useCallback(() => {
     setLoading(true);
@@ -69,10 +83,12 @@ function InventorySnapshot() {
 
   const kpis = data?.kpis;
   const fmt = (n: number) => fmtSAR(n);
-  const branchValue = Object.values(
+  // Keyed by locationId, not name — two locations can share a display name, and merging them
+  // would silently overstate one bar. The label still shows the name.
+  const locationValue = Object.values(
     (data?.rows ?? []).reduce<Record<string, { name: string; value: number }>>((acc, r) => {
-      acc[r.branch] ??= { name: r.branch, value: 0 };
-      acc[r.branch].value += r.stockCostValue;
+      acc[r.locationId] ??= { name: r.location, value: 0 };
+      acc[r.locationId].value += r.stockCostValue;
       return acc;
     }, {})
   );
@@ -80,15 +96,37 @@ function InventorySnapshot() {
   return (
     <PageShell
       title="Inventory Reports"
-      subtitle="Current stock snapshot, stock value and reserved quantity by branch"
+      subtitle="Current stock snapshot, stock value and reserved quantity across branches and warehouses"
     >
       <div className="flex flex-wrap items-center gap-2">
-        {!lockedBranchId && (
+        {/* Branch and Warehouse are shown per the caller's stock pool, resolved server-side: a
+            branch user (e.g. cashier) sees no warehouse control because they hold no warehouse
+            stock, and a warehouse user sees no branch control for the mirror reason. */}
+        {!lockedBranchId && scope?.canFilterBranch && (
           <Select value={branchId} onValueChange={setBranchId}>
             <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Branches</SelectItem>
               {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {scope?.canFilterWarehouse && (
+          <Select value={warehouseId} onValueChange={setWarehouseId}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Warehouses" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Warehouses</SelectItem>
+              {scope.warehouses.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {showLocationType && (
+          <Select value={locationType} onValueChange={setLocationType}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Locations" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Branches & Warehouses</SelectItem>
+              <SelectItem value="branch">Branches only</SelectItem>
+              <SelectItem value="warehouse">Warehouses only</SelectItem>
             </SelectContent>
           </Select>
         )}
@@ -129,9 +167,9 @@ function InventorySnapshot() {
 
       {canViewCost && (
         <Card className="p-6 border-border/60 shadow-card">
-          <h3 className="font-semibold mb-4">Stock Value by Branch</h3>
+          <h3 className="font-semibold mb-4">Stock Value by Location</h3>
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={branchValue}>
+            <BarChart data={locationValue}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="name" fontSize={11} />
               <YAxis fontSize={11} />
@@ -150,7 +188,16 @@ function InventorySnapshot() {
             { key: "sku", label: "SKU" },
             { key: "productName", label: "Product" },
             { key: "category", label: "Category" },
-            { key: "branch", label: "Branch" },
+            { key: "location", label: "Location" },
+            {
+              key: "locationType",
+              label: "Type",
+              render: (r: InventorySnapshotRow) => (
+                <Badge variant={r.locationType === "warehouse" ? "secondary" : "outline"} className="text-[10px] capitalize">
+                  {r.locationType}
+                </Badge>
+              ),
+            },
             { key: "isTobacco", label: "Tobacco", render: (r: InventorySnapshotRow) => (r.isTobacco ? <Badge variant="outline" className="text-[10px]">Tobacco</Badge> : "—") },
             { key: "onHandQty", label: "On Hand Qty" },
             { key: "reservedQty", label: "Reserved Qty" },
