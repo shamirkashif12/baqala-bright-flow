@@ -26,6 +26,15 @@ import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
 import { uuid } from "@/lib/utils";
 
+// "Failed to fetch" is the browser's own error when it can't reach anything at all (nothing
+// listening on the local print-agent port) — i.e. no printer/agent has ever been set up on
+// this till, not a real print failure. Silence that case entirely instead of alarming the
+// cashier on every single sale; a printer that's actually configured but errors for a real
+// reason (bad name, out of paper, etc.) still gets a normal HTTP-style error message.
+function isPrinterNotSetUp(msg: string): boolean {
+  return /failed to fetch|networkerror when attempting to fetch/i.test(msg);
+}
+
 // Distinguishes a printer-connectivity failure from a generic print error using the message
 // text — qz.ts/api.printReceipt don't return a structured error code, just a message string.
 function notifyPrintFailure(msg: string) {
@@ -1574,6 +1583,7 @@ function POS() {
       .then((res) => toast.success(res.message, { id: printId }))
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : "Print failed";
+        if (isPrinterNotSetUp(msg)) { toast.dismiss(printId); return; }
         toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
         notifyPrintFailure(msg);
       });
@@ -2270,6 +2280,7 @@ function POS() {
                   .then((res) => toast.success(res.message, { id: printId }))
                   .catch((err: unknown) => {
                     const msg = err instanceof Error ? err.message : "Print failed";
+                    if (isPrinterNotSetUp(msg)) { toast.dismiss(printId); return; }
                     toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
                     notifyPrintFailure(msg);
                   });
