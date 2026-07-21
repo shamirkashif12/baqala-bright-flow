@@ -36,18 +36,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_employee_contracts", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_employee_contracts_employees_employee_id",
-                        column: x => x.employee_id,
-                        principalTable: "employees",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_employee_contracts_users_uploaded_by",
-                        column: x => x.uploaded_by,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -68,18 +56,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_employee_documents", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_employee_documents_employees_employee_id",
-                        column: x => x.employee_id,
-                        principalTable: "employees",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_employee_documents_users_uploaded_by",
-                        column: x => x.uploaded_by,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -141,21 +117,9 @@ namespace BaqalaPOS.Api.Migrations
                 {
                     table.PrimaryKey("PK_leave_requests", x => x.id);
                     table.ForeignKey(
-                        name: "FK_leave_requests_employees_employee_id",
-                        column: x => x.employee_id,
-                        principalTable: "employees",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
                         name: "FK_leave_requests_leave_types_leave_type_id",
                         column: x => x.leave_type_id,
                         principalTable: "leave_types",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_leave_requests_users_approver_id",
-                        column: x => x.approver_id,
-                        principalTable: "users",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Restrict);
                 })
@@ -208,6 +172,60 @@ namespace BaqalaPOS.Api.Migrations
                 principalTable: "leave_policies",
                 principalColumn: "id",
                 onDelete: ReferentialAction.Restrict);
+
+            // employees/users were created in earlier migrations, so their actual collation may
+            // not match whatever these new FK columns get from the server's ambient default. See
+            // MigrationCollationHelper for why.
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_employee_contracts_employees_employee_id",
+                table: "employee_contracts",
+                column: "employee_id",
+                principalTable: "employees",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_employee_contracts_users_uploaded_by",
+                table: "employee_contracts",
+                column: "uploaded_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_employee_documents_employees_employee_id",
+                table: "employee_documents",
+                column: "employee_id",
+                principalTable: "employees",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_employee_documents_users_uploaded_by",
+                table: "employee_documents",
+                column: "uploaded_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_leave_requests_employees_employee_id",
+                table: "leave_requests",
+                column: "employee_id",
+                principalTable: "employees",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_leave_requests_users_approver_id",
+                table: "leave_requests",
+                column: "approver_id",
+                principalTable: "users",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
         }
 
         /// <inheritdoc />

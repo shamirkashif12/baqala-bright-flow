@@ -79,18 +79,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_work_shifts", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_work_shifts_branches_branch_id",
-                        column: x => x.branch_id,
-                        principalTable: "branches",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_work_shifts_departments_department_id",
-                        column: x => x.department_id,
-                        principalTable: "departments",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -110,18 +98,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_employee_shift_assignments", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_employee_shift_assignments_employees_employee_id",
-                        column: x => x.employee_id,
-                        principalTable: "employees",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_employee_shift_assignments_users_assigned_by",
-                        column: x => x.assigned_by,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_employee_shift_assignments_work_shifts_shift_id",
                         column: x => x.shift_id,
@@ -167,13 +143,18 @@ namespace BaqalaPOS.Api.Migrations
                 table: "work_shifts",
                 column: "department_id");
 
-            migrationBuilder.AddForeignKey(
+            // branches/departments/employees/users were all created in earlier migrations, so
+            // their actual collation may not match whatever these new FK columns get from the
+            // server's ambient default. See MigrationCollationHelper for why. work_shifts is
+            // created earlier in this same migration, so FKs to it can stay plain.
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_staff_attendance_employees_employee_id",
                 table: "staff_attendance",
                 column: "employee_id",
                 principalTable: "employees",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict);
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_staff_attendance_work_shifts_shift_id",
@@ -182,6 +163,41 @@ namespace BaqalaPOS.Api.Migrations
                 principalTable: "work_shifts",
                 principalColumn: "id",
                 onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_work_shifts_branches_branch_id",
+                table: "work_shifts",
+                column: "branch_id",
+                principalTable: "branches",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_work_shifts_departments_department_id",
+                table: "work_shifts",
+                column: "department_id",
+                principalTable: "departments",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_employee_shift_assignments_employees_employee_id",
+                table: "employee_shift_assignments",
+                column: "employee_id",
+                principalTable: "employees",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_employee_shift_assignments_users_assigned_by",
+                table: "employee_shift_assignments",
+                column: "assigned_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
         }
 
         /// <inheritdoc />
