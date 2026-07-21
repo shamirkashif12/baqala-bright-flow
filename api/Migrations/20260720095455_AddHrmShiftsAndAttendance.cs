@@ -11,6 +11,13 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // This migration previously failed partway through on production (first on an
+            // incompatible-collation FK, then again — after that fix — on "Duplicate column name
+            // 'date'"), because this project's startup runner executes each migration's SQL
+            // directly without a wrapping transaction (see Program.cs), so everything before the
+            // failure point had already committed without the migration being recorded as
+            // applied. Every statement below is guarded so re-running this migration is safe
+            // regardless of how far a previous attempt got. See MigrationIdempotencyHelper.
             migrationBuilder.AlterColumn<Guid>(
                 name: "user_id",
                 table: "staff_attendance",
@@ -19,129 +26,55 @@ namespace BaqalaPOS.Api.Migrations
                 oldClrType: typeof(Guid),
                 oldType: "char(36)");
 
-            migrationBuilder.AddColumn<DateTime>(
-                name: "date",
-                table: "staff_attendance",
-                type: "datetime(6)",
-                nullable: true);
+            migrationBuilder.AddColumnIfNotExists("staff_attendance", "date", "datetime(6) NULL");
+            migrationBuilder.AddColumnIfNotExists("staff_attendance", "early_leave_minutes", "int NOT NULL DEFAULT 0");
+            migrationBuilder.AddColumnIfNotExists("staff_attendance", "employee_id", "char(36) NULL");
+            migrationBuilder.AddColumnIfNotExists("staff_attendance", "late_minutes", "int NOT NULL DEFAULT 0");
+            migrationBuilder.AddColumnIfNotExists("staff_attendance", "remarks", "longtext NULL");
+            migrationBuilder.AddColumnIfNotExists("staff_attendance", "shift_id", "char(36) NULL");
 
-            migrationBuilder.AddColumn<int>(
-                name: "early_leave_minutes",
-                table: "staff_attendance",
-                type: "int",
-                nullable: false,
-                defaultValue: 0);
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS `work_shifts` (
+                    `id` char(36) NOT NULL,
+                    `name` varchar(150) NOT NULL,
+                    `branch_id` char(36) NULL,
+                    `department_id` char(36) NULL,
+                    `working_days` varchar(50) NOT NULL,
+                    `start_time` varchar(5) NOT NULL,
+                    `end_time` varchar(5) NOT NULL,
+                    `break_start` varchar(5) NULL,
+                    `break_end` varchar(5) NULL,
+                    `grace_in_minutes` int NOT NULL,
+                    `grace_out_minutes` int NOT NULL,
+                    `status` varchar(20) NOT NULL,
+                    `created_at` datetime(6) NOT NULL,
+                    `updated_at` datetime(6) NOT NULL,
+                    PRIMARY KEY (`id`)
+                );
+            ");
 
-            migrationBuilder.AddColumn<Guid>(
-                name: "employee_id",
-                table: "staff_attendance",
-                type: "char(36)",
-                nullable: true);
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS `employee_shift_assignments` (
+                    `id` char(36) NOT NULL,
+                    `employee_id` char(36) NOT NULL,
+                    `shift_id` char(36) NOT NULL,
+                    `effective_from` datetime(6) NOT NULL,
+                    `effective_to` datetime(6) NULL,
+                    `status` varchar(20) NOT NULL,
+                    `assigned_by` char(36) NULL,
+                    `assigned_at` datetime(6) NOT NULL,
+                    PRIMARY KEY (`id`),
+                    CONSTRAINT `FK_employee_shift_assignments_work_shifts_shift_id` FOREIGN KEY (`shift_id`) REFERENCES `work_shifts` (`id`) ON DELETE RESTRICT
+                );
+            ");
 
-            migrationBuilder.AddColumn<int>(
-                name: "late_minutes",
-                table: "staff_attendance",
-                type: "int",
-                nullable: false,
-                defaultValue: 0);
-
-            migrationBuilder.AddColumn<string>(
-                name: "remarks",
-                table: "staff_attendance",
-                type: "longtext",
-                nullable: true);
-
-            migrationBuilder.AddColumn<Guid>(
-                name: "shift_id",
-                table: "staff_attendance",
-                type: "char(36)",
-                nullable: true);
-
-            migrationBuilder.CreateTable(
-                name: "work_shifts",
-                columns: table => new
-                {
-                    id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    name = table.Column<string>(type: "varchar(150)", maxLength: 150, nullable: false),
-                    branch_id = table.Column<Guid>(type: "char(36)", nullable: true),
-                    department_id = table.Column<Guid>(type: "char(36)", nullable: true),
-                    working_days = table.Column<string>(type: "varchar(50)", maxLength: 50, nullable: false),
-                    start_time = table.Column<string>(type: "varchar(5)", maxLength: 5, nullable: false),
-                    end_time = table.Column<string>(type: "varchar(5)", maxLength: 5, nullable: false),
-                    break_start = table.Column<string>(type: "varchar(5)", maxLength: 5, nullable: true),
-                    break_end = table.Column<string>(type: "varchar(5)", maxLength: 5, nullable: true),
-                    grace_in_minutes = table.Column<int>(type: "int", nullable: false),
-                    grace_out_minutes = table.Column<int>(type: "int", nullable: false),
-                    status = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: false),
-                    created_at = table.Column<DateTime>(type: "datetime(6)", nullable: false),
-                    updated_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_work_shifts", x => x.id);
-                })
-                .Annotation("MySQL:Charset", "utf8mb4");
-
-            migrationBuilder.CreateTable(
-                name: "employee_shift_assignments",
-                columns: table => new
-                {
-                    id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    employee_id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    shift_id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    effective_from = table.Column<DateTime>(type: "datetime(6)", nullable: false),
-                    effective_to = table.Column<DateTime>(type: "datetime(6)", nullable: true),
-                    status = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: false),
-                    assigned_by = table.Column<Guid>(type: "char(36)", nullable: true),
-                    assigned_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_employee_shift_assignments", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_employee_shift_assignments_work_shifts_shift_id",
-                        column: x => x.shift_id,
-                        principalTable: "work_shifts",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                })
-                .Annotation("MySQL:Charset", "utf8mb4");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_staff_attendance_employee_id_date",
-                table: "staff_attendance",
-                columns: new[] { "employee_id", "date" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_staff_attendance_shift_id",
-                table: "staff_attendance",
-                column: "shift_id");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_employee_shift_assignments_assigned_by",
-                table: "employee_shift_assignments",
-                column: "assigned_by");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_employee_shift_assignments_employee_id",
-                table: "employee_shift_assignments",
-                column: "employee_id");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_employee_shift_assignments_shift_id",
-                table: "employee_shift_assignments",
-                column: "shift_id");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_work_shifts_branch_id",
-                table: "work_shifts",
-                column: "branch_id");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_work_shifts_department_id",
-                table: "work_shifts",
-                column: "department_id");
+            migrationBuilder.CreateIndexIfNotExists("IX_staff_attendance_employee_id_date", "staff_attendance", "`employee_id`, `date`", unique: true);
+            migrationBuilder.CreateIndexIfNotExists("IX_staff_attendance_shift_id", "staff_attendance", "`shift_id`");
+            migrationBuilder.CreateIndexIfNotExists("IX_employee_shift_assignments_assigned_by", "employee_shift_assignments", "`assigned_by`");
+            migrationBuilder.CreateIndexIfNotExists("IX_employee_shift_assignments_employee_id", "employee_shift_assignments", "`employee_id`");
+            migrationBuilder.CreateIndexIfNotExists("IX_employee_shift_assignments_shift_id", "employee_shift_assignments", "`shift_id`");
+            migrationBuilder.CreateIndexIfNotExists("IX_work_shifts_branch_id", "work_shifts", "`branch_id`");
+            migrationBuilder.CreateIndexIfNotExists("IX_work_shifts_department_id", "work_shifts", "`department_id`");
 
             // branches/departments/employees/users were all created in earlier migrations, so
             // their actual collation may not match whatever these new FK columns get from the
@@ -150,57 +83,57 @@ namespace BaqalaPOS.Api.Migrations
             // brand new in this migration: they're added via AddColumn to a table that already
             // existed, so they inherit staff_attendance's own collation from whenever it was
             // originally created, not today's ambient default that work_shifts.id just got.
-            migrationBuilder.AddForeignKeyWithMatchedCollation(
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
                 name: "FK_staff_attendance_employees_employee_id",
                 table: "staff_attendance",
                 column: "employee_id",
                 principalTable: "employees",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict,
+                onDeleteSql: "RESTRICT",
                 nullable: true);
 
-            migrationBuilder.AddForeignKeyWithMatchedCollation(
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
                 name: "FK_staff_attendance_work_shifts_shift_id",
                 table: "staff_attendance",
                 column: "shift_id",
                 principalTable: "work_shifts",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict,
+                onDeleteSql: "RESTRICT",
                 nullable: true);
 
-            migrationBuilder.AddForeignKeyWithMatchedCollation(
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
                 name: "FK_work_shifts_branches_branch_id",
                 table: "work_shifts",
                 column: "branch_id",
                 principalTable: "branches",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict,
+                onDeleteSql: "RESTRICT",
                 nullable: true);
 
-            migrationBuilder.AddForeignKeyWithMatchedCollation(
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
                 name: "FK_work_shifts_departments_department_id",
                 table: "work_shifts",
                 column: "department_id",
                 principalTable: "departments",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict,
+                onDeleteSql: "RESTRICT",
                 nullable: true);
 
-            migrationBuilder.AddForeignKeyWithMatchedCollation(
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
                 name: "FK_employee_shift_assignments_employees_employee_id",
                 table: "employee_shift_assignments",
                 column: "employee_id",
                 principalTable: "employees",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict);
+                onDeleteSql: "RESTRICT");
 
-            migrationBuilder.AddForeignKeyWithMatchedCollation(
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
                 name: "FK_employee_shift_assignments_users_assigned_by",
                 table: "employee_shift_assignments",
                 column: "assigned_by",
                 principalTable: "users",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict,
+                onDeleteSql: "RESTRICT",
                 nullable: true);
         }
 
