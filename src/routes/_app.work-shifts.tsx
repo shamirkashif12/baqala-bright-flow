@@ -149,7 +149,11 @@ function AssignShiftFields({ shift, employees, onAssign, saving }: { shift: Work
 function WorkShiftsTab() {
   const { user } = useAuth();
   const { branches } = useBranch();
-  const { canCreate, canEdit, canDelete } = usePermission("HR Shifts");
+  const { canCreate, canEdit, canDelete, canApprove } = usePermission("HR Shifts");
+  // A View-only grant (no Approve/Edit) only unlocks the caller's OWN assigned shift(s)
+  // server-side (WorkShiftsController.GetAll) — branch/department/employee filters are
+  // meaningless over that single-shift result, so hide them.
+  const canViewAll = canApprove || canEdit;
   const branchLocked = user?.role !== "tenant_admin";
 
   const [shifts, setShifts] = useState<WorkShift[]>([]);
@@ -159,6 +163,12 @@ function WorkShiftsTab() {
   const [loadError, setLoadError] = useState(false);
   const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [employeeFilter, setEmployeeFilter] = useState("all");
+  const [workingDayFilter, setWorkingDayFilter] = useState("all");
+  const [effectiveDateFilter, setEffectiveDateFilter] = useState("");
+  const [employeeShiftIds, setEmployeeShiftIds] = useState<string[] | null>(null);
+  const [assignments, setAssignments] = useState<{ shiftId: string; effectiveFrom: string; effectiveTo?: string }[]>([]);
   const [editShift, setEditShift] = useState<WorkShift | null>(null);
   const [assignShift, setAssignShift] = useState<WorkShift | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -173,8 +183,18 @@ function WorkShiftsTab() {
       .finally(() => setLoading(false));
     api.getDepartments({ status: "active" }).then(setDepartments).catch(() => {});
     api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getWorkShiftAssignments({ status: "active" }).then(setAssignments).catch(() => {});
   };
   useEffect(load, []);
+
+  // FRD 13.2 Employee filter — no "which shifts is employee X assigned to" list endpoint exists,
+  // so this reuses the employee's own shift-history endpoint and filters the shift list to it.
+  useEffect(() => {
+    if (employeeFilter === "all") { setEmployeeShiftIds(null); return; }
+    api.getEmployeeShiftHistory(employeeFilter)
+      .then(history => setEmployeeShiftIds(history.filter(a => a.status === "active").map(a => a.shiftId)))
+      .catch(() => setEmployeeShiftIds([]));
+  }, [employeeFilter]);
 
   const openCreate = () => {
     setForm({ ...emptyForm, branchId: branchLocked ? (user?.branchId ?? "all") : "all" });
@@ -229,25 +249,44 @@ function WorkShiftsTab() {
     }
   };
 
-  const handleAssign = async (employeeIds: string[], effectiveFrom: string, effectiveTo: string) => {
+  // FRD SHF-05 — a conflicting existing assignment blocks the save (409) unless the caller
+  // explicitly overrides; surface the conflicting shift(s) and let them confirm before retrying.
+  const handleAssign = async (employeeIds: string[], effectiveFrom: string, effectiveTo: string, override = false) => {
     if (!assignShift) return;
     setSaving(true);
     try {
-      const res = await api.assignWorkShift(assignShift.id, { employeeIds, effectiveFrom, effectiveTo: effectiveTo || undefined });
+      const res = await api.assignWorkShift(assignShift.id, { employeeIds, effectiveFrom, effectiveTo: effectiveTo || undefined, override });
       toast.success(`Assigned shift to ${res.assigned} employee${res.assigned === 1 ? "" : "s"}.`);
       setAssignShift(null);
       load();
     } catch (e: any) {
-      toast.error(e?.message || "Failed to assign shift.");
+      const conflicts = (e?.body as { conflicts?: { employeeName: string; conflictingShift: string; effectiveFrom: string; effectiveTo?: string }[] } | undefined)?.conflicts;
+      if (e?.status === 409 && conflicts?.length) {
+        const summary = conflicts.map(c => `${c.employeeName} → already on "${c.conflictingShift}" (${c.effectiveFrom}${c.effectiveTo ? ` to ${c.effectiveTo}` : " onward"})`).join("\n");
+        if (confirm(`Some employees already have an overlapping shift assignment:\n\n${summary}\n\nAssign anyway? This will end their existing assignment.`)) {
+          return handleAssign(employeeIds, effectiveFrom, effectiveTo, true);
+        }
+      } else {
+        toast.error(e?.message || "Failed to assign shift.");
+      }
     } finally {
       setSaving(false);
     }
   };
 
+  // FRD 13.2 Effective Date filter — only shifts with a live assignment covering the chosen date.
+  const shiftIdsEffectiveOnDate = effectiveDateFilter
+    ? new Set(assignments.filter(a => a.effectiveFrom <= effectiveDateFilter && (!a.effectiveTo || a.effectiveTo >= effectiveDateFilter)).map(a => a.shiftId))
+    : null;
+
   const filtered = shifts.filter(s => {
     const mb = branchFilter === "all" || s.branchId === branchFilter;
     const ms = statusFilter === "all" || s.status === statusFilter;
-    return mb && ms;
+    const md = departmentFilter === "all" || s.departmentId === departmentFilter;
+    const me = employeeShiftIds === null || employeeShiftIds.includes(s.id);
+    const mw = workingDayFilter === "all" || s.workingDays.split(",").includes(workingDayFilter);
+    const md2 = shiftIdsEffectiveOnDate === null || shiftIdsEffectiveOnDate.has(s.id);
+    return mb && ms && md && me && mw && md2;
   });
 
   const handleExport = () => exportRowsAsCsv(
@@ -261,7 +300,7 @@ function WorkShiftsTab() {
       {loadError && <LoadErrorBanner onRetry={load} />}
 
       <div className="flex flex-wrap items-center gap-2">
-        {!branchLocked && (
+        {!branchLocked && canViewAll && (
           <Select value={branchFilter} onValueChange={setBranchFilter}>
             <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -278,6 +317,35 @@ function WorkShiftsTab() {
             <SelectItem value="inactive">Inactive</SelectItem>
           </SelectContent>
         </Select>
+        {canViewAll && (
+          <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Departments</SelectItem>
+              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {canViewAll && (
+          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Employees</SelectItem>
+              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        <Select value={workingDayFilter} onValueChange={setWorkingDayFilter}>
+          <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Days</SelectItem>
+            {DAYS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Input type="date" value={effectiveDateFilter} onChange={e => setEffectiveDateFilter(e.target.value)} placeholder="Effective date" title="Effective Date" className="h-9 w-40" />
+        {effectiveDateFilter && (
+          <Button size="sm" variant="ghost" className="h-9 px-2 text-xs" onClick={() => setEffectiveDateFilter("")}>Clear date</Button>
+        )}
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export
@@ -360,8 +428,14 @@ function WorkShiftsTab() {
 }
 
 function WorkShifts() {
+  const { canEdit, canApprove } = usePermission("HR Shifts");
+  const canViewAll = canApprove || canEdit;
   return (
-    <PageShell title="Shifts" subtitle="Shift templates and employee schedule assignment">
+    <PageShell
+      title="Shifts"
+      subtitle={canViewAll ? "Shift templates and employee schedule assignment" : "Your assigned shift(s)"}
+      breadcrumb={["Human Resources", "Shifts"]}
+    >
       <WorkShiftsTab />
     </PageShell>
   );

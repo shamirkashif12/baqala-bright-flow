@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260721063027_AddHrmGapRemediationFields")]
+    partial class AddHrmGapRemediationFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -859,6 +862,11 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("is_active");
+
+                    b.Property<string>("MinCustomerTier")
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("min_customer_tier");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1762,122 +1770,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("leave_types");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.LoyaltyProgram", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid?>("BranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("branch_id");
-
-                    b.Property<string>("BrandColor")
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("brand_color");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("longtext")
-                        .HasColumnName("description");
-
-                    b.Property<decimal>("GoldEarnMultiplier")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("gold_earn_multiplier");
-
-                    b.Property<decimal>("GoldThreshold")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("gold_threshold");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("is_active");
-
-                    b.Property<string>("LogoUrl")
-                        .HasColumnType("longtext")
-                        .HasColumnName("logo_url");
-
-                    b.Property<decimal?>("MaxRedeemPctOfOrder")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("max_redeem_pct_of_order");
-
-                    b.Property<int>("MinPointsToRedeem")
-                        .HasColumnType("int")
-                        .HasColumnName("min_points_to_redeem");
-
-                    b.Property<decimal>("PlatinumEarnMultiplier")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("platinum_earn_multiplier");
-
-                    b.Property<decimal>("PlatinumThreshold")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("platinum_threshold");
-
-                    b.Property<int?>("PointsExpiryDays")
-                        .HasColumnType("int")
-                        .HasColumnName("points_expiry_days");
-
-                    b.Property<decimal>("PointsPerCurrencyUnit")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("points_per_currency_unit");
-
-                    b.Property<string>("ProgramName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("program_name");
-
-                    b.Property<decimal>("RedemptionValuePerPoint")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("redemption_value_per_point");
-
-                    b.Property<decimal>("SilverEarnMultiplier")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("silver_earn_multiplier");
-
-                    b.Property<decimal>("SilverThreshold")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("silver_threshold");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId")
-                        .IsUnique();
-
-                    b.ToTable("loyalty_programs");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = new Guid("00000000-0000-0000-0000-000000000001"),
-                            BrandColor = "#7c3aed",
-                            CreatedAt = new DateTime(2026, 7, 21, 0, 0, 0, 0, DateTimeKind.Utc),
-                            GoldEarnMultiplier = 1m,
-                            GoldThreshold = 5000m,
-                            IsActive = true,
-                            MaxRedeemPctOfOrder = 50m,
-                            MinPointsToRedeem = 100,
-                            PlatinumEarnMultiplier = 1m,
-                            PlatinumThreshold = 10000m,
-                            PointsExpiryDays = 365,
-                            PointsPerCurrencyUnit = 1m,
-                            ProgramName = "Loyalty Rewards",
-                            RedemptionValuePerPoint = 0.01m,
-                            SilverEarnMultiplier = 1m,
-                            SilverThreshold = 1000m,
-                            UpdatedAt = new DateTime(2026, 7, 21, 0, 0, 0, 0, DateTimeKind.Utc)
-                        });
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.LoyaltyTransaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1906,17 +1798,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("varchar(500)")
                         .HasColumnName("description");
 
-                    b.Property<bool>("ExpiredFlag")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("expired_flag");
-
                     b.Property<DateTime?>("ExpiryDate")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("expiry_date");
-
-                    b.Property<decimal?>("MonetaryValue")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("monetary_value");
 
                     b.Property<Guid?>("OrderId")
                         .HasColumnType("char(36)")
@@ -2159,14 +2043,6 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("decimal(18,4)")
                         .HasColumnName("discount_amount");
 
-                    b.Property<decimal>("LoyaltyDiscountAmount")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("loyalty_discount_amount");
-
-                    b.Property<decimal>("LoyaltyPointsRedeemed")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("loyalty_points_redeemed");
-
                     b.Property<string>("Notes")
                         .HasColumnType("longtext")
                         .HasColumnName("notes");
@@ -2248,44 +2124,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("TerminalId");
 
                     b.ToTable("orders");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.OrderDiscount", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("amount");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid?>("DiscountId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("discount_id");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("name");
-
-                    b.Property<Guid>("OrderId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("order_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DiscountId");
-
-                    b.HasIndex("OrderId");
-
-                    b.ToTable("order_discounts");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.OrderItem", b =>
@@ -5884,16 +5722,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("LeaveType");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.LoyaltyProgram", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Branch");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.LoyaltyTransaction", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
@@ -5998,23 +5826,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Shift");
 
                     b.Navigation("Terminal");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.OrderDiscount", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Discount", "Discount")
-                        .WithMany()
-                        .HasForeignKey("DiscountId");
-
-                    b.HasOne("BaqalaPOS.Api.Models.Order", "Order")
-                        .WithMany("Discounts")
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Discount");
-
-                    b.Navigation("Order");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.OrderItem", b =>
@@ -6847,8 +6658,6 @@ namespace BaqalaPOS.Api.Migrations
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Order", b =>
                 {
-                    b.Navigation("Discounts");
-
                     b.Navigation("Items");
 
                     b.Navigation("Payments");

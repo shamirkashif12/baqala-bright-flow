@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusBadge } from "@/components/module-placeholder";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
-import { downloadBlob } from "@/lib/csv-export";
+import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
 import { api, type ShiftClosingRow, type Department, type WorkShift, type ReportExportFormat } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -62,7 +62,7 @@ function ShiftClosingReport() {
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportShiftClosingReport({ ...filterParams, exportedBy: user?.id, format });
-      downloadBlob(blob, `shift-closing-report-${dateFrom}-to-${dateTo}.${format}`);
+      downloadBlob(blob, `shift-closing-report-${dateFrom}-to-${dateTo}.${exportFileExtension(format)}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
     }
@@ -82,7 +82,7 @@ function ShiftClosingReport() {
   ];
 
   return (
-    <PageShell title="Shift Closing Report" subtitle="Monitor shift closing completion and exceptions">
+    <PageShell title="Shift Closing Report" subtitle="Monitor shift closing completion and exceptions" breadcrumb={["Human Resources", "Shift Closing Report"]}>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
@@ -116,11 +116,14 @@ function ShiftClosingReport() {
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="Open">Open</SelectItem>
               <SelectItem value="Closed">Closed</SelectItem>
+              <SelectItem value="Late Closed">Late Closed</SelectItem>
               <SelectItem value="Manually Closed">Manually Closed</SelectItem>
               <SelectItem value="Checkout Missing">Checkout Missing</SelectItem>
+              <SelectItem value="Cancelled">Cancelled</SelectItem>
+              <SelectItem value="Not Applicable">Not Applicable</SelectItem>
             </SelectContent>
           </Select>
-          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
         </div>
 
         {loading ? (

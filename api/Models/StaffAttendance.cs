@@ -65,6 +65,11 @@ public class StaffAttendance
     [Column("remarks")]
     public string? Remarks { get; set; }
 
+    // Set true the first time Correct() runs on this row — backs the Attendance/Attendance
+    // Report "Correction Status" filter (FRD 7.3/14) without needing a separate history table.
+    [Column("is_corrected")]
+    public bool IsCorrected { get; set; } = false;
+
     // Navigation
     public User? User { get; set; }
     public Branch? Branch { get; set; }

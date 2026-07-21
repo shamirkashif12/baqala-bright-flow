@@ -1,6 +1,9 @@
-import { type ReactNode, useEffect } from "react";
-import { useRouterState, useNavigate } from "@tanstack/react-router";
+import { type ReactNode, useEffect, useRef } from "react";
+import { useRouterState, Link } from "@tanstack/react-router";
+import { ShieldAlert } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useAuth, type AppRole } from "@/lib/auth";
+import { api } from "@/lib/api";
 
 type RouteRule = {
   url: string;
@@ -80,6 +83,8 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/departments",         module: "HR Master Data" },
   { url: "/designations",        module: "HR Master Data" },
   { url: "/holidays",            module: "HR Master Data" },
+  // Self-service — any authenticated user can view their OWN payroll, no module gate.
+  { url: "/my-payroll" },
   // Network
   { url: "/branches",            module: "Branches" },
   { url: "/terminals",           module: "Terminals" },
@@ -88,6 +93,12 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/device-behavior",     module: "Devices" },
   // Insights
   { url: "/sales",               module: "Sales" },
+  // HRM reports carry their own permission gates on the backend (HrReportsController) —
+  // these specific entries must come before the generic "/reports" rule below since
+  // ROUTE_RULES.find() returns the first prefix match.
+  { url: "/reports/hrm-attendance",      module: "Reports" },
+  { url: "/reports/shift-closing",       module: "Reports" },
+  { url: "/reports/employee-activity",   module: "Audit Logs" },
   { url: "/reports",             module: "Reports" },
   { url: "/kpi",                 module: "Reports" },
   { url: "/bi",                  module: "Reports" },
@@ -131,15 +142,30 @@ function isAllowed(rule: RouteRule, user: ReturnType<typeof useAuth>["user"]): b
   return true;
 }
 
+function AccessDenied({ dest }: { dest: string }) {
+  return (
+    <div className="flex min-h-[70vh] flex-col items-center justify-center gap-3 px-6 text-center">
+      <ShieldAlert className="h-12 w-12 text-destructive" />
+      <h1 className="text-xl font-semibold">Access Denied</h1>
+      <p className="max-w-md text-sm text-muted-foreground">
+        You don't have permission to view this page. Contact your administrator if you believe this is a mistake.
+      </p>
+      <Button asChild className="mt-2">
+        <Link to={dest}>Back to safety</Link>
+      </Button>
+    </div>
+  );
+}
+
 /**
- * Wraps the routed page content. If the signed-in user doesn't have permission
- * for the current path, redirects them to their role's default landing page
- * instead of showing an "Access Denied" screen.
+ * Wraps the routed page content. If the signed-in user doesn't have permission for the current
+ * path, shows an Access Denied screen and logs the attempt (FRD 3.1) instead of silently
+ * redirecting them away.
  */
 export function RouteGuard({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const navigate = useNavigate();
+  const loggedPathRef = useRef<string | null>(null);
 
   const rule = ROUTE_RULES.find(
     (r) => path === r.url || path.startsWith(r.url + "/"),
@@ -148,17 +174,18 @@ export function RouteGuard({ children }: { children: ReactNode }) {
   const denied = !loading && !!rule && !isAllowed(rule, user);
 
   useEffect(() => {
-    if (denied && user) {
-      const dest = ROLE_DEFAULT_ROUTES[user.role as AppRole] ?? "/dashboard";
-      // Avoid redirect loops if the default route is also denied
-      if (path !== dest) navigate({ to: dest });
+    if (denied && user && loggedPathRef.current !== path) {
+      loggedPathRef.current = path;
+      api.logAccessDenied(path);
     }
-  }, [denied, user, navigate, path]);
+  }, [denied, user, path]);
 
   // Still hydrating — render nothing to avoid a flash
   if (loading) return null;
-  // Denied — blank while the redirect effect fires
-  if (denied) return null;
+  if (denied) {
+    const dest = ROLE_DEFAULT_ROUTES[user!.role as AppRole] ?? "/dashboard";
+    return <AccessDenied dest={dest} />;
+  }
 
   return <>{children}</>;
 }

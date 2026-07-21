@@ -283,7 +283,7 @@ function HolidaysTab() {
 
 function Holidays() {
   return (
-    <PageShell title="Holidays" subtitle="Branch and company holiday calendar">
+    <PageShell title="Holidays" subtitle="Branch and company holiday calendar" breadcrumb={["Human Resources", "Holidays"]}>
       <HolidaysTab />
     </PageShell>
   );

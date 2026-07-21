@@ -21,6 +21,18 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
         return (role, branchId);
     }
 
+    // A "View" grant on Leave Management only unlocks the caller's OWN leave history — seeing
+    // every employee's leave requests requires Approve (the module's manager-tier action; Edit is
+    // never granted here even to Branch Manager/Supervisor, so Approve alone is the signal).
+    // Without this, e.g. a Cashier (View+Create for their own applications) could see every other
+    // employee's leave requests in their branch.
+    private async Task<bool> HasElevatedAccessAsync() =>
+        await PermissionCheck.HasPermissionAsync(User, db, "Leave Management", PermAction.Approve)
+        || await PermissionCheck.HasPermissionAsync(User, db, "Leave Management", PermAction.Edit);
+
+    private async Task<Guid?> GetOwnEmployeeIdAsync(Guid? callerId) =>
+        callerId.HasValue ? await db.Employees.Where(e => e.UserId == callerId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
+
     // Inclusive day count minus any holiday (tenant-wide or the employee's own branch) falling
     // within the range — FRD 9.2 "excluding holidays/off days where configured". Weekly-off-day
     // exclusion is not attempted here (would need the employee's active shift's WorkingDays).
@@ -37,6 +49,7 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
         return Math.Max(0, totalDays - holidays.Distinct().Count());
     }
 
+    [RequirePermission("Leave Management", PermAction.View)]
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
@@ -45,7 +58,9 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
         [FromQuery] Guid? leaveTypeId,
         [FromQuery] string? status,
         [FromQuery] DateOnly? dateFrom,
-        [FromQuery] DateOnly? dateTo)
+        [FromQuery] DateOnly? dateTo,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
 
@@ -60,27 +75,49 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
         else if (branchId.HasValue)
             query = query.Where(l => l.Employee!.BranchId == branchId);
 
+        if (!await HasElevatedAccessAsync())
+        {
+            var ownEmployeeId = await GetOwnEmployeeIdAsync(CallerId());
+            query = ownEmployeeId.HasValue ? query.Where(l => l.EmployeeId == ownEmployeeId) : query.Where(l => false);
+        }
+        else if (employeeId.HasValue) query = query.Where(l => l.EmployeeId == employeeId);
+
         if (departmentId.HasValue) query = query.Where(l => l.Employee!.DepartmentId == departmentId);
-        if (employeeId.HasValue) query = query.Where(l => l.EmployeeId == employeeId);
         if (leaveTypeId.HasValue) query = query.Where(l => l.LeaveTypeId == leaveTypeId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(l => l.Status == status);
         if (dateFrom.HasValue) query = query.Where(l => l.ToDate >= dateFrom);
         if (dateTo.HasValue) query = query.Where(l => l.FromDate <= dateTo);
 
-        return Ok(await query.OrderByDescending(l => l.FromDate).ToListAsync());
+        query = query.OrderByDescending(l => l.FromDate);
+        if (!page.HasValue && !pageSize.HasValue) return Ok(await query.ToListAsync());
+        var totalCount = await query.CountAsync();
+        var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
+        var effectivePage = page is > 0 ? page.Value : 1;
+        var rows = await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync();
+        return Ok(new { items = rows, totalCount });
     }
 
     [RequirePermission("Leave Management", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Apply([FromBody] ApplyLeaveRequest req)
     {
-        var employee = await db.Employees.FindAsync(req.EmployeeId);
+        // Create-only callers (e.g. Cashier) can apply leave for THEMSELVES only — applying on
+        // behalf of another employee is a manager-tier action gated by Approve/Edit above.
+        var requestedEmployeeId = req.EmployeeId;
+        if (!await HasElevatedAccessAsync())
+        {
+            var ownEmployeeId = await GetOwnEmployeeIdAsync(CallerId());
+            if (ownEmployeeId is null) return Forbid();
+            requestedEmployeeId = ownEmployeeId.Value;
+        }
+
+        var employee = await db.Employees.FindAsync(requestedEmployeeId);
         if (employee is null) return NotFound(new { message = "Employee not found." });
         if (req.ToDate < req.FromDate) return BadRequest(new { message = "To Date cannot be before From Date." });
 
         // Overlapping-leave guard: block a new request that overlaps an existing pending/approved one.
         var overlapping = await db.LeaveRequests.AnyAsync(l =>
-            l.EmployeeId == req.EmployeeId &&
+            l.EmployeeId == requestedEmployeeId &&
             (l.Status == "pending" || l.Status == "approved") &&
             l.FromDate <= req.ToDate && l.ToDate >= req.FromDate);
         if (overlapping) return Conflict(new { message = "This employee already has a pending or approved leave request overlapping these dates." });
@@ -90,7 +127,7 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
         var leave = new LeaveRequest
         {
             Id = Guid.NewGuid(),
-            EmployeeId = req.EmployeeId,
+            EmployeeId = requestedEmployeeId,
             LeaveTypeId = req.LeaveTypeId,
             FromDate = req.FromDate,
             ToDate = req.ToDate,

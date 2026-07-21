@@ -3,8 +3,19 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Download, FileText, FileSpreadsheet } from "lucide-react";
 import type { ReportExportFormat } from "@/lib/api";
 
-/** Shared Export control for report detail pages — lets the user pick CSV or PDF, per the Reports FRD's export dropdown. */
-export function ReportExportButton({ onExport, disabled }: { onExport: (format: ReportExportFormat) => void; disabled?: boolean }) {
+const FORMAT_LABEL: Record<ReportExportFormat, string> = { excel: "Excel (.xlsx)", csv: "CSV", pdf: "PDF" };
+const FORMAT_ICON: Record<ReportExportFormat, typeof FileText> = { excel: FileSpreadsheet, csv: FileSpreadsheet, pdf: FileText };
+
+/**
+ * Shared Export control for report detail pages — lets the user pick a format, per the Reports
+ * FRD's export dropdown. Defaults to CSV/PDF (this app's ~25 non-HRM reports); HRM report pages
+ * pass formats={["excel","pdf"]} since Excel is their FRD-mandated format and their backend
+ * (HrReportsController) actually implements it — the generic ReportsController used by every
+ * other report does not, so Excel isn't offered there by default.
+ */
+export function ReportExportButton({ onExport, disabled, formats = ["csv", "pdf"] }: {
+  onExport: (format: ReportExportFormat) => void; disabled?: boolean; formats?: ReportExportFormat[];
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -13,12 +24,14 @@ export function ReportExportButton({ onExport, disabled }: { onExport: (format: 
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => onExport("csv")}>
-          <FileSpreadsheet className="h-4 w-4" />CSV
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onExport("pdf")}>
-          <FileText className="h-4 w-4" />PDF
-        </DropdownMenuItem>
+        {formats.map(f => {
+          const Icon = FORMAT_ICON[f];
+          return (
+            <DropdownMenuItem key={f} onClick={() => onExport(f)}>
+              <Icon className="h-4 w-4" />{FORMAT_LABEL[f]}
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );

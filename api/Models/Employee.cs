@@ -70,6 +70,11 @@ public class Employee
     [Column("leave_policy_id")]
     public Guid? LeavePolicyId { get; set; }
 
+    // FRD 9.4 — leave policy assignment/reassignment must carry an effective date; tracked here
+    // rather than a separate history table since only one policy is ever active at a time.
+    [Column("leave_policy_effective_from")]
+    public DateOnly? LeavePolicyEffectiveFrom { get; set; }
+
     [Required, Column("hire_date")]
     public DateOnly HireDate { get; set; }
 
@@ -120,9 +125,28 @@ public class Employee
     [NotMapped]
     public bool HasDocuments { get; set; }
 
+    // Populated by EmployeesController — the full Complete/Pending/Expiring Soon/Expired nuance
+    // for the card's Document Snapshot and the Employees list's Document Status filter (FRD 6.2/6.3).
+    [NotMapped]
+    public string DocumentStatus { get; set; } = "Pending";
+
     // Populated by EmployeesController from LeaveRequests — the card's Leave Snapshot (FRD 6.2).
     [NotMapped]
     public bool OnLeaveToday { get; set; }
+
+    // Populated by EmployeesController from the real EmployeeContract table — the card's Contract
+    // Snapshot (FRD 6.2) previously read the Employee's own contract* fields, which never reflect
+    // a contract terminated via EmployeesController.TerminateContract.
+    [NotMapped]
+    public LatestContractInfo? LatestContract { get; set; }
+}
+
+public class LatestContractInfo
+{
+    public string ContractType { get; set; } = default!;
+    public DateOnly? EndDate { get; set; }
+    public bool OpenEnded { get; set; }
+    public string Status { get; set; } = default!; // active | terminated (expiring_soon/expired computed client-side from EndDate)
 }
 
 public class CurrentShiftInfo

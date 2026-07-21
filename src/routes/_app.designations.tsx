@@ -230,7 +230,7 @@ function DesignationsTab() {
 
 function Designations() {
   return (
-    <PageShell title="Designations" subtitle="Job titles linked to departments">
+    <PageShell title="Designations" subtitle="Job titles linked to departments" breadcrumb={["Human Resources", "Designations"]}>
       <DesignationsTab />
     </PageShell>
   );

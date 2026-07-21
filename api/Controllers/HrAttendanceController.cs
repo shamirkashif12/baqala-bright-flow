@@ -21,6 +21,17 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
         return (role, branchId);
     }
 
+    // A "View" grant on HR Attendance only unlocks the caller's OWN record (self-service,
+    // mirroring EmployeesController.GetMyPayroll) — seeing every employee's attendance requires
+    // Approve or Edit, i.e. the module's manager-tier actions. Without this, e.g. a Cashier
+    // (View-only by default) could see every other employee's attendance in their branch.
+    private async Task<bool> HasElevatedAccessAsync() =>
+        await PermissionCheck.HasPermissionAsync(User, db, "HR Attendance", PermAction.Approve)
+        || await PermissionCheck.HasPermissionAsync(User, db, "HR Attendance", PermAction.Edit);
+
+    private async Task<Guid?> GetOwnEmployeeIdAsync(Guid? callerId) =>
+        callerId.HasValue ? await db.Employees.Where(e => e.UserId == callerId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
+
     // Late/early-leave minutes from shift timing. Same-day comparison only — does not attempt
     // to handle a night shift's End time crossing midnight, kept simple for this pass.
     private static (int lateMinutes, int earlyLeaveMinutes) ComputeMinutes(WorkShift? shift, DateTime? checkIn, DateTime? checkOut)
@@ -42,6 +53,11 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
         return (late, early);
     }
 
+    private async Task<HashSet<(Guid? BranchId, DateOnly Date)>> LoadActiveHolidaysAsync() =>
+        (await db.Holidays.Where(h => h.Status == "active").Select(h => new { h.BranchId, h.Date }).ToListAsync())
+            .Select(h => (h.BranchId, h.Date)).ToHashSet();
+
+    [RequirePermission("HR Attendance", PermAction.View)]
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
@@ -50,7 +66,10 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
         [FromQuery] Guid? shiftId,
         [FromQuery] string? status,
         [FromQuery] DateOnly? dateFrom,
-        [FromQuery] DateOnly? dateTo)
+        [FromQuery] DateOnly? dateTo,
+        [FromQuery] string? correctionStatus,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
@@ -63,23 +82,50 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
             .Where(a => a.EmployeeId != null)
             .AsQueryable();
 
+        if (!await HasElevatedAccessAsync())
+        {
+            var ownEmployeeId = await GetOwnEmployeeIdAsync(CallerId());
+            query = ownEmployeeId.HasValue ? query.Where(a => a.EmployeeId == ownEmployeeId) : query.Where(a => false);
+        }
+        else if (employeeId.HasValue) query = query.Where(a => a.EmployeeId == employeeId);
+
         if (branchId.HasValue) query = query.Where(a => a.BranchId == branchId);
         if (departmentId.HasValue) query = query.Where(a => a.Employee!.DepartmentId == departmentId);
-        if (employeeId.HasValue) query = query.Where(a => a.EmployeeId == employeeId);
         if (shiftId.HasValue) query = query.Where(a => a.ShiftId == shiftId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(a => a.Status == status);
         if (dateFrom.HasValue) query = query.Where(a => a.Date >= dateFrom);
         if (dateTo.HasValue) query = query.Where(a => a.Date <= dateTo);
+        if (correctionStatus == "corrected") query = query.Where(a => a.IsCorrected);
+        else if (correctionStatus == "original") query = query.Where(a => !a.IsCorrected);
 
-        var rows = await query.OrderByDescending(a => a.Date).ToListAsync();
-        return Ok(rows);
+        query = query.OrderByDescending(a => a.Date);
+        var totalCount = await query.CountAsync();
+        var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
+        var effectivePage = page is > 0 ? page.Value : 1;
+        var rows = page.HasValue || pageSize.HasValue
+            ? await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync()
+            : await query.ToListAsync();
+
+        AttendanceStatusHelper.ApplyDerivedStatus(rows, await LoadActiveHolidaysAsync());
+
+        if (!page.HasValue && !pageSize.HasValue) return Ok(rows);
+        return Ok(new { items = rows, totalCount });
     }
 
+    [RequirePermission("HR Attendance", PermAction.View)]
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
         var row = await db.StaffAttendances.Include(a => a.Employee).Include(a => a.Shift).FirstOrDefaultAsync(a => a.Id == id);
-        return row is null ? NotFound() : Ok(row);
+        if (row is null) return NotFound();
+
+        if (!await HasElevatedAccessAsync())
+        {
+            var ownEmployeeId = await GetOwnEmployeeIdAsync(CallerId());
+            if (ownEmployeeId is null || row.EmployeeId != ownEmployeeId) return NotFound();
+        }
+
+        return Ok(row);
     }
 
     [RequirePermission("HR Attendance", PermAction.Create)]
@@ -132,8 +178,9 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
         if (attendance is null) return NotFound();
         if (string.IsNullOrWhiteSpace(req.CorrectionReason)) return BadRequest(new { message = "Correction reason is required." });
 
-        var before = $"CheckIn: {attendance.CheckIn:HH:mm}, CheckOut: {attendance.CheckOut:HH:mm}, Status: {attendance.Status}, Late: {attendance.LateMinutes}m, Early: {attendance.EarlyLeaveMinutes}m";
+        var before = $"CheckIn: {attendance.CheckIn:HH:mm}, CheckOut: {attendance.CheckOut:HH:mm}, Status: {attendance.Status}, Shift: {attendance.ShiftId}, Late: {attendance.LateMinutes}m, Early: {attendance.EarlyLeaveMinutes}m";
 
+        attendance.ShiftId = req.ShiftId ?? attendance.ShiftId;
         WorkShift? shift = attendance.ShiftId.HasValue ? await db.WorkShifts.FindAsync(attendance.ShiftId.Value) : null;
         var (late, early) = ComputeMinutes(shift, req.CheckInTime ?? attendance.CheckIn, req.CheckOutTime ?? attendance.CheckOut);
 
@@ -144,6 +191,7 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
         attendance.EarlyLeaveMinutes = early;
         attendance.Remarks = req.CorrectionNote ?? attendance.Remarks;
         attendance.RecordedBy = CallerId();
+        attendance.IsCorrected = true;
         attendance.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
@@ -158,4 +206,4 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
 }
 
 public record MarkAttendanceRequest(Guid EmployeeId, DateOnly Date, Guid? ShiftId, DateTime? CheckInTime, DateTime? CheckOutTime, string Status, string? Remarks);
-public record AttendanceCorrectionRequest(DateTime? CheckInTime, DateTime? CheckOutTime, string Status, string CorrectionReason, string? CorrectionNote);
+public record AttendanceCorrectionRequest(Guid? ShiftId, DateTime? CheckInTime, DateTime? CheckOutTime, string Status, string CorrectionReason, string? CorrectionNote);

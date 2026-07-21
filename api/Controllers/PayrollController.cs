@@ -25,7 +25,9 @@ public class PayrollController(BaqalaDbContext db, IAuditService audit) : Contro
         await PermissionCheck.HasPermissionAsync(User, db, "Payroll", PermAction.View);
 
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] int? year, [FromQuery] int? month, [FromQuery] string? status)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] Guid? branchId, [FromQuery] int? year, [FromQuery] int? month, [FromQuery] string? status,
+        [FromQuery] int? page, [FromQuery] int? pageSize)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
@@ -37,16 +39,25 @@ public class PayrollController(BaqalaDbContext db, IAuditService audit) : Contro
         if (month.HasValue) query = query.Where(p => p.Month == month);
         if (!string.IsNullOrEmpty(status)) query = query.Where(p => p.Status == status);
 
-        var runs = await query.OrderByDescending(p => p.Year).ThenByDescending(p => p.Month).ToListAsync();
+        query = query.OrderByDescending(p => p.Year).ThenByDescending(p => p.Month);
+        var totalCount = await query.CountAsync();
+        var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
+        var effectivePage = page is > 0 ? page.Value : 1;
+        var runs = page.HasValue || pageSize.HasValue
+            ? await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync()
+            : await query.ToListAsync();
         var canViewAmounts = await CanViewAmountsAsync();
 
-        return Ok(runs.Select(r => new
+        var projected = runs.Select(r => new
         {
             r.Id, r.BranchId, r.Year, r.Month, r.PayDate, r.Status, r.EmployeeCount,
             TotalAmount = canViewAmounts ? r.TotalAmount : (decimal?)null,
             r.ProcessedBy, r.ProcessedAt, r.CreatedAt, r.UpdatedAt,
             Branch = r.Branch == null ? null : new { r.Branch.Id, r.Branch.Name },
-        }));
+        }).ToList();
+
+        if (!page.HasValue && !pageSize.HasValue) return Ok(projected);
+        return Ok(new { items = projected, totalCount });
     }
 
     [HttpGet("{id:guid}")]
@@ -117,7 +128,7 @@ public class PayrollController(BaqalaDbContext db, IAuditService audit) : Contro
         foreach (var employee in employees)
         {
             var employeeComponents = componentsByEmployee.GetValueOrDefault(employee.Id, []);
-            var basic = employeeComponents.FirstOrDefault(c => c.ComponentName == "Basic Salary")?.Amount ?? 0;
+            var basic = employeeComponents.FirstOrDefault(c => c.ComponentName.Equals("Basic Salary", StringComparison.OrdinalIgnoreCase))?.Amount ?? 0;
             var earnings = employeeComponents.Where(c => c.ComponentType == "Earning").Sum(c => c.Amount);
             var deductions = employeeComponents.Where(c => c.ComponentType == "Deduction").Sum(c => c.Amount);
             var net = earnings - deductions;
@@ -141,6 +152,45 @@ public class PayrollController(BaqalaDbContext db, IAuditService audit) : Contro
 
         await audit.LogAsync(action: "Payroll run processed", entityType: "PayrollRun", entityId: run.Id,
             userId: CallerId(), branchId: run.BranchId, details: $"{rows.Count} employees, total SAR {total:F2}", severity: "warning", module: "Payroll");
+
+        return Ok(run);
+    }
+
+    // FRD 8.2 — Draft/Processed/Locked/Cancelled were all listed as statuses but only
+    // Draft→Processed had a real transition; Locked (finalize, no further changes) and Cancelled
+    // (void the run) were unreachable.
+    [RequirePermission("Payroll", PermAction.Approve)]
+    [HttpPost("{id:guid}/lock")]
+    public async Task<IActionResult> Lock(Guid id)
+    {
+        var run = await db.PayrollRuns.FindAsync(id);
+        if (run is null) return NotFound();
+        if (run.Status != "Processed") return Conflict(new { message = "Only a Processed payroll run can be locked." });
+
+        run.Status = "Locked";
+        run.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(action: "Payroll run locked", entityType: "PayrollRun", entityId: run.Id,
+            userId: CallerId(), branchId: run.BranchId, severity: "warning", module: "Payroll");
+
+        return Ok(run);
+    }
+
+    [RequirePermission("Payroll", PermAction.Edit)]
+    [HttpPost("{id:guid}/cancel")]
+    public async Task<IActionResult> CancelRun(Guid id)
+    {
+        var run = await db.PayrollRuns.FindAsync(id);
+        if (run is null) return NotFound();
+        if (run.Status == "Locked") return Conflict(new { message = "A Locked payroll run cannot be cancelled." });
+
+        run.Status = "Cancelled";
+        run.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(action: "Payroll run cancelled", entityType: "PayrollRun", entityId: run.Id,
+            userId: CallerId(), branchId: run.BranchId, severity: "warning", module: "Payroll");
 
         return Ok(run);
     }

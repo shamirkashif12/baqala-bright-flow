@@ -57,6 +57,10 @@ public class ReturnsController(
     private async Task<LoyaltyProgram?> ResolveGlobalTierConfigAsync() =>
         await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == null && p.IsActive);
 
+    // FRD 16.1 "POS Actions" — see OrdersController's identical helper for why this is needed.
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? (await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()) : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
@@ -176,7 +180,8 @@ public class ReturnsController(
                 ret.ReturnNumber, ret.OrderId, ret.ReturnType, ret.RefundMethod, ret.RefundAmount, ret.Reason, ret.Status,
                 Items = ret.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.RefundAmount, i.Condition }),
             }),
-            severity: "warning");
+            severity: "warning",
+            module: "Returns", employeeId: await ResolveEmployeeIdAsync(ret.ProcessedBy ?? CallerId()));
 
         return CreatedAtAction(nameof(GetById), new { id = ret.Id }, ret);
     }
@@ -211,7 +216,8 @@ public class ReturnsController(
             branchId: ret.BranchId,
             details: System.Text.Json.JsonSerializer.Serialize(new { ret.Status, ret.ApprovedBy, ret.RefundAmount, ret.ReturnNumber }),
             severity: "warning",
-            beforeValue: beforeSnapshot);
+            beforeValue: beforeSnapshot,
+            module: "Returns", employeeId: await ResolveEmployeeIdAsync(CallerId()));
 
         // Notify both the cashier who raised the return and the manager who acted on it.
         // Previously only ProcessedBy was notified (and only when set), so approving a return that

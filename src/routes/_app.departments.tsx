@@ -259,7 +259,7 @@ function DepartmentsTab() {
 
 function Departments() {
   return (
-    <PageShell title="Departments" subtitle="Operational department master data">
+    <PageShell title="Departments" subtitle="Operational department master data" breadcrumb={["Human Resources", "Departments"]}>
       <DepartmentsTab />
     </PageShell>
   );

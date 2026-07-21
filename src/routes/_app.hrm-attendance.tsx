@@ -102,10 +102,11 @@ function MarkAttendanceFields({ form, setForm, onSave, saving, employees, shifts
   );
 }
 
-type CorrectionForm = { checkInTime: string; checkOutTime: string; status: string; correctionReason: string; correctionNote: string };
+type CorrectionForm = { shiftId: string; checkInTime: string; checkOutTime: string; status: string; correctionReason: string; correctionNote: string };
 
-function CorrectionFields({ row, form, setForm, onSave, saving }: {
+function CorrectionFields({ row, form, setForm, onSave, saving, shifts }: {
   row: StaffAttendance; form: CorrectionForm; setForm: React.Dispatch<React.SetStateAction<CorrectionForm>>; onSave: () => void; saving: boolean;
+  shifts: WorkShift[];
 }) {
   const { user } = useAuth();
   const setS = (k: keyof CorrectionForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
@@ -115,8 +116,14 @@ function CorrectionFields({ row, form, setForm, onSave, saving }: {
       <div className="rounded-xl bg-muted/40 p-3 text-xs space-y-1">
         <p><span className="text-muted-foreground">Employee:</span> <span className="font-medium">{row.employee?.fullName}</span></p>
         <p><span className="text-muted-foreground">Date:</span> <span className="font-medium">{row.date}</span></p>
-        <p><span className="text-muted-foreground">Original:</span> Check-In {timeStr(row.checkIn)} · Check-Out {timeStr(row.checkOut)} · {row.status}</p>
+        <p><span className="text-muted-foreground">Original:</span> Check-In {timeStr(row.checkIn)} · Check-Out {timeStr(row.checkOut)} · {row.status}{row.isCorrected && " (already corrected once)"}</p>
       </div>
+      <FieldRow label="Shift" required>
+        <Select value={form.shiftId} onValueChange={setS("shiftId")}>
+          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>{shifts.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({s.startTime}-{s.endTime})</SelectItem>)}</SelectContent>
+        </Select>
+      </FieldRow>
       <div className="grid grid-cols-2 gap-3">
         <FieldRow label="Corrected Check-In"><Input type="time" value={form.checkInTime} onChange={set("checkInTime")} className="h-9" /></FieldRow>
         <FieldRow label="Corrected Check-Out"><Input type="time" value={form.checkOutTime} onChange={set("checkOutTime")} className="h-9" /></FieldRow>
@@ -148,7 +155,11 @@ function CorrectionFields({ row, form, setForm, onSave, saving }: {
 function HrmAttendanceTab() {
   const { user } = useAuth();
   const { branches } = useBranch();
-  const { canCreate, canEdit } = usePermission("HR Attendance");
+  const { canCreate, canEdit, canApprove } = usePermission("HR Attendance");
+  // A View-only grant (no Approve/Edit) only unlocks the caller's OWN attendance server-side
+  // (HrAttendanceController.GetAll) — branch/department/employee filters are meaningless for a
+  // single-row result, so hide them rather than show controls that silently do nothing.
+  const canViewAll = canApprove || canEdit;
   const branchLocked = user?.role !== "tenant_admin";
 
   const [rows, setRows] = useState<StaffAttendance[]>([]);
@@ -163,13 +174,15 @@ function HrmAttendanceTab() {
   const [employeeFilter, setEmployeeFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [correctionFilter, setCorrectionFilter] = useState("all");
+  const [q, setQ] = useState("");
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState(todayStr);
 
   const [markOpen, setMarkOpen] = useState(false);
   const [markForm, setMarkForm] = useState<MarkForm>(emptyMarkForm);
   const [correctRow, setCorrectRow] = useState<StaffAttendance | null>(null);
-  const [correctForm, setCorrectForm] = useState<CorrectionForm>({ checkInTime: "", checkOutTime: "", status: "present", correctionReason: "", correctionNote: "" });
+  const [correctForm, setCorrectForm] = useState<CorrectionForm>({ shiftId: "", checkInTime: "", checkOutTime: "", status: "present", correctionReason: "", correctionNote: "" });
   const [saving, setSaving] = useState(false);
 
   const load = () => {
@@ -180,18 +193,27 @@ function HrmAttendanceTab() {
       employeeId: employeeFilter === "all" ? undefined : employeeFilter,
       shiftId: shiftFilter === "all" ? undefined : shiftFilter,
       status: statusFilter === "all" ? undefined : statusFilter,
+      correctionStatus: correctionFilter === "all" ? undefined : correctionFilter,
       dateFrom, dateTo,
     })
       .then(r => { setRows(r); setLoadError(false); })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   };
-  useEffect(load, [branchFilter, departmentFilter, employeeFilter, shiftFilter, statusFilter, dateFrom, dateTo]);
+  useEffect(load, [branchFilter, departmentFilter, employeeFilter, shiftFilter, statusFilter, correctionFilter, dateFrom, dateTo]);
+
+  const visibleRows = rows.filter(r => {
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    return (r.employee?.fullName ?? "").toLowerCase().includes(needle)
+      || (r.employee?.employeeCode ?? "").toLowerCase().includes(needle)
+      || (r.employee?.phone ?? "").includes(q);
+  });
 
   const handleExport = () => {
     exportRowsAsCsv(
-      ["Date", "Employee", "Employee ID", "Branch", "Department", "Shift", "Check-In", "Check-Out", "Total Hours", "Status", "Late (min)", "Early Leave (min)", "Remarks"],
-      rows.map(r => [r.date ?? "", r.employee?.fullName ?? "", r.employee?.employeeCode ?? "", r.branchId, r.employee?.department?.name ?? "", r.shift?.name ?? "", timeStr(r.checkIn), timeStr(r.checkOut), totalHours(r), r.status, r.lateMinutes, r.earlyLeaveMinutes, r.remarks ?? ""]),
+      ["Date", "Employee", "Employee ID", "Branch", "Department", "Shift", "Check-In", "Check-Out", "Total Hours", "Status", "Late (min)", "Early Leave (min)", "Correction Status", "Remarks"],
+      visibleRows.map(r => [r.date ?? "", r.employee?.fullName ?? "", r.employee?.employeeCode ?? "", r.branchId, r.employee?.department?.name ?? "", r.shift?.name ?? "", timeStr(r.checkIn), timeStr(r.checkOut), totalHours(r), r.status, r.lateMinutes, r.earlyLeaveMinutes, r.isCorrected ? "Corrected" : "Original", r.remarks ?? ""]),
       `attendance-${dateFrom}-to-${dateTo}.csv`
     );
   };
@@ -223,6 +245,7 @@ function HrmAttendanceTab() {
   const openCorrection = (row: StaffAttendance) => {
     setCorrectRow(row);
     setCorrectForm({
+      shiftId: row.shiftId ?? "",
       checkInTime: row.checkIn ? new Date(row.checkIn).toISOString().slice(11, 16) : "",
       checkOutTime: row.checkOut ? new Date(row.checkOut).toISOString().slice(11, 16) : "",
       status: row.status, correctionReason: "", correctionNote: "",
@@ -235,6 +258,7 @@ function HrmAttendanceTab() {
     try {
       const date = correctRow.date;
       await api.correctAttendance(correctRow.id, {
+        shiftId: correctForm.shiftId || undefined,
         checkInTime: correctForm.checkInTime ? `${date}T${correctForm.checkInTime}:00` : undefined,
         checkOutTime: correctForm.checkOutTime ? `${date}T${correctForm.checkOutTime}:00` : undefined,
         status: correctForm.status, correctionReason: correctForm.correctionReason, correctionNote: correctForm.correctionNote || undefined,
@@ -253,9 +277,10 @@ function HrmAttendanceTab() {
       {loadError && <LoadErrorBanner onRetry={load} />}
 
       <div className="flex flex-wrap items-center gap-2">
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, ID or phone…" className="h-9 w-48" />
         <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
         <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
-        {!branchLocked && (
+        {!branchLocked && canViewAll && (
           <Select value={branchFilter} onValueChange={setBranchFilter}>
             <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -264,20 +289,24 @@ function HrmAttendanceTab() {
             </SelectContent>
           </Select>
         )}
-        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Departments</SelectItem>
-            {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Employees</SelectItem>
-            {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {canViewAll && (
+          <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Departments</SelectItem>
+              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {canViewAll && (
+          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Employees</SelectItem>
+              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={shiftFilter} onValueChange={setShiftFilter}>
           <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -295,6 +324,14 @@ function HrmAttendanceTab() {
             <SelectItem value="on_leave">On Leave</SelectItem>
             <SelectItem value="holiday">Holiday</SelectItem>
             <SelectItem value="checkout_missing">Checkout Missing</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={correctionFilter} onValueChange={setCorrectionFilter}>
+          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Original &amp; Corrected</SelectItem>
+            <SelectItem value="original">Original Only</SelectItem>
+            <SelectItem value="corrected">Corrected Only</SelectItem>
           </SelectContent>
         </Select>
         <div className="flex-1" />
@@ -317,6 +354,8 @@ function HrmAttendanceTab() {
               <thead>
                 <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Employee</th>
+                  <th className="px-3 py-3 font-semibold">Branch</th>
+                  <th className="px-3 py-3 font-semibold">Department</th>
                   <th className="px-3 py-3 font-semibold">Date</th>
                   <th className="px-3 py-3 font-semibold">Shift</th>
                   <th className="px-3 py-3 font-semibold">Check-In</th>
@@ -325,13 +364,19 @@ function HrmAttendanceTab() {
                   <th className="px-3 py-3 font-semibold">Status</th>
                   <th className="px-3 py-3 font-semibold">Late</th>
                   <th className="px-3 py-3 font-semibold">Early Leave</th>
+                  <th className="px-3 py-3 font-semibold">Remarks</th>
                   <th className="px-3 py-3 font-semibold"></th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => (
+                {visibleRows.map(r => (
                   <tr key={r.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
-                    <td className="px-3 py-3 font-semibold">{r.employee?.fullName ?? "—"}</td>
+                    <td className="px-3 py-3 font-semibold">
+                      {r.employee?.fullName ?? "—"}
+                      {r.employee?.employeeCode && <span className="block text-[11px] font-normal text-muted-foreground">{r.employee.employeeCode}{r.employee.designation?.name ? ` · ${r.employee.designation.name}` : ""}</span>}
+                    </td>
+                    <td className="px-3 py-3 text-xs">{branches.find(b => b.id === r.branchId)?.name ?? "—"}</td>
+                    <td className="px-3 py-3 text-xs">{r.employee?.department?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{r.date}</td>
                     <td className="px-3 py-3 text-xs">{r.shift?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{timeStr(r.checkIn)}</td>
@@ -340,13 +385,14 @@ function HrmAttendanceTab() {
                     <td className="px-3 py-3"><StatusBadge status={r.status} /></td>
                     <td className="px-3 py-3 text-xs">{r.lateMinutes > 0 ? `${r.lateMinutes}m` : "—"}</td>
                     <td className="px-3 py-3 text-xs">{r.earlyLeaveMinutes > 0 ? `${r.earlyLeaveMinutes}m` : "—"}</td>
+                    <td className="px-3 py-3 text-xs max-w-[160px] truncate" title={r.remarks}>{r.remarks ?? "—"}</td>
                     <td className="px-3 py-3">
                       {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openCorrection(r)}><Pencil className="h-3.5 w-3.5" /></Button>}
                     </td>
                   </tr>
                 ))}
-                {rows.length === 0 && (
-                  <tr><td colSpan={10} className="text-center py-10 text-muted-foreground text-sm">No attendance records found.</td></tr>
+                {visibleRows.length === 0 && (
+                  <tr><td colSpan={13} className="text-center py-10 text-muted-foreground text-sm">No attendance records found.</td></tr>
                 )}
               </tbody>
             </table>
@@ -364,7 +410,7 @@ function HrmAttendanceTab() {
       <Sheet open={!!correctRow} onOpenChange={v => !v && setCorrectRow(null)}>
         <SheetContent>
           <SheetHeader><SheetTitle>Manual Correction</SheetTitle></SheetHeader>
-          {correctRow && <CorrectionFields row={correctRow} form={correctForm} setForm={setCorrectForm} onSave={handleCorrect} saving={saving} />}
+          {correctRow && <CorrectionFields row={correctRow} form={correctForm} setForm={setCorrectForm} onSave={handleCorrect} saving={saving} shifts={shifts} />}
         </SheetContent>
       </Sheet>
     </div>
@@ -372,8 +418,14 @@ function HrmAttendanceTab() {
 }
 
 function HrmAttendance() {
+  const { canEdit, canApprove } = usePermission("HR Attendance");
+  const canViewAll = canApprove || canEdit;
   return (
-    <PageShell title="Attendance" subtitle="Track and manage employee attendance records">
+    <PageShell
+      title="Attendance"
+      subtitle={canViewAll ? "Track and manage employee attendance records" : "Your own attendance records"}
+      breadcrumb={["Human Resources", "Attendance"]}
+    >
       <HrmAttendanceTab />
     </PageShell>
   );

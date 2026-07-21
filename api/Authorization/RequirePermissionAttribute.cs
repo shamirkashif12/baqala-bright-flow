@@ -92,6 +92,12 @@ public class RequirePermissionAttribute(string module, PermAction action) : Attr
                     "Admin / Security", "Unauthorized Action Attempt", "Unauthorized Action Attempt",
                     $"You do not have permission for this action ({action.ToString().ToLower()} {module})",
                     severity: "warning", branchId: branchId);
+
+                // FRD 3.1 — a restricted-access attempt must be logged, not just surfaced as a
+                // notification to the user themselves.
+                var audit = context.HttpContext.RequestServices.GetRequiredService<IAuditService>();
+                await audit.LogAsync(action: "Access denied", userId: userId, branchId: branchId, severity: "warning",
+                    details: $"{context.HttpContext.Request.Method} {context.HttpContext.Request.Path} — requires {action.ToString().ToLower()} on {module}", module: module);
             }
         }
     }

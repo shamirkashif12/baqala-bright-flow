@@ -304,7 +304,7 @@ function BranchDropdown() {
 }
 
 // ── Topbar ─────────────────────────────────────────────────────────────────────
-export function AppTopbar({ title, subtitle }: { title: string; subtitle?: string }) {
+export function AppTopbar({ title, subtitle, breadcrumb }: { title: string; subtitle?: string; breadcrumb?: string[] }) {
   const { dir, t } = useI18n();
   const rtl = dir === "rtl";
 
@@ -312,6 +312,9 @@ export function AppTopbar({ title, subtitle }: { title: string; subtitle?: strin
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/80 backdrop-blur-xl px-4 md:px-6">
       <SidebarTrigger />
       <div className="flex-1 min-w-0">
+        {breadcrumb && breadcrumb.length > 0 && (
+          <p className="text-[11px] text-muted-foreground truncate">{breadcrumb.map(t).join(" › ")}</p>
+        )}
         <h1 className="text-lg md:text-xl font-bold tracking-tight truncate">{t(title)}</h1>
         {subtitle && <p className="text-xs text-muted-foreground truncate">{t(subtitle)}</p>}
       </div>
@@ -330,10 +333,10 @@ export function AppTopbar({ title, subtitle }: { title: string; subtitle?: strin
   );
 }
 
-export function PageShell({ title, subtitle, actions, children }: { title: string; subtitle?: string; actions?: React.ReactNode; children: React.ReactNode }) {
+export function PageShell({ title, subtitle, breadcrumb, actions, children }: { title: string; subtitle?: string; breadcrumb?: string[]; actions?: React.ReactNode; children: React.ReactNode }) {
   return (
     <>
-      <AppTopbar title={title} subtitle={subtitle} />
+      <AppTopbar title={title} subtitle={subtitle} breadcrumb={breadcrumb} />
       <div className="px-4 md:px-6 py-6 space-y-6">
         {actions && <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>}
         {children}

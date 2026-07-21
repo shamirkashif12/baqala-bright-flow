@@ -20,7 +20,9 @@ public class HolidaysController(BaqalaDbContext db, IAuditService audit) : Contr
         [FromQuery] int? year,
         [FromQuery] string? holidayType,
         [FromQuery] string? status,
-        [FromQuery] string? search)
+        [FromQuery] string? search,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize)
     {
         var query = db.Holidays.Include(h => h.Branch).AsQueryable();
         if (branchId.HasValue) query = query.Where(h => h.BranchId == branchId);
@@ -28,7 +30,14 @@ public class HolidaysController(BaqalaDbContext db, IAuditService audit) : Contr
         if (!string.IsNullOrEmpty(holidayType)) query = query.Where(h => h.HolidayType == holidayType);
         if (!string.IsNullOrEmpty(status)) query = query.Where(h => h.Status == status);
         if (!string.IsNullOrEmpty(search)) query = query.Where(h => h.Name.Contains(search));
-        return Ok(await query.OrderBy(h => h.Date).ToListAsync());
+
+        query = query.OrderBy(h => h.Date);
+        if (!page.HasValue && !pageSize.HasValue) return Ok(await query.ToListAsync());
+        var totalCount = await query.CountAsync();
+        var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
+        var effectivePage = page is > 0 ? page.Value : 1;
+        var rows = await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync();
+        return Ok(new { items = rows, totalCount });
     }
 
     [HttpGet("{id:guid}")]

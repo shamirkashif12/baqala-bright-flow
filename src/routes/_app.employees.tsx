@@ -14,19 +14,21 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Eye, Pencil, Plus, Trash2, Camera, User as UserIcon, Phone, Building2, IdCard, CalendarClock, Download } from "lucide-react";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Eye, Pencil, Plus, Trash2, Camera, User as UserIcon, Phone, Building2, IdCard, CalendarClock, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import {
   api, type Employee, type Department, type Designation, type Role, type WorkShift, type EmployeeShiftAssignment,
   type LeaveRequest, type LeaveType, type LeavePolicy, type EmployeeDocument, type EmployeeContract, type SalaryComponent,
-  type EmployeeActivityRow,
+  type EmployeeActivityRow, type ReportExportFormat,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { fileToCompressedDataUrl, fileToDataUrl } from "@/lib/image";
 import { localDateStr } from "@/lib/utils";
-import { exportRowsAsCsv } from "@/lib/csv-export";
+import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
+import { ReportExportButton } from "@/components/report-export-button";
 
 export const Route = createFileRoute("/_app/employees")({
   validateSearch: (search) => ({
@@ -47,11 +49,20 @@ function FieldRow({ label, required, children }: { label: string; required?: boo
   );
 }
 
+// Prefers the real EmployeeContract record (latestContract) so a Terminated contract can
+// actually surface — falls back to the Employee's own contract* fields only when no
+// EmployeeContract row has ever been uploaded for them (FRD 6.2 Contract Snapshot).
 function contractStatus(e: Employee): { label: string; tone: string } {
-  if (!e.contractType) return { label: "Not Set", tone: "bg-muted text-muted-foreground" };
-  if (e.contractOpenEnded) return { label: "Active", tone: "bg-success/15 text-success" };
-  if (!e.contractEndDate) return { label: "Active", tone: "bg-success/15 text-success" };
-  const days = Math.ceil((new Date(e.contractEndDate).getTime() - Date.now()) / 86400000);
+  const type = e.latestContract?.contractType ?? e.contractType;
+  const openEnded = e.latestContract ? e.latestContract.openEnded : e.contractOpenEnded;
+  const endDate = e.latestContract ? e.latestContract.endDate : e.contractEndDate;
+  const status = e.latestContract?.status;
+
+  if (!type) return { label: "Not Set", tone: "bg-muted text-muted-foreground" };
+  if (status === "terminated") return { label: "Terminated", tone: "bg-destructive/15 text-destructive" };
+  if (openEnded) return { label: "Active", tone: "bg-success/15 text-success" };
+  if (!endDate) return { label: "Active", tone: "bg-success/15 text-success" };
+  const days = Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000);
   if (days < 0) return { label: "Expired", tone: "bg-destructive/15 text-destructive" };
   if (days <= 30) return { label: "Expiring Soon", tone: "bg-warning/20 text-warning-foreground" };
   return { label: "Active", tone: "bg-success/15 text-success" };
@@ -61,7 +72,7 @@ type EmployeeForm = {
   fullName: string; email: string; phone: string; emergencyContact: string;
   nationalId: string; iqamaExpiry: string; dateOfBirth: string; gender: string;
   nationality: string; maritalStatus: string; profileImageUrl: string;
-  branchId: string; departmentId: string; designationId: string; roleId: string; leavePolicyId: string;
+  branchId: string; departmentId: string; designationId: string; roleId: string; leavePolicyId: string; userId: string;
   hireDate: string; employmentStatus: string;
   currentAddress: string; permanentAddress: string; sameAsCurrent: boolean;
   contractType: string; contractStartDate: string; contractEndDate: string; contractOpenEnded: boolean;
@@ -71,7 +82,7 @@ const emptyForm: EmployeeForm = {
   fullName: "", email: "", phone: "", emergencyContact: "",
   nationalId: "", iqamaExpiry: "", dateOfBirth: "", gender: "", nationality: "", maritalStatus: "",
   profileImageUrl: "",
-  branchId: "", departmentId: "none", designationId: "none", roleId: "none", leavePolicyId: "none",
+  branchId: "", departmentId: "none", designationId: "none", roleId: "none", leavePolicyId: "none", userId: "none",
   hireDate: todayStr, employmentStatus: "active",
   currentAddress: "", permanentAddress: "", sameAsCurrent: false,
   contractType: "none", contractStartDate: todayStr, contractEndDate: "", contractOpenEnded: false,
@@ -79,7 +90,7 @@ const emptyForm: EmployeeForm = {
 
 // Module-scope — not nested inside EmployeesTab, so it never remounts on parent re-render.
 function EmployeeFormFields({
-  form, setForm, onSave, saving, branches, departments, designations, roles, leavePolicies, branchLocked,
+  form, setForm, onSave, saving, branches, departments, designations, roles, leavePolicies, linkableUsers, branchLocked,
 }: {
   form: EmployeeForm;
   setForm: React.Dispatch<React.SetStateAction<EmployeeForm>>;
@@ -90,6 +101,7 @@ function EmployeeFormFields({
   designations: Designation[];
   roles: Role[];
   leavePolicies: LeavePolicy[];
+  linkableUsers: { id: string; fullName: string; email: string }[];
   branchLocked: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -201,6 +213,15 @@ function EmployeeFormFields({
               </SelectContent>
             </Select>
           </FieldRow>
+          <FieldRow label="Link to Login Account">
+            <Select value={form.userId} onValueChange={setS("userId")}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="No login account" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Not linked (no POS/admin login)</SelectItem>
+                {linkableUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName} ({u.email})</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FieldRow>
           <FieldRow label="Leave Policy">
             <Select value={form.leavePolicyId} onValueChange={setS("leavePolicyId")}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Select leave policy" /></SelectTrigger>
@@ -273,8 +294,9 @@ function EmployeeFormFields({
   );
 }
 
-function EmployeeCard({ employee, onView, onEdit, onDelete, canEdit, canDelete }: {
-  employee: Employee; onView: () => void; onEdit: () => void; onDelete: () => void; canEdit: boolean; canDelete: boolean;
+function EmployeeCard({ employee, onView, onEdit, onEditTab, onDelete, onActivate, canEdit, canDelete, deleting }: {
+  employee: Employee; onView: () => void; onEdit: () => void; onEditTab: (tab: string) => void; onDelete: () => void; onActivate: () => void;
+  canEdit: boolean; canDelete: boolean; deleting?: boolean;
 }) {
   const cs = contractStatus(employee);
   return (
@@ -309,15 +331,38 @@ function EmployeeCard({ employee, onView, onEdit, onDelete, canEdit, canDelete }
           {employee.leavePolicy ? employee.leavePolicy.name : "Leave: Not Assigned"}
         </Badge>
         {employee.onLeaveToday && <Badge variant="outline" className="text-[10px] border-0 bg-warning/20 text-warning-foreground">On Leave</Badge>}
-        <Badge variant="outline" className={`text-[10px] border-0 ${employee.hasDocuments ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
-          Documents: {employee.hasDocuments ? "Complete" : "Pending"}
+        <Badge variant="outline" className={`text-[10px] border-0 ${
+          employee.documentStatus === "Complete" ? "bg-success/15 text-success"
+          : employee.documentStatus === "Expiring Soon" ? "bg-warning/20 text-warning-foreground"
+          : employee.documentStatus === "Expired" ? "bg-destructive/15 text-destructive"
+          : "bg-muted text-muted-foreground"
+        }`}>
+          Documents: {employee.documentStatus ?? "Pending"}
         </Badge>
       </div>
 
       <div className="flex justify-end gap-1 pt-1 border-t border-border/40">
         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onView}><Eye className="h-3.5 w-3.5" /></Button>
         {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onEdit}><Pencil className="h-3.5 w-3.5" /></Button>}
-        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={onDelete}><Trash2 className="h-3.5 w-3.5" /></Button>}
+        {canDelete && (
+          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={onDelete} disabled={deleting}>
+            {deleting ? <span className="h-3.5 w-3.5 animate-pulse text-[10px]">…</span> : <Trash2 className="h-3.5 w-3.5" />}
+          </Button>
+        )}
+        {canEdit && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost" className="h-7 w-7"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onEditTab("documents")}>Upload Document</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEditTab("documents")}>Upload Contract</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEditTab("shifts")}>Assign Shift</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEditTab("leaves")}>Assign Leave</DropdownMenuItem>
+              {employee.employmentStatus !== "active" && <DropdownMenuItem onClick={onActivate}>Activate</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </Card>
   );
@@ -394,30 +439,58 @@ function EmployeeShiftsSection({ employee, onChanged }: { employee: Employee; on
   );
 }
 
+// FRD 9.1 "balances" — consumed vs remaining per bucket, matched by leave type name against the
+// policy's fixed Annual/Sick/Casual allotments (the only buckets a LeavePolicy tracks).
+function leaveBalances(history: LeaveRequest[], policy: Employee["leavePolicy"]) {
+  if (!policy) return [];
+  // Match by substring, not exact equality — seeded/admin-created leave types are named
+  // "Annual Leave"/"Sick Leave"/"Casual Leave" (not the bare bucket name), and an exact
+  // match against "Annual"/"Sick"/"Casual" never hits, so consumed silently stayed 0 forever.
+  const consumedByType = (name: string) => history
+    .filter(l => l.status === "approved" && (l.leaveType?.name ?? "").toLowerCase().includes(name.toLowerCase()))
+    .reduce((s, l) => s + l.totalDays, 0);
+  return [
+    { label: "Annual", allotted: policy.annualDays, consumed: consumedByType("Annual") },
+    { label: "Sick", allotted: policy.sickDays, consumed: consumedByType("Sick") },
+    { label: "Casual", allotted: policy.casualDays, consumed: consumedByType("Casual") },
+  ];
+}
+
 function EmployeeLeavesSection({ employee }: { employee: Employee }) {
-  const { canCreate } = usePermission("Leave Management");
+  const { canCreate, canEdit } = usePermission("Leave Management");
   const [history, setHistory] = useState<LeaveRequest[]>([]);
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
+  const [leavePolicies, setLeavePolicies] = useState<LeavePolicy[]>([]);
   const [applying, setApplying] = useState(false);
   const [leaveTypeId, setLeaveTypeId] = useState("");
   const [fromDate, setFromDate] = useState(localDateStr());
   const [toDate, setToDate] = useState(localDateStr());
   const [reason, setReason] = useState("");
+  const [attachmentUrl, setAttachmentUrl] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const [assigningPolicy, setAssigningPolicy] = useState(false);
+  const [policyId, setPolicyId] = useState(employee.leavePolicyId ?? "");
+  const [policyEffective, setPolicyEffective] = useState(localDateStr());
+  const [policySaving, setPolicySaving] = useState(false);
+  const [localPolicy, setLocalPolicy] = useState(employee.leavePolicy);
 
   const reload = () => api.getEmployeeLeaves(employee.id).then(setHistory).catch(() => {});
   useEffect(() => {
     reload();
     api.getLeaveTypes({ status: "active" }).then(setLeaveTypes).catch(() => {});
+    api.getLeavePolicies({ status: "active" }).then(setLeavePolicies).catch(() => {});
   }, [employee.id]);
 
   const handleApply = async () => {
     if (!leaveTypeId || !reason.trim()) return;
     setSaving(true);
     try {
-      await api.applyLeave({ employeeId: employee.id, leaveTypeId, fromDate, toDate, reason });
+      await api.applyLeave({ employeeId: employee.id, leaveTypeId, fromDate, toDate, reason, attachmentUrl });
       setApplying(false);
       setReason("");
+      setAttachmentUrl(undefined);
       reload();
     } catch (e: any) {
       toast.error(e?.message || "Failed to apply leave.");
@@ -425,6 +498,22 @@ function EmployeeLeavesSection({ employee }: { employee: Employee }) {
       setSaving(false);
     }
   };
+
+  const handleAssignPolicy = async () => {
+    setPolicySaving(true);
+    try {
+      const updated = await api.updateEmployee(employee.id, { ...employee, leavePolicyId: policyId || undefined, leavePolicyEffectiveFrom: policyEffective });
+      setLocalPolicy(updated.leavePolicy ?? leavePolicies.find(p => p.id === policyId));
+      setAssigningPolicy(false);
+      toast.success("Leave policy updated.");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update leave policy.");
+    } finally {
+      setPolicySaving(false);
+    }
+  };
+
+  const balances = leaveBalances(history, localPolicy);
 
   return (
     <div className="mt-5">
@@ -434,7 +523,40 @@ function EmployeeLeavesSection({ employee }: { employee: Employee }) {
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setApplying(true)}>Apply Leave</Button>
         )}
       </div>
-      <p className="text-xs text-muted-foreground mb-2">Policy: {employee.leavePolicy?.name ?? "Not Assigned"}{employee.leavePolicy && ` (Annual ${employee.leavePolicy.annualDays}d · Sick ${employee.leavePolicy.sickDays}d · Casual ${employee.leavePolicy.casualDays}d)`}</p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-muted-foreground">Policy: {localPolicy?.name ?? "Not Assigned"}{employee.leavePolicyEffectiveFrom && ` · effective ${employee.leavePolicyEffectiveFrom}`}</p>
+        {canEdit && !assigningPolicy && (
+          <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setAssigningPolicy(true)}>Assign / Update</Button>
+        )}
+      </div>
+      {assigningPolicy && (
+        <div className="rounded-xl border border-border/60 p-3 space-y-2 mb-3">
+          <Select value={policyId} onValueChange={setPolicyId}>
+            <SelectTrigger className="h-9"><SelectValue placeholder="Select leave policy" /></SelectTrigger>
+            <SelectContent>{leavePolicies.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <div>
+            <label className="text-[11px] text-muted-foreground">Effective From</label>
+            <Input type="date" value={policyEffective} onChange={e => setPolicyEffective(e.target.value)} className="h-9" />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={policySaving} onClick={handleAssignPolicy}>
+              {policySaving ? "Saving…" : "Save"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setAssigningPolicy(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {balances.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          {balances.map(b => (
+            <div key={b.label} className="rounded-lg border border-border/50 p-2 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{b.label}</p>
+              <p className="text-sm font-semibold">{Math.max(0, b.allotted - b.consumed)}<span className="text-xs text-muted-foreground font-normal">/{b.allotted}</span></p>
+            </div>
+          ))}
+        </div>
+      )}
       {applying && (
         <div className="rounded-xl border border-border/60 p-3 space-y-2 mb-3">
           <Select value={leaveTypeId} onValueChange={setLeaveTypeId}>
@@ -446,6 +568,12 @@ function EmployeeLeavesSection({ employee }: { employee: Employee }) {
             <Input type="date" value={toDate} min={fromDate} onChange={e => setToDate(e.target.value)} className="h-9" />
           </div>
           <Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason" className="min-h-14" />
+          <Input type="file" accept=".pdf,image/*" disabled={uploading} onChange={async e => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setUploading(true);
+            try { setAttachmentUrl(await fileToDataUrl(file)); } catch { toast.error("Failed to attach file."); } finally { setUploading(false); }
+          }} className="h-9" />
           <div className="flex gap-2">
             <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!leaveTypeId || !reason.trim() || saving} onClick={handleApply}>
               {saving ? "Submitting…" : "Submit"}
@@ -693,34 +821,80 @@ function EmployeeContractsSection({ employee }: { employee: Employee }) {
   );
 }
 
+const SALARY_FREQUENCIES = ["Monthly", "Weekly", "Bi-Weekly", "One-Time"];
+const CUSTOM_NAME = "__custom__";
+// Canonical names so payroll processing (which matches "Basic Salary" to populate the
+// payslip's Basic Salary column) gets a consistent string instead of relying on free text —
+// picking from this list avoids variants like "basic salary"/"Base Salary" landing here.
+const EARNING_NAME_PRESETS = ["Basic Salary", "Housing Allowance", "Transport Allowance", "Food Allowance", "Overtime", "Bonus"];
+const DEDUCTION_NAME_PRESETS = ["Loan Deduction", "Advance Deduction", "Absence Deduction", "GOSI / Social Insurance", "Tax Deduction"];
+
 function EmployeeSalarySection({ employee }: { employee: Employee }) {
   const { canCreate, canEdit, canDelete } = usePermission("Payroll");
   const [components, setComponents] = useState<SalaryComponent[]>([]);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [nameChoice, setNameChoice] = useState("");
   const [componentName, setComponentName] = useState("");
   const [componentType, setComponentType] = useState("Earning");
   const [amount, setAmount] = useState("");
+  const [frequency, setFrequency] = useState("Monthly");
+  const [effectiveFrom, setEffectiveFrom] = useState(localDateStr());
+  const [effectiveTo, setEffectiveTo] = useState("");
+  const [openEnded, setOpenEnded] = useState(true);
+  const [status, setStatus] = useState("active");
   const [saving, setSaving] = useState(false);
+
+  const namePresets = componentType === "Deduction" ? DEDUCTION_NAME_PRESETS : EARNING_NAME_PRESETS;
+  const isCustomName = nameChoice === CUSTOM_NAME;
 
   const reload = () => { api.getEmployeeSalaryComponents(employee.id).then(setComponents).catch(() => {}); };
   useEffect(reload, [employee.id]);
 
-  const resetForm = () => { setAdding(false); setEditingId(null); setComponentName(""); setComponentType("Earning"); setAmount(""); };
+  const resetForm = () => {
+    setAdding(false); setEditingId(null); setNameChoice(""); setComponentName(""); setComponentType("Earning"); setAmount("");
+    setFrequency("Monthly"); setEffectiveFrom(localDateStr()); setEffectiveTo(""); setOpenEnded(true); setStatus("active");
+  };
+
+  const changeType = (type: string) => {
+    setComponentType(type);
+    const presets = type === "Deduction" ? DEDUCTION_NAME_PRESETS : EARNING_NAME_PRESETS;
+    if (nameChoice !== CUSTOM_NAME && !presets.includes(nameChoice)) {
+      setNameChoice("");
+      setComponentName("");
+    }
+  };
+
+  const changeNameChoice = (choice: string) => {
+    setNameChoice(choice);
+    if (choice !== CUSTOM_NAME) setComponentName(choice);
+    else setComponentName("");
+  };
 
   const openEdit = (c: SalaryComponent) => {
     setEditingId(c.id);
     setAdding(false);
+    const presets = c.componentType === "Deduction" ? DEDUCTION_NAME_PRESETS : EARNING_NAME_PRESETS;
+    const preset = presets.find(p => p.toLowerCase() === c.componentName.toLowerCase());
+    setNameChoice(preset ?? CUSTOM_NAME);
     setComponentName(c.componentName);
     setComponentType(c.componentType);
     setAmount(String(c.amount));
+    setFrequency(c.frequency || "Monthly");
+    setEffectiveFrom(c.effectiveFrom || localDateStr());
+    setEffectiveTo(c.effectiveTo || "");
+    setOpenEnded(!c.effectiveTo);
+    setStatus(c.status || "active");
   };
 
   const handleAdd = async () => {
     if (!componentName.trim() || !amount) return;
     setSaving(true);
     try {
-      await api.addSalaryComponent(employee.id, { componentName, componentType, amount: Number(amount), frequency: "Monthly", effectiveFrom: localDateStr() });
+      await api.addSalaryComponent(employee.id, {
+        componentName, componentType, amount: Number(amount), frequency, effectiveFrom,
+        effectiveTo: openEnded ? undefined : (effectiveTo || undefined),
+      });
       resetForm();
       reload();
     } catch (e: any) {
@@ -732,13 +906,11 @@ function EmployeeSalarySection({ employee }: { employee: Employee }) {
 
   const handleUpdate = async () => {
     if (!editingId || !componentName.trim() || !amount) return;
-    const existing = components.find(c => c.id === editingId);
-    if (!existing) return;
     setSaving(true);
     try {
       await api.updateSalaryComponent(employee.id, editingId, {
-        componentName, componentType, amount: Number(amount),
-        frequency: existing.frequency, effectiveFrom: existing.effectiveFrom, effectiveTo: existing.effectiveTo, status: existing.status,
+        componentName, componentType, amount: Number(amount), frequency, effectiveFrom,
+        effectiveTo: openEnded ? undefined : (effectiveTo || undefined), status,
       });
       resetForm();
       reload();
@@ -775,17 +947,57 @@ function EmployeeSalarySection({ employee }: { employee: Employee }) {
       </div>
       {formOpen && (
         <div className="rounded-xl border border-border/60 p-3 space-y-2 mb-3">
-          <Input value={componentName} onChange={e => setComponentName(e.target.value)} placeholder="e.g. Basic Salary, Housing Allowance" className="h-9" />
           <div className="grid grid-cols-2 gap-2">
-            <Select value={componentType} onValueChange={setComponentType}>
+            <Select value={componentType} onValueChange={changeType}>
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="Earning">Earning</SelectItem>
                 <SelectItem value="Deduction">Deduction</SelectItem>
               </SelectContent>
             </Select>
-            <Input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Amount (SAR)" className="h-9" />
+            <Select value={nameChoice} onValueChange={changeNameChoice}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select component name" /></SelectTrigger>
+              <SelectContent>
+                {namePresets.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                <SelectItem value={CUSTOM_NAME}>Other (type your own)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+          {isCustomName && (
+            <Input value={componentName} onChange={e => setComponentName(e.target.value)} placeholder="Component name" className="h-9" />
+          )}
+          <Input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Amount (SAR)" className="h-9" />
+          <div className="grid grid-cols-2 gap-2">
+            <Select value={frequency} onValueChange={setFrequency}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {SALARY_FREQUENCIES.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {editingId && (
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] text-muted-foreground">Effective From</label>
+              <Input type="date" value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)} className="h-9" />
+            </div>
+            <div>
+              <label className="text-[11px] text-muted-foreground">Effective To</label>
+              <Input type="date" value={effectiveTo} disabled={openEnded} onChange={e => setEffectiveTo(e.target.value)} className="h-9" />
+            </div>
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" checked={openEnded} onChange={e => setOpenEnded(e.target.checked)} />
+            Open-ended (no end date)
+          </label>
           <div className="flex gap-2">
             <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!componentName.trim() || !amount || saving} onClick={editingId ? handleUpdate : handleAdd}>
               {saving ? "Saving…" : editingId ? "Update" : "Save"}
@@ -930,7 +1142,7 @@ function EmployeesTab() {
   const { user } = useAuth();
   const { branches } = useBranch();
   const search = Route.useSearch();
-  const { canCreate, canEdit, canDelete } = usePermission("Employees");
+  const { canCreate, canEdit, canDelete, canExport } = usePermission("Employees");
   const branchLocked = user?.role !== "tenant_admin";
 
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -938,6 +1150,7 @@ function EmployeesTab() {
   const [designations, setDesignations] = useState<Designation[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [leavePolicies, setLeavePolicies] = useState<LeavePolicy[]>([]);
+  const [linkableUsers, setLinkableUsers] = useState<{ id: string; fullName: string; email: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -948,6 +1161,7 @@ function EmployeesTab() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
   const [contractStatusFilter, setContractStatusFilter] = useState("all");
+  const [documentStatusFilter, setDocumentStatusFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
   const [leaveStatusFilter, setLeaveStatusFilter] = useState("all");
   const [shifts, setShifts] = useState<WorkShift[]>([]);
@@ -982,20 +1196,22 @@ function EmployeesTab() {
     setForm({ ...emptyForm, branchId: branchLocked ? (user?.branchId ?? "") : "" });
     setActiveTab("details");
     setDrawerOpen(true);
+    api.getLinkableUsers().then(setLinkableUsers).catch(() => {});
   };
 
-  const openEdit = (e: Employee) => {
+  const openEdit = (e: Employee, tab: string = "details") => {
     setViewEmployee(null);
     setActiveEmployee(e);
-    setActiveTab("details");
+    setActiveTab(tab);
     setDrawerOpen(true);
+    api.getLinkableUsers(e.id).then(setLinkableUsers).catch(() => {});
     setForm({
       fullName: e.fullName, email: e.email ?? "", phone: e.phone, emergencyContact: e.emergencyContact ?? "",
       nationalId: e.nationalId, iqamaExpiry: e.iqamaExpiry?.slice(0, 10) ?? "", dateOfBirth: e.dateOfBirth?.slice(0, 10) ?? "",
       gender: e.gender ?? "", nationality: e.nationality ?? "", maritalStatus: e.maritalStatus ?? "",
       profileImageUrl: e.profileImageUrl ?? "",
       branchId: e.branchId, departmentId: e.departmentId ?? "none", designationId: e.designationId ?? "none", roleId: e.roleId ?? "none",
-      leavePolicyId: e.leavePolicyId ?? "none",
+      leavePolicyId: e.leavePolicyId ?? "none", userId: e.userId ?? "none",
       hireDate: e.hireDate.slice(0, 10), employmentStatus: e.employmentStatus,
       currentAddress: e.currentAddress ?? "", permanentAddress: e.permanentAddress ?? "", sameAsCurrent: !!e.permanentAddress && e.permanentAddress === e.currentAddress,
       contractType: e.contractType ?? "none", contractStartDate: e.contractStartDate?.slice(0, 10) ?? todayStr,
@@ -1016,6 +1232,7 @@ function EmployeesTab() {
         departmentId: form.departmentId === "none" ? undefined : form.departmentId,
         designationId: form.designationId === "none" ? undefined : form.designationId,
         roleId: form.roleId === "none" ? undefined : form.roleId,
+        userId: form.userId === "none" ? undefined : form.userId,
         leavePolicyId: form.leavePolicyId === "none" ? undefined : form.leavePolicyId,
         hireDate: form.hireDate, employmentStatus: form.employmentStatus,
         currentAddress: form.currentAddress, permanentAddress: (form.sameAsCurrent ? form.currentAddress : form.permanentAddress) || undefined,
@@ -1041,13 +1258,28 @@ function EmployeesTab() {
     }
   };
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const handleDelete = async (e: Employee) => {
     if (!confirm(`Deactivate employee "${e.fullName}"?`)) return;
+    setDeletingId(e.id);
     try {
       await api.deleteEmployee(e.id);
+      toast.success(`${e.fullName} deactivated.`);
       load();
     } catch (err: any) {
       toast.error(err?.message || "Failed to deactivate employee.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleActivate = async (e: Employee) => {
+    try {
+      await api.updateEmployee(e.id, { ...e, employmentStatus: "active" });
+      toast.success(`${e.fullName} activated.`);
+      load();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to activate employee.");
     }
   };
 
@@ -1059,17 +1291,31 @@ function EmployeesTab() {
     const ms = statusFilter === "all" || e.employmentStatus === statusFilter;
     const mrole = roleFilter === "all" || e.roleId === roleFilter;
     const mcontract = contractStatusFilter === "all" || contractStatus(e).label.replace(" ", "-").toLowerCase() === contractStatusFilter;
+    const mdoc = documentStatusFilter === "all" || (e.documentStatus ?? "Pending") === documentStatusFilter;
     const mshift = shiftFilter === "all" || (shiftFilter === "none" ? !e.currentShift : e.currentShift?.shiftId === shiftFilter);
     const mleave = leaveStatusFilter === "all" || (leaveStatusFilter === "on_leave" ? e.onLeaveToday : leaveStatusFilter === "working" ? !e.onLeaveToday : true);
-    return mq && mb && md && mdes && ms && mrole && mcontract && mshift && mleave;
+    return mq && mb && md && mdes && ms && mrole && mcontract && mdoc && mshift && mleave;
   });
 
-  const handleExport = () => {
-    exportRowsAsCsv(
-      ["Employee Code", "Full Name", "Phone", "Email", "Branch", "Department", "Designation", "ACL Role", "Employment Status", "Contract Status", "Shift", "Leave Policy", "Hire Date"],
-      filtered.map(e => [e.employeeCode, e.fullName, e.phone, e.email ?? "", e.branch?.name ?? "", e.department?.name ?? "", e.designation?.name ?? "", e.role?.name ?? "", e.employmentStatus, contractStatus(e).label, e.currentShift?.shiftName ?? "Not Assigned", e.leavePolicy?.name ?? "Not Assigned", e.hireDate]),
-      `employees-${localDateStr()}.csv`
-    );
+  // Backend export — respects the same branch/department/designation/role/status/search filters
+  // the list applies, plus ACL masking, filter-summary/generated-by/at metadata and an audit log
+  // entry (FRD 4.4), unlike the previous client-side CSV built from already-loaded rows.
+  const handleExport = async (format: ReportExportFormat) => {
+    try {
+      const blob = await api.exportEmployees({
+        branchId: branchFilter === "all" ? undefined : branchFilter,
+        departmentId: departmentFilter === "all" ? undefined : departmentFilter,
+        designationId: designationFilter === "all" ? undefined : designationFilter,
+        roleId: roleFilter === "all" ? undefined : roleFilter,
+        status: statusFilter === "all" ? undefined : statusFilter,
+        search: q || undefined,
+        exportedBy: user?.id,
+        format,
+      });
+      downloadBlob(blob, `employees-${localDateStr()}.${exportFileExtension(format)}`);
+    } catch (e: any) {
+      toast.error(e?.message || "Export failed.");
+    }
   };
 
   return (
@@ -1125,7 +1371,18 @@ function EmployeesTab() {
             <SelectItem value="active">Active</SelectItem>
             <SelectItem value="expiring-soon">Expiring Soon</SelectItem>
             <SelectItem value="expired">Expired</SelectItem>
-            <SelectItem value="not-set">Not Set</SelectItem>
+            <SelectItem value="terminated">Terminated</SelectItem>
+            <SelectItem value="not-set">Not Uploaded</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={documentStatusFilter} onValueChange={setDocumentStatusFilter}>
+          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Document Statuses</SelectItem>
+            <SelectItem value="Complete">Complete</SelectItem>
+            <SelectItem value="Pending">Pending</SelectItem>
+            <SelectItem value="Expiring Soon">Expiring Soon</SelectItem>
+            <SelectItem value="Expired">Expired</SelectItem>
           </SelectContent>
         </Select>
         <Select value={shiftFilter} onValueChange={setShiftFilter}>
@@ -1145,9 +1402,7 @@ function EmployeesTab() {
           </SelectContent>
         </Select>
         <div className="flex-1" />
-        <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
-          <Download className="h-4 w-4" /> Export
-        </Button>
+        <ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} />
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openCreate}>
             <Plus className="h-4 w-4" /> Add Employee
@@ -1167,9 +1422,12 @@ function EmployeesTab() {
               employee={e}
               onView={() => setViewEmployee(e)}
               onEdit={() => openEdit(e)}
+              onEditTab={(tab) => openEdit(e, tab)}
               onDelete={() => handleDelete(e)}
+              onActivate={() => handleActivate(e)}
               canEdit={canEdit}
               canDelete={canDelete}
+              deleting={deletingId === e.id}
             />
           ))}
         </div>
@@ -1192,7 +1450,7 @@ function EmployeesTab() {
               <p className="text-xs text-muted-foreground mt-2">Save Details first to unlock Documents, Salary, Leaves and Shifts.</p>
             )}
             <TabsContent value="details">
-              <EmployeeFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches} departments={departments} designations={designations} roles={roles} leavePolicies={leavePolicies} branchLocked={branchLocked} />
+              <EmployeeFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches} departments={departments} designations={designations} roles={roles} leavePolicies={leavePolicies} linkableUsers={linkableUsers} branchLocked={branchLocked} />
             </TabsContent>
             <TabsContent value="documents">
               {activeEmployee && <><EmployeeDocumentsSection employee={activeEmployee} /><EmployeeContractsSection employee={activeEmployee} /></>}
@@ -1215,7 +1473,7 @@ function EmployeesTab() {
 
 function Employees() {
   return (
-    <PageShell title="Employees" subtitle="Manage your mart's employee directory">
+    <PageShell title="Employees" subtitle="Manage your mart's employee directory" breadcrumb={["Human Resources", "Employees"]}>
       <EmployeesTab />
     </PageShell>
   );
