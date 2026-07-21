@@ -31,18 +31,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_payroll_runs", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_payroll_runs_branches_branch_id",
-                        column: x => x.branch_id,
-                        principalTable: "branches",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_payroll_runs_users_processed_by",
-                        column: x => x.processed_by,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -65,12 +53,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_salary_components", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_salary_components_employees_employee_id",
-                        column: x => x.employee_id,
-                        principalTable: "employees",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -89,12 +71,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_payroll_run_employees", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_payroll_run_employees_employees_employee_id",
-                        column: x => x.employee_id,
-                        principalTable: "employees",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_payroll_run_employees_payroll_runs_payroll_run_id",
                         column: x => x.payroll_run_id,
@@ -128,6 +104,42 @@ namespace BaqalaPOS.Api.Migrations
                 name: "IX_salary_components_employee_id",
                 table: "salary_components",
                 column: "employee_id");
+
+            // branches/employees/users were all created in earlier migrations, so their actual
+            // collation may not match whatever these new FK columns get from the server's
+            // ambient default. See MigrationCollationHelper for why.
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_payroll_runs_branches_branch_id",
+                table: "payroll_runs",
+                column: "branch_id",
+                principalTable: "branches",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_payroll_runs_users_processed_by",
+                table: "payroll_runs",
+                column: "processed_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_salary_components_employees_employee_id",
+                table: "salary_components",
+                column: "employee_id",
+                principalTable: "employees",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_payroll_run_employees_employees_employee_id",
+                table: "payroll_run_employees",
+                column: "employee_id",
+                principalTable: "employees",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict);
         }
 
         /// <inheritdoc />

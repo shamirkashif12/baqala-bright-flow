@@ -116,17 +116,36 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     [HttpGet("by-number/{orderNumber}")]
     public async Task<IActionResult> GetByOrderNumber(string orderNumber)
     {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        var isAdmin = callerRole == "tenant_admin";
+
+        // Same lean projection as GetById — was previously `.Include()`-ing and returning the
+        // raw entity graph, which pulls a product's full `ImageUrl` (an inline base64 data-URI,
+        // sometimes tens of KB) into the response. See MIMONY-ORDERS-CREATE-RAWENTITY-001.
         var order = await db.Orders
-            .Include(o => o.Items).ThenInclude(i => i.Product)
-            .Include(o => o.Payments)
-            .Include(o => o.Customer)
-            .Include(o => o.Branch)
-            .FirstOrDefaultAsync(o => o.OrderNumber == orderNumber);
+            .Where(o => o.OrderNumber == orderNumber)
+            .Select(o => new
+            {
+                o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
+                o.Subtotal, o.DiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
+                o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
+                Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
+                Cashier = o.Cashier == null || (!isAdmin && callerBranchId.HasValue && o.Cashier.BranchId != callerBranchId)
+                    ? null
+                    : new { o.Cashier.Id, o.Cashier.FullName },
+                Customer = o.Customer == null ? null : new { o.Customer.Id, o.Customer.FullName, o.Customer.Phone, o.Customer.Email },
+                Items = o.Items.Select(i => new
+                {
+                    i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount,
+                    Product = i.Product == null ? null : new { i.Product.Id, i.Product.Name, i.Product.Sku }
+                }),
+                Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
+            })
+            .FirstOrDefaultAsync();
         if (order is null) return NotFound();
 
         // Same branch-scoping gap as GetById above — a direct order-number lookup previously
         // bypassed the caller's branch entirely.
-        var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && order.BranchId != callerBranchId)
             return NotFound();
 
@@ -505,14 +524,36 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
-            db.ZatcaInvoices.Add(zatcaInvoice);
-            await db.SaveChangesAsync();
+
+            // Creating the invoice row itself was the one step in this block NOT covered by the
+            // "a ZATCA failure must never fail the sale" guarantee below — a save failure here
+            // (e.g. a schema mismatch on the ZatcaInvoices table) previously threw all the way out
+            // to the global exception handler and 500'd an already-completed, already-paid sale.
+            bool invoiceSaved;
+            try
+            {
+                db.ZatcaInvoices.Add(zatcaInvoice);
+                await db.SaveChangesAsync();
+                invoiceSaved = true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to create ZATCA invoice row for order {OrderId}", order.Id);
+                db.Entry(zatcaInvoice).State = EntityState.Detached;
+                invoiceSaved = false;
+
+                await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
+                    "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
+                    $"ZATCA invoice creation failed for Invoice {order.OrderNumber}",
+                    severity: "error", entityType: "Order", entityId: order.Id);
+            }
 
             // Submitted synchronously (not fire-and-forget) so the checkout response — and thus
             // the printed receipt — carries the real ZATCA-signed QR code, not a client-side
             // approximation. A ZATCA failure must not fail the sale itself; the invoice is left
             // in whatever status SubmitInvoiceAsync set (e.g. "rejected") for later retry via
             // POST zatca/invoices/{id}/submit.
+            if (invoiceSaved)
             try
             {
                 var submitted = await zatcaService.SubmitInvoiceAsync(zatcaInvoice.Id);
@@ -609,7 +650,24 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             }
         }
 
-        return CreatedAtAction(nameof(GetById), new { id = order.Id }, order);
+        // MIMONY-ORDERS-CREATE-RAWENTITY-001: this used to return the raw, EF-tracked `order`
+        // entity directly, unlike every other read endpoint here (GetAll/GetById), which
+        // deliberately project down to a lean DTO — GetById's Product projection explicitly
+        // excludes `ImageUrl` for exactly this reason. A product with a large inline base64
+        // image (data-URI, tens of KB) reliably 500'd checkout for that product only: JSON-
+        // serializing the tracked entity graph pulls in every navigation property behind it,
+        // and this is the one path that was never guarded against that. Building the response
+        // straight from the in-memory `order` object's own scalar properties — never touching
+        // its Items[].Product/Branch/Cashier navigations — sidesteps the whole class of bug.
+        return CreatedAtAction(nameof(GetById), new { id = order.Id }, new
+        {
+            order.Id, order.OrderNumber, order.Source, order.BranchId, order.CustomerId, order.CashierId, order.TerminalId, order.ShiftId, order.CouponId,
+            order.Subtotal, order.DiscountAmount, order.TaxAmount, order.CustomFeeAmount, order.TobaccoFeeAmount, order.TotalAmount,
+            order.PaymentStatus, order.OrderStatus, order.Notes, order.ClientRequestId, order.VoidReason, order.CreatedAt, order.UpdatedAt,
+            order.ZatcaQrCode, order.ZatcaInvoiceStatus,
+            Items = order.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount }),
+            Payments = order.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
+        });
     }
 
     [RequirePermission("Orders", PermAction.Edit)]

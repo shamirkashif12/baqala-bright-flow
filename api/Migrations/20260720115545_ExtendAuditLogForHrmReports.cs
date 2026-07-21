@@ -29,13 +29,19 @@ namespace BaqalaPOS.Api.Migrations
                 table: "audit_logs",
                 column: "employee_id");
 
-            migrationBuilder.AddForeignKey(
+            // audit_logs.employee_id is added via AddColumn to a table that's existed since
+            // InitialSchema, so it inherits audit_logs' own collation from back then, which may
+            // not match employees.id's collation (employees is new, from AddHrmCoreTables, and
+            // got whatever the server's ambient default was at that later point). See
+            // MigrationCollationHelper for why.
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_audit_logs_employees_employee_id",
                 table: "audit_logs",
                 column: "employee_id",
                 principalTable: "employees",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict);
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
         }
 
         /// <inheritdoc />

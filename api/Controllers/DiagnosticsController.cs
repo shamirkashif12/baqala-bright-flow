@@ -31,4 +31,19 @@ public class DiagnosticsController(BaqalaDbContext db) : ControllerBase
             },
         });
     }
+
+    [HttpGet("errors")]
+    public IActionResult GetRecentErrors()
+    {
+        if (User.FindFirst("role")?.Value != "tenant_admin") return Forbid();
+        return Ok(RecentErrors.All());
+    }
+
+    [HttpGet("errors/{referenceId}")]
+    public IActionResult GetError(string referenceId)
+    {
+        if (User.FindFirst("role")?.Value != "tenant_admin") return Forbid();
+        var entry = RecentErrors.Find(referenceId);
+        return entry is null ? NotFound() : Ok(entry);
+    }
 }
