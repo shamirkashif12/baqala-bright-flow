@@ -165,17 +165,21 @@ namespace BaqalaPOS.Api.Migrations
                 table: "leave_requests",
                 column: "leave_type_id");
 
-            migrationBuilder.AddForeignKey(
+            // employees/users were created in earlier migrations, so their actual collation may
+            // not match whatever these new FK columns get from the server's ambient default. See
+            // MigrationCollationHelper for why. employees.leave_policy_id needs the same
+            // treatment even though leave_policies is brand new in this migration: it's added via
+            // AddColumn to a table that already existed, so it inherits employees' own collation
+            // from whenever it was originally created, not today's ambient default that
+            // leave_policies.id just got.
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_employees_leave_policies_leave_policy_id",
                 table: "employees",
                 column: "leave_policy_id",
                 principalTable: "leave_policies",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict);
-
-            // employees/users were created in earlier migrations, so their actual collation may
-            // not match whatever these new FK columns get from the server's ambient default. See
-            // MigrationCollationHelper for why.
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
             migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_employee_contracts_employees_employee_id",
                 table: "employee_contracts",

@@ -145,8 +145,11 @@ namespace BaqalaPOS.Api.Migrations
 
             // branches/departments/employees/users were all created in earlier migrations, so
             // their actual collation may not match whatever these new FK columns get from the
-            // server's ambient default. See MigrationCollationHelper for why. work_shifts is
-            // created earlier in this same migration, so FKs to it can stay plain.
+            // server's ambient default. See MigrationCollationHelper for why. staff_attendance's
+            // employee_id/shift_id columns need the same treatment even though work_shifts is
+            // brand new in this migration: they're added via AddColumn to a table that already
+            // existed, so they inherit staff_attendance's own collation from whenever it was
+            // originally created, not today's ambient default that work_shifts.id just got.
             migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_staff_attendance_employees_employee_id",
                 table: "staff_attendance",
@@ -156,13 +159,14 @@ namespace BaqalaPOS.Api.Migrations
                 onDelete: ReferentialAction.Restrict,
                 nullable: true);
 
-            migrationBuilder.AddForeignKey(
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_staff_attendance_work_shifts_shift_id",
                 table: "staff_attendance",
                 column: "shift_id",
                 principalTable: "work_shifts",
                 principalColumn: "id",
-                onDelete: ReferentialAction.Restrict);
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
 
             migrationBuilder.AddForeignKeyWithMatchedCollation(
                 name: "FK_work_shifts_branches_branch_id",
