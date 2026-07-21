@@ -6,8 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
-import { downloadBlob } from "@/lib/csv-export";
-import { api, type EmployeeActivityRow, type ReportExportFormat } from "@/lib/api";
+import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
+import { api, type EmployeeActivityRow, type Employee, type User, type ReportExportFormat } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
@@ -24,7 +24,7 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-const MODULES = ["Employees", "HR Master Data", "HR Attendance", "HR Shifts", "Leave Management", "Payroll"];
+const MODULES = ["Employees", "HR Master Data", "HR Attendance", "HR Shifts", "Leave Management", "Payroll", "Authentication", "POS", "Returns"];
 
 function severityTone(s: string) {
   if (s === "critical") return "bg-destructive/15 text-destructive";
@@ -35,22 +35,32 @@ function severityTone(s: string) {
 function EmployeeActivityReport() {
   const { user } = useAuth();
   const { branches } = useBranch();
-  const { canExport } = usePermission("Reports");
+  const { canExport } = usePermission("Audit Logs");
   const branchLocked = user?.role !== "tenant_admin";
 
   const [rows, setRows] = useState<EmployeeActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
 
   const [dateFrom, setDateFrom] = useState(firstOfMonthStr());
   const [dateTo, setDateTo] = useState(todayStr());
   const [branchId, setBranchId] = useState("all");
   const [module, setModule] = useState("all");
+  const [employeeId, setEmployeeId] = useState("all");
+  const [performedBy, setPerformedBy] = useState("all");
   const [search, setSearch] = useState("");
+  const [referenceId, setReferenceId] = useState("");
+  const [ipOrDevice, setIpOrDevice] = useState("");
 
   const filterParams = {
     branchId: branchLocked ? (user?.branchId ?? undefined) : (branchId === "all" ? undefined : branchId),
     module: module === "all" ? undefined : module,
+    employeeId: employeeId === "all" ? undefined : employeeId,
+    performedBy: performedBy === "all" ? undefined : performedBy,
     activityType: search || undefined,
+    referenceId: referenceId || undefined,
+    ipOrDevice: ipOrDevice || undefined,
     dateFrom: dateFrom ? `${dateFrom}T00:00:00` : undefined,
     dateTo: dateTo ? `${dateTo}T23:59:59` : undefined,
   };
@@ -59,13 +69,17 @@ function EmployeeActivityReport() {
     setLoading(true);
     api.getEmployeeActivityReport(filterParams).then(setRows).catch(() => {}).finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, module, search, dateFrom, dateTo]);
+  }, [branchId, module, employeeId, performedBy, search, referenceId, ipOrDevice, dateFrom, dateTo]);
   useEffect(load, [load]);
+  useEffect(() => {
+    api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getUsers().then(setUsers).catch(() => {});
+  }, []);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportEmployeeActivityReport({ ...filterParams, exportedBy: user?.id, format });
-      downloadBlob(blob, `employee-activity-report-${dateFrom}-to-${dateTo}.${format}`);
+      downloadBlob(blob, `employee-activity-report-${dateFrom}-to-${dateTo}.${exportFileExtension(format)}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
     }
@@ -83,7 +97,7 @@ function EmployeeActivityReport() {
   ];
 
   return (
-    <PageShell title="Employee Activity Report" subtitle="Audit trail of employee actions across HRM and POS modules">
+    <PageShell title="Employee Activity Report" subtitle="Audit trail of employee actions across HRM and POS modules" breadcrumb={["Human Resources", "Employee Activity Report"]}>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
@@ -104,8 +118,24 @@ function EmployeeActivityReport() {
               {MODULES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
             </SelectContent>
           </Select>
+          <Select value={employeeId} onValueChange={setEmployeeId}>
+            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Employees</SelectItem>
+              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={performedBy} onValueChange={setPerformedBy}>
+            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Performed By</SelectItem>
+              {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search activity…" className="h-9 w-48" />
-          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+          <Input value={referenceId} onChange={e => setReferenceId(e.target.value)} placeholder="Reference ID…" className="h-9 w-40" />
+          <Input value={ipOrDevice} onChange={e => setIpOrDevice(e.target.value)} placeholder="IP / Device…" className="h-9 w-36" />
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
         </div>
 
         {loading ? (

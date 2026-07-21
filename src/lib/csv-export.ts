@@ -1,3 +1,8 @@
+/** Maps a ReportExportFormat to its real file extension — "excel" downloads as .xlsx, not .excel. */
+export function exportFileExtension(format: string): string {
+  return format === "excel" ? "xlsx" : format;
+}
+
 /** Triggers a browser download for a Blob (used by report CSV export buttons). */
 export function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);

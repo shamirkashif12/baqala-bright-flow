@@ -22,6 +22,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return (role, branchId);
     }
 
+    // FRD 16.1 "POS Actions" — the Employee Activity Report can only surface these rows if they
+    // carry module/employeeId like every HRM audit call already does; POS-side actions predate
+    // that addition and only ever passed userId.
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? (await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()) : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
@@ -456,7 +462,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
                 }),
                 // A discounted sale is the one a manager actually wants to spot in the trail.
-                severity: order.DiscountAmount > 0 ? "warning" : "info");
+                severity: order.DiscountAmount > 0 ? "warning" : "info",
+                module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId));
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for order {OrderId}", order.Id); }
 
@@ -469,7 +476,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 userId: order.CashierId,
                 branchId: order.BranchId,
                 details: $"{checkoutWithoutShiftRole} completed order {order.OrderNumber} with no open shift — sale has no ShiftId to reconcile against.",
-                severity: "warning");
+                severity: "warning",
+                module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId));
         }
 
         // ── ZATCA Phase 2: auto-create + submit e-invoice ──────────────────────
@@ -674,7 +682,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             branchId: order.BranchId,
             beforeValue: beforeSnapshot,
             details: System.Text.Json.JsonSerializer.Serialize(new { order.OrderNumber, ShiftId = shift.Id }),
-            severity: "warning");
+            severity: "warning",
+            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()));
 
         return Ok(order);
     }
@@ -833,7 +842,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             branchId: order.BranchId,
             details: afterSnapshot,
             severity: "info",
-            beforeValue: beforeSnapshot);
+            beforeValue: beforeSnapshot,
+            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()));
 
         var updated = await db.Orders
             .Include(o => o.Items).ThenInclude(i => i.Product)
@@ -869,7 +879,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             details: $"{{\"orderNumber\":\"{order.OrderNumber}\",\"reason\":{System.Text.Json.JsonSerializer.Serialize(req.Reason)}}}",
             severity: "info",
             beforeValue: beforeSnapshot,
-            notes: req.Reason);
+            notes: req.Reason,
+            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()));
 
         return Ok(order);
     }

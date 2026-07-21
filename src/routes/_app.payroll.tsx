@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Eye, Play, Plus, Download } from "lucide-react";
+import { Eye, Play, Plus, Download, Lock, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { api, type PayrollRun, type PayrollRunDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -181,6 +181,34 @@ function PayrollTab() {
     }
   };
 
+  const handleLock = async (run: PayrollRun) => {
+    if (!confirm(`Lock payroll for ${MONTH_NAMES[run.month - 1]} ${run.year}? No further changes will be possible.`)) return;
+    setProcessingId(run.id);
+    try {
+      await api.lockPayrollRun(run.id);
+      toast.success("Payroll run locked.");
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to lock payroll run.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleCancel = async (run: PayrollRun) => {
+    if (!confirm(`Cancel payroll for ${MONTH_NAMES[run.month - 1]} ${run.year}?`)) return;
+    setProcessingId(run.id);
+    try {
+      await api.cancelPayrollRun(run.id);
+      toast.success("Payroll run cancelled.");
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to cancel payroll run.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const years = Array.from(new Set(runs.map(r => r.year))).sort((a, b) => b - a);
 
   const filtered = runs.filter(r => {
@@ -282,6 +310,16 @@ function PayrollTab() {
                             <Play className="h-3.5 w-3.5" />
                           </Button>
                         )}
+                        {canApprove && r.status === "Processed" && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7" title="Lock" disabled={processingId === r.id} onClick={() => handleLock(r)}>
+                            <Lock className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {canApprove && (r.status === "Draft" || r.status === "Processed") && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Cancel" disabled={processingId === r.id} onClick={() => handleCancel(r)}>
+                            <Ban className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -309,7 +347,7 @@ function PayrollTab() {
 
 function Payroll() {
   return (
-    <PageShell title="Payroll" subtitle="Payroll runs and employee salary components">
+    <PageShell title="Payroll" subtitle="Payroll runs and employee salary components" breadcrumb={["Human Resources", "Payroll"]}>
       <PayrollTab />
     </PageShell>
   );

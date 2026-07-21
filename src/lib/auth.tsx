@@ -271,6 +271,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Fire-and-forget, before clearing the session — the auth token is still valid for this one
+    // last call. FRD 16.1 "Authentication" category logs this server-side (AuthController.Logout).
+    api.logout();
     clearSession();
     setAuthUser(null);
   }, []);

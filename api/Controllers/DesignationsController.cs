@@ -15,13 +15,22 @@ public class DesignationsController(BaqalaDbContext db, IAuditService audit) : C
         Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] Guid? departmentId, [FromQuery] string? status, [FromQuery] string? search)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] Guid? departmentId, [FromQuery] string? status, [FromQuery] string? search,
+        [FromQuery] int? page, [FromQuery] int? pageSize)
     {
         var query = db.Designations.Include(d => d.Department).AsQueryable();
         if (departmentId.HasValue) query = query.Where(d => d.DepartmentId == departmentId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(d => d.Status == status);
         if (!string.IsNullOrEmpty(search)) query = query.Where(d => d.Name.Contains(search));
-        return Ok(await query.OrderBy(d => d.Name).ToListAsync());
+
+        query = query.OrderBy(d => d.Name);
+        if (!page.HasValue && !pageSize.HasValue) return Ok(await query.ToListAsync());
+        var totalCount = await query.CountAsync();
+        var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
+        var effectivePage = page is > 0 ? page.Value : 1;
+        var rows = await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync();
+        return Ok(new { items = rows, totalCount });
     }
 
     [HttpGet("{id:guid}")]

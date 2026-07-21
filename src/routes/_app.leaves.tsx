@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Check, Plus, X, Ban, Download } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +20,7 @@ import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { localDateStr } from "@/lib/utils";
 import { exportRowsAsCsv } from "@/lib/csv-export";
+import { fileToDataUrl } from "@/lib/image";
 
 export const Route = createFileRoute("/_app/leaves")({ component: Leaves });
 
@@ -28,7 +30,7 @@ function FieldRow({ label, required, children }: { label: string; required?: boo
   return <div className="space-y-1"><Label className="text-xs">{label}{required && <span className="text-destructive"> *</span>}</Label>{children}</div>;
 }
 
-type ApplyForm = { employeeId: string; leaveTypeId: string; fromDate: string; toDate: string; reason: string };
+type ApplyForm = { employeeId: string; leaveTypeId: string; fromDate: string; toDate: string; reason: string; attachmentUrl?: string };
 const emptyApplyForm: ApplyForm = { employeeId: "", leaveTypeId: "", fromDate: todayStr, toDate: todayStr, reason: "" };
 
 function ApplyLeaveFields({ form, setForm, onSave, saving, employees, leaveTypes }: {
@@ -38,6 +40,20 @@ function ApplyLeaveFields({ form, setForm, onSave, saving, employees, leaveTypes
   const setS = (k: keyof ApplyForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
   const set = (k: keyof ApplyForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
   const totalDays = Math.max(0, Math.round((new Date(form.toDate).getTime() - new Date(form.fromDate).getTime()) / 86400000) + 1);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await fileToDataUrl(file);
+      setForm(p => ({ ...p, attachmentUrl: url }));
+    } catch {
+      toast.error("Failed to attach file.");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div className="mt-4 space-y-3">
@@ -59,6 +75,10 @@ function ApplyLeaveFields({ form, setForm, onSave, saving, employees, leaveTypes
       </div>
       <p className="text-xs text-muted-foreground">Total: {totalDays} day{totalDays === 1 ? "" : "s"} (server excludes holidays)</p>
       <FieldRow label="Reason" required><Textarea value={form.reason} onChange={set("reason")} className="min-h-20" /></FieldRow>
+      <FieldRow label="Attachment">
+        <Input type="file" accept=".pdf,image/*" disabled={uploading} onChange={e => handleFile(e.target.files?.[0])} className="h-9" />
+        {form.attachmentUrl && <p className="text-xs text-success mt-1">File attached.</p>}
+      </FieldRow>
       <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving || !form.employeeId || !form.leaveTypeId || !form.reason.trim()}>
         {saving ? "Submitting…" : "Apply Leave"}
       </Button>
@@ -88,6 +108,10 @@ function LeavesTab() {
   const { user } = useAuth();
   const { branches } = useBranch();
   const { canCreate, canApprove, canEdit } = usePermission("Leave Management");
+  // A View-only grant (no Approve/Edit) only unlocks the caller's OWN leave requests server-side
+  // (LeaveController.GetAll) — branch/department/approver filters are meaningless over that
+  // single-employee result, so hide them.
+  const canViewAll = canApprove || canEdit;
   const branchLocked = user?.role !== "tenant_admin";
 
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
@@ -203,7 +227,7 @@ function LeavesTab() {
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search employee name or ID…" className="h-9 w-52" />
         <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} placeholder="From" className="h-9 w-36" />
         <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} placeholder="To" className="h-9 w-36" />
-        {!branchLocked && (
+        {!branchLocked && canViewAll && (
           <Select value={branchFilter} onValueChange={setBranchFilter}>
             <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -212,20 +236,24 @@ function LeavesTab() {
             </SelectContent>
           </Select>
         )}
-        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Departments</SelectItem>
-            {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={approverFilter} onValueChange={setApproverFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Approvers</SelectItem>
-            {approvers.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {canViewAll && (
+          <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Departments</SelectItem>
+              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {canViewAll && (
+          <Select value={approverFilter} onValueChange={setApproverFilter}>
+            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Approvers</SelectItem>
+              {approvers.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -316,10 +344,127 @@ function LeavesTab() {
   );
 }
 
-function Leaves() {
+const DAY_MS = 86400000;
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// FRD 9.1 "Leave Calendar" — a distinct calendar view of approved/pending leaves, filterable by
+// branch/department/employee/leave type; previously only the flat Leave Requests list existed.
+function LeaveCalendarTab() {
+  const { user } = useAuth();
+  const { branches } = useBranch();
+  const branchLocked = user?.role !== "tenant_admin";
+
+  const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
+  const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [employeeFilter, setEmployeeFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+
+  useEffect(() => {
+    api.getLeaves({ status: undefined }).then(l => setLeaves(l.filter(x => x.status === "approved" || x.status === "pending"))).catch(() => {});
+    api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getDepartments({ status: "active" }).then(setDepartments).catch(() => {});
+    api.getLeaveTypes({ status: "active" }).then(setLeaveTypes).catch(() => {});
+  }, []);
+
+  const filtered = leaves.filter(l => {
+    const emp = employees.find(e => e.id === l.employeeId);
+    const mb = branchLocked ? emp?.branchId === user?.branchId : (branchFilter === "all" || emp?.branchId === branchFilter);
+    const md = departmentFilter === "all" || emp?.departmentId === departmentFilter;
+    const me = employeeFilter === "all" || l.employeeId === employeeFilter;
+    const mt = typeFilter === "all" || l.leaveTypeId === typeFilter;
+    return mb && md && me && mt;
+  });
+
+  const year = cursor.getFullYear(), month = cursor.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startOffset = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (Date | null)[] = [...Array(startOffset).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1))];
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const leavesOn = (d: Date) => filtered.filter(l => {
+    const from = new Date(l.fromDate + "T00:00:00").getTime();
+    const to = new Date(l.toDate + "T00:00:00").getTime();
+    const t = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    return t >= from && t <= to;
+  });
+
   return (
-    <PageShell title="Leave Management" subtitle="Review and manage employee leave requests">
-      <LeavesTab />
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {!branchLocked && (
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">All Branches</SelectItem>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+          </Select>
+        )}
+        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">All Departments</SelectItem>{departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">All Employees</SelectItem>{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">All Types</SelectItem>{leaveTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+        </Select>
+        <div className="flex-1" />
+        <Button size="sm" variant="outline" onClick={() => setCursor(new Date(year, month - 1, 1))}>‹</Button>
+        <span className="text-sm font-medium w-32 text-center">{cursor.toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</span>
+        <Button size="sm" variant="outline" onClick={() => setCursor(new Date(year, month + 1, 1))}>›</Button>
+      </div>
+
+      <Card className="p-3">
+        <div className="grid grid-cols-7 gap-1 text-xs">
+          {WEEKDAYS.map(w => <div key={w} className="text-center font-semibold text-muted-foreground py-1">{w}</div>)}
+          {cells.map((d, i) => {
+            const dayLeaves = d ? leavesOn(d) : [];
+            return (
+              <div key={i} className={`min-h-20 rounded-lg border p-1 ${d ? "border-border/50" : "border-transparent"}`}>
+                {d && <p className="text-[11px] text-muted-foreground mb-1">{d.getDate()}</p>}
+                <div className="space-y-0.5">
+                  {dayLeaves.slice(0, 3).map(l => (
+                    <div key={l.id} title={`${l.employee?.fullName ?? employees.find(e => e.id === l.employeeId)?.fullName ?? ""} · ${l.leaveType?.name ?? ""}`}
+                      className={`truncate rounded px-1 text-[10px] ${l.status === "approved" ? "bg-success/15 text-success" : "bg-warning/20 text-warning-foreground"}`}>
+                      {employees.find(e => e.id === l.employeeId)?.fullName ?? "—"}
+                    </div>
+                  ))}
+                  {dayLeaves.length > 3 && <p className="text-[10px] text-muted-foreground">+{dayLeaves.length - 3} more</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function Leaves() {
+  const { canApprove, canEdit } = usePermission("Leave Management");
+  const canViewAll = canApprove || canEdit;
+  return (
+    <PageShell
+      title="Leave Management"
+      subtitle={canViewAll ? "Review and manage employee leave requests" : "Your own leave requests"}
+      breadcrumb={["Human Resources", "Leave Management"]}
+    >
+      <Tabs defaultValue="requests">
+        <TabsList>
+          <TabsTrigger value="requests">Leave Requests</TabsTrigger>
+          <TabsTrigger value="calendar">Leave Calendar</TabsTrigger>
+        </TabsList>
+        <TabsContent value="requests"><LeavesTab /></TabsContent>
+        <TabsContent value="calendar"><LeaveCalendarTab /></TabsContent>
+      </Tabs>
     </PageShell>
   );
 }

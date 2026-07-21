@@ -1,6 +1,8 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +10,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuditLogsController(BaqalaDbContext db) : ControllerBase
+public class AuditLogsController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's events.
     // Rows with no BranchId (tenant-level actions — role/settings changes, etc.) are excluded
@@ -71,6 +73,22 @@ public class AuditLogsController(BaqalaDbContext db) : ControllerBase
         return Ok(new { total, page, pageSize, items });
     }
 
+    // FRD 3.1 — direct URL access to a restricted page must be logged. Deliberately not the
+    // general Create endpoint below (which requires Audit Logs Create and accepts an arbitrary
+    // body): a user denied a page they lack permission for often lacks Audit Logs permission too,
+    // so this narrow, [Authorize]-only endpoint self-reports a fixed "Access denied" action tied
+    // to the caller's own identity — it cannot forge an arbitrary log row.
+    [Authorize]
+    [HttpPost("access-denied")]
+    public async Task<IActionResult> LogAccessDenied([FromBody] AccessDeniedRequest req)
+    {
+        var userId = Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var uid) ? uid : (Guid?)null;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        await audit.LogAsync(action: "Access denied", userId: userId, branchId: branchId, severity: "warning",
+            details: $"Denied direct access to {req.Path}");
+        return NoContent();
+    }
+
     // Previously ungated entirely — no [Authorize], no [RequirePermission] — while binding the
     // AuditLog entity wholesale from the body. Any caller could forge rows with an arbitrary
     // UserId, Action, Severity or IpAddress, attributing actions to any user and defeating the
@@ -92,3 +110,5 @@ public class AuditLogsController(BaqalaDbContext db) : ControllerBase
         return Created($"/api/auditlogs/{log.Id}", log);
     }
 }
+
+public record AccessDeniedRequest(string Path);

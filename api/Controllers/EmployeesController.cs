@@ -60,18 +60,32 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         }
     }
 
-    // Document Snapshot (FRD 6.2) — "has at least one document on file" is enough for the card;
-    // the full Complete/Expiring/Expired nuance is computed client-side per-document where it's
-    // actually displayed (the profile drawer's Documents section).
+    // Document Snapshot (FRD 6.2) — full Complete/Pending/Expiring Soon/Expired status (the worst
+    // case among an employee's documents), needed for both the card badge and the Employees list's
+    // Document Status filter (FRD 6.3), not just the binary "has documents" HasDocuments flag.
     private async Task AttachHasDocumentsAsync(List<Employee> employees)
     {
         if (employees.Count == 0) return;
         var ids = employees.Select(e => e.Id).ToHashSet();
-        var withDocs = (await db.EmployeeDocuments.Select(d => d.EmployeeId).ToListAsync())
-            .Where(ids.Contains)
-            .ToHashSet();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var docsByEmployee = (await db.EmployeeDocuments.Select(d => new { d.EmployeeId, d.ExpiryDate }).ToListAsync())
+            .Where(d => ids.Contains(d.EmployeeId))
+            .GroupBy(d => d.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         foreach (var employee in employees)
-            employee.HasDocuments = withDocs.Contains(employee.Id);
+        {
+            if (!docsByEmployee.TryGetValue(employee.Id, out var docs))
+            {
+                employee.HasDocuments = false;
+                employee.DocumentStatus = "Pending";
+                continue;
+            }
+            employee.HasDocuments = true;
+            if (docs.Any(d => d.ExpiryDate.HasValue && d.ExpiryDate.Value < today)) employee.DocumentStatus = "Expired";
+            else if (docs.Any(d => d.ExpiryDate.HasValue && d.ExpiryDate.Value <= today.AddDays(30))) employee.DocumentStatus = "Expiring Soon";
+            else employee.DocumentStatus = "Complete";
+        }
     }
 
     // Leave Snapshot (FRD 6.2) — "On Leave" badge for an approved leave covering today.
@@ -90,6 +104,48 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
             employee.OnLeaveToday = onLeave.Contains(employee.Id);
     }
 
+    // FRD 3.1 — National ID, DOB, contact/address fields must be masked from anyone who lacks
+    // ACL permission to actually manage employees. We don't hard-gate GetAll/GetById behind
+    // "Employees" View because other HR modules (Shifts/Leave/Attendance/Departments pickers)
+    // legitimately call this same endpoint for name lookups under their own module permission —
+    // masking (rather than blocking the whole list) is what satisfies the FRD without breaking
+    // those cross-module pickers.
+    private async Task<bool> CanViewSensitiveFieldsAsync() =>
+        await PermissionCheck.HasPermissionAsync(User, db, "Employees", PermAction.Edit);
+
+    private const string Masked = "••••••••";
+
+    private static void MaskSensitiveFields(Employee e)
+    {
+        e.NationalId = Masked;
+        e.Phone = Masked;
+        if (e.EmergencyContact is not null) e.EmergencyContact = Masked;
+        if (e.Email is not null) e.Email = Masked;
+        e.DateOfBirth = null;
+        e.IqamaExpiry = null;
+        if (e.CurrentAddress is not null) e.CurrentAddress = Masked;
+        if (e.PermanentAddress is not null) e.PermanentAddress = Masked;
+    }
+
+    private async Task AttachLatestContractAsync(List<Employee> employees)
+    {
+        if (employees.Count == 0) return;
+        // Filter by the id set in-memory rather than ids.Contains(c.EmployeeId) in the query —
+        // this MySQL EF provider fails to type-map a List<Guid>/HashSet<Guid> used inside
+        // Contains() (see DataSeeder.PatchRemoveTestBranchesAsync's comment for the same gotcha).
+        var ids = employees.Select(e => e.Id).ToHashSet();
+        var contracts = (await db.EmployeeContracts.OrderByDescending(c => c.StartDate).ToListAsync())
+            .Where(c => ids.Contains(c.EmployeeId))
+            .GroupBy(c => c.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.First());
+        foreach (var employee in employees)
+            if (contracts.TryGetValue(employee.Id, out var c))
+                employee.LatestContract = new LatestContractInfo
+                {
+                    ContractType = c.ContractType, EndDate = c.EndDate, OpenEnded = c.OpenEnded, Status = c.Status,
+                };
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
@@ -97,7 +153,9 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         [FromQuery] Guid? designationId,
         [FromQuery] Guid? roleId,
         [FromQuery] string? status,
-        [FromQuery] string? search)
+        [FromQuery] string? search,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
@@ -116,11 +174,25 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
                 e.Phone.Contains(search) ||
                 (e.Email != null && e.Email.Contains(search)));
 
-        var employees = await query.OrderBy(e => e.FullName).ToListAsync();
+        query = query.OrderBy(e => e.FullName);
+        var totalCount = await query.CountAsync();
+        var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
+        var effectivePage = page is > 0 ? page.Value : 1;
+        // page/pageSize are optional — omitting them keeps the old "return everything" behavior
+        // for internal cross-module pickers (Shifts/Leave/Departments) that don't paginate.
+        var employees = page.HasValue || pageSize.HasValue
+            ? await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync()
+            : await query.ToListAsync();
         await AttachCurrentShiftsAsync(employees);
         await AttachHasDocumentsAsync(employees);
         await AttachOnLeaveTodayAsync(employees);
-        return Ok(employees);
+        await AttachLatestContractAsync(employees);
+
+        if (!await CanViewSensitiveFieldsAsync())
+            foreach (var e in employees) MaskSensitiveFields(e);
+
+        if (!page.HasValue && !pageSize.HasValue) return Ok(employees);
+        return Ok(new { items = employees, totalCount });
     }
 
     [HttpGet("{id:guid}")]
@@ -134,16 +206,94 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         await AttachCurrentShiftsAsync([employee]);
         await AttachHasDocumentsAsync([employee]);
         await AttachOnLeaveTodayAsync([employee]);
+        await AttachLatestContractAsync([employee]);
+
+        if (!await CanViewSensitiveFieldsAsync())
+            MaskSensitiveFields(employee);
+
         return Ok(employee);
+    }
+
+    // FRD 4.4 — export must include a filter summary, generated-by/at, branch and record count,
+    // respect ACL masking (reuses the same GetAll query + masking logic) and be audit-logged.
+    // Previously the frontend built a plain CSV client-side from already-loaded rows with none
+    // of that, and no Export-permission gate.
+    [RequirePermission("Employees", PermAction.Export)]
+    [HttpGet("export")]
+    public async Task<IActionResult> Export(
+        [FromQuery] Guid? branchId, [FromQuery] Guid? departmentId, [FromQuery] Guid? designationId,
+        [FromQuery] Guid? roleId, [FromQuery] string? status, [FromQuery] string? search,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "excel")
+    {
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            branchId = callerBranchId;
+
+        var query = WithIncludes(db.Employees.AsQueryable());
+        if (branchId.HasValue) query = query.Where(e => e.BranchId == branchId);
+        if (departmentId.HasValue) query = query.Where(e => e.DepartmentId == departmentId);
+        if (designationId.HasValue) query = query.Where(e => e.DesignationId == designationId);
+        if (roleId.HasValue) query = query.Where(e => e.RoleId == roleId);
+        if (!string.IsNullOrEmpty(status)) query = query.Where(e => e.EmploymentStatus == status);
+        if (!string.IsNullOrEmpty(search))
+            query = query.Where(e => e.FullName.Contains(search) || e.EmployeeCode.Contains(search) || e.Phone.Contains(search) || (e.Email != null && e.Email.Contains(search)));
+
+        var employees = await query.OrderBy(e => e.FullName).ToListAsync();
+        await AttachLatestContractAsync(employees);
+        if (!await CanViewSensitiveFieldsAsync())
+            foreach (var e in employees) MaskSensitiveFields(e);
+
+        var headers = new[] { "Employee ID", "Full Name", "Branch", "Department", "Designation", "Assigned Role", "Hire Date", "Status", "Phone", "Email", "Contract Type", "Contract Status" };
+        var rows = employees.Select(e => new object?[]
+        {
+            e.EmployeeCode, e.FullName, e.Branch?.Name, e.Department?.Name, e.Designation?.Name, e.Role?.Name,
+            e.HireDate, e.EmploymentStatus, e.Phone, e.Email, e.LatestContract?.ContractType, e.LatestContract?.Status,
+        }).ToList();
+
+        await audit.LogAsync(action: "Report exported", entityType: "Report", userId: exportedBy, branchId: branchId,
+            details: $"{{\"report\":\"employees\",\"format\":\"{format}\",\"rows\":{employees.Count}}}", module: "Employees");
+
+        return await ExportFileBuilder.BuildAsync(this, db, format, "Employees", $"Records: {employees.Count}", headers, rows, $"employees-{DateTime.UtcNow:yyyy-MM-dd}", exportedBy);
+    }
+
+    // FRD 4.1 — duplicate check must cover identifier/mobile/email, not just National ID.
+    private async Task<string?> FindDuplicateFieldAsync(Employee e, Guid? excludeId)
+    {
+        if (await db.Employees.AnyAsync(x => x.NationalId == e.NationalId && x.Id != excludeId))
+            return "An employee with this National ID / Iqama already exists.";
+        if (await db.Employees.AnyAsync(x => x.Phone == e.Phone && x.Id != excludeId))
+            return "An employee with this phone number already exists.";
+        if (!string.IsNullOrWhiteSpace(e.Email) && await db.Employees.AnyAsync(x => x.Email == e.Email && x.Id != excludeId))
+            return "An employee with this email already exists.";
+        return null;
+    }
+
+    // FRD DEP-02/DES-02 — an inactive department/designation must not be assignable to a new or
+    // edited employee; the frontend already filters these out of its pickers, but that's
+    // bypassable via a direct API call, so enforce it here too.
+    private async Task<string?> ValidateActiveMasterDataAsync(Employee e)
+    {
+        if (e.DepartmentId.HasValue)
+        {
+            var dept = await db.Departments.FindAsync(e.DepartmentId.Value);
+            if (dept is null || dept.Status != "active") return "The selected department is not active.";
+        }
+        if (e.DesignationId.HasValue)
+        {
+            var desig = await db.Designations.FindAsync(e.DesignationId.Value);
+            if (desig is null || desig.Status != "active") return "The selected designation is not active.";
+        }
+        return null;
     }
 
     [RequirePermission("Employees", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Employee employee)
     {
-        var dupNationalId = await db.Employees.AnyAsync(e => e.NationalId == employee.NationalId);
-        if (dupNationalId)
-            return Conflict(new { message = "An employee with this National ID / Iqama already exists." });
+        var duplicateMessage = await FindDuplicateFieldAsync(employee, null);
+        if (duplicateMessage is not null) return Conflict(new { message = duplicateMessage });
+        var masterDataError = await ValidateActiveMasterDataAsync(employee);
+        if (masterDataError is not null) return BadRequest(new { message = masterDataError });
 
         employee.Id = Guid.NewGuid();
         employee.CreatedAt = employee.UpdatedAt = DateTime.UtcNow;
@@ -181,14 +331,13 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         var employee = await db.Employees.FindAsync(id);
         if (employee is null) return NotFound();
 
-        if (updated.NationalId != employee.NationalId)
-        {
-            var dupNationalId = await db.Employees.AnyAsync(e => e.NationalId == updated.NationalId && e.Id != id);
-            if (dupNationalId)
-                return Conflict(new { message = "An employee with this National ID / Iqama already exists." });
-        }
+        var duplicateMessage = await FindDuplicateFieldAsync(updated, id);
+        if (duplicateMessage is not null) return Conflict(new { message = duplicateMessage });
+        var masterDataError = await ValidateActiveMasterDataAsync(updated);
+        if (masterDataError is not null) return BadRequest(new { message = masterDataError });
 
-        var before = $"Status: {employee.EmploymentStatus}, Branch: {employee.BranchId}, Department: {employee.DepartmentId}, Designation: {employee.DesignationId}";
+        var leavePolicyChanged = updated.LeavePolicyId != employee.LeavePolicyId;
+        var before = $"Status: {employee.EmploymentStatus}, Branch: {employee.BranchId}, Department: {employee.DepartmentId}, Designation: {employee.DesignationId}, LeavePolicy: {employee.LeavePolicyId}";
 
         employee.FullName = updated.FullName;
         employee.Email = updated.Email;
@@ -207,6 +356,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         employee.RoleId = updated.RoleId;
         employee.UserId = updated.UserId;
         employee.LeavePolicyId = updated.LeavePolicyId;
+        if (leavePolicyChanged) employee.LeavePolicyEffectiveFrom = updated.LeavePolicyEffectiveFrom ?? DateOnly.FromDateTime(DateTime.UtcNow);
         employee.HireDate = updated.HireDate;
         employee.EmploymentStatus = updated.EmploymentStatus;
         employee.CurrentAddress = updated.CurrentAddress;
@@ -226,9 +376,15 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
             userId: CallerId(),
             branchId: employee.BranchId,
             beforeValue: before,
-            details: $"Status: {employee.EmploymentStatus}, Branch: {employee.BranchId}, Department: {employee.DepartmentId}, Designation: {employee.DesignationId}",
+            details: $"Status: {employee.EmploymentStatus}, Branch: {employee.BranchId}, Department: {employee.DepartmentId}, Designation: {employee.DesignationId}, LeavePolicy: {employee.LeavePolicyId}",
             module: "Employees",
             employeeId: employee.Id);
+
+        if (leavePolicyChanged)
+            await audit.LogAsync(
+                action: "Leave policy assigned", entityType: "Employee", entityId: employee.Id, userId: CallerId(),
+                branchId: employee.BranchId, details: $"Leave policy set to {employee.LeavePolicyId} effective {employee.LeavePolicyEffectiveFrom}",
+                module: "Leave Management", employeeId: employee.Id);
 
         return Ok(employee);
     }
@@ -256,10 +412,29 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         return NoContent();
     }
 
+    // A "View" grant on the target module only unlocks the CALLER'S OWN sub-resource
+    // (shifts/leaves) under this employee-profile endpoint — seeing another employee's requires
+    // Approve or Edit on that module. Mirrors the same rule enforced directly on
+    // WorkShiftsController/LeaveController's list endpoints, so this profile-tab shortcut can't
+    // be used to route around it.
+    private async Task<bool> HasElevatedAccessAsync(string module) =>
+        await PermissionCheck.HasPermissionAsync(User, db, module, PermAction.Approve)
+        || await PermissionCheck.HasPermissionAsync(User, db, module, PermAction.Edit);
+
+    private async Task<bool> IsOwnEmployeeAsync(Guid employeeId)
+    {
+        var callerId = CallerId();
+        if (callerId is null) return false;
+        return await db.Employees.AnyAsync(e => e.Id == employeeId && e.UserId == callerId);
+    }
+
     // Shift assignment history for this employee's profile Shifts tab, newest first.
+    [RequirePermission("HR Shifts", PermAction.View)]
     [HttpGet("{id:guid}/shifts")]
     public async Task<IActionResult> GetShifts(Guid id)
     {
+        if (!await HasElevatedAccessAsync("HR Shifts") && !await IsOwnEmployeeAsync(id)) return NotFound();
+
         var assignments = await db.EmployeeShiftAssignments
             .Include(a => a.Shift)
             .Where(a => a.EmployeeId == id)
@@ -269,9 +444,12 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     // Leave history for this employee's profile Leaves tab, newest first.
+    [RequirePermission("Leave Management", PermAction.View)]
     [HttpGet("{id:guid}/leaves")]
     public async Task<IActionResult> GetLeaves(Guid id)
     {
+        if (!await HasElevatedAccessAsync("Leave Management") && !await IsOwnEmployeeAsync(id)) return NotFound();
+
         var leaves = await db.LeaveRequests
             .Include(l => l.LeaveType)
             .Include(l => l.Approver)
@@ -281,9 +459,14 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         return Ok(leaves);
     }
 
+    // FRD 3.1/6.4 — document attachments must be ACL-controlled like every other sensitive field;
+    // gated on the same "Employees" Edit permission GetAll/GetById already use to decide whether
+    // to mask PII, with a self-service carve-out so an employee can always see their own uploads.
     [HttpGet("{id:guid}/documents")]
     public async Task<IActionResult> GetDocuments(Guid id)
     {
+        if (!await CanViewSensitiveFieldsAsync() && !await IsOwnEmployeeAsync(id)) return NotFound();
+
         var documents = await db.EmployeeDocuments.Where(d => d.EmployeeId == id).OrderByDescending(d => d.UploadedAt).ToListAsync();
         return Ok(documents);
     }
@@ -368,6 +551,83 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         return Ok(contract);
     }
 
+    // Users who could be linked as this Employee's login account (FRD's Employee<->User is
+    // intentionally optional — many staff never get a login — but until now there was no UI at
+    // all to set the link, only a one-time startup backfill). Excludes Users already linked to a
+    // DIFFERENT employee; a currentEmployeeId lets the Edit form keep showing its own current link.
+    [HttpGet("linkable-users")]
+    public async Task<IActionResult> GetLinkableUsers([FromQuery] Guid? currentEmployeeId)
+    {
+        // Materialize first, then filter in-memory — this MySQL EF provider fails to type-map a
+        // List<Guid> used inside Contains() in a translated query (see
+        // DataSeeder.PatchRemoveTestBranchesAsync's comment for the same gotcha elsewhere).
+        var linkedElsewhere = (await db.Employees
+                .Where(e => e.UserId != null)
+                .Select(e => new { e.Id, e.UserId })
+                .ToListAsync())
+            .Where(e => currentEmployeeId == null || e.Id != currentEmployeeId)
+            .Select(e => e.UserId!.Value)
+            .ToHashSet();
+
+        var users = await db.Users.Where(u => u.Status == "active").OrderBy(u => u.FullName).ToListAsync();
+        var linkable = users.Where(u => !linkedElsewhere.Contains(u.Id))
+            .Select(u => new { u.Id, u.FullName, u.Email });
+        return Ok(linkable);
+    }
+
+    // Self-service payroll (Mod #3) — any authenticated user with a linked Employee record can
+    // see their OWN salary components + payslip history, regardless of "Payroll" module
+    // permission (that permission gates seeing OTHER people's amounts, not your own).
+    [HttpGet("me/payroll")]
+    public async Task<IActionResult> GetMyPayroll()
+    {
+        var callerId = CallerId();
+        if (callerId is null) return Unauthorized();
+        var employee = await db.Employees.FirstOrDefaultAsync(e => e.UserId == callerId);
+        if (employee is null) return NotFound(new { message = "No employee record is linked to this account." });
+
+        var components = await db.SalaryComponents
+            .Where(c => c.EmployeeId == employee.Id && c.Status == "active")
+            .OrderBy(c => c.ComponentName)
+            .ToListAsync();
+
+        var payslips = await db.PayrollRunEmployees
+            .Include(r => r.PayrollRun)
+            .Where(r => r.EmployeeId == employee.Id)
+            .ToListAsync();
+
+        return Ok(new
+        {
+            employee = new { employee.Id, employee.FullName, employee.EmployeeCode },
+            components,
+            payslips = payslips
+                .OrderByDescending(r => r.PayrollRun?.Year).ThenByDescending(r => r.PayrollRun?.Month)
+                .Select(r => new
+                {
+                    r.Id,
+                    r.PayrollRun?.Year, r.PayrollRun?.Month, r.PayrollRun?.PayDate, r.PayrollRun?.Status,
+                    r.BasicSalary, r.GrossEarnings, r.TotalDeductions, r.NetPayable,
+                }),
+        });
+    }
+
+    // Additive safeguard on top of the FRD's own module+branch ACL model (which has no rank
+    // concept): a manager-tier caller can only add/edit/delete salary components for an employee
+    // whose assigned ACL role ranks strictly below their own. tenant_admin is exempt (full access
+    // per FRD section 3). An employee with no assigned ACL role is treated as unranked (0) —
+    // still editable by anyone who already holds the Payroll permission gate.
+    private async Task<bool> CanEditSalaryForAsync(Guid employeeId)
+    {
+        var callerAppRole = User.FindFirst("role")?.Value;
+        if (callerAppRole == "tenant_admin") return true;
+        var callerRank = RoleRank.Of(callerAppRole ?? "");
+
+        var targetRoleName = await db.Employees.Where(e => e.Id == employeeId).Select(e => e.Role!.Name).FirstOrDefaultAsync();
+        if (targetRoleName is null) return true;
+        var targetRank = RoleRank.Of(RoleNormalizer.ToAppRole(targetRoleName));
+        return callerRank > targetRank;
+    }
+
     [HttpGet("{id:guid}/salary-components")]
     public async Task<IActionResult> GetSalaryComponents(Guid id)
     {
@@ -383,6 +643,8 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     {
         var employee = await db.Employees.FindAsync(id);
         if (employee is null) return NotFound(new { message = "Employee not found." });
+        if (!await CanEditSalaryForAsync(id))
+            return StatusCode(403, new { message = "You cannot edit salary for an employee at or above your own role level." });
 
         component.Id = Guid.NewGuid();
         component.EmployeeId = id;
@@ -404,6 +666,8 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     {
         var component = await db.SalaryComponents.FirstOrDefaultAsync(c => c.Id == componentId && c.EmployeeId == id);
         if (component is null) return NotFound();
+        if (!await CanEditSalaryForAsync(id))
+            return StatusCode(403, new { message = "You cannot edit salary for an employee at or above your own role level." });
 
         component.ComponentName = updated.ComponentName;
         component.ComponentType = updated.ComponentType;
@@ -426,6 +690,8 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     {
         var component = await db.SalaryComponents.FirstOrDefaultAsync(c => c.Id == componentId && c.EmployeeId == id);
         if (component is null) return NotFound();
+        if (!await CanEditSalaryForAsync(id))
+            return StatusCode(403, new { message = "You cannot edit salary for an employee at or above your own role level." });
         component.Status = "inactive";
         component.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();

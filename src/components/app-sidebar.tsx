@@ -47,6 +47,8 @@ import {
   CalendarDays,
   Clock,
   Plane,
+  CalendarCheck2,
+  AlarmClockOff,
 } from "lucide-react";
 import {
   Sidebar,
@@ -153,6 +155,9 @@ const navGroups: NavGroup[] = [
   {
     label: "Human Resources",
     items: [
+      // No module/roles — every signed-in user can see their own payroll, regardless of the
+      // "Payroll" module permission (that permission gates OTHER people's amounts, not your own).
+      { title: "My Payroll", url: "/my-payroll", icon: Wallet },
       { title: "Employees",    url: "/employees",    icon: Users,        module: "Employees" },
       { title: "Attendance",   url: "/hrm-attendance", icon: ClipboardCheck, module: "HR Attendance" },
       { title: "Shifts",       url: "/work-shifts",  icon: Clock,        module: "HR Shifts" },
@@ -161,6 +166,12 @@ const navGroups: NavGroup[] = [
       { title: "Departments",  url: "/departments",  icon: Building,     module: "HR Master Data" },
       { title: "Designations", url: "/designations", icon: IdCard,       module: "HR Master Data" },
       { title: "Holidays",     url: "/holidays",      icon: CalendarDays,module: "HR Master Data" },
+      { title: "Attendance Report",     url: "/reports/hrm-attendance",     icon: CalendarCheck2, module: "Reports" },
+      { title: "Shift Closing Report",  url: "/reports/shift-closing",      icon: AlarmClockOff,  module: "Reports" },
+      // Deliberately gated on "Audit Logs", not "Reports" like its siblings above — FRD 3/16
+      // scope this report's user stories to admin/auditor only (EAR-01..05), unlike Attendance/
+      // Shift Closing Report which Branch Manager and Supervisor are explicitly entitled to.
+      { title: "Employee Activity Report", url: "/reports/employee-activity", icon: History,      module: "Audit Logs" },
     ],
   },
   {

@@ -35,7 +35,7 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         {
             // Previously never logged at all, so the Audit Trail's "Failed Logins" KPI (and the
             // FRD's "Auditor reviews failed login attempts" scenario) had nothing to show.
-            await audit.LogAsync("login_failed", "User", null, null, null, $"{{\"email\":\"{emailNorm}\"}}", "warning");
+            await audit.LogAsync("login_failed", "User", null, null, null, $"{{\"email\":\"{emailNorm}\"}}", "warning", module: "Authentication");
             return Unauthorized(new { message = "Invalid email or password." });
         }
 
@@ -43,8 +43,13 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
-        var appRole = ToAppRole(user.Role.Name);
+        var appRole = RoleNormalizer.ToAppRole(user.Role.Name);
         var token = GenerateJwt(user, appRole);
+
+        // FRD 16.1 "Authentication" category — successful logins were previously invisible to the
+        // Employee Activity Report; only the failed-login case above was ever logged.
+        await audit.LogAsync("login", "User", user.Id, user.Id, user.BranchId, severity: "info",
+            module: "Authentication", employeeId: await ResolveEmployeeIdAsync(user.Id));
 
         return Ok(new
         {
@@ -61,6 +66,23 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
             }
         });
     }
+
+    // FRD 16.1 "Authentication" category — logout, since JWT auth is stateless server-side,
+    // has no natural server touchpoint unless the frontend explicitly calls one before clearing
+    // its local session.
+    [Authorize]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        var userId = Guid.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var uid) ? uid : (Guid?)null;
+        var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+        await audit.LogAsync("logout", "User", userId, userId, branchId, severity: "info",
+            module: "Authentication", employeeId: await ResolveEmployeeIdAsync(userId));
+        return NoContent();
+    }
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? (await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()) : null;
 
     private string GenerateJwt(BaqalaPOS.Api.Models.User user, string appRole)
     {
@@ -93,27 +115,6 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
-
-    private static string ToAppRole(string roleName) => roleName switch
-    {
-        "Tenant Administrator" or "Admin"            => "tenant_admin",
-        "Branch Manager"       or "Manager"          => "branch_manager",
-        "Cashier"                                    => "cashier",
-        "Storekeeper"          or "Inventory Staff"  => "storekeeper",
-        "Supervisor"                                 => "supervisor",
-        "Finance User"         or "Accountant"       => "finance_user",
-        "Marketing User"                             => "marketing_user",
-        "Picker"                                     => "picker",
-        // Previously collapsed into marketing_user/picker respectively — two
-        // real, distinct roles (with their own real permission rows) getting
-        // mislabeled as unrelated ones, which silently broke every isManager/
-        // role-gated check for them and showed the wrong label throughout the
-        // app (an Auditor's own dashboard called them a "Marketing User").
-        "Auditor"                                    => "auditor",
-        "Warehouse Staff"                             => "warehouse_staff",
-        "Warehouse Manager"                          => "warehouse_manager",
-        _                                            => roleName.ToLower().Replace(' ', '_')
-    };
 
     private static string HashPassword(string plain) =>
         Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(

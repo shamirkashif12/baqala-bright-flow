@@ -71,11 +71,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     let msg = text;
+    let body: unknown;
     try {
       const parsed = JSON.parse(text) as { message?: string; title?: string };
       msg = parsed.message ?? parsed.title ?? text;
+      body = parsed;
     } catch { /* not JSON */ }
-    throw new Error(msg || res.statusText);
+    const err = new Error(msg || res.statusText) as Error & { status?: number; body?: unknown };
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
   const contentType = res.headers.get("content-type") ?? "";
   if (!contentType.includes("json")) return undefined as T;
@@ -92,11 +97,16 @@ async function requestBlob(path: string): Promise<Blob> {
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     let msg = text;
+    let body: unknown;
     try {
       const parsed = JSON.parse(text) as { message?: string; title?: string };
       msg = parsed.message ?? parsed.title ?? text;
+      body = parsed;
     } catch { /* not JSON */ }
-    throw new Error(msg || res.statusText);
+    const err = new Error(msg || res.statusText) as Error & { status?: number; body?: unknown };
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
   return res.blob();
 }
@@ -109,6 +119,10 @@ function toQuery(params?: Record<string, string | number | boolean | undefined>)
 }
 
 export const api = {
+  logAccessDenied: (path: string) =>
+    request<void>("/api/auditlogs/access-denied", { method: "POST", body: JSON.stringify({ path }) }).catch(() => {}),
+  logout: () => request<void>("/api/auth/logout", { method: "POST" }).catch(() => {}),
+
   // Branches
   getBranches: (status?: string) =>
     request<Branch[]>(`/api/branches${status ? `?status=${status}` : ""}`),
@@ -847,11 +861,15 @@ export const api = {
   getEmployees: (params?: { branchId?: string; departmentId?: string; designationId?: string; roleId?: string; status?: string; search?: string }) =>
     request<Employee[]>(`/api/employees${toQuery(params)}`),
   getEmployee: (id: string) => request<Employee>(`/api/employees/${id}`),
+  getLinkableUsers: (currentEmployeeId?: string) =>
+    request<{ id: string; fullName: string; email: string }[]>(`/api/employees/linkable-users${toQuery({ currentEmployeeId })}`),
   createEmployee: (data: Partial<Employee>) =>
     request<Employee>("/api/employees", { method: "POST", body: JSON.stringify(data) }),
   updateEmployee: (id: string, data: Partial<Employee>) =>
     request<Employee>(`/api/employees/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteEmployee: (id: string) => request<void>(`/api/employees/${id}`, { method: "DELETE" }),
+  exportEmployees: (params?: { branchId?: string; departmentId?: string; designationId?: string; roleId?: string; status?: string; search?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/employees/export${toQuery(params)}`),
 
   // Departments (HRM)
   getDepartments: (params?: { branchId?: string; status?: string; search?: string }) =>
@@ -889,17 +907,19 @@ export const api = {
   updateWorkShift: (id: string, data: Partial<WorkShift>) =>
     request<WorkShift>(`/api/work-shifts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteWorkShift: (id: string) => request<void>(`/api/work-shifts/${id}`, { method: "DELETE" }),
-  assignWorkShift: (id: string, data: { employeeIds: string[]; effectiveFrom: string; effectiveTo?: string }) =>
+  assignWorkShift: (id: string, data: { employeeIds: string[]; effectiveFrom: string; effectiveTo?: string; override?: boolean }) =>
     request<{ assigned: number }>(`/api/work-shifts/${id}/assign`, { method: "POST", body: JSON.stringify(data) }),
   getEmployeeShiftHistory: (employeeId: string) =>
     request<EmployeeShiftAssignment[]>(`/api/employees/${employeeId}/shifts`),
+  getWorkShiftAssignments: (params?: { status?: string }) =>
+    request<{ id: string; employeeId: string; shiftId: string; effectiveFrom: string; effectiveTo?: string; status: string }[]>(`/api/work-shifts/assignments${toQuery(params)}`),
 
   // HRM Attendance
-  getHrAttendance: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; dateFrom?: string; dateTo?: string }) =>
+  getHrAttendance: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; dateFrom?: string; dateTo?: string; correctionStatus?: string }) =>
     request<StaffAttendance[]>(`/api/hrm/attendance${toQuery(params)}`),
   markAttendance: (data: { employeeId: string; date: string; shiftId?: string; checkInTime?: string; checkOutTime?: string; status: string; remarks?: string }) =>
     request<StaffAttendance>("/api/hrm/attendance", { method: "POST", body: JSON.stringify(data) }),
-  correctAttendance: (id: string, data: { checkInTime?: string; checkOutTime?: string; status: string; correctionReason: string; correctionNote?: string }) =>
+  correctAttendance: (id: string, data: { shiftId?: string; checkInTime?: string; checkOutTime?: string; status: string; correctionReason: string; correctionNote?: string }) =>
     request<StaffAttendance>(`/api/hrm/attendance/${id}/correction`, { method: "POST", body: JSON.stringify(data) }),
 
   // Leave (HRM)
@@ -943,6 +963,9 @@ export const api = {
   createPayrollRun: (data: { branchId: string; year: number; month: number; payDate: string }) =>
     request<PayrollRun>("/api/payroll-runs", { method: "POST", body: JSON.stringify(data) }),
   processPayrollRun: (id: string) => request<PayrollRun>(`/api/payroll-runs/${id}/process`, { method: "POST" }),
+  lockPayrollRun: (id: string) => request<PayrollRun>(`/api/payroll-runs/${id}/lock`, { method: "POST" }),
+  cancelPayrollRun: (id: string) => request<PayrollRun>(`/api/payroll-runs/${id}/cancel`, { method: "POST" }),
+  getMyPayroll: () => request<MyPayroll>("/api/employees/me/payroll"),
 
   getEmployeeSalaryComponents: (employeeId: string) => request<SalaryComponent[]>(`/api/employees/${employeeId}/salary-components`),
   addSalaryComponent: (employeeId: string, data: Partial<SalaryComponent>) =>
@@ -953,19 +976,21 @@ export const api = {
     request<void>(`/api/employees/${employeeId}/salary-components/${componentId}`, { method: "DELETE" }),
 
   // HRM Reports
-  getHrAttendanceReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; dateFrom?: string; dateTo?: string }) =>
+  getHrAttendanceReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; correctionStatus?: string; dateFrom?: string; dateTo?: string }) =>
     request<StaffAttendance[]>(`/api/hrm/reports/attendance${toQuery(params)}`),
-  exportHrAttendanceReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; dateFrom?: string; dateTo?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportHrAttendanceReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; correctionStatus?: string; dateFrom?: string; dateTo?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/hrm/reports/attendance/export${toQuery(params)}`),
+  getAttendanceCorrectionHistory: (id: string) =>
+    request<{ createdAt: string; oldValues?: string; newValues?: string; notes?: string; userId?: string }[]>(`/api/hrm/reports/attendance/${id}/history`),
 
   getShiftClosingReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; closingStatus?: string; dateFrom?: string; dateTo?: string }) =>
     request<ShiftClosingRow[]>(`/api/hrm/reports/shift-closing${toQuery(params)}`),
   exportShiftClosingReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; closingStatus?: string; dateFrom?: string; dateTo?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/hrm/reports/shift-closing/export${toQuery(params)}`),
 
-  getEmployeeActivityReport: (params?: { branchId?: string; employeeId?: string; module?: string; activityType?: string; performedBy?: string; referenceId?: string; dateFrom?: string; dateTo?: string }) =>
+  getEmployeeActivityReport: (params?: { branchId?: string; employeeId?: string; module?: string; activityType?: string; performedBy?: string; referenceId?: string; ipOrDevice?: string; dateFrom?: string; dateTo?: string }) =>
     request<EmployeeActivityRow[]>(`/api/hrm/reports/employee-activity${toQuery(params)}`),
-  exportEmployeeActivityReport: (params?: { branchId?: string; employeeId?: string; module?: string; activityType?: string; performedBy?: string; referenceId?: string; dateFrom?: string; dateTo?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportEmployeeActivityReport: (params?: { branchId?: string; employeeId?: string; module?: string; activityType?: string; performedBy?: string; referenceId?: string; ipOrDevice?: string; dateFrom?: string; dateTo?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/hrm/reports/employee-activity/export${toQuery(params)}`),
 };
 
@@ -996,9 +1021,10 @@ export interface Employee {
   contractType?: string; contractStartDate?: string; contractEndDate?: string; contractOpenEnded: boolean;
   createdAt: string; updatedAt: string;
   branch?: Branch; department?: Department; designation?: Designation; role?: Role;
-  leavePolicyId?: string; leavePolicy?: LeavePolicy;
+  leavePolicyId?: string; leavePolicy?: LeavePolicy; leavePolicyEffectiveFrom?: string;
   currentShift?: { shiftId: string; shiftName: string; startTime: string; endTime: string; effectiveFrom: string };
-  hasDocuments: boolean; onLeaveToday: boolean;
+  hasDocuments: boolean; documentStatus: string; onLeaveToday: boolean;
+  latestContract?: { contractType: string; endDate?: string; openEnded: boolean; status: string };
 }
 
 // HRM — Leave
@@ -1026,6 +1052,15 @@ export interface PayrollRunEmployeeRow {
   basicSalary?: number; grossEarnings?: number; totalDeductions?: number; netPayable?: number;
 }
 export interface PayrollRunDetail extends PayrollRun { employees: PayrollRunEmployeeRow[] }
+export interface MyPayslip {
+  id: string; year?: number; month?: number; payDate?: string; status?: string;
+  basicSalary: number; grossEarnings: number; totalDeductions: number; netPayable: number;
+}
+export interface MyPayroll {
+  employee: { id: string; fullName: string; employeeCode: string };
+  components: SalaryComponent[];
+  payslips: MyPayslip[];
+}
 
 // HRM — Reports
 export interface ShiftClosingRow {
@@ -1438,7 +1473,7 @@ export interface StaffAttendance {
   user?: { id: string; fullName: string; roleName?: string };
   // HRM Attendance module fields
   employeeId?: string; date?: string; shiftId?: string;
-  lateMinutes: number; earlyLeaveMinutes: number; remarks?: string;
+  lateMinutes: number; earlyLeaveMinutes: number; remarks?: string; isCorrected?: boolean;
   employee?: Employee; shift?: WorkShift;
 }
 
@@ -1713,7 +1748,7 @@ export interface DashboardMetrics {
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
 
-export type ReportExportFormat = "csv" | "pdf";
+export type ReportExportFormat = "csv" | "pdf" | "excel";
 
 export interface DailySalesHour {
   hour: number; transactions: number; grossSales: number; discounts: number; returns: number;
