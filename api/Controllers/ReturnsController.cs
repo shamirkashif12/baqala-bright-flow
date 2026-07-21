@@ -42,6 +42,21 @@ public class ReturnsController(
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
+    // Branch-specific active program if one exists, else the one guaranteed business-wide default
+    // (BranchId == null) — same resolver as LoyaltyController.ResolveEffectiveAsync and
+    // OrdersController.ResolveLoyaltyProgramAsync, duplicated per-controller like GetCallerContext
+    // above since this codebase has no shared service layer for per-entity logic.
+    private async Task<LoyaltyProgram?> ResolveLoyaltyProgramAsync(Guid branchId) =>
+        await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == branchId && p.IsActive)
+        ?? await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == null && p.IsActive);
+
+    // Tier (Standard/Silver/Gold/Platinum) is one field on Customer, shared across every branch —
+    // thresholds/multipliers come ONLY from the business-wide default program, never from a
+    // branch override, so the same customer can't be told they're a different tier depending on
+    // which branch's numbers last touched them. See identical resolver in OrdersController.
+    private async Task<LoyaltyProgram?> ResolveGlobalTierConfigAsync() =>
+        await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == null && p.IsActive);
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
@@ -305,6 +320,69 @@ public class ReturnsController(
         // order here instead, once it's genuinely approved and completed, never earlier.
         var order = await db.Orders.FindAsync(ret.OrderId);
         if (order is not null) order.OrderStatus = "refunded";
+
+        // Reverse a proportional share of this order's loyalty activity — mirrors the full
+        // reversal in OrdersController.ApplyVoidAsync, scaled by how much of the order this
+        // return refunds, so several independent partial returns against the same order each
+        // reverse only their own slice rather than double-counting.
+        if (order is not null && order.CustomerId.HasValue && order.TotalAmount > 0)
+        {
+            var customer = await db.Customers.FindAsync(order.CustomerId.Value);
+            if (customer != null)
+            {
+                var refundShare = Math.Min(1m, ret.RefundAmount / order.TotalAmount);
+                var loyaltyTxns = await db.LoyaltyTransactions
+                    .Where(t => t.OrderId == order.Id && (t.TransactionType == "earn" || t.TransactionType == "redeem"))
+                    .ToListAsync();
+
+                foreach (var txn in loyaltyTxns)
+                {
+                    var share = Math.Round(Math.Abs(txn.Points) * refundShare, 0, MidpointRounding.AwayFromZero);
+                    if (share <= 0) continue;
+
+                    decimal reversal;
+                    decimal? monetaryValue = null;
+                    if (txn.TransactionType == "earn")
+                    {
+                        // Clawback, clamped so the balance never goes negative if the customer
+                        // already spent those points elsewhere since.
+                        reversal = -Math.Min(share, customer.LoyaltyBalance);
+                    }
+                    else
+                    {
+                        reversal = share; // restore a share of the redeemed points
+                        if (txn.MonetaryValue.HasValue && txn.Points != 0)
+                            monetaryValue = Math.Round(txn.MonetaryValue.Value * (share / Math.Abs(txn.Points)), 4);
+                    }
+                    if (reversal == 0) continue;
+
+                    customer.LoyaltyBalance += reversal;
+                    db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                    {
+                        Id = Guid.NewGuid(),
+                        CustomerId = customer.Id,
+                        OrderId = order.Id,
+                        BranchId = order.BranchId,
+                        TransactionType = "adjust",
+                        Points = reversal,
+                        BalanceAfter = customer.LoyaltyBalance,
+                        MonetaryValue = monetaryValue,
+                        Description = $"Reversal for return {ret.ReturnNumber}",
+                        CreatedAt = DateTime.UtcNow,
+                    });
+                }
+
+                customer.TotalSpend = Math.Max(0, customer.TotalSpend - ret.RefundAmount);
+                var tierConfig = await ResolveGlobalTierConfigAsync();
+                if (tierConfig != null)
+                {
+                    customer.Tier = customer.TotalSpend >= tierConfig.PlatinumThreshold ? "platinum"
+                        : customer.TotalSpend >= tierConfig.GoldThreshold ? "gold"
+                        : customer.TotalSpend >= tierConfig.SilverThreshold ? "silver"
+                        : "standard";
+                }
+            }
+        }
 
         await db.SaveChangesAsync();
 

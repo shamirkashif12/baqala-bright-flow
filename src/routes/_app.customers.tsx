@@ -12,28 +12,42 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import {
   Plus, Search, Star, Phone, Mail, ShoppingBag, TrendingUp,
-  ChevronRight, Loader2, ArrowUpCircle, ArrowDownCircle, Gift, X,
+  ChevronRight, Loader2, ArrowUpCircle, ArrowDownCircle, Gift, X, Clock, RefreshCcw,
 } from "lucide-react";
-import { api, type Customer, type LoyaltyTransaction } from "@/lib/api";
+import { api, type Customer, type LoyaltyTransaction, type LoyaltyProgram } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/customers")({ component: Customers });
 
 // ─── Tier config ──────────────────────────────────────────────────────────────
-const TIERS = [
-  { key: "standard", label: "Standard", min: 0,     next: 1000,  color: "bg-muted text-muted-foreground",                          bar: "bg-gray-400" },
-  { key: "silver",   label: "Silver",   min: 1000,  next: 5000,  color: "bg-slate-100 text-slate-600 dark:bg-slate-800",           bar: "bg-slate-400" },
-  { key: "gold",     label: "Gold",     min: 5000,  next: 10000, color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30",     bar: "bg-yellow-400" },
-  { key: "platinum", label: "Platinum", min: 10000, next: null,  color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30",     bar: "bg-purple-500" },
+// Colors/labels are fixed, but the spend thresholds (min/next) are NOT — they come from the
+// business-wide default Loyalty Program (configured on /loyalty-program), the same single rule
+// used everywhere tier is computed server-side, so this display never disagrees with reality.
+// The numbers below are only the fallback shown before that config loads.
+type TierMeta = { key: string; label: string; min: number; next: number | null; color: string; bar: string };
+const TIER_META_BASE: Omit<TierMeta, "min" | "next">[] = [
+  { key: "standard", label: "Standard", color: "bg-muted text-muted-foreground" /*                */, bar: "bg-gray-400" },
+  { key: "silver",   label: "Silver",   color: "bg-slate-100 text-slate-600 dark:bg-slate-800" /*   */, bar: "bg-slate-400" },
+  { key: "gold",     label: "Gold",     color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30", bar: "bg-yellow-400" },
+  { key: "platinum", label: "Platinum", color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30", bar: "bg-purple-500" },
 ];
 
-function tierFor(spend: number) {
-  return [...TIERS].reverse().find(t => spend >= t.min) ?? TIERS[0];
+function buildTiers(program: LoyaltyProgram | null): TierMeta[] {
+  const silver = program?.silverThreshold ?? 1000;
+  const gold = program?.goldThreshold ?? 5000;
+  const platinum = program?.platinumThreshold ?? 10000;
+  const mins = [0, silver, gold, platinum];
+  const nexts: (number | null)[] = [silver, gold, platinum, null];
+  return TIER_META_BASE.map((t, i) => ({ ...t, min: mins[i], next: nexts[i] }));
 }
 
-function TierBadge({ tier }: { tier: string }) {
-  const t = TIERS.find(t => t.key === tier) ?? TIERS[0];
+function tierFor(spend: number, tiers: TierMeta[]) {
+  return [...tiers].reverse().find(t => spend >= t.min) ?? tiers[0];
+}
+
+function TierBadge({ tier, tiers }: { tier: string; tiers: TierMeta[] }) {
+  const t = tiers.find(t => t.key === tier) ?? tiers[0];
   return (
     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${t.color}`}>
       {t.label}
@@ -41,9 +55,9 @@ function TierBadge({ tier }: { tier: string }) {
   );
 }
 
-function TierProgress({ spend }: { spend: number }) {
-  const current = tierFor(spend);
-  const next = TIERS.find(t => t.min === current.next);
+function TierProgress({ spend, tiers }: { spend: number; tiers: TierMeta[] }) {
+  const current = tierFor(spend, tiers);
+  const next = tiers.find(t => t.min === current.next);
   if (!next) return <p className="text-xs text-purple-600 font-medium">Maximum tier reached 🎉</p>;
   const pct = Math.min(100, ((spend - current.min) / (current.next! - current.min)) * 100);
   return (
@@ -63,10 +77,11 @@ function TierProgress({ spend }: { spend: number }) {
 }
 
 // ─── Customer detail drawer ───────────────────────────────────────────────────
-function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () => void }) {
+function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers: TierMeta[]; onEdit: () => void }) {
   const { canEdit } = usePermission("Customers");
   const [history, setHistory] = useState<LoyaltyTransaction[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [program, setProgram] = useState<LoyaltyProgram | null>(null);
 
   useEffect(() => {
     setLoadingHistory(true);
@@ -76,10 +91,20 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
       .finally(() => setLoadingHistory(false));
   }, [customer.id]);
 
+  useEffect(() => {
+    setProgram(null);
+    if (!customer.preferredBranchId) return;
+    api.getEffectiveLoyaltyProgram(customer.preferredBranchId).then(setProgram).catch(() => setProgram(null));
+  }, [customer.preferredBranchId]);
+
+  const redemptionRate = program?.redemptionValuePerPoint ?? 0.01; // falls back to the legacy /100 display
+
   const txIcon = (type: string) => {
     if (type === "earn") return <ArrowUpCircle className="h-4 w-4 text-green-500 shrink-0" />;
     if (type === "redeem") return <ArrowDownCircle className="h-4 w-4 text-red-500 shrink-0" />;
-    return <Gift className="h-4 w-4 text-purple-500 shrink-0" />;
+    if (type === "expire") return <Clock className="h-4 w-4 text-muted-foreground shrink-0" />;
+    if (type === "adjust") return <RefreshCcw className="h-4 w-4 text-blue-500 shrink-0" />;
+    return <Gift className="h-4 w-4 text-purple-500 shrink-0" />; // welcome | birthday
   };
 
   return (
@@ -91,7 +116,7 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
           <p className="text-xs text-muted-foreground font-mono">{customer.customerCode}</p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
-          <TierBadge tier={customer.tier} />
+          <TierBadge tier={customer.tier} tiers={tiers} />
           <Badge variant="outline" className={customer.status === "active" ? "text-green-600 border-green-400/40 text-xs" : "text-xs"}>
             {customer.status}
           </Badge>
@@ -128,7 +153,7 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
               {customer.loyaltyBalance.toLocaleString()}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              ≈ <SARIcon />{(customer.loyaltyBalance / 100).toFixed(2)} discount value
+              ≈ <SARIcon />{(customer.loyaltyBalance * redemptionRate).toFixed(2)} discount value
             </p>
           </div>
           <div className="text-right">
@@ -138,7 +163,7 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
             </p>
           </div>
         </div>
-        <TierProgress spend={customer.totalSpend} />
+        <TierProgress spend={customer.totalSpend} tiers={tiers} />
       </div>
 
       <Separator />
@@ -168,9 +193,16 @@ function CustomerDetail({ customer, onEdit }: { customer: Customer; onEdit: () =
                     {" · "}Balance after: {tx.balanceAfter.toLocaleString()} pts
                   </p>
                 </div>
-                <span className={`font-bold tabular-nums text-sm ${tx.points > 0 ? "text-green-600" : "text-red-500"}`}>
-                  {tx.points > 0 ? "+" : ""}{tx.points} pts
-                </span>
+                <div className="text-right">
+                  <span className={`font-bold tabular-nums text-sm block ${tx.points > 0 ? "text-green-600" : "text-red-500"}`}>
+                    {tx.points > 0 ? "+" : ""}{tx.points} pts
+                  </span>
+                  {tx.monetaryValue != null && (
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      <SARIcon />{tx.monetaryValue.toFixed(2)}
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -241,7 +273,7 @@ function CustomerForm({ editing, onSaved, onCancel }: {
           <Select value={form.tier} onValueChange={v => setForm(p => ({ ...p, tier: v }))}>
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {TIERS.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
+              {TIER_META_BASE.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
             </SelectContent>
           </Select>
         </CFormField>
@@ -278,6 +310,14 @@ function Customers() {
   const [dateTo, setDateTo] = useState("");
   const [selected, setSelected] = useState<Customer | null>(null);
   const [editTarget, setEditTarget] = useState<Customer | null | "new">(null);
+  const [tierProgram, setTierProgram] = useState<LoyaltyProgram | null>(null);
+  const tiers = buildTiers(tierProgram);
+
+  useEffect(() => {
+    // Tier thresholds are business-wide (the default, branch-less program) — fetched once here
+    // rather than per-customer, since every customer's tier badge/progress uses the same rule.
+    api.getLoyaltyPrograms().then(list => setTierProgram(list.find(p => !p.branchId) ?? null)).catch(() => {});
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -336,7 +376,7 @@ function Customers() {
           <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Tier" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Tiers</SelectItem>
-            {TIERS.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
+            {TIER_META_BASE.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="flex items-center gap-1">
@@ -389,7 +429,7 @@ function Customers() {
                       <div className="flex items-center gap-1 text-xs"><Phone className="h-3 w-3 text-muted-foreground" />{c.phone}</div>
                       {c.email && <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5"><Mail className="h-3 w-3" />{c.email}</div>}
                     </td>
-                    <td className="px-4 py-3"><TierBadge tier={c.tier} /></td>
+                    <td className="px-4 py-3"><TierBadge tier={c.tier} tiers={tiers} /></td>
                     <td className="px-4 py-3 tabular-nums font-medium">
                       <Star className="h-3 w-3 inline mr-1 text-yellow-500" />{c.loyaltyBalance.toLocaleString()}
                     </td>
@@ -420,6 +460,7 @@ function Customers() {
           {selected && (
             <CustomerDetail
               customer={selected}
+              tiers={tiers}
               onEdit={() => setEditTarget(selected)}
             />
           )}

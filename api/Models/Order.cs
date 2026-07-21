@@ -40,6 +40,15 @@ public class Order
     [Column("discount_amount")]
     public decimal DiscountAmount { get; set; } = 0;
 
+    // Breakout of how much of DiscountAmount (still the all-inclusive total) came from loyalty
+    // points redemption, so reversal logic and the loyalty report don't have to reverse-engineer
+    // it from the ledger.
+    [Column("loyalty_points_redeemed")]
+    public decimal LoyaltyPointsRedeemed { get; set; } = 0;
+
+    [Column("loyalty_discount_amount")]
+    public decimal LoyaltyDiscountAmount { get; set; } = 0;
+
     [Column("tax_amount")]
     public decimal TaxAmount { get; set; } = 0;
 
@@ -93,6 +102,11 @@ public class Order
     public Coupon? Coupon { get; set; }
     public ICollection<OrderItem> Items { get; set; } = [];
     public ICollection<OrderPayment> Payments { get; set; } = [];
+    // Named breakdown of DiscountAmount — which manually-applied Discount(s) (POS's Discounts
+    // dropdown) contributed to it, and how much each contributed. Coupon's own contribution is
+    // already identified via CouponId, and loyalty's via LoyaltyDiscountAmount — this is the
+    // piece that was previously an anonymous number with no way to tell which discount it was.
+    public ICollection<OrderDiscount> Discounts { get; set; } = [];
     [JsonIgnore] public ICollection<CustomerReturn> Returns { get; set; } = [];
 
     // Populated only on the Create response (not persisted) so the receipt can render the real
@@ -192,4 +206,32 @@ public class OrderPayment
 
     // Navigation
     [JsonIgnore] public Order? Order { get; set; }
+}
+
+[Table("order_discounts")]
+public class OrderDiscount
+{
+    [Key, Column("id")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Column("order_id")]
+    public Guid OrderId { get; set; }
+
+    // Nullable, not a hard FK requirement — the Discount this came from may be edited or deleted
+    // later; Name below is a snapshot precisely so this row still means something after that.
+    [Column("discount_id")]
+    public Guid? DiscountId { get; set; }
+
+    [Required, MaxLength(255), Column("name")]
+    public string Name { get; set; } = default!;
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // Navigation
+    [JsonIgnore] public Order? Order { get; set; }
+    public Discount? Discount { get; set; }
 }

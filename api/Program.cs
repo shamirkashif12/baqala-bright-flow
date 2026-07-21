@@ -56,6 +56,7 @@ builder.Services.AddScoped<IPriceResolutionService, PriceResolutionService>();
 builder.Services.AddScoped<IStockMovementService, StockMovementService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 builder.Services.AddHostedService<UsbPrinterAutoInstallService>();
+builder.Services.AddHostedService<LoyaltyExpiryService>();
 
 // ─── ZATCA (Saudi e-invoicing Phase 2) ───────────────────────────────────────
 // The ZATCA private key/CSID secrets are encrypted at rest with this key ring. It used to persist

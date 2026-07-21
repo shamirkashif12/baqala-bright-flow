@@ -75,10 +75,12 @@ function statusIcon(s: string) {
 
 function exportCSV(orders: Order[]) {
   const rows = [
-    ["Order#", "Branch", "Cashier", "Subtotal", "Discount", "Tax", "Total", "Order Status", "Payment Status", "Date"],
+    ["Order#", "Branch", "Cashier", "Subtotal", "Discount", "Loyalty Pts Redeemed", "Loyalty Discount", "Tax", "Total", "Order Status", "Payment Status", "Date"],
     ...orders.map(o => [
       o.orderNumber, o.branch?.name ?? "", o.cashier?.fullName ?? "",
-      o.subtotal.toFixed(2), o.discountAmount.toFixed(2), o.taxAmount.toFixed(2),
+      o.subtotal.toFixed(2), o.discountAmount.toFixed(2),
+      String(o.loyaltyPointsRedeemed ?? 0), (o.loyaltyDiscountAmount ?? 0).toFixed(2),
+      o.taxAmount.toFixed(2),
       o.totalAmount.toFixed(2), o.orderStatus, o.paymentStatus,
       new Date(o.createdAt).toLocaleString("en-SA"),
     ]),
@@ -182,7 +184,13 @@ function printReceipt(order: Order) {
     <div class="divider"></div>
     <table class="totals">
       <tr><td>Subtotal</td><td>SAR ${order.subtotal.toFixed(2)}</td></tr>
-      ${order.discountAmount > 0 ? `<tr><td>Discount</td><td>-SAR ${order.discountAmount.toFixed(2)}</td></tr>` : ""}
+      ${(order.discounts ?? []).map(d => `<tr><td>${d.name}</td><td>-SAR ${d.amount.toFixed(2)}</td></tr>`).join("")}
+      ${(() => {
+        const named = (order.discounts ?? []).reduce((s, d) => s + d.amount, 0);
+        const other = order.discountAmount - (order.loyaltyDiscountAmount ?? 0) - named;
+        return other > 0.005 ? `<tr><td>Discount</td><td>-SAR ${other.toFixed(2)}</td></tr>` : "";
+      })()}
+      ${order.loyaltyPointsRedeemed ? `<tr><td>Loyalty Redeemed (${order.loyaltyPointsRedeemed} pts)</td><td>-SAR ${(order.loyaltyDiscountAmount ?? 0).toFixed(2)}</td></tr>` : ""}
       <tr><td>VAT (15%)</td><td>SAR ${order.taxAmount.toFixed(2)}</td></tr>
       <tr class="total-row"><td>TOTAL</td><td>SAR ${order.totalAmount.toFixed(2)}</td></tr>
     </table>
@@ -895,9 +903,28 @@ function OrderDetail({ orderId, onStatusChanged }: {
         <div className="flex justify-between text-muted-foreground">
           <span>Subtotal</span><span><SARIcon />{order.subtotal.toFixed(2)}</span>
         </div>
-        {order.discountAmount > 0 && (
+        {/* discountAmount is the all-inclusive total (coupon + named discounts + loyalty) — show
+            each manually-applied discount by name (order.discounts), then a fallback "Discount"
+            line for whatever's left unaccounted (a coupon, or a legacy order predating this
+            breakdown), so the lines below always sum to the total exactly. */}
+        {(order.discounts ?? []).map(d => (
+          <div key={d.id} className="flex justify-between text-red-600">
+            <span>{d.name}</span><span>-<SARIcon />{d.amount.toFixed(2)}</span>
+          </div>
+        ))}
+        {(() => {
+          const named = (order.discounts ?? []).reduce((s, d) => s + d.amount, 0);
+          const other = order.discountAmount - (order.loyaltyDiscountAmount ?? 0) - named;
+          return other > 0.005 ? (
+            <div className="flex justify-between text-red-600">
+              <span>Discount</span><span>-<SARIcon />{other.toFixed(2)}</span>
+            </div>
+          ) : null;
+        })()}
+        {!!order.loyaltyPointsRedeemed && order.loyaltyPointsRedeemed > 0 && (
           <div className="flex justify-between text-red-600">
-            <span>Discount</span><span>-<SARIcon />{order.discountAmount.toFixed(2)}</span>
+            <span>Loyalty Redeemed ({order.loyaltyPointsRedeemed.toLocaleString()} pts)</span>
+            <span>-<SARIcon />{(order.loyaltyDiscountAmount ?? 0).toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between text-muted-foreground">

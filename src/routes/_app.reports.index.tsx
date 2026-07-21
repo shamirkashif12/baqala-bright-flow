@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
   FileBarChart, Download, TrendingUp, Calendar, Building2, ShoppingCart, Tag, Truck, Boxes,
   Ban, RotateCcw, Percent, CreditCard, ShieldCheck, DollarSign, AlertTriangle, Cigarette, Coins,
-  ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, UserCheck, CalendarCheck, History,
+  ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, UserCheck, CalendarCheck, History, Gift,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/")({ component: Reports });
@@ -72,6 +72,8 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/audit-trail", exportFile: () => api.exportAuditTrailReport({ exportedBy }) },
     { code: "discounts", name: "Discount Report", desc: "Discounts applied across periods", icon: Percent, color: "warning",
       href: "/reports/discounts", exportFile: () => api.exportDiscountsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "loyalty", name: "Loyalty Program", desc: "Points earned, redeemed and expired by branch", icon: Gift, color: "success",
+      href: "/reports/loyalty", exportFile: () => api.exportLoyaltyReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "payment-methods", name: "Payment Methods", desc: "Cash / Card / STC Pay split", icon: CreditCard, color: "primary",
       href: "/reports/payment-methods", exportFile: () => api.exportPaymentMethodsReport({ from: todayStr(), to: todayStr(), exportedBy }) },
     { code: "vat-zatca", name: "VAT / ZATCA Report", desc: "Tax filing-ready VAT summary", icon: ShieldCheck, color: "success",

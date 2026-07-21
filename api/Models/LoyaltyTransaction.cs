@@ -35,6 +35,16 @@ public class LoyaltyTransaction
     [Column("expiry_date")]
     public DateTime? ExpiryDate { get; set; }
 
+    // SAR value snapshot for redeem/adjust rows — captured at the time the transaction happened
+    // so historical reporting isn't affected if the program's redemption rate changes later.
+    [Column("monetary_value")]
+    public decimal? MonetaryValue { get; set; }
+
+    // Set by LoyaltyExpiryService once this earn row's ExpiryDate has been evaluated, so it isn't
+    // re-checked (and re-"expired" for 0 points) every sweep cycle forever.
+    [Column("expired_flag")]
+    public bool ExpiredFlag { get; set; } = false;
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

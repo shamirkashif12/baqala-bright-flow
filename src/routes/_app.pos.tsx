@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Search, ScanBarcode, Pause, RotateCcw, Printer,
   Plus, Minus, Trash2, CreditCard, Banknote, Split,
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getUsbPrinter, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice } from "@/lib/api";
+import { api, getUsbPrinter, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram } from "@/lib/api";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
@@ -97,7 +98,12 @@ type InvoiceSnapshot = {
   createdAt: string;
   items: CartItem[];
   subtotal: number;
+  // All-inclusive total (coupon + auto-discounts + loyalty) — kept for the totals math, but
+  // loyaltyDiscountAmount below breaks out how much of it came from redeemed points, so the
+  // receipt can show that as its own line instead of folding it silently into "Discount".
   discount: number;
+  loyaltyPointsRedeemed?: number;
+  loyaltyDiscountAmount?: number;
   vat: number;
   total: number;
   taxLabel: string;
@@ -535,6 +541,14 @@ function POS() {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
 
+  // ─── Discounts — manually applied by the cashier, never auto-applied ──────────
+  const [appliedDiscounts, setAppliedDiscounts] = useState<Discount[]>([]);
+  const [discountPickerId, setDiscountPickerId] = useState("");
+
+  // ─── Loyalty points redemption ─────────────────────────────────────────────────
+  const [loyaltyProgram, setLoyaltyProgram] = useState<LoyaltyProgram | null>(null);
+  const [redeemPoints, setRedeemPoints] = useState(0);
+
   // Branch-configurable cashier permissions (POS Settings → Permissions tab). Cashier role only
   // — Branch Manager/Supervisor/tenant_admin covering a register aren't restricted by these.
   // Defaults match PosSettings.cs so the UI behaves the same as an unconfigured branch until the
@@ -609,6 +623,12 @@ function POS() {
     ).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-only load; user.id is stable per session
 
+  // ─── Loyalty program: reload whenever the active branch changes ───────────────
+  useEffect(() => {
+    if (!branch) { setLoyaltyProgram(null); return; }
+    api.getEffectiveLoyaltyProgram(branch.id).then(setLoyaltyProgram).catch(() => setLoyaltyProgram(null));
+  }, [branch]);
+
   // ─── Branch change: clear & reload; remount: restore saved cart ──────────────
   useEffect(() => {
     if (!branch) return;
@@ -622,10 +642,13 @@ function POS() {
       setAppliedCoupon(null);
       setCouponCode("");
       setCouponError(null);
+      setAppliedDiscounts([]);
+      setDiscountPickerId("");
       setCustomer(null);
       setCustomerPhone("");
       setCustomerNotFound(false);
       setNewCustomerName("");
+      setRedeemPoints(0);
       setBranchSwitchBanner(branch.name);
       setTimeout(() => setBranchSwitchBanner(null), 3000);
     } else {
@@ -1075,6 +1098,19 @@ function POS() {
       : Math.min(appliedCoupon.value, subtotal)
     : 0;
 
+  // Loyalty points redemption — mirrors couponDiscount's role in the taxable base below. The
+  // server re-clamps to the customer's live balance/program caps at checkout (OrdersController),
+  // so this is a client-side preview matching what the cashier sees, not the final source of truth.
+  const maxRedeemablePoints = customer && loyaltyProgram
+    ? Math.max(0, Math.min(
+        customer.loyaltyBalance,
+        loyaltyProgram.maxRedeemPctOfOrder != null && loyaltyProgram.redemptionValuePerPoint > 0
+          ? Math.floor(subtotal * (loyaltyProgram.maxRedeemPctOfOrder / 100) / loyaltyProgram.redemptionValuePerPoint)
+          : customer.loyaltyBalance
+      ))
+    : 0;
+  const loyaltyDiscount = Math.min(redeemPoints, maxRedeemablePoints) * (loyaltyProgram?.redemptionValuePerPoint ?? 0);
+
   // Parse combo product IDs stored as JSON in itemsDescription
   function parseComboIds(desc?: string | null): string[] {
     if (!desc) return [];
@@ -1086,55 +1122,43 @@ function POS() {
     try { const d = JSON.parse(json); return Array.isArray(d) ? d : []; } catch { return []; }
   }
 
-  // Active discounts: "all"/"branch" apply across the whole basket (minus any excluded products),
-  // "product" applies to that one product, "category" applies to every cart line in that category
-  // (minus exclusions) — category/branch scoping and exclusions were previously silently ignored
-  // here even though the Discounts admin screen lets a manager configure them, so a "10% off
-  // Beverages" discount never actually applied at checkout.
-  const discountSavings = activeDiscounts.reduce((sum, d) => {
-    const now = new Date();
-    if (d.startDate && new Date(d.startDate) > now) return sum;
-    if (d.endDate && new Date(d.endDate) < now) return sum;
-    // Loyalty/senior-style discounts require an actual eligible customer —
-    // never auto-apply to an anonymous walk-in.
-    if (d.requiresCustomer && !customer) return sum;
-    if (d.minCustomerTier) {
-      const tierRank: Record<string, number> = { standard: 0, silver: 1, gold: 2, platinum: 3 };
-      const customerRank = customer ? tierRank[customer.tier ?? "standard"] ?? 0 : -1;
-      if (customerRank < (tierRank[d.minCustomerTier] ?? 0)) return sum;
-    }
-    if (d.appliesTo === "branch" && d.branchId && branch && d.branchId !== branch.id) return sum;
-
+  // Manually-applied discounts only (never auto-applied — the cashier picks one from the
+  // dropdown and clicks Apply, same as a coupon). "all"/"branch" apply across the whole basket
+  // (minus any excluded products), "product" applies to that one product, "category" applies to
+  // every cart line in that category (minus exclusions).
+  function computeDiscountSaving(d: Discount): number {
+    if (d.requiresCustomer && !customer) return 0; // customer detached after applying — don't charge for it
     const excludedIds = new Set(parseIdList(d.excludedProductIdsJson));
-
     if (d.appliesTo === "all" || d.appliesTo === "branch") {
-      const eligible = displayCart.filter(ci => !excludedIds.has(ci.productId));
-      const eligibleSubtotal = eligible.reduce((s, ci) => s + ci.qty * ci.price, 0);
-      if (eligibleSubtotal <= 0) return sum;
-      return sum + (d.discountType === "percentage"
-        ? eligibleSubtotal * (d.value / 100)
-        : Math.min(d.value, eligibleSubtotal));
+      const eligibleSubtotal = displayCart.filter(ci => !excludedIds.has(ci.productId)).reduce((s, ci) => s + ci.qty * ci.price, 0);
+      if (eligibleSubtotal <= 0) return 0;
+      return d.discountType === "percentage" ? eligibleSubtotal * (d.value / 100) : Math.min(d.value, eligibleSubtotal);
     }
-    if (d.appliesTo === "product" && d.productId) {
-      if (excludedIds.has(d.productId)) return sum;
+    if (d.appliesTo === "product" && d.productId && !excludedIds.has(d.productId)) {
       const item = displayCart.find(i => i.productId === d.productId);
-      if (!item) return sum;
-      return sum + (d.discountType === "percentage"
-        ? item.qty * item.price * (d.value / 100)
-        : Math.min(d.value * item.qty, item.qty * item.price));
+      if (!item) return 0;
+      return d.discountType === "percentage" ? item.qty * item.price * (d.value / 100) : Math.min(d.value * item.qty, item.qty * item.price);
     }
     if (d.appliesTo === "category" && d.categoryId) {
-      const lines = displayCart.filter(ci => {
-        if (excludedIds.has(ci.productId)) return false;
-        return products.find(p => p.id === ci.productId)?.categoryId === d.categoryId;
-      });
-      if (lines.length === 0) return sum;
-      return sum + lines.reduce((s, ci) => s + (d.discountType === "percentage"
-        ? ci.qty * ci.price * (d.value / 100)
-        : Math.min(d.value * ci.qty, ci.qty * ci.price)), 0);
+      const lines = displayCart.filter(ci => !excludedIds.has(ci.productId) && products.find(p => p.id === ci.productId)?.categoryId === d.categoryId);
+      if (lines.length === 0) return 0;
+      return lines.reduce((s, ci) => s + (d.discountType === "percentage" ? ci.qty * ci.price * (d.value / 100) : Math.min(d.value * ci.qty, ci.qty * ci.price)), 0);
     }
-    return sum;
-  }, 0);
+    return 0;
+  }
+  const discountSavings = appliedDiscounts.reduce((sum, d) => sum + computeDiscountSaving(d), 0);
+
+  // What's left in the dropdown to pick from — active, in date range, branch-eligible, not
+  // already applied, and (for requiresCustomer discounts) only once a customer is attached.
+  const eligibleDiscounts = activeDiscounts.filter(d => {
+    if (appliedDiscounts.some(a => a.id === d.id)) return false;
+    const now = new Date();
+    if (d.startDate && new Date(d.startDate) > now) return false;
+    if (d.endDate && new Date(d.endDate) < now) return false;
+    if (d.requiresCustomer && !customer) return false;
+    if (d.appliesTo === "branch" && d.branchId && branch && d.branchId !== branch.id) return false;
+    return true;
+  });
 
   // Triggered offers — split into "discountable" (we can compute SAR savings) vs "notify only"
   const triggeredOffers = activeOffers.filter(o => {
@@ -1189,6 +1213,8 @@ function POS() {
     return sum;
   }, 0) + bundleDiscount;
 
+  // Name is legacy — discountSavings is now manually-applied (see appliedDiscounts above),
+  // only offerDiscount (BOGO/combo/etc.) still triggers automatically off cart contents.
   const totalAutoDiscount = discountSavings + offerDiscount;
 
   // Product-level discounts set in inventory (discount + discountType fields on Product)
@@ -1212,7 +1238,7 @@ function POS() {
     return sum;
   }, 0) : 0;
 
-  const taxable = subtotal - couponDiscount - totalAutoDiscount - productDiscountTotal + tobaccoExcise;
+  const taxable = subtotal - couponDiscount - totalAutoDiscount - productDiscountTotal - loyaltyDiscount + tobaccoExcise;
   const vatAmount = Math.max(0, taxable) * taxRate;
   const total = Math.max(0, taxable) + vatAmount + customFeeTotal;
 
@@ -1362,11 +1388,13 @@ function POS() {
     try {
       const c = await api.getCustomerByPhone(customerPhone.trim());
       setCustomer(c);
+      setRedeemPoints(0);
       api.notify("Customer / Loyalty", "Customer Added", "Customer Added", "Customer attached successfully",
         { entityType: "Customer", entityId: c.id });
     } catch {
       setCustomer(null);
       setCustomerNotFound(true);
+      setRedeemPoints(0);
     } finally {
       setCustomerLoading(false);
     }
@@ -1448,11 +1476,14 @@ function POS() {
     setAppliedCoupon(null);
     setCouponCode("");
     setCouponError(null);
+    setAppliedDiscounts([]);
+    setDiscountPickerId("");
     setCustomer(null);
     setCustomerPhone("");
     setCustomerNotFound(false);
     setNewCustomerName("");
     setCreatingCustomer(false);
+    setRedeemPoints(0);
   };
 
   // ─── Charge handler ────────────────────────────────────────────────────────────
@@ -1485,7 +1516,12 @@ function POS() {
       customerId: customer?.id,
       cashierId: activeShift?.cashierId ?? user?.id,
       subtotal,
-      discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal,
+      discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal + loyaltyDiscount,
+      loyaltyPointsRedeemed: Math.min(redeemPoints, maxRedeemablePoints),
+      loyaltyDiscountAmount: loyaltyDiscount,
+      // Named breakdown of the manually-applied Discounts (see appliedDiscounts) — so Order
+      // Details/receipts can show "Senior Citizen 5%" etc. by name instead of one anonymous total.
+      discounts: appliedDiscounts.map((d) => ({ discountId: d.id, name: d.name, amount: computeDiscountSaving(d) })),
       // Kept distinct (previously lumped together as taxAmount) so the Tax and Fee reports,
       // which read these as two separate figures, don't see fees miscounted as VAT.
       taxAmount: vatAmount,
@@ -1534,7 +1570,9 @@ function POS() {
       createdAt: order.createdAt ?? new Date().toISOString(),
       items: [...displayCart],
       subtotal,
-      discount: couponDiscount + totalAutoDiscount + productDiscountTotal,
+      discount: couponDiscount + totalAutoDiscount + productDiscountTotal + loyaltyDiscount,
+      loyaltyPointsRedeemed: Math.min(redeemPoints, maxRedeemablePoints) || undefined,
+      loyaltyDiscountAmount: loyaltyDiscount || undefined,
       vat: vatAmount,
       total,
       taxLabel,
@@ -1879,7 +1917,7 @@ function POS() {
                   <p className="text-xs font-semibold truncate">{customer.fullName}</p>
                   <p className="text-[10px] text-muted-foreground">{customer.phone}</p>
                 </div>
-                <button onClick={() => { setCustomer(null); setCustomerPhone(""); setCustomerNotFound(false); setNewCustomerName(""); }} className="text-muted-foreground hover:text-destructive">
+                <button onClick={() => { setCustomer(null); setCustomerPhone(""); setCustomerNotFound(false); setNewCustomerName(""); setRedeemPoints(0); }} className="text-muted-foreground hover:text-destructive">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -1929,6 +1967,43 @@ function POS() {
               </div>
             )}
 
+            {/* Loyalty points redemption */}
+            {customer && loyaltyProgram?.isActive && customer.loyaltyBalance >= loyaltyProgram.minPointsToRedeem && (
+              <div className="rounded-lg border border-border/60 px-3 py-2 space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>Redeem points — balance {customer.loyaltyBalance.toLocaleString()} pts</span>
+                  <button
+                    className="text-primary font-medium hover:underline"
+                    onClick={() => setRedeemPoints(maxRedeemablePoints)}
+                  >
+                    Max ({maxRedeemablePoints.toLocaleString()})
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={maxRedeemablePoints}
+                    value={redeemPoints || ""}
+                    onChange={(e) => {
+                      const v = Math.floor(Number(e.target.value) || 0);
+                      setRedeemPoints(Math.max(0, Math.min(v, maxRedeemablePoints)));
+                    }}
+                    placeholder="0"
+                    className="h-8 text-xs"
+                  />
+                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                    = − <SARIcon />{loyaltyDiscount.toFixed(2)}
+                  </span>
+                  {redeemPoints > 0 && (
+                    <button onClick={() => setRedeemPoints(0)} className="text-muted-foreground hover:text-destructive shrink-0">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Coupon */}
             {appliedCoupon ? (
               <div className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2">
@@ -1962,6 +2037,51 @@ function POS() {
               </div>
             )}
             {couponError && <p className="text-[10px] text-destructive -mt-2">{couponError}</p>}
+
+            {/* Discounts — manually picked and applied by the cashier, never auto-applied */}
+            {appliedDiscounts.map(d => (
+              <div key={d.id} className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2">
+                <Tag className="h-4 w-4 text-success shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold truncate">{d.name}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {d.discountType === "percentage" ? `${d.value}% off` : `SAR ${d.value} off`}
+                    {" — "}saves <SARIcon />{computeDiscountSaving(d).toFixed(2)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setAppliedDiscounts(list => list.filter(x => x.id !== d.id))}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+            {eligibleDiscounts.length > 0 && (
+              <div className="flex gap-1.5">
+                <Select value={discountPickerId} onValueChange={setDiscountPickerId}>
+                  <SelectTrigger className="h-8 text-xs flex-1"><SelectValue placeholder="Select a discount…" /></SelectTrigger>
+                  <SelectContent>
+                    {eligibleDiscounts.map(d => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.name} ({d.discountType === "percentage" ? `${d.value}%` : `SAR ${d.value}`})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm" variant="outline" className="h-8 px-2 text-xs"
+                  disabled={!discountPickerId}
+                  onClick={() => {
+                    const d = activeDiscounts.find(x => x.id === discountPickerId);
+                    if (d) setAppliedDiscounts(list => [...list, d]);
+                    setDiscountPickerId("");
+                  }}
+                >
+                  Apply
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Line-item breakdown: subtotal · discounts · fees · VAT */}
@@ -1974,6 +2094,12 @@ function POS() {
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Coupon ({appliedCoupon?.code})</span>
                 <span className="tabular-nums text-success">− <SARIcon />{couponDiscount.toFixed(2)}</span>
+              </div>
+            )}
+            {loyaltyDiscount > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Loyalty Redeemed ({Math.min(redeemPoints, maxRedeemablePoints).toLocaleString()} pts)</span>
+                <span className="tabular-nums text-success">− <SARIcon />{loyaltyDiscount.toFixed(2)}</span>
               </div>
             )}
             {displayCart.map((ci) => {
@@ -1997,38 +2123,22 @@ function POS() {
                 </div>
               );
             })}
-            {activeDiscounts.filter(d => {
-              const now = new Date();
-              if (d.startDate && new Date(d.startDate) > now) return false;
-              if (d.endDate && new Date(d.endDate) < now) return false;
-              if (d.requiresCustomer && !customer) return false;
-              if (d.appliesTo === "branch") return !d.branchId || !branch || d.branchId === branch.id;
-              if (d.appliesTo === "all") return displayCart.length > 0;
-              if (d.appliesTo === "product" && d.productId) return displayCart.some(i => i.productId === d.productId);
-              if (d.appliesTo === "category" && d.categoryId) return displayCart.some(i => products.find(p => p.id === i.productId)?.categoryId === d.categoryId);
-              return false;
-            }).map(d => {
-              // Reuses the exact same matching/exclusion rules as the top-level discountSavings
-              // calc — this panel is just a per-discount breakdown of that same total, not a
-              // second independent computation, so the two can never drift apart.
-              const excludedIds = new Set(parseIdList(d.excludedProductIdsJson));
-              let saving = 0;
-              if (d.appliesTo === "all" || d.appliesTo === "branch") {
-                const eligibleSubtotal = displayCart.filter(ci => !excludedIds.has(ci.productId)).reduce((s, ci) => s + ci.qty * ci.price, 0);
-                saving = d.discountType === "percentage" ? eligibleSubtotal * (d.value / 100) : Math.min(d.value, eligibleSubtotal);
-              } else if (d.appliesTo === "product" && d.productId && !excludedIds.has(d.productId)) {
-                const item = displayCart.find(i => i.productId === d.productId);
-                if (item) saving = d.discountType === "percentage" ? item.qty * item.price * (d.value / 100) : Math.min(d.value * item.qty, item.qty * item.price);
-              } else if (d.appliesTo === "category" && d.categoryId) {
-                const lines = displayCart.filter(ci => !excludedIds.has(ci.productId) && products.find(p => p.id === ci.productId)?.categoryId === d.categoryId);
-                saving = lines.reduce((s, ci) => s + (d.discountType === "percentage" ? ci.qty * ci.price * (d.value / 100) : Math.min(d.value * ci.qty, ci.qty * ci.price)), 0);
-              }
-              return saving > 0 ? (
-                <div key={d.id} className="flex justify-between text-sm">
+            {appliedDiscounts.map(d => {
+              const saving = computeDiscountSaving(d);
+              return (
+                <div key={d.id} className="flex justify-between items-center text-sm">
                   <span className="text-muted-foreground truncate max-w-[150px]">{d.name}</span>
-                  <span className="tabular-nums text-success">− <SARIcon />{saving.toFixed(2)}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="tabular-nums text-success">− <SARIcon />{saving.toFixed(2)}</span>
+                    <button
+                      onClick={() => setAppliedDiscounts(list => list.filter(x => x.id !== d.id))}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
                 </div>
-              ) : null;
+              );
             })}
             {bonusContributions.map(c => {
               const prod = products.find(p => p.id === c.productId);
@@ -2170,6 +2280,7 @@ function POS() {
             <Row k="Customer" v={customer?.fullName ?? "Walk-in"} />
             <Row k="Status" v="In progress" />
             {appliedCoupon && <Row k="Coupon" v={<>{appliedCoupon.code} (−<SARIcon />{couponDiscount.toFixed(2)})</>} />}
+            {loyaltyDiscount > 0 && <Row k="Loyalty Redeemed" v={<>−{Math.min(redeemPoints, maxRedeemablePoints)} pts (−<SARIcon />{loyaltyDiscount.toFixed(2)})</>} />}
             <div className="pt-2 border-t">
               {displayCart.map((i) => (
                 <div key={i.sku} className="flex justify-between text-xs py-1">
@@ -2229,7 +2340,15 @@ function POS() {
                   ))}
                 </div>
                 <div className="border-t border-dashed border-border pt-2 space-y-0.5">
-                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{(invoice.subtotal - invoice.discount).toFixed(2)}</span></div>
+                  {/* Net of coupon/auto/manual discounts, but NOT loyalty — that's broken out as
+                      its own line below so the customer can see it, same as the checkout summary. */}
+                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{(invoice.subtotal - (invoice.discount - (invoice.loyaltyDiscountAmount ?? 0))).toFixed(2)}</span></div>
+                  {!!invoice.loyaltyPointsRedeemed && (
+                    <div className="flex justify-between">
+                      <span>Loyalty Redeemed ({invoice.loyaltyPointsRedeemed} pts)</span>
+                      <span className="tabular-nums">-{(invoice.loyaltyDiscountAmount ?? 0).toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between"><span>{invoice.taxLabel}</span><span className="tabular-nums">{invoice.vat.toFixed(2)}</span></div>
                   <div className="flex justify-between font-bold text-sm pt-1">
                     <span>Total</span>

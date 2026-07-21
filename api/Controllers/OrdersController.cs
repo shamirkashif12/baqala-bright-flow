@@ -22,6 +22,26 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return (role, branchId);
     }
 
+    // Branch-specific active program if one exists, else the one guaranteed business-wide
+    // default (BranchId == null, seeded in BaqalaDbContext) — mirrors LoyaltyController's
+    // identically-named resolver, duplicated per-controller like GetCallerContext above since
+    // this codebase has no shared service layer for per-entity logic. Governs EARNING/REDEMPTION
+    // terms only (rate, redemption value, min/max redeem) — these are allowed to vary per branch.
+    private async Task<LoyaltyProgram?> ResolveLoyaltyProgramAsync(Guid branchId) =>
+        await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == branchId && p.IsActive)
+        ?? await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == null && p.IsActive);
+
+    // Tier (Standard/Silver/Gold/Platinum) is a single field on Customer, shared across every
+    // branch — it can't be recomputed against whichever branch's program happens to be active for
+    // the order just processed, or the SAME customer's tier would flip depending on which branch's
+    // thresholds last touched them. So tier thresholds and per-tier earn multipliers are
+    // deliberately read ONLY from the one business-wide default program (BranchId == null),
+    // never from a branch override, regardless of which branch this order belongs to. If the
+    // default program itself is inactive, tier is frozen (not recomputed) rather than falling
+    // back to some other branch's numbers.
+    private async Task<LoyaltyProgram?> ResolveGlobalTierConfigAsync() =>
+        await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == null && p.IsActive);
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
@@ -55,7 +75,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             .Select(o => new
             {
                 o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
-                o.Subtotal, o.DiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
+                o.Subtotal, o.DiscountAmount, o.LoyaltyPointsRedeemed, o.LoyaltyDiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
                 o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
                 Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
                 Cashier = o.Cashier == null || (!isAdmin && callerBranchId.HasValue && o.Cashier.BranchId != callerBranchId)
@@ -63,6 +83,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     : new { o.Cashier.Id, o.Cashier.FullName },
                 Items = o.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount }),
                 Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
+                Discounts = o.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
             })
             .ToListAsync();
         return Ok(orders);
@@ -79,7 +100,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             .Select(o => new
             {
                 o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
-                o.Subtotal, o.DiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
+                o.Subtotal, o.DiscountAmount, o.LoyaltyPointsRedeemed, o.LoyaltyDiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
                 o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
                 Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
                 // Redacted — same reason as GetAll above, plus MIMONY-PII-ORDERS-CROSSBRANCH-001:
@@ -94,6 +115,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     Product = i.Product == null ? null : new { i.Product.Id, i.Product.Name, i.Product.Sku }
                 }),
                 Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
+                Discounts = o.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
             })
             .FirstOrDefaultAsync();
         if (order is null) return NotFound();
@@ -121,7 +143,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             .Select(o => new
             {
                 o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
-                o.Subtotal, o.DiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
+                o.Subtotal, o.DiscountAmount, o.LoyaltyPointsRedeemed, o.LoyaltyDiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
                 o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
                 Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
                 Cashier = o.Cashier == null || (!isAdmin && callerBranchId.HasValue && o.Cashier.BranchId != callerBranchId)
@@ -134,6 +156,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     Product = i.Product == null ? null : new { i.Product.Id, i.Product.Name, i.Product.Sku }
                 }),
                 Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
+                Discounts = o.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
             })
             .FirstOrDefaultAsync();
         if (order is null) return NotFound();
@@ -157,7 +180,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (order.ClientRequestId.HasValue)
         {
             var existing = await db.Orders
-                .Include(o => o.Items).Include(o => o.Payments)
+                .Include(o => o.Items).Include(o => o.Payments).Include(o => o.Discounts)
                 .FirstOrDefaultAsync(o => o.ClientRequestId == order.ClientRequestId);
             if (existing is not null) return Ok(existing);
         }
@@ -327,6 +350,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 item.TaxAmount = Math.Round(item.TotalPrice / order.Subtotal * order.TaxAmount, 2);
         }
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
+        foreach (var d in order.Discounts) { d.Id = Guid.NewGuid(); d.OrderId = order.Id; d.CreatedAt = DateTime.UtcNow; }
         db.Orders.Add(order);
 
         // Keep the till's running totals live so "expected cash"/variance at close-out
@@ -583,46 +607,129 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             }
         }
 
-        // ── Loyalty points: earn 1 point per SAR spent ────────────────────────
+        // ── Loyalty points: redeem, then earn ──────────────────────────────────
+        // By this point (SaveChangesAsync at line 393) the order/items/payments/stock are
+        // already committed and the customer has already paid — same "never fail an
+        // already-completed sale" rule the ZATCA block above follows. So unlike a normal
+        // discount/coupon (client computes, server just persists), redemption DOES get
+        // validated server-side here (a balance can't go negative), but any problem — no
+        // active program, a stale/over-large request, falling under the minimum after
+        // clamping — is handled by silently reducing the redemption to what's actually valid
+        // (down to zero if necessary), never by rejecting the request outright.
         if (order.CustomerId.HasValue)
         {
-            const decimal PointsPerSar = 1m;
             var customer = await db.Customers.FindAsync(order.CustomerId.Value);
             if (customer != null)
             {
-                var earned = Math.Floor(order.TotalAmount * PointsPerSar);
-                if (earned > 0)
+                var program = await ResolveLoyaltyProgramAsync(order.BranchId);
+
+                var requestedPoints = Math.Max(0, order.LoyaltyPointsRedeemed);
+                decimal redeemedPoints = 0;
+                if (requestedPoints > 0 && program != null)
                 {
-                    customer.LoyaltyBalance += earned;
-                    customer.TotalSpend += order.TotalAmount;
-                    customer.Tier = customer.TotalSpend switch
+                    redeemedPoints = Math.Min(requestedPoints, customer.LoyaltyBalance);
+                    if (program.MaxRedeemPctOfOrder.HasValue && program.RedemptionValuePerPoint > 0)
                     {
-                        >= 10000 => "platinum",
-                        >= 5000  => "gold",
-                        >= 1000  => "silver",
-                        _        => "standard",
-                    };
+                        var maxByPct = Math.Floor(order.Subtotal * (program.MaxRedeemPctOfOrder.Value / 100m) / program.RedemptionValuePerPoint);
+                        redeemedPoints = Math.Min(redeemedPoints, maxByPct);
+                    }
+                    if (redeemedPoints < program.MinPointsToRedeem) redeemedPoints = 0;
+                }
+
+                var originalLoyaltyDiscount = order.LoyaltyDiscountAmount;
+                if (redeemedPoints > 0)
+                {
+                    var monetaryValue = redeemedPoints * program!.RedemptionValuePerPoint;
+                    customer.LoyaltyBalance -= redeemedPoints;
+                    order.LoyaltyPointsRedeemed = redeemedPoints;
+                    order.LoyaltyDiscountAmount = monetaryValue;
+                    // The client already folded its intended loyalty discount into the
+                    // all-inclusive DiscountAmount before checkout (same as it does for coupons) —
+                    // true that figure up/down if server-side clamping changed what's actually valid.
+                    order.DiscountAmount += monetaryValue - originalLoyaltyDiscount;
+
                     db.LoyaltyTransactions.Add(new LoyaltyTransaction
                     {
                         Id = Guid.NewGuid(),
                         CustomerId = customer.Id,
                         OrderId = order.Id,
                         BranchId = order.BranchId,
-                        TransactionType = "earn",
-                        Points = earned,
+                        TransactionType = "redeem",
+                        Points = -redeemedPoints,
                         BalanceAfter = customer.LoyaltyBalance,
-                        Description = $"Earned from order {order.OrderNumber}",
+                        MonetaryValue = monetaryValue,
+                        Description = $"Redeemed on order {order.OrderNumber}",
                         CreatedAt = DateTime.UtcNow,
                     });
-                    await db.SaveChangesAsync();
+                }
+                else
+                {
+                    order.LoyaltyPointsRedeemed = 0;
+                    order.LoyaltyDiscountAmount = 0;
+                    order.DiscountAmount -= originalLoyaltyDiscount;
+                }
 
-                    if (order.CashierId.HasValue)
+                // No active program for this branch (branch override inactive/missing AND the
+                // business-wide default is also inactive) means loyalty is genuinely OFF here —
+                // no earning. Previously this fell back to hardcoded defaults (1 pt/SAR) and kept
+                // earning even with the toggle off, which defeated the point of IsActive entirely.
+                decimal earned = 0;
+                if (program != null)
+                {
+                    customer.TotalSpend += order.TotalAmount;
+
+                    // Tier is one field shared across every branch — thresholds/multipliers come
+                    // ONLY from the global default program (see ResolveGlobalTierConfigAsync),
+                    // never from this branch's own override, so the same customer can't be told
+                    // they're a different tier depending on which branch rang up the sale. If the
+                    // default program is inactive, tier is frozen rather than guessed.
+                    var tierConfig = await ResolveGlobalTierConfigAsync();
+                    if (tierConfig != null)
                     {
-                        await notifications.NotifyUserAsync(order.CashierId.Value,
-                            "Customer / Loyalty", "Loyalty Points Earned", "Loyalty Points Earned",
-                            $"Customer earned {earned:F0} loyalty points",
-                            entityType: "Order", entityId: order.Id, branchId: order.BranchId);
+                        customer.Tier = customer.TotalSpend >= tierConfig.PlatinumThreshold ? "platinum"
+                            : customer.TotalSpend >= tierConfig.GoldThreshold ? "gold"
+                            : customer.TotalSpend >= tierConfig.SilverThreshold ? "silver"
+                            : "standard";
                     }
+
+                    var earnMultiplier = tierConfig is null ? 1m : customer.Tier switch
+                    {
+                        "platinum" => tierConfig.PlatinumEarnMultiplier,
+                        "gold" => tierConfig.GoldEarnMultiplier,
+                        "silver" => tierConfig.SilverEarnMultiplier,
+                        _ => 1m,
+                    };
+
+                    earned = Math.Floor(order.TotalAmount * program.PointsPerCurrencyUnit * earnMultiplier);
+                    if (earned > 0)
+                    {
+                        customer.LoyaltyBalance += earned;
+                        db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                        {
+                            Id = Guid.NewGuid(),
+                            CustomerId = customer.Id,
+                            OrderId = order.Id,
+                            BranchId = order.BranchId,
+                            TransactionType = "earn",
+                            Points = earned,
+                            BalanceAfter = customer.LoyaltyBalance,
+                            Description = $"Earned from order {order.OrderNumber}",
+                            ExpiryDate = program.PointsExpiryDays.HasValue
+                                ? DateTime.UtcNow.AddDays(program.PointsExpiryDays.Value)
+                                : null,
+                            CreatedAt = DateTime.UtcNow,
+                        });
+                    }
+                }
+
+                await db.SaveChangesAsync();
+
+                if (order.CashierId.HasValue && earned > 0)
+                {
+                    await notifications.NotifyUserAsync(order.CashierId.Value,
+                        "Customer / Loyalty", "Loyalty Points Earned", "Loyalty Points Earned",
+                        $"Customer earned {earned:F0} loyalty points",
+                        entityType: "Order", entityId: order.Id, branchId: order.BranchId);
                 }
 
                 // ── Send invoice email ─────────────────────────────────────────
@@ -654,11 +761,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return CreatedAtAction(nameof(GetById), new { id = order.Id }, new
         {
             order.Id, order.OrderNumber, order.Source, order.BranchId, order.CustomerId, order.CashierId, order.TerminalId, order.ShiftId, order.CouponId,
-            order.Subtotal, order.DiscountAmount, order.TaxAmount, order.CustomFeeAmount, order.TobaccoFeeAmount, order.TotalAmount,
+            order.Subtotal, order.DiscountAmount, order.LoyaltyPointsRedeemed, order.LoyaltyDiscountAmount, order.TaxAmount, order.CustomFeeAmount, order.TobaccoFeeAmount, order.TotalAmount,
             order.PaymentStatus, order.OrderStatus, order.Notes, order.ClientRequestId, order.VoidReason, order.CreatedAt, order.UpdatedAt,
             order.ZatcaQrCode, order.ZatcaInvoiceStatus,
             Items = order.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount }),
             Payments = order.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
+            Discounts = order.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
         });
     }
 
@@ -759,6 +867,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound();
 
+        // Captured before any mutation below — needed to reverse this order's OLD contribution to
+        // loyalty (earned points, TotalSpend) once the new totals are known, see the loyalty
+        // re-sync block below.
+        var oldCustomerId = order.CustomerId;
+        var oldTotalAmount = order.TotalAmount;
+
         if (req.PaymentMethod is not null && order.Payments.Count > 1)
             return BadRequest(new { message = "This order has split payments — payment method can't be edited here." });
 
@@ -843,9 +957,25 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // outright when the caller explicitly sends an override (req.DiscountAmount).
         var newSubtotal = newItems.Sum(i => i.TotalPrice);
         var newTobaccoFee = newItems.Sum(i => i.TobaccoFeeAmount);
+        // Can't let an edit shrink the order below what's already been redeemed in loyalty points —
+        // those points already left the customer's balance, this endpoint has no concept of giving
+        // them back, and forcing the discount up to cover it here would push the total negative.
+        if (order.LoyaltyDiscountAmount > newSubtotal)
+        {
+            return BadRequest(new
+            {
+                message = $"This order already has SAR {order.LoyaltyDiscountAmount:F2} redeemed via loyalty points — " +
+                           $"the new subtotal (SAR {newSubtotal:F2}) can't be reduced below that. Void the order instead if it needs to be this small."
+            });
+        }
+
         var newDiscount = req.DiscountAmount.HasValue
             ? Math.Clamp(req.DiscountAmount.Value, 0, newSubtotal)
             : Math.Min(order.DiscountAmount, newSubtotal);
+
+        // Same reasoning as above — the discount itself can't be edited down below the redeemed
+        // amount either, even if the subtotal is still large enough overall.
+        if (newDiscount < order.LoyaltyDiscountAmount) newDiscount = order.LoyaltyDiscountAmount;
 
         // VAT is charged on (subtotal - discount + tobacco fee), not on subtotal alone (see
         // Create()) — so the rate must be derived from that same taxable base, not just Subtotal,
@@ -861,6 +991,118 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         order.TaxAmount = Math.Round(newTaxableBase * taxRate, 2);
         order.TotalAmount = newSubtotal - newDiscount + order.TobaccoFeeAmount + order.TaxAmount + order.CustomFeeAmount;
         order.Notes = req.Notes;
+
+        // Loyalty re-sync: TotalAmount just changed (and CustomerId may be about to be
+        // reassigned below) after points were already earned against the OLD total for the OLD
+        // customer in Create() — replay the same reversal-then-earn steps Void/Refund use so
+        // balance/TotalSpend/Tier don't silently drift from what this order now actually
+        // represents. The existing REDEMPTION is deliberately left alone (already floor-checked
+        // above) — those points genuinely left the original customer's balance and stay
+        // attributed to them even if the order is reassigned; only the EARN side is re-derived.
+        var finalCustomerId = req.UpdateCustomer ? req.CustomerId : oldCustomerId;
+
+        if (oldCustomerId.HasValue)
+        {
+            var oldCustomer = await db.Customers.FindAsync(oldCustomerId.Value);
+            if (oldCustomer != null)
+            {
+                var oldEarnTxn = await db.LoyaltyTransactions
+                    .FirstOrDefaultAsync(t => t.OrderId == order.Id && t.TransactionType == "earn");
+                if (oldEarnTxn != null)
+                {
+                    var clawback = -Math.Min(oldEarnTxn.Points, oldCustomer.LoyaltyBalance);
+                    if (clawback != 0)
+                    {
+                        oldCustomer.LoyaltyBalance += clawback;
+                        db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                        {
+                            Id = Guid.NewGuid(),
+                            CustomerId = oldCustomer.Id,
+                            OrderId = order.Id,
+                            BranchId = order.BranchId,
+                            TransactionType = "adjust",
+                            Points = clawback,
+                            BalanceAfter = oldCustomer.LoyaltyBalance,
+                            Description = $"Reversal for edited order {order.OrderNumber}",
+                            CreatedAt = DateTime.UtcNow,
+                        });
+                    }
+                }
+                oldCustomer.TotalSpend = Math.Max(0, oldCustomer.TotalSpend - oldTotalAmount);
+
+                // If the order is staying with this same customer, the earn step below recomputes
+                // Tier from the fully-netted TotalSpend anyway — only recompute it here when the
+                // order is being reassigned away, since nothing else will touch this customer again.
+                if (finalCustomerId != oldCustomerId)
+                {
+                    // Tier thresholds are global (see ResolveGlobalTierConfigAsync) — never
+                    // resolved per this order's branch.
+                    var tierConfig = await ResolveGlobalTierConfigAsync();
+                    if (tierConfig != null)
+                    {
+                        oldCustomer.Tier = oldCustomer.TotalSpend >= tierConfig.PlatinumThreshold ? "platinum"
+                            : oldCustomer.TotalSpend >= tierConfig.GoldThreshold ? "gold"
+                            : oldCustomer.TotalSpend >= tierConfig.SilverThreshold ? "silver"
+                            : "standard";
+                    }
+                }
+            }
+        }
+
+        if (finalCustomerId.HasValue)
+        {
+            // FindAsync returns the SAME tracked instance as the block above when
+            // finalCustomerId == oldCustomerId, so the reversal's TotalSpend subtraction and this
+            // addition net out correctly against the same in-memory customer.
+            var earningCustomer = await db.Customers.FindAsync(finalCustomerId.Value);
+            if (earningCustomer != null)
+            {
+                var program = await ResolveLoyaltyProgramAsync(order.BranchId);
+                earningCustomer.TotalSpend += order.TotalAmount;
+                if (program != null)
+                {
+                    // Tier thresholds/multipliers are global (see ResolveGlobalTierConfigAsync) —
+                    // never resolved per this order's branch.
+                    var tierConfig = await ResolveGlobalTierConfigAsync();
+                    if (tierConfig != null)
+                    {
+                        earningCustomer.Tier = earningCustomer.TotalSpend >= tierConfig.PlatinumThreshold ? "platinum"
+                            : earningCustomer.TotalSpend >= tierConfig.GoldThreshold ? "gold"
+                            : earningCustomer.TotalSpend >= tierConfig.SilverThreshold ? "silver"
+                            : "standard";
+                    }
+
+                    var earnMultiplier = tierConfig is null ? 1m : earningCustomer.Tier switch
+                    {
+                        "platinum" => tierConfig.PlatinumEarnMultiplier,
+                        "gold" => tierConfig.GoldEarnMultiplier,
+                        "silver" => tierConfig.SilverEarnMultiplier,
+                        _ => 1m,
+                    };
+                    var earned = Math.Floor(order.TotalAmount * program.PointsPerCurrencyUnit * earnMultiplier);
+                    if (earned > 0)
+                    {
+                        earningCustomer.LoyaltyBalance += earned;
+                        db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                        {
+                            Id = Guid.NewGuid(),
+                            CustomerId = earningCustomer.Id,
+                            OrderId = order.Id,
+                            BranchId = order.BranchId,
+                            TransactionType = "earn",
+                            Points = earned,
+                            BalanceAfter = earningCustomer.LoyaltyBalance,
+                            Description = $"Earned from edited order {order.OrderNumber}",
+                            ExpiryDate = program.PointsExpiryDays.HasValue
+                                ? DateTime.UtcNow.AddDays(program.PointsExpiryDays.Value)
+                                : null,
+                            CreatedAt = DateTime.UtcNow,
+                        });
+                    }
+                }
+            }
+        }
+
         if (req.UpdateCustomer) order.CustomerId = req.CustomerId;
         order.UpdatedAt = DateTime.UtcNow;
 
@@ -897,6 +1139,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             .Include(o => o.Items).ThenInclude(i => i.Product)
             .Include(o => o.Payments)
             .Include(o => o.Customer)
+            .Include(o => o.Discounts)
             .FirstOrDefaultAsync(o => o.Id == id);
         return Ok(updated);
     }
@@ -907,7 +1150,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> VoidOrder(Guid id, [FromBody] OrderVoidRequest req)
     {
-        var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).FirstOrDefaultAsync(o => o.Id == id);
+        var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).Include(o => o.Discounts).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound();
         if (order.OrderStatus == "cancelled") return BadRequest(new { message = "This order is already cancelled." });
 
@@ -973,6 +1216,58 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                         default: shift.DigitalSales -= pay.Amount; break;
                     }
                     shift.TotalSales -= pay.Amount;
+                }
+            }
+        }
+
+        // Reverse any loyalty ledger activity this order created — claw back earned points,
+        // restore redeemed points, and roll back TotalSpend/Tier, mirroring the earn/redeem
+        // logic in Create().
+        if (order.CustomerId.HasValue)
+        {
+            var customer = await db.Customers.FindAsync(order.CustomerId.Value);
+            if (customer != null)
+            {
+                var loyaltyTxns = await db.LoyaltyTransactions
+                    .Where(t => t.OrderId == order.Id && (t.TransactionType == "earn" || t.TransactionType == "redeem"))
+                    .ToListAsync();
+
+                foreach (var txn in loyaltyTxns)
+                {
+                    // earn (+N) -> clawback, clamped so balance never goes negative if the
+                    // customer already spent those points elsewhere since; redeem (-N) -> restore.
+                    var reversal = txn.TransactionType == "earn"
+                        ? -Math.Min(txn.Points, customer.LoyaltyBalance)
+                        : -txn.Points;
+                    if (reversal == 0) continue;
+
+                    customer.LoyaltyBalance += reversal;
+                    db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                    {
+                        Id = Guid.NewGuid(),
+                        CustomerId = customer.Id,
+                        OrderId = order.Id,
+                        BranchId = order.BranchId,
+                        TransactionType = "adjust",
+                        Points = reversal,
+                        BalanceAfter = customer.LoyaltyBalance,
+                        MonetaryValue = txn.MonetaryValue,
+                        Description = $"Reversal for voided order {order.OrderNumber}",
+                        CreatedAt = DateTime.UtcNow,
+                    });
+                }
+
+                customer.TotalSpend = Math.Max(0, customer.TotalSpend - order.TotalAmount);
+                // Tier thresholds are global (see ResolveGlobalTierConfigAsync) — never resolved
+                // per this order's branch, so voiding an order doesn't recompute tier against a
+                // different branch's numbers than whatever last set it.
+                var tierConfig = await ResolveGlobalTierConfigAsync();
+                if (tierConfig != null)
+                {
+                    customer.Tier = customer.TotalSpend >= tierConfig.PlatinumThreshold ? "platinum"
+                        : customer.TotalSpend >= tierConfig.GoldThreshold ? "gold"
+                        : customer.TotalSpend >= tierConfig.SilverThreshold ? "silver"
+                        : "standard";
                 }
             }
         }

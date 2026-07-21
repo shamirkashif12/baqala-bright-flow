@@ -24,6 +24,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     // Customers & Loyalty
     public DbSet<Customer> Customers { get; set; }
     public DbSet<LoyaltyTransaction> LoyaltyTransactions { get; set; }
+    public DbSet<LoyaltyProgram> LoyaltyPrograms { get; set; }
 
     // Products
     public DbSet<Category> Categories { get; set; }
@@ -43,6 +44,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<Order> Orders { get; set; }
     public DbSet<OrderItem> OrderItems { get; set; }
     public DbSet<OrderPayment> OrderPayments { get; set; }
+    public DbSet<OrderDiscount> OrderDiscounts { get; set; }
     public DbSet<CustomerReturn> CustomerReturns { get; set; }
     public DbSet<CustomerReturnItem> CustomerReturnItems { get; set; }
 
@@ -165,6 +167,28 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
         modelBuilder.Entity<TenantSetting>()
             .HasIndex(t => new { t.BranchId, t.SettingKey }).IsUnique();
+
+        modelBuilder.Entity<LoyaltyProgram>()
+            .HasIndex(l => l.BranchId).IsUnique();
+
+        modelBuilder.Entity<LoyaltyProgram>()
+            .HasOne(l => l.Branch)
+            .WithMany()
+            .HasForeignKey(l => l.BranchId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // Seeds the one guaranteed business-wide default program (BranchId == null) every branch
+        // falls back to until it gets its own override. Fixed timestamps for the same reason as
+        // ZatcaIdentity.HasData above — DateTime.UtcNow here would make every `migrations add`
+        // detect a spurious pending model change.
+        modelBuilder.Entity<LoyaltyProgram>().HasData(new LoyaltyProgram
+        {
+            Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
+            BranchId = null,
+            ProgramName = "Loyalty Rewards",
+            CreatedAt = new DateTime(2026, 7, 21, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2026, 7, 21, 0, 0, 0, DateTimeKind.Utc),
+        });
 
         modelBuilder.Entity<Employee>().HasIndex(e => e.EmployeeCode).IsUnique();
         modelBuilder.Entity<Employee>().HasIndex(e => e.NationalId).IsUnique();

@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260721123616_AddLoyaltyProgram")]
+    partial class AddLoyaltyProgram
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -859,6 +862,11 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("is_active");
+
+                    b.Property<string>("MinCustomerTier")
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("min_customer_tier");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -2244,44 +2252,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("TerminalId");
 
                     b.ToTable("orders");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.OrderDiscount", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("amount");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid?>("DiscountId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("discount_id");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("name");
-
-                    b.Property<Guid>("OrderId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("order_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DiscountId");
-
-                    b.HasIndex("OrderId");
-
-                    b.ToTable("order_discounts");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.OrderItem", b =>
@@ -5992,23 +5962,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Terminal");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.OrderDiscount", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Discount", "Discount")
-                        .WithMany()
-                        .HasForeignKey("DiscountId");
-
-                    b.HasOne("BaqalaPOS.Api.Models.Order", "Order")
-                        .WithMany("Discounts")
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Discount");
-
-                    b.Navigation("Order");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.OrderItem", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.InventoryBatch", "Batch")
@@ -6839,8 +6792,6 @@ namespace BaqalaPOS.Api.Migrations
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Order", b =>
                 {
-                    b.Navigation("Discounts");
-
                     b.Navigation("Items");
 
                     b.Navigation("Payments");

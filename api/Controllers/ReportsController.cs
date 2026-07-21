@@ -2603,17 +2603,18 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var includeMargin = await CanViewFinanceAsync();
         if (!includeMargin) MaskDiscountsMargin(result);
         var headers = includeMargin
-            ? new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Discount Type", "Coupon Code", "Discount %", "Discount Amount", "Net Sales After Discount", "Margin Impact" }
-            : new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Discount Type", "Coupon Code", "Discount %", "Discount Amount", "Net Sales After Discount" };
+            ? new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Discount Type", "Coupon Code", "Discount %", "Discount Amount", "Loyalty Amount", "Net Sales After Discount", "Margin Impact" }
+            : new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Discount Type", "Coupon Code", "Discount %", "Discount Amount", "Loyalty Amount", "Net Sales After Discount" };
         var rows = result.Rows.Select(r => includeMargin
-            ? new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.DiscountType, r.CouponCode, r.DiscountPct, r.DiscountAmount, r.NetSalesAfterDiscount, r.MarginImpact }
-            : new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.DiscountType, r.CouponCode, r.DiscountPct, r.DiscountAmount, r.NetSalesAfterDiscount }
+            ? new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.DiscountType, r.CouponCode, r.DiscountPct, r.DiscountAmount, r.LoyaltyDiscountAmount, r.NetSalesAfterDiscount, r.MarginImpact }
+            : new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.DiscountType, r.CouponCode, r.DiscountPct, r.DiscountAmount, r.LoyaltyDiscountAmount, r.NetSalesAfterDiscount }
         ).ToList();
         await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
             $"{{\"report\":\"discounts\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
         var kpis = new List<(string, string)>
         {
             ("Total Discount Value", result.Kpis.TotalDiscountValue.ToString("0.##")), ("Manual Discount Value", result.Kpis.ManualDiscountValue.ToString("0.##")),
+            ("Loyalty Discount Value", result.Kpis.LoyaltyDiscountValue.ToString("0.##")),
             ("Coupon Usage", result.Kpis.CouponUsage.ToString()), ("Discount % of Sales", result.Kpis.DiscountPctOfSales.ToString("0.0")),
         };
         if (includeMargin) kpis.Add(("Margin Impact", result.Kpis.MarginImpact?.ToString("0.##") ?? "N/A"));
@@ -2638,7 +2639,11 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
         var rows = orders.Select(o =>
         {
-            var type = o.CouponId.HasValue ? "coupon" : "manual";
+            // Coupon takes precedence in the (rare) case an order combines a coupon with loyalty
+            // redemption — same simplification this report already made for coupon+manual-discount
+            // combos (one row, one primary type). LoyaltyDiscountAmount below still captures the
+            // loyalty slice regardless of which bucket the row lands in.
+            var type = o.CouponId.HasValue ? "coupon" : o.LoyaltyDiscountAmount > 0 ? "loyalty" : "manual";
             return new DiscountRow
             {
                 TransactionId = o.Id.ToString()[..8], InvoiceNo = o.OrderNumber, DateTime = o.CreatedAt,
@@ -2646,7 +2651,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 CustomerType = o.CustomerId.HasValue ? "Registered" : "Walk-in",
                 DiscountType = type, CouponCode = o.Coupon?.Code,
                 DiscountPct = o.Subtotal > 0 ? Math.Round(o.DiscountAmount / o.Subtotal * 100, 1) : 0m,
-                DiscountAmount = o.DiscountAmount, NetSalesAfterDiscount = o.Subtotal - o.DiscountAmount,
+                DiscountAmount = o.DiscountAmount, LoyaltyDiscountAmount = o.LoyaltyDiscountAmount,
+                NetSalesAfterDiscount = o.Subtotal - o.DiscountAmount,
                 // A discount reduces net sales with no corresponding change to COGS, so it reduces
                 // gross margin dollar-for-dollar (FRD §7.15).
                 MarginImpact = o.DiscountAmount,
@@ -2662,6 +2668,9 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             {
                 TotalDiscountValue = rows.Sum(r => r.DiscountAmount),
                 ManualDiscountValue = rows.Where(r => r.DiscountType == "manual").Sum(r => r.DiscountAmount),
+                // Sums the loyalty slice across ALL rows (not just ones tagged "loyalty"), so a
+                // coupon+loyalty combo order's redeemed points still count here.
+                LoyaltyDiscountValue = rows.Sum(r => r.LoyaltyDiscountAmount),
                 CouponUsage = rows.Count(r => r.DiscountType == "coupon"),
                 DiscountPctOfSales = totalNet > 0 ? Math.Round(rows.Sum(r => r.DiscountAmount) / totalNet * 100, 1) : 0m,
                 MarginImpact = rows.Sum(r => r.MarginImpact ?? 0m),
@@ -3167,6 +3176,113 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     // ───────────────────────────────────────────────────────────────────────
 
     /// <summary>Builds a CSV or PDF export file from the same headers/rows/KPIs, per the FRD's multi-format export rule.</summary>
+    // ───────────────────────────────────────────────────────────────────────
+    // N. Loyalty Program (LOY-001)
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("loyalty")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetLoyaltyReport([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        return Ok(await BuildLoyaltyReportAsync(rangeFrom, rangeTo, branchId));
+    }
+
+    [HttpGet("loyalty/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportLoyaltyReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildLoyaltyReportAsync(rangeFrom, rangeTo, branchId);
+        var headers = new[] { "Branch", "Points Earned", "Points Redeemed", "Points Expired", "Redemption Value (SAR)", "Active Members" };
+        var rows = result.ByBranch.Select(r => new object?[]
+        {
+            r.BranchName, r.PointsEarned, r.PointsRedeemed, r.PointsExpired, r.RedemptionValue, r.ActiveMembers,
+        }).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+            $"{{\"report\":\"loyalty\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.ByBranch.Count}}}");
+        var kpis = new (string, string)[]
+        {
+            ("Points Earned", result.Kpis.TotalPointsEarned.ToString("0.##")),
+            ("Points Redeemed", result.Kpis.TotalPointsRedeemed.ToString("0.##")),
+            ("Points Expired", result.Kpis.TotalPointsExpired.ToString("0.##")),
+            ("Redemption Value (SAR)", result.Kpis.TotalRedemptionValue.ToString("0.##")),
+            ("Active Members", result.Kpis.TotalActiveMembers.ToString()),
+        };
+        return BuildExportFile(format, "Loyalty Program Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            kpis, headers, rows, $"loyalty-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    private async Task<LoyaltyReportResult> BuildLoyaltyReportAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId)
+    {
+        // Same branch-claim override every other report in this controller applies — a Branch
+        // Manager cannot see another branch's loyalty activity by passing a different branchId.
+        var (scopeRole, scopeBranchId) = GetCallerContext();
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+
+        var branchesQ = db.Branches.Where(b => b.Status == "active");
+        if (branchId.HasValue) branchesQ = branchesQ.Where(b => b.Id == branchId);
+        var branches = await branchesQ.ToListAsync();
+
+        // Joined via navigation (Include), not a Contains() over a materialized id list — the
+        // MySQL EF provider in use here fails to type-map a List<Guid> parameter in a Contains()
+        // translation (same issue worked around elsewhere in OrdersController/DataSeeder).
+        var txnQ = db.LoyaltyTransactions.Include(t => t.Customer)
+            .Where(t => t.CreatedAt >= rangeFrom && t.CreatedAt < rangeToExclusive);
+        if (branchId.HasValue) txnQ = txnQ.Where(t => t.BranchId == branchId);
+        var txns = await txnQ.Select(t => new
+        {
+            t.BranchId,
+            t.CustomerId,
+            t.TransactionType,
+            t.Points,
+            t.MonetaryValue,
+            CustomerTier = t.Customer!.Tier,
+            CustomerBalance = t.Customer!.LoyaltyBalance,
+        }).ToListAsync();
+
+        var byBranch = txns.Where(t => t.BranchId.HasValue).ToLookup(t => t.BranchId!.Value);
+        var rows = branches.Select(b =>
+        {
+            var branchTxns = byBranch[b.Id];
+            return new LoyaltyReportRow
+            {
+                BranchId = b.Id,
+                BranchName = b.Name,
+                PointsEarned = branchTxns.Where(t => t.TransactionType == "earn").Sum(t => t.Points),
+                PointsRedeemed = -branchTxns.Where(t => t.TransactionType == "redeem").Sum(t => t.Points),
+                PointsExpired = -branchTxns.Where(t => t.TransactionType == "expire").Sum(t => t.Points),
+                RedemptionValue = branchTxns.Where(t => t.TransactionType == "redeem").Sum(t => t.MonetaryValue ?? 0),
+                ActiveMembers = branchTxns.Select(t => t.CustomerId).Distinct().Count(),
+            };
+        }).ToList();
+
+        var tierBreakdown = txns
+            .GroupBy(t => t.CustomerId)
+            .Select(g => g.First())
+            .GroupBy(t => t.CustomerTier)
+            .Select(g => new LoyaltyTierRow { Tier = g.Key, Members = g.Count(), TotalBalance = g.Sum(t => t.CustomerBalance) })
+            .ToList();
+
+        return new LoyaltyReportResult
+        {
+            ByBranch = rows,
+            TierBreakdown = tierBreakdown,
+            Kpis = new LoyaltyReportKpis
+            {
+                TotalPointsEarned = rows.Sum(r => r.PointsEarned),
+                TotalPointsRedeemed = rows.Sum(r => r.PointsRedeemed),
+                TotalPointsExpired = rows.Sum(r => r.PointsExpired),
+                TotalRedemptionValue = rows.Sum(r => r.RedemptionValue),
+                TotalActiveMembers = txns.Select(t => t.CustomerId).Distinct().Count(),
+            },
+        };
+    }
+
     private FileContentResult BuildExportFile(
         string? format, string title, string filterSummary, (string Label, string Value)[] kpis,
         string[] headers, IReadOnlyList<object?[]> rows, string baseFileName)
@@ -3894,6 +4010,10 @@ public sealed class DiscountRow
     public string? CouponCode { get; init; }
     public decimal DiscountPct { get; init; }
     public decimal DiscountAmount { get; init; }
+    // The slice of DiscountAmount that came from redeemed loyalty points — populated regardless
+    // of DiscountType, so an order combining a coupon with loyalty redemption still reports its
+    // loyalty portion even though the row's primary type is "coupon".
+    public decimal LoyaltyDiscountAmount { get; init; }
     public decimal NetSalesAfterDiscount { get; init; }
     // A discount comes straight off net sales with no change to COGS, so its margin impact
     // equals the discount amount given up (FRD §7.15 "Margin Impact" column).
@@ -3904,6 +4024,7 @@ public sealed class DiscountsKpis
 {
     public decimal TotalDiscountValue { get; init; }
     public decimal ManualDiscountValue { get; init; }
+    public decimal LoyaltyDiscountValue { get; init; }
     public int CouponUsage { get; init; }
     public decimal DiscountPctOfSales { get; init; }
     public decimal? MarginImpact { get; set; }
@@ -4069,4 +4190,38 @@ public sealed class ProfitMarginResult
 {
     public ProfitMarginKpis Kpis { get; init; } = new();
     public List<ProfitMarginRow> Rows { get; init; } = [];
+}
+
+public sealed class LoyaltyReportRow
+{
+    public Guid BranchId { get; init; }
+    public string BranchName { get; init; } = "";
+    public decimal PointsEarned { get; init; }
+    public decimal PointsRedeemed { get; init; }
+    public decimal PointsExpired { get; init; }
+    public decimal RedemptionValue { get; init; }
+    public int ActiveMembers { get; init; }
+}
+
+public sealed class LoyaltyTierRow
+{
+    public string Tier { get; init; } = "";
+    public int Members { get; init; }
+    public decimal TotalBalance { get; init; }
+}
+
+public sealed class LoyaltyReportKpis
+{
+    public decimal TotalPointsEarned { get; init; }
+    public decimal TotalPointsRedeemed { get; init; }
+    public decimal TotalPointsExpired { get; init; }
+    public decimal TotalRedemptionValue { get; init; }
+    public int TotalActiveMembers { get; init; }
+}
+
+public sealed class LoyaltyReportResult
+{
+    public List<LoyaltyReportRow> ByBranch { get; init; } = [];
+    public List<LoyaltyTierRow> TierBreakdown { get; init; } = [];
+    public LoyaltyReportKpis Kpis { get; init; } = new();
 }

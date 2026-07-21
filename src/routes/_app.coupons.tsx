@@ -324,22 +324,13 @@ function CouponsTab() {
 type DiscountForm = {
   name: string; appliesTo: string; productId: string; categoryId: string; branchIds: string[];
   discountType: string; value: string; isActive: boolean; startDate: string; endDate: string;
-  excludedProductIds: string[]; minCustomerTier: string; requiresCustomer: boolean;
+  excludedProductIds: string[]; requiresCustomer: boolean;
 };
 const emptyDiscount: DiscountForm = {
   name: "", appliesTo: "all", productId: "", categoryId: "", branchIds: [],
   discountType: "percentage", value: "", isActive: true, startDate: today, endDate: nextMonth,
-  excludedProductIds: [], minCustomerTier: "none", requiresCustomer: false,
+  excludedProductIds: [], requiresCustomer: false,
 };
-
-// Customer groups are loyalty tiers (Customer.Tier). Ranked, not arbitrary labels — picking Silver
-// means Silver *and above*, which is how the POS evaluates MinCustomerTier at checkout.
-const CUSTOMER_TIERS = [
-  { value: "standard", label: "Standard & above" },
-  { value: "silver", label: "Silver & above" },
-  { value: "gold", label: "Gold & above" },
-  { value: "platinum", label: "Platinum only" },
-];
 
 function DiscountsTab() {
   const { canCreate, canEdit, canDelete } = usePermission("Coupons");
@@ -378,7 +369,6 @@ function DiscountsTab() {
       branchIds: d.branchId ? [d.branchId] : [], discountType: d.discountType, value: String(d.value),
       isActive: d.isActive, startDate: d.startDate?.slice(0, 10) ?? today, endDate: d.endDate?.slice(0, 10) ?? nextMonth,
       excludedProductIds,
-      minCustomerTier: d.minCustomerTier ?? "none",
       requiresCustomer: d.requiresCustomer ?? false,
     });
     setSheetOpen(true);
@@ -399,10 +389,7 @@ function DiscountsTab() {
         isActive: form.isActive,
         startDate: form.startDate || undefined, endDate: form.endDate || undefined,
         excludedProductIds: form.excludedProductIds.length > 0 ? form.excludedProductIds : undefined,
-        minCustomerTier: form.minCustomerTier !== "none" ? form.minCustomerTier : undefined,
-        // A tier-gated discount is meaningless for an anonymous walk-in — there's no tier to check —
-        // so targeting a customer group implies the cashier must attach a customer at checkout.
-        requiresCustomer: form.minCustomerTier !== "none" ? true : form.requiresCustomer,
+        requiresCustomer: form.requiresCustomer,
       };
       if (editItem) {
         const branchId = form.appliesTo === "branch" ? (form.branchIds[0] || undefined) : undefined;
@@ -544,31 +531,14 @@ function DiscountsTab() {
               </FL>
             )}
 
-            <FL label="Customer group (loyalty tier)">
-              <Select value={form.minCustomerTier} onValueChange={setS("minCustomerTier")}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Any customer" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Any customer</SelectItem>
-                  {CUSTOMER_TIERS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {form.minCustomerTier === "none"
-                  ? "Applies to everyone, including walk-ins."
-                  : "The cashier must attach a customer at checkout for this discount to apply."}
-              </p>
-            </FL>
-
-            {form.minCustomerTier === "none" && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox" id="requiresCustomer" checked={form.requiresCustomer}
-                  onChange={e => setForm(p => ({ ...p, requiresCustomer: e.target.checked }))}
-                  className="h-4 w-4 accent-primary"
-                />
-                <label htmlFor="requiresCustomer" className="text-sm cursor-pointer">Require a registered customer</label>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox" id="requiresCustomer" checked={form.requiresCustomer}
+                onChange={e => setForm(p => ({ ...p, requiresCustomer: e.target.checked }))}
+                className="h-4 w-4 accent-primary"
+              />
+              <label htmlFor="requiresCustomer" className="text-sm cursor-pointer">Require a registered customer</label>
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <FL label="Discount Type">
