@@ -522,10 +522,20 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
       );
       reset(); onDone(); onClose();
     } catch (e) {
-      // The product (and possibly some branch batches) were already committed; discontinue it so no
-      // phantom half-stocked item is left behind.
-      if (createdProductId) await api.deleteProduct(createdProductId).catch(() => {});
-      setError(e instanceof Error ? e.message : "Failed.");
+      // Product deletion is approval-gated now (queues a request, doesn't actually remove the
+      // row — see ProductsController.Delete), so calling it here to "roll back" a partially
+      // failed save used to silently no-op: the product stayed, half-stocked or unpriced, with
+      // no indication anything was wrong beyond a generic error. Since the product genuinely
+      // was created, say so plainly and point at Edit Product instead of pretending it didn't
+      // happen — retrying Add Product with the same name/SKU would just hit a conflict against
+      // the very row this failure left behind.
+      const message = e instanceof Error ? e.message : "Failed.";
+      setError(
+        createdProductId
+          ? `"${form.name}" was created, but adding stock/pricing failed: ${message}. Open Edit Product for "${form.name}" to finish setting it up.`
+          : message,
+      );
+      if (createdProductId) onDone();
     }
     finally { setSaving(false); }
   };

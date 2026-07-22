@@ -158,7 +158,15 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateUserRequest req)
     {
         if (await db.Users.AnyAsync(u => u.Email == req.Email))
-            return Conflict("Email already in use.");
+            return Conflict(new { message = "Email already in use." });
+        // Username has its own DB-level unique index (see BaqalaDbContext), but this endpoint
+        // never checked it — a collision (easy to hit against the densely pre-seeded demo/QA
+        // users) threw an unhandled DbUpdateException at SaveChangesAsync, surfaced to the client
+        // only as a generic "Something went wrong" 500 with no user created.
+        if (await db.Users.AnyAsync(u => u.Username == req.Username))
+            return Conflict(new { message = "Username already in use." });
+        if (req.RoleId == Guid.Empty || !await db.Roles.AnyAsync(r => r.Id == req.RoleId))
+            return BadRequest(new { message = "A valid role must be selected." });
 
         var user = new User
         {

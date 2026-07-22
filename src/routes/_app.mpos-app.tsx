@@ -248,7 +248,7 @@ function MposApp() {
     if (screen.name === "Cart") return <CartScreen cart={cart} onQty={updateQty} onRemove={removeItem} subtotal={cartSubtotal} tax={cartTax} tobacco={cartTobacco} total={cartTotal} onHold={() => { if (cart.length) { setHeld(h => [cart, ...h]); setCart([]); back(); notify("Order held"); } }} onPay={() => push({ name: "Payment" })} onBack={back} />;
     if (screen.name === "Payment") return <PaymentScreen total={cartTotal} subtotal={cartSubtotal} tax={cartTax} tobacco={cartTobacco} onApprove={finalizeOrder} onBack={back} />;
     if (screen.name === "HeldOrders") return <HeldOrdersScreen held={held} onResume={(idx: number) => { setCart(held[idx]); setHeld(h => h.filter((_, i) => i !== idx)); push({ name: "Cart" }); notify("Held order resumed"); }} onBack={back} />;
-    if (screen.name === "Invoice") return <InvoiceScreen order={screen.order} onDone={() => goTab("POS")} onBack={back} />;
+    if (screen.name === "Invoice") return <InvoiceScreen order={screen.order} onDone={() => goTab("Orders")} onBack={back} />;
     if (screen.name === "OrderDetails") return <OrderDetailsScreen o={screen.order} onBack={back} />;
     if (screen.name === "ItemDetails") return <ItemDetailsScreen p={screen.product} onBack={back} />;
     if (screen.name === "TerminalOverview") return <TerminalOverviewScreen onOpen={(t: typeof terminals[number]) => push({ name: "TerminalDetails", t })} onBack={back} />;

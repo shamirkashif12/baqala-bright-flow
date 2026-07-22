@@ -90,14 +90,21 @@ const TYPE_ROUTE: Record<string, string> = {
   "ZATCA Submission Failed": "/zatca",
   "ZATCA Invoice Generated": "/zatca",
   "ZATCA Pending Queue": "/zatca",
+  // Admin / security
+  "Unauthorized Action Attempt": "/audit-logs",
+  // Pricing / catalog
+  "Price Updated": "/pricing",
+  "Product Recall": "/batches",
+  "Daily Expiry Summary": "/batches",
 };
 
-// "Manager Approval Granted"/"Rejected" is reused for both PO and Return approvals — the entity
-// it points at decides where clicking should land.
+// "Manager Approval Granted"/"Rejected" is reused for PO, Return, and Stock Transfer approvals —
+// the entity it points at decides where clicking should land.
 function routeForNotification(n: { type: string; entityType?: string }): string | undefined {
   if (n.type === "Manager Approval Granted" || n.type === "Manager Approval Rejected") {
     if (n.entityType === "PurchaseOrder") return "/purchase-orders";
     if (n.entityType === "CustomerReturn") return "/returns";
+    if (n.entityType === "StockTransfer") return "/stock-transfers";
     return undefined;
   }
   return TYPE_ROUTE[n.type];

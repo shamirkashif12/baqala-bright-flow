@@ -126,13 +126,13 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 ServiceCharges = o.ServiceCharges.Select(s => new { s.Id, s.TaxFeeRuleId, s.Name, s.Amount }),
             })
             .FirstOrDefaultAsync();
-        if (order is null) return NotFound();
+        if (order is null) return NotFound(new { message = "Order not found." });
 
         // Branch-scoped roles may only look up an order from their own branch — mirrors GetAll's
         // filter, which this direct-by-id lookup previously bypassed entirely (any authenticated
         // caller could fetch any order, and its embedded cashier PII, given just its GUID).
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && order.BranchId != callerBranchId)
-            return NotFound();
+            return NotFound(new { message = "Order not found." });
 
         return Ok(order);
     }
@@ -168,12 +168,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 ServiceCharges = o.ServiceCharges.Select(s => new { s.Id, s.TaxFeeRuleId, s.Name, s.Amount }),
             })
             .FirstOrDefaultAsync();
-        if (order is null) return NotFound();
+        if (order is null) return NotFound(new { message = "Order not found." });
 
         // Same branch-scoping gap as GetById above — a direct order-number lookup previously
         // bypassed the caller's branch entirely.
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && order.BranchId != callerBranchId)
-            return NotFound();
+            return NotFound(new { message = "Order not found." });
 
         return Ok(order);
     }
@@ -803,7 +803,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateStatusRequest req)
     {
         var order = await db.Orders.FindAsync(id);
-        if (order is null) return NotFound();
+        if (order is null) return NotFound(new { message = "Order not found." });
 
         // Cancelling has to reverse stock and the cashier shift's running totals — VoidOrder
         // (the DELETE endpoint) already does that correctly. This endpoint used to accept
@@ -846,7 +846,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     public async Task<IActionResult> ReconcileShift(Guid id, [FromBody] ReconcileShiftRequest req)
     {
         var order = await db.Orders.FindAsync(id);
-        if (order is null) return NotFound();
+        if (order is null) return NotFound(new { message = "Order not found." });
         if (order.ShiftId.HasValue)
             return BadRequest(new { message = "This order already has a shift assigned — nothing to reconcile." });
 
@@ -910,7 +910,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (req.Items.Count == 0) return BadRequest(new { message = "An order must have at least one line item." });
 
         var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).FirstOrDefaultAsync(o => o.Id == id);
-        if (order is null) return NotFound();
+        if (order is null) return NotFound(new { message = "Order not found." });
 
         // Captured before any mutation below — needed to reverse this order's OLD contribution to
         // loyalty (earned points, TotalSpend) once the new totals are known, see the loyalty
@@ -1219,7 +1219,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     public async Task<IActionResult> VoidOrder(Guid id, [FromBody] OrderVoidRequest req)
     {
         var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).Include(o => o.Discounts).Include(o => o.ServiceCharges).FirstOrDefaultAsync(o => o.Id == id);
-        if (order is null) return NotFound();
+        if (order is null) return NotFound(new { message = "Order not found." });
         if (order.OrderStatus == "cancelled") return BadRequest(new { message = "This order is already cancelled." });
 
         var settings = await db.PosSettings.AsNoTracking().FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
@@ -1266,7 +1266,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     public async Task<IActionResult> AddPayment(Guid id, [FromBody] OrderPayment payment)
     {
         var order = await db.Orders.FindAsync(id);
-        if (order is null) return NotFound();
+        if (order is null) return NotFound(new { message = "Order not found." });
         payment.Id = Guid.NewGuid();
         payment.OrderId = id;
         payment.CreatedAt = DateTime.UtcNow;

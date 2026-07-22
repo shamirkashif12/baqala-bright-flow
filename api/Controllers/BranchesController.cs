@@ -21,6 +21,9 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
         return (role, branchId);
     }
 
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status)
     {
@@ -73,6 +76,7 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
             action: "Branch created",
             entityType: "Branch",
             entityId: branch.Id,
+            userId: CallerId(),
             branchId: branch.Id,
             details: $"{branch.Name} ({branch.BranchCode}) · {branch.City}");
 
@@ -100,6 +104,7 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
             action: "Branch updated",
             entityType: "Branch",
             entityId: branch.Id,
+            userId: CallerId(),
             branchId: branch.Id,
             details: $"{branch.Name} · status: {branch.Status}");
 
@@ -120,6 +125,7 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
             action: "Branch disabled",
             entityType: "Branch",
             entityId: branch.Id,
+            userId: CallerId(),
             branchId: branch.Id,
             details: $"{branch.Name} disabled");
 

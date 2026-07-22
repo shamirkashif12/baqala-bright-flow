@@ -293,8 +293,11 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
     } else {
       Promise.all([api.getUsers(), api.getBranches(), api.getTerminals()])
         .then(([u, b, t]) => {
-          // Only Cashier-role accounts can hold a shift — no other role appears here.
-          setUsers(u.filter(u => u.status === "active" && u.roleName === "Cashier"));
+          // Cashier, Branch Manager/Manager, and Tenant Administrator/Admin accounts can hold a
+          // shift (mirrors the role check in ShiftsController.OpenShift) — everyone else is
+          // excluded so they can't appear in this picker.
+          const checkInRoles = new Set(["Cashier", "Branch Manager", "Manager", "Tenant Administrator", "Admin"]);
+          setUsers(u.filter(u => u.status === "active" && checkInRoles.has(u.roleName ?? "")));
           setBranches(b.filter(b => b.status === "active"));
           setTerminals(t);
         })
