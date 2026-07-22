@@ -149,6 +149,11 @@ public class ReturnsController(
         ret.Id = Guid.NewGuid();
         ret.ReturnNumber = $"RET-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
         ret.Status = "pending";
+        // Neither of this endpoint's two frontend callers (Orders' quick-refund dialog, the
+        // dedicated Returns page) ever sent ProcessedBy, so the Approval Center's "Requested By"
+        // column was always blank for every refund — derive it from the authenticated caller
+        // instead of trusting the client to remember to send it.
+        ret.ProcessedBy = CallerId();
         ret.CreatedAt = ret.UpdatedAt = DateTime.UtcNow;
         foreach (var item in ret.Items) { item.Id = Guid.NewGuid(); item.ReturnId = ret.Id; }
         db.CustomerReturns.Add(ret);
