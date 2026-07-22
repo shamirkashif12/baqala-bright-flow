@@ -2303,6 +2303,9 @@ function POS() {
             <Row k="Customer" v={customer?.fullName ?? "Walk-in"} />
             <Row k="Status" v="In progress" />
             {appliedCoupon && <Row k="Coupon" v={<>{appliedCoupon.code} (−<SARIcon />{couponDiscount.toFixed(2)})</>} />}
+            {appliedDiscounts.map((d) => (
+              <Row key={d.id} k={d.name} v={<>−<SARIcon />{computeDiscountSaving(d).toFixed(2)}</>} />
+            ))}
             {loyaltyDiscount > 0 && <Row k="Loyalty Redeemed" v={<>−{Math.min(redeemPoints, maxRedeemablePoints)} pts (−<SARIcon />{loyaltyDiscount.toFixed(2)})</>} />}
             <div className="pt-2 border-t">
               {displayCart.map((i) => (
@@ -2312,13 +2315,17 @@ function POS() {
                 </div>
               ))}
             </div>
+            <div className="pt-2 border-t space-y-1.5">
+              <Row k="Subtotal" v={<><SARIcon />{subtotal.toFixed(2)}</>} />
+              <Row k="VAT 15%" v={<><SARIcon />{vatAmount.toFixed(2)}</>} />
+              {tobaccoExcise > 0 && <Row k="Tobacco Excise" v={<><SARIcon />{tobaccoExcise.toFixed(2)}</>} />}
+              {customFeeTotal > 0 && <Row k="Service Charge" v={<><SARIcon />{customFeeTotal.toFixed(2)}</>} />}
+              <div className="flex justify-between pt-1.5 border-t font-semibold text-base">
+                <span>Total</span>
+                <span><SARIcon />{total.toFixed(2)}</span>
+              </div>
+            </div>
           </div>
-          <DialogFooter className="flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={hold} disabled={cart.length === 0}>Hold</Button>
-            <Button className="gradient-primary text-primary-foreground border-0" onClick={() => { setOrderOpen(false); setPayOpen(true); }}>
-              Complete Order
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
