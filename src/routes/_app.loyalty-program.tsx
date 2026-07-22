@@ -351,11 +351,18 @@ function LoyaltyProgramPage() {
                     <p className="text-xs text-muted-foreground">Points expiry</p>
                     <p className="font-semibold tabular-nums">{current.pointsExpiryDays != null ? `${current.pointsExpiryDays} days` : "Never"}</p>
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Silver / Gold / Platinum</p>
-                    <p className="font-semibold tabular-nums"><SARIcon />{current.silverThreshold} / <SARIcon />{current.goldThreshold} / <SARIcon />{current.platinumThreshold}</p>
-                  </div>
+                  {scope === DEFAULT_SCOPE && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Silver / Gold / Platinum</p>
+                      <p className="font-semibold tabular-nums"><SARIcon />{current.silverThreshold} / <SARIcon />{current.goldThreshold} / <SARIcon />{current.platinumThreshold}</p>
+                    </div>
+                  )}
                 </div>
+                {scope !== DEFAULT_SCOPE && (
+                  <p className="text-xs text-muted-foreground">
+                    Tier thresholds and earn multipliers are shared across all branches — configure them on the Default (All Branches) program.
+                  </p>
+                )}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">

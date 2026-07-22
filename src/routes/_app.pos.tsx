@@ -1102,12 +1102,18 @@ function POS() {
   // server re-clamps to the customer's live balance/program caps at checkout (OrdersController),
   // so this is a client-side preview matching what the cashier sees, not the final source of truth.
   const maxRedeemablePoints = customer && loyaltyProgram
-    ? Math.max(0, Math.min(
-        customer.loyaltyBalance,
-        loyaltyProgram.maxRedeemPctOfOrder != null && loyaltyProgram.redemptionValuePerPoint > 0
-          ? Math.floor(subtotal * (loyaltyProgram.maxRedeemPctOfOrder / 100) / loyaltyProgram.redemptionValuePerPoint)
-          : customer.loyaltyBalance
-      ))
+    ? (() => {
+        const cap = Math.max(0, Math.min(
+          customer.loyaltyBalance,
+          loyaltyProgram.maxRedeemPctOfOrder != null && loyaltyProgram.redemptionValuePerPoint > 0
+            ? Math.floor(subtotal * (loyaltyProgram.maxRedeemPctOfOrder / 100) / loyaltyProgram.redemptionValuePerPoint)
+            : customer.loyaltyBalance
+        ));
+        // The server silently zeroes any redemption that falls under MinPointsToRedeem (it never
+        // rejects an already-completed sale) — mirror that here so the cart's discount preview
+        // never promises a redemption the order will actually apply as zero after charging.
+        return cap < loyaltyProgram.minPointsToRedeem ? 0 : cap;
+      })()
     : 0;
   const loyaltyDiscount = Math.min(redeemPoints, maxRedeemablePoints) * (loyaltyProgram?.redemptionValuePerPoint ?? 0);
 
