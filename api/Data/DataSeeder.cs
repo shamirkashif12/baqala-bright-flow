@@ -1234,6 +1234,54 @@ public static class DataSeeder
             await db.SaveChangesAsync();
     }
 
+    // Approval Center (order cancellation / item deletion): both actions are gated on the
+    // module's Delete flag, and the request queues only when the caller lacks Approve. Branch
+    // Manager and Supervisor already held Orders:Approve/Inventory:Approve but not Delete, so
+    // they got a flat 403 trying to void an order or delete a product — the queue branch was
+    // unreachable for every seeded role except Tenant Administrator (who also holds Approve, so
+    // it always self-executed and never queued either). Cashier becomes the Orders requestor
+    // (Delete=true, Approve stays false); Storekeeper becomes the Inventory requestor the same
+    // way — which also means Storekeeper's prior Approve=true on Inventory had to come out, or
+    // granting them Delete would have let them self-approve their own product/category deletion.
+    public static async Task PatchApprovalCenterPermissionsAsync(BaqalaDbContext db)
+    {
+        // RenameRoles (Program.cs) renames "Branch Manager"→"Manager" and "Storekeeper"→
+        // "Inventory Staff" on the live DB — check both forms so this patch works whichever
+        // side of that rename a given environment happens to be on (same reasoning as
+        // PatchMarketingPermissionsAsync's "Auditor" / "Marketing User" dual check above).
+        var roles = await db.Roles
+            .Where(r => r.Name == "Branch Manager" || r.Name == "Manager"
+                     || r.Name == "Supervisor" || r.Name == "Cashier"
+                     || r.Name == "Storekeeper" || r.Name == "Inventory Staff")
+            .ToListAsync();
+        if (roles.Count == 0) return;
+
+        var changed = false;
+        foreach (var role in roles)
+        {
+            var isManagerTier = role.Name is "Branch Manager" or "Manager" or "Supervisor";
+            var isStorekeeper = role.Name is "Storekeeper" or "Inventory Staff";
+            var wantsOrdersDelete = isManagerTier || role.Name == "Cashier";
+            var wantsInventoryDelete = isManagerTier || isStorekeeper;
+            var wantsStorekeeperNotApprover = isStorekeeper;
+
+            if (wantsOrdersDelete)
+            {
+                var p = await db.RolePermissions.FirstOrDefaultAsync(x => x.RoleId == role.Id && x.Module == "Orders");
+                if (p is not null && !p.CanDelete) { p.CanDelete = true; changed = true; }
+            }
+            if (wantsInventoryDelete)
+            {
+                var p = await db.RolePermissions.FirstOrDefaultAsync(x => x.RoleId == role.Id && x.Module == "Inventory");
+                if (p is not null && !p.CanDelete) { p.CanDelete = true; changed = true; }
+                if (p is not null && wantsStorekeeperNotApprover && p.CanApprove) { p.CanApprove = false; changed = true; }
+            }
+        }
+
+        if (changed)
+            await db.SaveChangesAsync();
+    }
+
     // ─── Backfill: Role Permissions ──────────────────────────────────────────
     private static async Task SeedRolePermissionsAsync(BaqalaDbContext db)
     {
@@ -1307,12 +1355,12 @@ public static class DataSeeder
                 P(r, "POS",                 true,  true,  true,  false, true,  false),
                 P(r, "Cashier Workspace",   true,  true,  true,  false, true,  false),
                 P(r, "Cashier Shifts",      true,  false, false, false, true,  true),
-                P(r, "Orders",              true,  true,  true,  false, true,  true),
+                P(r, "Orders",              true,  true,  true,  true,  true,  true),
                 P(r, "Coupons",             true,  true,  true,  true,  true,  false),
                 P(r, "Loyalty Program",     true,  false, true,  false, false, true),
                 P(r, "Customers",           true,  true,  true,  false, false, true),
                 P(r, "Returns",             true,  true,  true,  false, true,  true),
-                P(r, "Inventory",           true,  true,  true,  false, true,  true),
+                P(r, "Inventory",           true,  true,  true,  true,  true,  true),
                 P(r, "Stocks",              true,  false, false, false, false, true),
                 P(r, "Batches",             true,  true,  true,  false, false, true),
                 P(r, "Warehouses",          true,  true,  true,  false, true,  false),
@@ -1347,7 +1395,7 @@ public static class DataSeeder
                 P(r, "POS",                 true,  true,  true,  false, false, false),
                 P(r, "Cashier Workspace",   true,  true,  true,  false, false, false),
                 P(r, "Cashier Shifts",      true,  true,  false, false, false, false),
-                P(r, "Orders",              true,  true,  false, false, false, false),
+                P(r, "Orders",              true,  true,  false, true,  false, false),
                 P(r, "Coupons",             true,  false, false, false, false, false),
                 P(r, "Loyalty Program",     true,  false, false, false, false, false),
                 P(r, "Customers",           true,  true,  false, false, false, false),
@@ -1392,7 +1440,14 @@ public static class DataSeeder
                 P(r, "Loyalty Program",     false, false, false, false, false, false),
                 P(r, "Customers",           false, false, false, false, false, false),
                 P(r, "Returns",             false, false, false, false, false, false),
-                P(r, "Inventory",           true,  true,  true,  false, true,  true),
+                // Delete=true, Approve=false: Storekeeper is the requestor for item deletion
+                // (they're the only non-manager role with catalog access), not an approver —
+                // Branch Manager/Supervisor hold Inventory:Approve and decide these requests.
+                // Storekeeper previously held Approve=true here too, which — combined with the
+                // Approval Center's "grant Delete → self-approve if you already hold Approve"
+                // rule — would have let a storekeeper delete a product with no manager sign-off
+                // at all the moment Delete was added, defeating the point of gating it.
+                P(r, "Inventory",           true,  true,  true,  true,  false, true),
                 P(r, "Stocks",              true,  true,  true,  false, true,  true),
                 P(r, "Batches",             true,  true,  true,  false, false, true),
                 P(r, "Warehouses",          true,  false, true,  false, false, false),
@@ -1427,12 +1482,12 @@ public static class DataSeeder
                 P(r, "POS",                 true,  true,  true,  false, true,  false),
                 P(r, "Cashier Workspace",   true,  true,  true,  false, true,  false),
                 P(r, "Cashier Shifts",      true,  true,  true,  false, true,  true),
-                P(r, "Orders",              true,  true,  true,  false, true,  true),
+                P(r, "Orders",              true,  true,  true,  true,  true,  true),
                 P(r, "Coupons",             true,  false, false, false, true,  false),
                 P(r, "Loyalty Program",     true,  false, false, false, false, false),
                 P(r, "Customers",           true,  true,  true,  false, false, false),
                 P(r, "Returns",             true,  true,  true,  false, true,  true),
-                P(r, "Inventory",           true,  true,  true,  false, true,  true),
+                P(r, "Inventory",           true,  true,  true,  true,  true,  true),
                 P(r, "Stocks",              true,  false, false, false, false, true),
                 P(r, "Batches",             true,  false, false, false, false, true),
                 P(r, "Warehouses",          true,  true,  true,  false, true,  false),
@@ -1978,7 +2033,7 @@ public static class DataSeeder
             {
                 Id = Guid.NewGuid(), CashierId = cashier.Id, BranchId = branch.Id, TerminalId = terminal?.Id,
                 OpeningAmount = 500, CashSales = 0, CardSales = 0, DigitalSales = 0, TotalSales = 0,
-                Status = "open", OpenedAt = today.AddHours(8),
+                Status = "open", OpenedAt = DateTime.UtcNow,
             };
             db.CashierShifts.Add(shift);
             await db.SaveChangesAsync();
@@ -1991,6 +2046,10 @@ public static class DataSeeder
                 var subtotal = qty * product.BasePrice;
                 var tax = Math.Round(subtotal * product.TaxPercentage / 100m, 2);
                 var method = i == 0 ? "cash" : "card";
+                // Real DateTime.UtcNow, not a hardcoded today.AddHours(...) — a fixed clock-time
+                // would misrepresent when the row was actually written, so it lands at the wrong
+                // spot in any list sorted by CreatedAt (e.g. showing up above orders that were
+                // genuinely created earlier the same day, once this patch finally runs).
                 var order = new Order
                 {
                     Id = Guid.NewGuid(), OrderNumber = $"ORD-TODAY-{branch.BranchCode}-{today:yyyyMMdd}-{i + 1}", Source = "pos",
@@ -1999,7 +2058,7 @@ public static class DataSeeder
                     Subtotal = subtotal, TaxAmount = tax,
                     CustomFeeAmount = i == 2 ? 5m : 0m,
                     TotalAmount = subtotal + tax + (i == 2 ? 5m : 0m),
-                    CreatedAt = today.AddHours(9).AddMinutes(i * 20), UpdatedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow.AddSeconds(i), UpdatedAt = DateTime.UtcNow,
                 };
                 order.Items.Add(new OrderItem
                 {
@@ -2027,7 +2086,7 @@ public static class DataSeeder
             db.StaffAttendances.Add(new StaffAttendance
             {
                 Id = Guid.NewGuid(), UserId = cashier.Id, BranchId = branch.Id,
-                CheckIn = today.AddHours(8), Status = "present",
+                CheckIn = DateTime.UtcNow, Status = "present",
             });
             await db.SaveChangesAsync();
         }
@@ -2049,7 +2108,7 @@ public static class DataSeeder
                 Id = Guid.NewGuid(), ProductId = wasteProduct.Id, BranchId = branch.Id, BatchId = batch?.Id,
                 AdjustmentType = "damage", Quantity = 2, Reason = "Damaged packaging",
                 Notes = "Found damaged during shelf restock", AdjustedBy = cashier.Id,
-                CreatedAt = today.AddHours(10),
+                CreatedAt = DateTime.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -2101,7 +2160,7 @@ public static class DataSeeder
                     OrderId = returnableOrder.Id, BranchId = branch.Id, ProcessedBy = cashier.Id,
                     ReturnType = "partial_return", RefundMethod = "cash", RefundAmount = returnItem.TotalPrice,
                     Reason = "Customer changed mind", Status = "completed", ApprovedBy = cashier.Id,
-                    CreatedAt = today.AddHours(11),
+                    CreatedAt = DateTime.UtcNow,
                 };
                 ret.Items.Add(new CustomerReturnItem
                 {
