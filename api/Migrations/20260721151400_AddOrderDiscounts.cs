@@ -11,43 +11,44 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.CreateTable(
-                name: "order_discounts",
-                columns: table => new
-                {
-                    id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    order_id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    discount_id = table.Column<Guid>(type: "char(36)", nullable: true),
-                    name = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false),
-                    amount = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    created_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_order_discounts", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_order_discounts_discounts_discount_id",
-                        column: x => x.discount_id,
-                        principalTable: "discounts",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_order_discounts_orders_order_id",
-                        column: x => x.order_id,
-                        principalTable: "orders",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                })
-                .Annotation("MySQL:Charset", "utf8mb4");
+            // Both FKs below reference tables (orders, discounts) created in earlier migrations —
+            // the same incompatible-collation risk that hit AddLoyaltyProgram right before this
+            // migration in the sequence. This one hasn't actually failed yet (it's never been
+            // reached — blocked behind AddLoyaltyProgram), but it carries the identical latent
+            // bug, so it's guarded now rather than waiting to hit the same failure on the very
+            // next deploy. See MigrationIdempotencyHelper / MigrationCollationHelper.
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS `order_discounts` (
+                    `id` char(36) NOT NULL,
+                    `order_id` char(36) NOT NULL,
+                    `discount_id` char(36) NULL,
+                    `name` varchar(255) NOT NULL,
+                    `amount` decimal(18,4) NOT NULL,
+                    `created_at` datetime(6) NOT NULL,
+                    PRIMARY KEY (`id`)
+                );
+            ");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_order_discounts_discount_id",
-                table: "order_discounts",
-                column: "discount_id");
+            migrationBuilder.CreateIndexIfNotExists("IX_order_discounts_discount_id", "order_discounts", "`discount_id`");
+            migrationBuilder.CreateIndexIfNotExists("IX_order_discounts_order_id", "order_discounts", "`order_id`");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_order_discounts_order_id",
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_order_discounts_discounts_discount_id",
                 table: "order_discounts",
-                column: "order_id");
+                column: "discount_id",
+                principalTable: "discounts",
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT",
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_order_discounts_orders_order_id",
+                table: "order_discounts",
+                column: "order_id",
+                principalTable: "orders",
+                principalColumn: "id",
+                onDeleteSql: "CASCADE",
+                nullable: false);
         }
 
         /// <inheritdoc />

@@ -11,80 +11,68 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<decimal>(
-                name: "loyalty_discount_amount",
-                table: "orders",
-                type: "decimal(18,4)",
-                nullable: false,
-                defaultValue: 0m);
+            // This migration failed partway through on at least one environment: the four
+            // AddColumn calls below committed (this project's startup runner executes each
+            // migration's SQL directly without a wrapping transaction — see Program.cs), but the
+            // migration was never recorded as applied, so retrying replayed the whole Up() from
+            // scratch and blew up on "Duplicate column name 'loyalty_discount_amount'". The most
+            // likely original failure point is the CreateTable's inline FK just below: branches
+            // was created in an earlier migration, so its actual collation may not match whatever
+            // this new FK column gets from the server's ambient default — the same
+            // incompatible-collation bug MigrationCollationHelper exists to fix (see
+            // AddHrmShiftsAndAttendance for the first occurrence of this exact failure mode).
+            // Every statement here is now guarded so re-running is safe regardless of how far a
+            // previous attempt got. See MigrationIdempotencyHelper.
+            migrationBuilder.AddColumnIfNotExists("orders", "loyalty_discount_amount", "decimal(18,4) NOT NULL DEFAULT 0.0");
+            migrationBuilder.AddColumnIfNotExists("orders", "loyalty_points_redeemed", "decimal(18,4) NOT NULL DEFAULT 0.0");
+            migrationBuilder.AddColumnIfNotExists("loyalty_transactions", "expired_flag", "tinyint(1) NOT NULL DEFAULT FALSE");
+            migrationBuilder.AddColumnIfNotExists("loyalty_transactions", "monetary_value", "decimal(18,4) NULL");
 
-            migrationBuilder.AddColumn<decimal>(
-                name: "loyalty_points_redeemed",
-                table: "orders",
-                type: "decimal(18,4)",
-                nullable: false,
-                defaultValue: 0m);
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS `loyalty_programs` (
+                    `id` char(36) NOT NULL,
+                    `branch_id` char(36) NULL,
+                    `program_name` varchar(255) NOT NULL,
+                    `description` longtext NULL,
+                    `logo_url` longtext NULL,
+                    `brand_color` varchar(20) NULL,
+                    `points_per_currency_unit` decimal(18,4) NOT NULL,
+                    `redemption_value_per_point` decimal(18,4) NOT NULL,
+                    `min_points_to_redeem` int NOT NULL,
+                    `max_redeem_pct_of_order` decimal(18,4) NULL,
+                    `points_expiry_days` int NULL,
+                    `silver_threshold` decimal(18,4) NOT NULL,
+                    `gold_threshold` decimal(18,4) NOT NULL,
+                    `platinum_threshold` decimal(18,4) NOT NULL,
+                    `silver_earn_multiplier` decimal(18,4) NOT NULL,
+                    `gold_earn_multiplier` decimal(18,4) NOT NULL,
+                    `platinum_earn_multiplier` decimal(18,4) NOT NULL,
+                    `is_active` tinyint(1) NOT NULL,
+                    `created_at` datetime(6) NOT NULL,
+                    `updated_at` datetime(6) NOT NULL,
+                    PRIMARY KEY (`id`)
+                );
+            ");
 
-            migrationBuilder.AddColumn<bool>(
-                name: "expired_flag",
-                table: "loyalty_transactions",
-                type: "tinyint(1)",
-                nullable: false,
-                defaultValue: false);
+            // Fixed seed id, so a plain INSERT would fail on 'Duplicate entry' if a prior partial
+            // run already got this far — IGNORE makes it a no-op instead.
+            migrationBuilder.Sql(@"
+                INSERT IGNORE INTO `loyalty_programs`
+                    (`id`, `branch_id`, `brand_color`, `created_at`, `description`, `gold_earn_multiplier`, `gold_threshold`, `is_active`, `logo_url`, `max_redeem_pct_of_order`, `min_points_to_redeem`, `platinum_earn_multiplier`, `platinum_threshold`, `points_expiry_days`, `points_per_currency_unit`, `program_name`, `redemption_value_per_point`, `silver_earn_multiplier`, `silver_threshold`, `updated_at`)
+                VALUES
+                    ('00000000-0000-0000-0000-000000000001', NULL, '#7c3aed', '2026-07-21 00:00:00.000000', NULL, 1.0, 5000.0, TRUE, NULL, 50.0, 100, 1.0, 10000.0, 365, 1.0, 'Loyalty Rewards', 0.01, 1.0, 1000.0, '2026-07-21 00:00:00.000000');
+            ");
 
-            migrationBuilder.AddColumn<decimal>(
-                name: "monetary_value",
-                table: "loyalty_transactions",
-                type: "decimal(18,4)",
-                nullable: true);
+            migrationBuilder.CreateIndexIfNotExists("IX_loyalty_programs_branch_id", "loyalty_programs", "`branch_id`", unique: true);
 
-            migrationBuilder.CreateTable(
-                name: "loyalty_programs",
-                columns: table => new
-                {
-                    id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    branch_id = table.Column<Guid>(type: "char(36)", nullable: true),
-                    program_name = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false),
-                    description = table.Column<string>(type: "longtext", nullable: true),
-                    logo_url = table.Column<string>(type: "longtext", nullable: true),
-                    brand_color = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: true),
-                    points_per_currency_unit = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    redemption_value_per_point = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    min_points_to_redeem = table.Column<int>(type: "int", nullable: false),
-                    max_redeem_pct_of_order = table.Column<decimal>(type: "decimal(18,4)", nullable: true),
-                    points_expiry_days = table.Column<int>(type: "int", nullable: true),
-                    silver_threshold = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    gold_threshold = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    platinum_threshold = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    silver_earn_multiplier = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    gold_earn_multiplier = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    platinum_earn_multiplier = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    is_active = table.Column<bool>(type: "tinyint(1)", nullable: false),
-                    created_at = table.Column<DateTime>(type: "datetime(6)", nullable: false),
-                    updated_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_loyalty_programs", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_loyalty_programs_branches_branch_id",
-                        column: x => x.branch_id,
-                        principalTable: "branches",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.SetNull);
-                })
-                .Annotation("MySQL:Charset", "utf8mb4");
-
-            migrationBuilder.InsertData(
-                table: "loyalty_programs",
-                columns: new[] { "id", "branch_id", "brand_color", "created_at", "description", "gold_earn_multiplier", "gold_threshold", "is_active", "logo_url", "max_redeem_pct_of_order", "min_points_to_redeem", "platinum_earn_multiplier", "platinum_threshold", "points_expiry_days", "points_per_currency_unit", "program_name", "redemption_value_per_point", "silver_earn_multiplier", "silver_threshold", "updated_at" },
-                values: new object[] { new Guid("00000000-0000-0000-0000-000000000001"), null, "#7c3aed", new DateTime(2026, 7, 21, 0, 0, 0, 0, DateTimeKind.Utc), null, 1m, 5000m, true, null, 50m, 100, 1m, 10000m, 365, 1m, "Loyalty Rewards", 0.01m, 1m, 1000m, new DateTime(2026, 7, 21, 0, 0, 0, 0, DateTimeKind.Utc) });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_loyalty_programs_branch_id",
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_loyalty_programs_branches_branch_id",
                 table: "loyalty_programs",
                 column: "branch_id",
-                unique: true);
+                principalTable: "branches",
+                principalColumn: "id",
+                onDeleteSql: "SET NULL",
+                nullable: true);
         }
 
         /// <inheritdoc />
