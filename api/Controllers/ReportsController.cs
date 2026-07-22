@@ -3217,6 +3217,37 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             kpis, headers, rows, $"loyalty-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
+    // Separate export (own headers/rows shape) rather than folding into ExportLoyaltyReport
+    // above — BuildExportFile only writes one flat table per file, and the branch table's
+    // columns don't line up with the customer table's.
+    [HttpGet("loyalty/customers/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportLoyaltyCustomersReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildLoyaltyReportAsync(rangeFrom, rangeTo, branchId);
+        var headers = new[] { "Customer", "Phone", "Branch(es)", "Tier", "Current Balance", "Points Earned", "Points Redeemed", "Points Expired", "Redemption Value (SAR)", "Last Activity" };
+        var rows = result.ByCustomer.Select(r => new object?[]
+        {
+            r.CustomerName, r.Phone, r.Branches, r.Tier, r.CurrentBalance, r.PointsEarned, r.PointsRedeemed, r.PointsExpired, r.RedemptionValue, r.LastActivityAt.ToString("yyyy-MM-dd HH:mm"),
+        }).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+            $"{{\"report\":\"loyalty_customers\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.ByCustomer.Count}}}");
+        var kpis = new (string, string)[]
+        {
+            ("Points Earned", result.Kpis.TotalPointsEarned.ToString("0.##")),
+            ("Points Redeemed", result.Kpis.TotalPointsRedeemed.ToString("0.##")),
+            ("Points Expired", result.Kpis.TotalPointsExpired.ToString("0.##")),
+            ("Redemption Value (SAR)", result.Kpis.TotalRedemptionValue.ToString("0.##")),
+            ("Active Members", result.Kpis.TotalActiveMembers.ToString()),
+        };
+        return BuildExportFile(format, "Loyalty Program Report — By Customer", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            kpis, headers, rows, $"loyalty-customers-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
     private async Task<LoyaltyReportResult> BuildLoyaltyReportAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId)
     {
         // Same branch-claim override every other report in this controller applies — a Branch
@@ -3241,6 +3272,9 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             t.TransactionType,
             t.Points,
             t.MonetaryValue,
+            t.CreatedAt,
+            CustomerName = t.Customer!.FullName,
+            CustomerPhone = t.Customer!.Phone,
             CustomerTier = t.Customer!.Tier,
             CustomerBalance = t.Customer!.LoyaltyBalance,
         }).ToListAsync();
@@ -3268,9 +3302,42 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .Select(g => new LoyaltyTierRow { Tier = g.Key, Members = g.Count(), TotalBalance = g.Sum(t => t.CustomerBalance) })
             .ToList();
 
+        // Full id->name map, not just the (possibly branch-filtered) `branches` list above — a
+        // customer transacting at a branch outside the current filter/active set (e.g. it was
+        // since deactivated) should still show a real name here instead of falling through to
+        // the "—" placeholder.
+        var branchNameMap = await db.Branches.ToDictionaryAsync(b => b.Id, b => b.Name);
+        var byCustomer = txns
+            .GroupBy(t => t.CustomerId)
+            .Select(g =>
+            {
+                var first = g.First();
+                var branchNames = g.Where(t => t.BranchId.HasValue)
+                    .Select(t => t.BranchId!.Value).Distinct()
+                    .Select(id => branchNameMap.GetValueOrDefault(id, "—"))
+                    .OrderBy(n => n).ToList();
+                return new LoyaltyCustomerRow
+                {
+                    CustomerId = g.Key,
+                    CustomerName = first.CustomerName,
+                    Phone = first.CustomerPhone,
+                    Branches = string.Join(", ", branchNames),
+                    Tier = first.CustomerTier,
+                    CurrentBalance = first.CustomerBalance,
+                    PointsEarned = g.Where(t => t.TransactionType == "earn").Sum(t => t.Points),
+                    PointsRedeemed = -g.Where(t => t.TransactionType == "redeem").Sum(t => t.Points),
+                    PointsExpired = -g.Where(t => t.TransactionType == "expire").Sum(t => t.Points),
+                    RedemptionValue = g.Where(t => t.TransactionType == "redeem").Sum(t => t.MonetaryValue ?? 0),
+                    LastActivityAt = g.Max(t => t.CreatedAt),
+                };
+            })
+            .OrderByDescending(r => r.CurrentBalance)
+            .ToList();
+
         return new LoyaltyReportResult
         {
             ByBranch = rows,
+            ByCustomer = byCustomer,
             TierBreakdown = tierBreakdown,
             Kpis = new LoyaltyReportKpis
             {
@@ -4210,6 +4277,24 @@ public sealed class LoyaltyTierRow
     public decimal TotalBalance { get; init; }
 }
 
+public sealed class LoyaltyCustomerRow
+{
+    public Guid CustomerId { get; init; }
+    public string CustomerName { get; init; } = "";
+    public string Phone { get; init; } = "";
+    // Comma-joined names of every branch this customer had loyalty activity at within the
+    // selected range — a customer can earn/redeem at more than one branch, so this isn't a
+    // single BranchId the way LoyaltyReportRow's is.
+    public string Branches { get; init; } = "";
+    public string Tier { get; init; } = "";
+    public decimal CurrentBalance { get; init; }
+    public decimal PointsEarned { get; init; }
+    public decimal PointsRedeemed { get; init; }
+    public decimal PointsExpired { get; init; }
+    public decimal RedemptionValue { get; init; }
+    public DateTime LastActivityAt { get; init; }
+}
+
 public sealed class LoyaltyReportKpis
 {
     public decimal TotalPointsEarned { get; init; }
@@ -4222,6 +4307,7 @@ public sealed class LoyaltyReportKpis
 public sealed class LoyaltyReportResult
 {
     public List<LoyaltyReportRow> ByBranch { get; init; } = [];
+    public List<LoyaltyCustomerRow> ByCustomer { get; init; } = [];
     public List<LoyaltyTierRow> TierBreakdown { get; init; } = [];
     public LoyaltyReportKpis Kpis { get; init; } = new();
 }

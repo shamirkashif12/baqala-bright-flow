@@ -394,6 +394,8 @@ export const api = {
     request<LoyaltyReportResult>(`/api/reports/loyalty${toQuery(params)}`),
   exportLoyaltyReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/loyalty/export${toQuery(params)}`),
+  exportLoyaltyCustomersReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/loyalty/customers/export${toQuery(params)}`),
 
   // Finance
   getExpenses: (params?: { branchId?: string; status?: string; paymentMethod?: string; expenseTypeId?: string }) => {
@@ -1430,8 +1432,15 @@ export interface LoyaltyReportRow {
   redemptionValue: number; activeMembers: number;
 }
 
+export interface LoyaltyCustomerRow {
+  customerId: string; customerName: string; phone: string; branches: string; tier: string;
+  currentBalance: number; pointsEarned: number; pointsRedeemed: number; pointsExpired: number;
+  redemptionValue: number; lastActivityAt: string;
+}
+
 export interface LoyaltyReportResult {
   byBranch: LoyaltyReportRow[];
+  byCustomer: LoyaltyCustomerRow[];
   tierBreakdown: Array<{ tier: string; members: number; totalBalance: number }>;
   kpis: {
     totalPointsEarned: number; totalPointsRedeemed: number; totalPointsExpired: number;
