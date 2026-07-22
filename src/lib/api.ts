@@ -184,11 +184,11 @@ export const api = {
     request<Product>("/api/products", { method: "POST", body: JSON.stringify(data) }),
   updateProduct: (id: string, data: Partial<Product>) =>
     request<Product>(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  // A caller with Inventory:Approve deletes (discontinues) immediately — response body is empty
-  // (204). Anyone else's request is queued in the Approval Center instead (202, with a message
-  // and approvalRequestId) and the product stays live until a manager decides it.
-  deleteProduct: (id: string) =>
-    request<{ message: string; approvalRequestId: string } | undefined>(`/api/products/${id}`, { method: "DELETE" }),
+  // Always queues in the Approval Center (202, with a message and approvalRequestId) — no
+  // self-approve bypass, even for a caller who holds Inventory:Approve. The product stays live
+  // until a manager (someone other than whoever requested it) decides it.
+  deleteProduct: (id: string, reason?: string) =>
+    request<{ message: string; approvalRequestId: string }>(`/api/products/${id}`, { method: "DELETE", body: JSON.stringify({ reason }) }),
 
   // Pricing (FRD §12) — branch / customer-tier / scheduled / pack price rules.
   //
@@ -246,8 +246,9 @@ export const api = {
     request<Category>("/api/categories", { method: "POST", body: JSON.stringify(data) }),
   updateCategory: (id: string, data: Partial<Category>) =>
     request<Category>(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteCategory: (id: string) =>
-    request<void>(`/api/categories/${id}`, { method: "DELETE" }),
+  // Always queues in the Approval Center — same no-bypass rule as deleteProduct above.
+  deleteCategory: (id: string, reason?: string) =>
+    request<{ message: string; approvalRequestId: string }>(`/api/categories/${id}`, { method: "DELETE", body: JSON.stringify({ reason }) }),
 
   // Inventory
   getStock: (params?: { branchId?: string; lowStock?: boolean; categoryId?: string }) => {

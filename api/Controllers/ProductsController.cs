@@ -182,7 +182,7 @@ public class ProductsController(
     // request immediately.
     [RequirePermission("Inventory", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(Guid id, [FromBody] ItemDeletionRequest? req)
     {
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
@@ -193,6 +193,12 @@ public class ProductsController(
             EntityType = "Product",
             EntityId = product.Id,
             RequestedBy = CallerId() ?? Guid.Empty,
+            Reason = req?.Reason,
+            // Snapshot the name so the Approval Center's Details column shows what's actually being
+            // deleted instead of a generic "Product deletion" — and so it still means something
+            // after approval, since a hard-deleted Category (unlike a soft-deleted Product) no
+            // longer exists to look the name up from at that point.
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Name = product.Name, Sku = product.Sku }),
         };
         db.ApprovalRequests.Add(pending);
         await db.SaveChangesAsync();
@@ -236,7 +242,7 @@ public class ProductsController(
     // "item_deletion" request type and gets the same no-exceptions treatment.
     [RequirePermission("Inventory", PermAction.Delete)]
     [HttpDelete("/api/categories/{id:guid}")]
-    public async Task<IActionResult> DeleteCategory(Guid id)
+    public async Task<IActionResult> DeleteCategory(Guid id, [FromBody] ItemDeletionRequest? req)
     {
         var category = await db.Categories.FindAsync(id);
         if (category is null) return NotFound();
@@ -247,6 +253,10 @@ public class ProductsController(
             EntityType = "Category",
             EntityId = category.Id,
             RequestedBy = CallerId() ?? Guid.Empty,
+            Reason = req?.Reason,
+            // Snapshot — a Category is hard-deleted once approved, so there'd be nothing left to
+            // look the name up from at that point.
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Name = category.Name }),
         };
         db.ApprovalRequests.Add(pending);
         await db.SaveChangesAsync();
@@ -282,3 +292,5 @@ public class ProductsController(
         return NoContent();
     }
 }
+
+public record ItemDeletionRequest(string? Reason);

@@ -806,6 +806,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deletingProduct, setDeletingProduct] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
   const [form, setForm] = useState({
     name: "", sku: "", barcode: "", categoryId: "",
     saleUnitType: "single" as "single" | "pack", itemsPerPack: "",
@@ -890,13 +891,12 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     if (!item?.product?.id) return;
     setDeletingProduct(true);
     try {
-      const res = await api.deleteProduct(item.product.id);
-      // No self-approve bypass for product deletion (unlike Discounts/Refunds/Void) — every
-      // request queues in the Approval Center and always needs a second person's decision, even
-      // from a manager. res.approvalRequestId is always present; kept as a guard rather than an
-      // assumption in case that ever changes.
-      toast.success(res?.approvalRequestId ? "Deletion request sent for manager approval." : "Product deleted.");
+      await api.deleteProduct(item.product.id, deleteReason.trim() || undefined);
+      // Every deletion queues in the Approval Center and always needs a second person's decision,
+      // even from a manager — no self-approve bypass (unlike Discounts/Refunds/Void).
+      toast.success("Deletion request sent for manager approval.");
       setConfirmDelete(false);
+      setDeleteReason("");
       onDone(); onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to delete this product.");
@@ -1102,7 +1102,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         </Button>
       </DialogContent>
 
-      <Dialog open={confirmDelete} onOpenChange={v => !v && setConfirmDelete(false)}>
+      <Dialog open={confirmDelete} onOpenChange={v => { if (!v) { setConfirmDelete(false); setDeleteReason(""); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Delete Product</DialogTitle></DialogHeader>
           <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
@@ -1114,8 +1114,13 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
               can't action your own request — and only takes effect once approved.
             </p>
           </div>
+          <div className="mt-1">
+            <label className="text-xs text-muted-foreground">Reason (optional)</label>
+            <Textarea className="resize-none text-sm h-16 mt-1" placeholder="e.g. Discontinued by supplier, duplicate SKU…"
+              value={deleteReason} onChange={e => setDeleteReason(e.target.value)} />
+          </div>
           <div className="flex justify-end gap-2 mt-1">
-            <Button variant="outline" onClick={() => setConfirmDelete(false)} disabled={deletingProduct}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setConfirmDelete(false); setDeleteReason(""); }} disabled={deletingProduct}>Cancel</Button>
             <Button variant="destructive" onClick={handleDeleteProduct} disabled={deletingProduct}>
               {deletingProduct ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete Product
             </Button>
