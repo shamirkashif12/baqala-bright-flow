@@ -127,9 +127,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
         branchId,
         customer,
         tobaccoFeeEnabled,
+        tobaccoRule,
         priceMap,
       }),
-    [lines, coupon, products, activeDiscounts, activeOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled, priceMap],
+    [lines, coupon, products, activeDiscounts, activeOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled, tobaccoRule, priceMap],
   );
 
   return (

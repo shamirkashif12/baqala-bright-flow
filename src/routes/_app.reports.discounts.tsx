@@ -19,7 +19,7 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recha
 
 export const Route = createFileRoute("/_app/reports/discounts")({ component: Discounts });
 
-const TYPE_COLORS: Record<string, string> = { coupon: "var(--primary)", manual: "var(--warning)" };
+const TYPE_COLORS: Record<string, string> = { coupon: "var(--primary)", manual: "var(--warning)", loyalty: "var(--success)" };
 
 function firstOfMonthStr() {
   const d = new Date();
@@ -96,14 +96,16 @@ function Discounts() {
             <SelectItem value="all">All Types</SelectItem>
             <SelectItem value="coupon">Coupon</SelectItem>
             <SelectItem value="manual">Manual</SelectItem>
+            <SelectItem value="loyalty">Loyalty</SelectItem>
           </SelectContent>
         </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <MetricCard label="Total Discount Value" value={<><SARIcon />{fmt(kpis?.totalDiscountValue ?? 0)}</>} icon={Percent} accent="primary" />
         <MetricCard label="Manual Discount Value" value={<><SARIcon />{fmt(kpis?.manualDiscountValue ?? 0)}</>} icon={Wallet} accent="warning" />
+        <MetricCard label="Loyalty Discount Value" value={<><SARIcon />{fmt(kpis?.loyaltyDiscountValue ?? 0)}</>} icon={Wallet} accent="success" />
         <MetricCard label="Coupon Usage" value={String(kpis?.couponUsage ?? 0)} icon={Ticket} />
         <MetricCard label="Discount % of Sales" value={`${kpis?.discountPctOfSales ?? 0}%`} icon={Percent} accent="destructive" />
       </div>

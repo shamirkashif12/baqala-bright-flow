@@ -108,6 +108,12 @@ function TobaccoExcise() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
+      {data && (
+        <p className="text-xs text-muted-foreground">
+          {data.legalCompanyName} · CR: {data.commercialRegistrationNumber} · VAT Reg. No.: {data.vatRegistrationNumber}
+        </p>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
         <MetricCard label="Excise Sales Value" value={<><SARIcon />{fmt(kpis?.exciseSalesValue ?? 0)}</>} icon={Cigarette} accent="primary" />
         <MetricCard label="Excise Tax Amount" value={<><SARIcon />{fmt(kpis?.exciseTaxAmount ?? 0)}</>} icon={Coins} accent="warning" />
@@ -151,6 +157,12 @@ function TobaccoExcise() {
           ]}
           rows={data?.rows ?? []}
         />
+      )}
+      {!loading && (data?.rows.length ?? 0) > 0 && (
+        <div className="flex justify-end gap-6 text-sm font-semibold">
+          <span>Grand Total Excise: <SARIcon />{fmt((data?.rows ?? []).reduce((s, r) => s + r.exciseAmount, 0))}</span>
+          <span>Net Excise: <SARIcon />{fmt((data?.rows ?? []).reduce((s, r) => s + r.netExcise, 0))}</span>
+        </div>
       )}
     </PageShell>
   );

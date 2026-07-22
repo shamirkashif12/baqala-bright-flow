@@ -44,14 +44,12 @@ public class Discount
     [Column("end_date")]
     public DateTime? EndDate { get; set; }
 
-    // Eligibility gate — customer-tier/loyalty discounts must not auto-apply to
-    // anonymous walk-ins. When true, a customer must be selected at checkout.
+    // Eligibility gate — when true, a customer must be attached at checkout for the cashier to
+    // apply this discount (e.g. a "members only" discount). Tier-based eligibility was removed:
+    // that's the Loyalty Program's job now (per-tier earn multiplier), not the Discounts feature's
+    // — having both react to tier was confusing and the two could disagree.
     [Column("requires_customer")]
     public bool RequiresCustomer { get; set; } = false;
-
-    // Minimum customer.Tier required (standard | silver | gold | platinum), or null for none.
-    [MaxLength(20), Column("min_customer_tier")]
-    public string? MinCustomerTier { get; set; }
 
     // Product ids carved out of an "all"/"branch"/"category" scoped discount, stored as a JSON
     // array (e.g. ["<guid>","<guid>"]) — mirrors the JSON-column convention already used for

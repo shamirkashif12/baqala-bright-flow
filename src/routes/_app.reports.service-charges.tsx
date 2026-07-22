@@ -14,10 +14,10 @@ import { api, type FeeReport as FeeReportData, type FeeRow, type ReportExportFor
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { DollarSign, Receipt, TrendingUp } from "lucide-react";
+import { Receipt, TrendingUp, Truck } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
-export const Route = createFileRoute("/_app/reports/fees")({ component: FeeReportPage });
+export const Route = createFileRoute("/_app/reports/service-charges")({ component: FeeReportPage });
 
 function firstOfMonthStr() {
   const d = new Date();
@@ -53,7 +53,7 @@ function FeeReportPage() {
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportFeeReport({ from, to, branchId: branchId !== "all" ? branchId : undefined, exportedBy: user?.id, format });
-      downloadBlob(blob, `fees-${from}-to-${to}.${format}`);
+      downloadBlob(blob, `service-charges-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
     }
@@ -65,13 +65,14 @@ function FeeReportPage() {
     (data?.rows ?? []).reduce<Record<string, { date: string; value: number }>>((acc, r) => {
       const day = r.dateTime.slice(0, 10);
       acc[day] ??= { date: day.slice(5), value: 0 };
-      acc[day].value += r.feeAmount;
+      acc[day].value += r.serviceChargeAmount;
       return acc;
     }, {})
   );
+  const grandTotal = (data?.rows ?? []).reduce((s, r) => s + r.serviceChargeAmount, 0);
 
   return (
-    <PageShell title="Fee Report" subtitle="Custom fees collected across transactions">
+    <PageShell title="Service Charges Report" subtitle="Business-configured surcharges (delivery fee, card surcharge) — not a tax. See Tobacco Excise Report for the tobacco tax.">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1">
           <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
@@ -90,15 +91,14 @@ function FeeReportPage() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Fees Collected" value={<><SARIcon />{fmt(kpis?.totalFeesCollected ?? 0)}</>} icon={DollarSign} accent="primary" />
-        <MetricCard label="Transactions with Fees" value={String(kpis?.transactionsWithFees ?? 0)} icon={Receipt} />
-        <MetricCard label="Avg Fee per Transaction" value={<><SARIcon />{fmt(kpis?.averageFeePerTransaction ?? 0)}</>} icon={TrendingUp} accent="success" />
-        <MetricCard label="Tobacco Fees" value={<><SARIcon />{fmt(kpis?.totalTobaccoFees ?? 0)}</>} icon={DollarSign} accent="warning" />
+      <div className="grid gap-4 md:grid-cols-3">
+        <MetricCard label="Total Service Charges" value={<><SARIcon />{fmt(kpis?.totalServiceCharges ?? 0)}</>} icon={Truck} accent="primary" />
+        <MetricCard label="Transactions with Charge" value={String(kpis?.transactionsWithFees ?? 0)} icon={Receipt} />
+        <MetricCard label="Avg Charge per Transaction" value={<><SARIcon />{fmt(kpis?.averageFeePerTransaction ?? 0)}</>} icon={TrendingUp} accent="success" />
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">
-        <h3 className="font-semibold mb-4">Fee Trend</h3>
+        <h3 className="font-semibold mb-4">Service Charge Trend</h3>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -113,20 +113,26 @@ function FeeReportPage() {
       {loading ? (
         <div className="text-muted-foreground text-sm py-4">Loading…</div>
       ) : (
-        <PaginatedDataTable
-          columns={[
-            { key: "feeId", label: "Fee ID" },
-            { key: "feeType", label: "Fee Type" },
-            { key: "invoiceNo", label: "Invoice No." },
-            { key: "dateTime", label: "Date/Time", render: (r: FeeRow) => new Date(r.dateTime).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" }) },
-            { key: "branch", label: "Branch" },
-            { key: "cashier", label: "Cashier" },
-            { key: "customerType", label: "Customer Type" },
-            { key: "feeAmount", label: "Fee Amount", render: (r: FeeRow) => <span className="font-semibold"><SARIcon />{fmt(r.feeAmount)}</span> },
-            { key: "netFee", label: "Net Fee", render: (r: FeeRow) => <><SARIcon />{fmt(r.netFee)}</> },
-          ]}
-          rows={data?.rows ?? []}
-        />
+        <>
+          <PaginatedDataTable
+            columns={[
+              { key: "invoiceNo", label: "Invoice No." },
+              { key: "dateTime", label: "Date/Time", render: (r: FeeRow) => new Date(r.dateTime).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" }) },
+              { key: "branch", label: "Branch" },
+              { key: "cashier", label: "Cashier" },
+              { key: "customerType", label: "Customer Type" },
+              { key: "chargeName", label: "Charge Name" },
+              { key: "serviceChargeAmount", label: "Service Charge Amount", render: (r: FeeRow) => <span className="font-semibold"><SARIcon />{fmt(r.serviceChargeAmount)}</span> },
+            ]}
+            rows={data?.rows ?? []}
+            emptyMessage="No service charges in this period."
+          />
+          {(data?.rows.length ?? 0) > 0 && (
+            <div className="flex justify-end mt-2 text-sm font-semibold">
+              Grand Total: <SARIcon />{fmt(grandTotal)}
+            </div>
+          )}
+        </>
       )}
     </PageShell>
   );

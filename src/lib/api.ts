@@ -396,6 +396,32 @@ export const api = {
   getCustomerLoyalty: (id: string) =>
     request<LoyaltyTransaction[]>(`/api/customers/${id}/loyalty`),
 
+  // Loyalty Program
+  getLoyaltyPrograms: (branchId?: string) =>
+    request<LoyaltyProgram[]>(`/api/loyalty/programs${branchId ? `?branchId=${branchId}` : ""}`),
+  getLoyaltyProgram: (id: string) =>
+    request<LoyaltyProgram>(`/api/loyalty/programs/${id}`),
+  getEffectiveLoyaltyProgram: (branchId: string) =>
+    request<LoyaltyProgram>(`/api/loyalty/programs/effective/${branchId}`),
+  createLoyaltyProgram: (data: Partial<LoyaltyProgram>) =>
+    request<LoyaltyProgram>("/api/loyalty/programs", { method: "POST", body: JSON.stringify(data) }),
+  updateLoyaltyProgram: (id: string, data: Partial<LoyaltyProgram>) =>
+    request<LoyaltyProgram>(`/api/loyalty/programs/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteLoyaltyProgram: (id: string) =>
+    request<void>(`/api/loyalty/programs/${id}`, { method: "DELETE" }),
+  // Public, unauthenticated — the branded loyalty landing page (no bearer token attached; request()
+  // only adds an Authorization header when one exists in localStorage, so these still work signed-out).
+  getPublicLoyaltyProgram: (branchId: string) =>
+    request<PublicLoyaltyProgram>(`/api/loyalty/public/${branchId}`),
+  lookupPublicLoyalty: (branchId: string, phone: string) =>
+    request<PublicLoyaltyLookup>(`/api/loyalty/public/${branchId}/lookup?phone=${encodeURIComponent(phone)}`),
+  getLoyaltyReport: (params?: { from?: string; to?: string; branchId?: string }) =>
+    request<LoyaltyReportResult>(`/api/reports/loyalty${toQuery(params)}`),
+  exportLoyaltyReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/loyalty/export${toQuery(params)}`),
+  exportLoyaltyCustomersReport: (params?: { from?: string; to?: string; branchId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/loyalty/customers/export${toQuery(params)}`),
+
   // Finance
   getExpenses: (params?: { branchId?: string; status?: string; paymentMethod?: string; expenseTypeId?: string }) => {
     const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
@@ -779,9 +805,9 @@ export const api = {
     requestBlob(`/api/reports/tax/export${toQuery(params)}`),
 
   getFeeReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string }) =>
-    request<FeeReport>(`/api/reports/fees${toQuery(params)}`),
+    request<FeeReport>(`/api/reports/service-charges${toQuery(params)}`),
   exportFeeReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
-    requestBlob(`/api/reports/fees/export${toQuery(params)}`),
+    requestBlob(`/api/reports/service-charges/export${toQuery(params)}`),
 
   getTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string }) =>
     request<TobaccoExciseReport>(`/api/reports/tobacco-excise${toQuery(params)}`),
@@ -883,6 +909,7 @@ export const api = {
     vatNumber?: string; crNumber?: string; customerName?: string; paymentMethod?: string;
     items: { name: string; qty: number; price: number }[];
     subtotal: number; discount: number; vat: number; total: number; taxLabel: string;
+    loyaltyPointsRedeemed?: number; loyaltyDiscountAmount?: number;
     tobaccoExcise?: number;
     fees?: { name: string; amount: number }[];
     splitBreakdown?: { method: string; amount: number }[];
@@ -1201,7 +1228,7 @@ export interface Category {
 export interface Product {
   id: string; sku: string; barcode?: string; name: string; nameAr?: string;
   categoryId?: string; brand?: string; basePrice: number; costPrice?: number;
-  taxPercentage: number; customFee: number; reorderLevel: number;
+  taxPercentage: number; reorderLevel: number;
   status: string; weightBased: boolean; isTobacco: boolean;
   discount?: number; discountType?: "percentage" | "fixed";
   imageUrl?: string;
@@ -1348,8 +1375,19 @@ export interface RecallImpact {
 export interface Order {
   id: string; orderNumber: string; source: string; branchId: string;
   customerId?: string; cashierId?: string; subtotal: number; discountAmount: number;
+  // Breakout of how much of discountAmount came from loyalty points redemption — the server
+  // clamps loyaltyPointsRedeemed to the customer's balance/program caps, so what's echoed back
+  // on the response may be lower than what was sent.
+  loyaltyPointsRedeemed?: number; loyaltyDiscountAmount?: number;
   taxAmount: number; customFeeAmount?: number; tobaccoFeeAmount?: number; totalAmount: number; paymentStatus: string; orderStatus: string;
   createdAt: string; items?: OrderItem[]; payments?: OrderPayment[];
+  // Named breakdown of discountAmount — which manually-applied Discount(s) contributed and how
+  // much each contributed (coupon's own share is separately identified via couponId, loyalty's
+  // via loyaltyDiscountAmount above).
+  discounts?: Array<{ id?: string; discountId?: string; name: string; amount: number }>;
+  // Named breakdown of customFeeAmount — which configured service charge(s) (Delivery Service
+  // Fee, Card Payment Surcharge, etc.) contributed and how much each contributed.
+  serviceCharges?: Array<{ id?: string; taxFeeRuleId?: string; name: string; amount: number }>;
   branch?: { id: string; name: string };
   cashier?: { id: string; fullName: string };
   customer?: { id: string; fullName: string; phone: string; email?: string };
@@ -1423,12 +1461,64 @@ export interface Customer {
   id: string; customerCode: string; fullName: string; phone: string;
   email?: string; loyaltyBalance: number; totalSpend: number;
   visitCount?: number; tier: string; status: string; createdAt?: string;
+  preferredBranchId?: string;
 }
 
 export interface LoyaltyTransaction {
   id: string; customerId: string; orderId?: string; branchId?: string;
   transactionType: string; points: number; balanceAfter: number;
+  monetaryValue?: number;
   description?: string; expiryDate?: string; createdAt: string;
+}
+
+export interface LoyaltyProgram {
+  id: string; branchId?: string;
+  programName: string; description?: string; logoUrl?: string; brandColor?: string;
+  pointsPerCurrencyUnit: number; redemptionValuePerPoint: number;
+  minPointsToRedeem: number;
+  // null = no cap / never expires. Must be sent as an explicit null in requests, not omitted —
+  // omitting the key leaves it out of the JSON body entirely, and the server's model binder then
+  // falls back to the field's non-null default (50 / 365) instead of actually clearing it.
+  maxRedeemPctOfOrder?: number | null; pointsExpiryDays?: number | null;
+  silverThreshold: number; goldThreshold: number; platinumThreshold: number;
+  silverEarnMultiplier: number; goldEarnMultiplier: number; platinumEarnMultiplier: number;
+  isActive: boolean; createdAt?: string; updatedAt?: string;
+}
+
+export interface PublicLoyaltyProgram {
+  branchName: string; programName: string; description?: string;
+  logoUrl?: string; brandColor?: string;
+  pointsPerCurrencyUnit: number; redemptionValuePerPoint: number; minPointsToRedeem: number;
+}
+
+export interface PublicLoyaltyLookup {
+  fullName: string; tier: string; loyaltyBalance: number;
+  recentHistory: Array<{
+    transactionType: string; points: number; monetaryValue?: number;
+    createdAt: string; description?: string;
+  }>;
+}
+
+export interface LoyaltyReportRow {
+  branchId: string; branchName: string;
+  pointsEarned: number; pointsRedeemed: number; pointsExpired: number;
+  redemptionValue: number; activeMembers: number;
+}
+
+export interface LoyaltyCustomerRow {
+  customerId: string; customerName: string; phone: string; branches: string; tier: string;
+  currentBalance: number; pointsEarned: number; pointsRedeemed: number; pointsExpired: number;
+  redemptionValue: number; lastActivityAt: string;
+}
+
+export interface LoyaltyReportResult {
+  byBranch: LoyaltyReportRow[];
+  byCustomer: LoyaltyCustomerRow[];
+  tierBreakdown: Array<{ tier: string; members: number; totalBalance: number }>;
+  kpis: {
+    totalPointsEarned: number; totalPointsRedeemed: number; totalPointsExpired: number;
+    totalRedemptionValue: number; totalActiveMembers: number;
+  };
 }
 
 export interface ExpenseType {
@@ -1457,7 +1547,7 @@ export interface Discount {
   discountType: string; // percentage | fixed
   value: number; isActive: boolean;
   startDate?: string; endDate?: string; createdAt: string;
-  requiresCustomer?: boolean; minCustomerTier?: string; // standard | silver | gold | platinum
+  requiresCustomer?: boolean;
   // JSON array of product ids carved out of an all/branch/category scoped discount
   excludedProductIdsJson?: string;
   product?: { id: string; name: string; sku: string };
@@ -1482,7 +1572,7 @@ export interface Offer {
 
 export interface TaxFeeRule {
   id: string; ruleName: string; ruleType: string; vatPercentage: number;
-  customFeeAmount: number; excisePercentage: number; isTobacco: boolean;
+  customFeeAmount: number; excisePercentage: number; minimumExciseAmount: number; isTobacco: boolean;
   applicableTo: string; status: string; effectiveDate: string;
 }
 
@@ -2140,10 +2230,11 @@ export interface AuditTrailReport {
 
 export interface DiscountRow {
   transactionId: string; invoiceNo: string; dateTime: string; branch: string; cashier: string; customerType: string;
-  discountType: string; couponCode?: string; discountPct: number; discountAmount: number; netSalesAfterDiscount: number;
+  discountType: string; couponCode?: string; discountPct: number; discountAmount: number;
+  loyaltyDiscountAmount: number; netSalesAfterDiscount: number;
 }
 export interface DiscountsReport {
-  kpis: { totalDiscountValue: number; manualDiscountValue: number; couponUsage: number; discountPctOfSales: number };
+  kpis: { totalDiscountValue: number; manualDiscountValue: number; loyaltyDiscountValue: number; couponUsage: number; discountPctOfSales: number };
   rows: DiscountRow[];
 }
 
@@ -2165,12 +2256,14 @@ export interface TaxReport {
   rows: TaxReportRow[];
 }
 
+// Business-configured surcharges (delivery fee, card surcharge) — NOT a tax. KSA only recognizes
+// VAT and tobacco excise as real taxes; see TobaccoExciseReport for that.
 export interface FeeRow {
-  feeId: string; feeType: string; transactionId: string; invoiceNo: string; dateTime: string; branch: string;
-  cashier: string; customerType: string; feeAmount: number; netFee: number;
+  transactionId: string; invoiceNo: string; dateTime: string; branch: string;
+  cashier: string; customerType: string; chargeName: string; serviceChargeAmount: number;
 }
 export interface FeeReport {
-  kpis: { totalFeesCollected: number; transactionsWithFees: number; averageFeePerTransaction: number; totalTobaccoFees: number };
+  kpis: { totalServiceCharges: number; transactionsWithFees: number; averageFeePerTransaction: number };
   rows: FeeRow[];
 }
 
@@ -2182,6 +2275,9 @@ export interface TobaccoExciseRow {
 export interface TobaccoExciseReport {
   kpis: { exciseSalesValue: number; exciseTaxAmount: number; tobaccoUnitsSold: number; exciseRefunds: number; topTobaccoSku?: string; complianceExceptions: number };
   rows: TobaccoExciseRow[];
+  legalCompanyName: string;
+  commercialRegistrationNumber: string;
+  vatRegistrationNumber: string;
 }
 
 export interface ProfitMarginRow {

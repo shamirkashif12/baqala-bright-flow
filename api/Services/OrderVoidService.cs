@@ -59,6 +59,58 @@ public class OrderVoidService(BaqalaDbContext db, IBatchConsumptionService batch
             }
         }
 
+        // Reverse any loyalty ledger activity this order created — claw back earned points,
+        // restore redeemed points, and roll back TotalSpend/Tier, mirroring the earn/redeem
+        // logic in OrdersController.Create().
+        if (order.CustomerId.HasValue)
+        {
+            var customer = await db.Customers.FindAsync(order.CustomerId.Value);
+            if (customer != null)
+            {
+                var loyaltyTxns = await db.LoyaltyTransactions
+                    .Where(t => t.OrderId == order.Id && (t.TransactionType == "earn" || t.TransactionType == "redeem"))
+                    .ToListAsync();
+
+                foreach (var txn in loyaltyTxns)
+                {
+                    // earn (+N) -> clawback, clamped so balance never goes negative if the
+                    // customer already spent those points elsewhere since; redeem (-N) -> restore.
+                    var reversal = txn.TransactionType == "earn"
+                        ? -Math.Min(txn.Points, customer.LoyaltyBalance)
+                        : -txn.Points;
+                    if (reversal == 0) continue;
+
+                    customer.LoyaltyBalance += reversal;
+                    db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                    {
+                        Id = Guid.NewGuid(),
+                        CustomerId = customer.Id,
+                        OrderId = order.Id,
+                        BranchId = order.BranchId,
+                        TransactionType = "adjust",
+                        Points = reversal,
+                        BalanceAfter = customer.LoyaltyBalance,
+                        MonetaryValue = txn.MonetaryValue,
+                        Description = $"Reversal for voided order {order.OrderNumber}",
+                        CreatedAt = DateTime.UtcNow,
+                    });
+                }
+
+                customer.TotalSpend = Math.Max(0, customer.TotalSpend - order.TotalAmount);
+                // Tier thresholds are global (see OrdersController.ResolveGlobalTierConfigAsync) —
+                // never resolved per this order's branch, so voiding an order doesn't recompute
+                // tier against a different branch's numbers than whatever last set it.
+                var tierConfig = await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == null && p.IsActive);
+                if (tierConfig != null)
+                {
+                    customer.Tier = customer.TotalSpend >= tierConfig.PlatinumThreshold ? "platinum"
+                        : customer.TotalSpend >= tierConfig.GoldThreshold ? "gold"
+                        : customer.TotalSpend >= tierConfig.SilverThreshold ? "silver"
+                        : "standard";
+                }
+            }
+        }
+
         order.OrderStatus = "cancelled";
         order.VoidReason = reason;
         order.UpdatedAt = DateTime.UtcNow;

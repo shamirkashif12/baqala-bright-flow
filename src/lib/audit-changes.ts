@@ -22,7 +22,6 @@ const PRODUCT_FIELDS: { key: keyof Snapshot; label: string; kind: ChangeKind; mo
   { key: "basePrice", label: "Selling price", kind: "price", money: true },
   { key: "costPrice", label: "Cost price", kind: "price", money: true },
   { key: "taxPercentage", label: "VAT %", kind: "other" },
-  { key: "customFee", label: "Custom fee", kind: "other", money: true },
   { key: "reorderLevel", label: "Reorder level", kind: "quantity" },
   { key: "status", label: "Status", kind: "status" },
   { key: "isTobacco", label: "Tobacco / excise", kind: "other" },
@@ -45,7 +44,7 @@ interface Snapshot {
   items?: SnapshotItem[];
   // Catalog snapshot (ProductsController) — "Added Items" / "Price Changes" / "Deleted Items".
   name?: string; sku?: string; barcode?: string | null;
-  basePrice?: number; costPrice?: number; taxPercentage?: number; customFee?: number;
+  basePrice?: number; costPrice?: number; taxPercentage?: number;
   reorderLevel?: number; isTobacco?: boolean; categoryId?: string | null;
   // Batch receipt (InventoryController.ReceiveBatch) — "Added Items" as stock, not catalog.
   batchNumber?: string; purchaseCost?: number; expiryDate?: string | null;

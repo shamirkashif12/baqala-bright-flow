@@ -3041,17 +3041,18 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var includeMargin = await CanViewFinanceAsync();
         if (!includeMargin) MaskDiscountsMargin(result);
         var headers = includeMargin
-            ? new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Discount Type", "Coupon Code", "Discount %", "Discount Amount", "Net Sales After Discount", "Margin Impact" }
-            : new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Discount Type", "Coupon Code", "Discount %", "Discount Amount", "Net Sales After Discount" };
+            ? new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Discount Type", "Coupon Code", "Discount %", "Discount Amount", "Loyalty Amount", "Net Sales After Discount", "Margin Impact" }
+            : new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Discount Type", "Coupon Code", "Discount %", "Discount Amount", "Loyalty Amount", "Net Sales After Discount" };
         var rows = result.Rows.Select(r => includeMargin
-            ? new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.DiscountType, r.CouponCode, r.DiscountPct, r.DiscountAmount, r.NetSalesAfterDiscount, r.MarginImpact }
-            : new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.DiscountType, r.CouponCode, r.DiscountPct, r.DiscountAmount, r.NetSalesAfterDiscount }
+            ? new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.DiscountType, r.CouponCode, r.DiscountPct, r.DiscountAmount, r.LoyaltyDiscountAmount, r.NetSalesAfterDiscount, r.MarginImpact }
+            : new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.DiscountType, r.CouponCode, r.DiscountPct, r.DiscountAmount, r.LoyaltyDiscountAmount, r.NetSalesAfterDiscount }
         ).ToList();
         await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
             $"{{\"report\":\"discounts\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
         var kpis = new List<(string, string)>
         {
             ("Total Discount Value", result.Kpis.TotalDiscountValue.ToString("0.##")), ("Manual Discount Value", result.Kpis.ManualDiscountValue.ToString("0.##")),
+            ("Loyalty Discount Value", result.Kpis.LoyaltyDiscountValue.ToString("0.##")),
             ("Coupon Usage", result.Kpis.CouponUsage.ToString()), ("Discount % of Sales", result.Kpis.DiscountPctOfSales.ToString("0.0")),
         };
         if (includeMargin) kpis.Add(("Margin Impact", result.Kpis.MarginImpact?.ToString("0.##") ?? "N/A"));
@@ -3076,7 +3077,11 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
         var rows = orders.Select(o =>
         {
-            var type = o.CouponId.HasValue ? "coupon" : "manual";
+            // Coupon takes precedence in the (rare) case an order combines a coupon with loyalty
+            // redemption — same simplification this report already made for coupon+manual-discount
+            // combos (one row, one primary type). LoyaltyDiscountAmount below still captures the
+            // loyalty slice regardless of which bucket the row lands in.
+            var type = o.CouponId.HasValue ? "coupon" : o.LoyaltyDiscountAmount > 0 ? "loyalty" : "manual";
             return new DiscountRow
             {
                 TransactionId = o.Id.ToString()[..8], InvoiceNo = o.OrderNumber, DateTime = o.CreatedAt,
@@ -3084,7 +3089,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 CustomerType = o.CustomerId.HasValue ? "Registered" : "Walk-in",
                 DiscountType = type, CouponCode = o.Coupon?.Code,
                 DiscountPct = o.Subtotal > 0 ? Math.Round(o.DiscountAmount / o.Subtotal * 100, 1) : 0m,
-                DiscountAmount = o.DiscountAmount, NetSalesAfterDiscount = o.Subtotal - o.DiscountAmount,
+                DiscountAmount = o.DiscountAmount, LoyaltyDiscountAmount = o.LoyaltyDiscountAmount,
+                NetSalesAfterDiscount = o.Subtotal - o.DiscountAmount,
                 // A discount reduces net sales with no corresponding change to COGS, so it reduces
                 // gross margin dollar-for-dollar (FRD §7.15).
                 MarginImpact = o.DiscountAmount,
@@ -3100,6 +3106,9 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             {
                 TotalDiscountValue = rows.Sum(r => r.DiscountAmount),
                 ManualDiscountValue = rows.Where(r => r.DiscountType == "manual").Sum(r => r.DiscountAmount),
+                // Sums the loyalty slice across ALL rows (not just ones tagged "loyalty"), so a
+                // coupon+loyalty combo order's redeemed points still count here.
+                LoyaltyDiscountValue = rows.Sum(r => r.LoyaltyDiscountAmount),
                 CouponUsage = rows.Count(r => r.DiscountType == "coupon"),
                 DiscountPctOfSales = totalNet > 0 ? Math.Round(rows.Sum(r => r.DiscountAmount) / totalNet * 100, 1) : 0m,
                 MarginImpact = rows.Sum(r => r.MarginImpact ?? 0m),
@@ -3263,7 +3272,17 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     // 19. Fee Report (RPT-FINANCE-FEES)
     // ───────────────────────────────────────────────────────────────────────
 
-    [HttpGet("fees")]
+    // Service Charges (formerly "Fee Report" / briefly "Tobacco Fee Report"). This is NOT a tax
+    // report — KSA only recognizes VAT and tobacco excise as real taxes (see the Tobacco Excise
+    // report above for that). This one covers Order.CustomFeeAmount only: business-configured
+    // surcharges like a delivery fee or card-payment surcharge, entirely separate from tobacco.
+    // A prior version of this endpoint merged CustomFeeAmount with TobaccoFeeAmount on the theory
+    // they were always the same charge — that was wrong: the seeded "Delivery Service Fee" is a
+    // real, active, non-tobacco charge, so an order with just that fee (no tobacco item at all)
+    // was being mislabeled "Tobacco Fee". Un-merged here; see BuildTobaccoExciseAsync for the
+    // genuinely tobacco-only report, which now carries the company-identity/subtotal treatment
+    // this report doesn't need (it isn't reporting a tax).
+    [HttpGet("service-charges")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetFeeReport([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? cashierId)
     {
@@ -3272,7 +3291,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         return Ok(await BuildFeeReportAsync(rangeFrom, rangeTo, branchId, cashierId));
     }
 
-    [HttpGet("fees/export")]
+    [HttpGet("service-charges/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportFeeReport(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? cashierId,
@@ -3281,67 +3300,117 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
         var result = await BuildFeeReportAsync(rangeFrom, rangeTo, branchId, cashierId);
-        var headers = new[] { "Fee ID", "Fee Type", "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Fee Amount", "Net Fee" };
-        var rows = result.Rows.Select(r => new object?[]
+        var headers = new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Charge Name", "Service Charge Amount" };
+
+        var rows = new List<object?[]>();
+        foreach (var branchGroup in result.Rows.GroupBy(r => r.Branch))
         {
-            r.FeeId, r.FeeType, r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.FeeAmount, r.NetFee,
-        }).ToList();
+            foreach (var r in branchGroup)
+                rows.Add(new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.ChargeName, r.ServiceChargeAmount });
+            rows.Add(new object?[] { "", "", "", $"Subtotal — {branchGroup.Key}", "", "", "", branchGroup.Sum(r => r.ServiceChargeAmount) });
+        }
+        if (result.Rows.Count > 0)
+            rows.Add(new object?[] { "", "", "", "GRAND TOTAL", "", "", "", result.Rows.Sum(r => r.ServiceChargeAmount) });
+
         await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
-            $"{{\"report\":\"fees\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
+            $"{{\"report\":\"service_charges\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
         var kpis = new (string, string)[]
         {
-            ("Total Fees Collected", result.Kpis.TotalFeesCollected.ToString("0.##")), ("Transactions with Fees", result.Kpis.TransactionsWithFees.ToString()),
-            ("Average Fee per Transaction", result.Kpis.AverageFeePerTransaction.ToString("0.##")), ("Total Tobacco Fees", result.Kpis.TotalTobaccoFees.ToString("0.##")),
+            ("Total Service Charges", result.Kpis.TotalServiceCharges.ToString("0.##")), ("Transactions with Charge", result.Kpis.TransactionsWithFees.ToString()),
+            ("Average Charge per Transaction", result.Kpis.AverageFeePerTransaction.ToString("0.##")),
         };
-        return await BuildExportFile(format, "Fee Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
-            kpis, headers, rows, $"fees-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+        return await BuildExportFile(format, "Service Charges Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            kpis, headers, rows, $"service-charges-{rangeFrom:yyyy-MM-dd}-to-{rangeTo.AddDays(-1):yyyy-MM-dd}");
     }
 
     private async Task<FeeReportResult> BuildFeeReportAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? cashierId)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
         if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
-        var ordersQ = db.Orders.Include(o => o.Branch).Include(o => o.Cashier)
-            .Where(o => (o.CustomFeeAmount > 0 || o.TobaccoFeeAmount > 0) && o.CreatedAt >= rangeFrom && o.CreatedAt < rangeToExclusive && o.PaymentStatus == "paid");
+
+        // Order.CustomFeeAmount is the business-configured surcharge/delivery-fee total (TaxFeeRule
+        // rows with RuleType == "custom_fee"), not tobacco excise. Which named charge(s) made up
+        // that total lives in OrderServiceCharge (added alongside OrderDiscount) — orders from
+        // before that existed (or from a caller not yet updated to send it) have no rows there, so
+        // they fall back to one generic "Service Charge" row for the full amount.
+        var ordersQ = db.Orders.Include(o => o.Branch).Include(o => o.Cashier).Include(o => o.ServiceCharges)
+            .Where(o => o.CustomFeeAmount > 0 && o.CreatedAt >= rangeFrom && o.CreatedAt < rangeToExclusive && o.PaymentStatus == "paid");
         if (branchId.HasValue) ordersQ = ordersQ.Where(o => o.BranchId == branchId);
         if (cashierId.HasValue) ordersQ = ordersQ.Where(o => o.CashierId == cashierId);
-        var orders = await ordersQ.OrderByDescending(o => o.CreatedAt).ToListAsync();
+        var orders = await ordersQ.OrderBy(o => o.Branch!.Name).ThenByDescending(o => o.CreatedAt).ToListAsync();
 
-        // The schema tracks a single custom_fee_amount per order — there is no per-fee-type breakdown,
-        // refunded-fee tracking or fee-specific VAT split to source "Fee Type"/"Refunded Fee"/"VAT on Fee" from.
-        // Tobacco fee is its own persisted column (OrderItem/Order.TobaccoFeeAmount) so it gets its own
-        // row per order rather than being lumped into "Custom Fee".
-        var rows = orders.SelectMany(o =>
+        var rows = new List<FeeRow>();
+        foreach (var o in orders)
         {
-            var r = new List<FeeRow>();
-            if (o.CustomFeeAmount > 0)
-                r.Add(new FeeRow
+            var transactionId = o.Id.ToString()[..8];
+            var invoiceNo = o.OrderNumber;
+            var branch = o.Branch?.Name ?? "—";
+            var cashier = o.Cashier?.FullName ?? "—";
+            var customerType = o.CustomerId.HasValue ? "Registered" : "Walk-in";
+
+            if (o.ServiceCharges.Count == 0)
+            {
+                rows.Add(new FeeRow
                 {
-                    FeeId = o.Id.ToString()[..8], FeeType = "Custom Fee", TransactionId = o.Id.ToString()[..8], InvoiceNo = o.OrderNumber,
-                    DateTime = o.CreatedAt, Branch = o.Branch?.Name ?? "—", Cashier = o.Cashier?.FullName ?? "—",
-                    CustomerType = o.CustomerId.HasValue ? "Registered" : "Walk-in", FeeAmount = o.CustomFeeAmount, NetFee = o.CustomFeeAmount,
+                    TransactionId = transactionId, InvoiceNo = invoiceNo, DateTime = o.CreatedAt,
+                    Branch = branch, Cashier = cashier, CustomerType = customerType,
+                    ChargeName = "Service Charge", ServiceChargeAmount = o.CustomFeeAmount,
                 });
-            if (o.TobaccoFeeAmount > 0)
-                r.Add(new FeeRow
+                continue;
+            }
+
+            foreach (var sc in o.ServiceCharges)
+            {
+                rows.Add(new FeeRow
                 {
-                    FeeId = o.Id.ToString()[..8], FeeType = "Tobacco Fee", TransactionId = o.Id.ToString()[..8], InvoiceNo = o.OrderNumber,
-                    DateTime = o.CreatedAt, Branch = o.Branch?.Name ?? "—", Cashier = o.Cashier?.FullName ?? "—",
-                    CustomerType = o.CustomerId.HasValue ? "Registered" : "Walk-in", FeeAmount = o.TobaccoFeeAmount, NetFee = o.TobaccoFeeAmount,
+                    TransactionId = transactionId, InvoiceNo = invoiceNo, DateTime = o.CreatedAt,
+                    Branch = branch, Cashier = cashier, CustomerType = customerType,
+                    ChargeName = sc.Name, ServiceChargeAmount = sc.Amount,
                 });
-            return r;
-        }).ToList();
+            }
+
+            // Guards against partial/rounding drift between the named breakdown and the
+            // order-level total — the total is what was actually charged, so any unaccounted
+            // remainder still needs to show up rather than silently vanish from the report.
+            var unaccounted = o.CustomFeeAmount - o.ServiceCharges.Sum(sc => sc.Amount);
+            if (unaccounted > 0.005m)
+            {
+                rows.Add(new FeeRow
+                {
+                    TransactionId = transactionId, InvoiceNo = invoiceNo, DateTime = o.CreatedAt,
+                    Branch = branch, Cashier = cashier, CustomerType = customerType,
+                    ChargeName = "Other Charges", ServiceChargeAmount = unaccounted,
+                });
+            }
+        }
 
         return new FeeReportResult
         {
             Kpis = new FeeReportKpis
             {
-                TotalFeesCollected = rows.Sum(r => r.FeeAmount),
+                TotalServiceCharges = rows.Sum(r => r.ServiceChargeAmount),
                 TransactionsWithFees = orders.Count,
-                AverageFeePerTransaction = orders.Count > 0 ? Math.Round(rows.Sum(r => r.FeeAmount) / orders.Count, 2) : 0m,
-                TotalTobaccoFees = rows.Where(r => r.FeeType == "Tobacco Fee").Sum(r => r.FeeAmount),
+                AverageFeePerTransaction = orders.Count > 0 ? Math.Round(rows.Sum(r => r.ServiceChargeAmount) / orders.Count, 2) : 0m,
             },
             Rows = rows,
         };
+    }
+
+    // Shared by tax-compliance reports (Tobacco Excise) that need the legal entity's name/CR/VAT
+    // on export/print — NOT used by the Service Charges report, which isn't reporting a tax.
+    // When a specific branch is in scope, use that branch's own ZATCA identity (same SellerName
+    // ?? Branch.Name / VatRegistrationNumber ?? CommercialRegistration fallback ZatcaService uses
+    // for invoices). For "All Branches", there's no single legal entity to pick correctly, so
+    // fall back to the branch with the earliest CreatedAt as a representative default rather
+    // than leaving the field blank.
+    private async Task<(string LegalName, string Cr, string Vat)> ResolveCompanyInfoAsync(Guid? branchId)
+    {
+        var branchQ = db.Branches.AsQueryable();
+        branchQ = branchId.HasValue ? branchQ.Where(b => b.Id == branchId) : branchQ.OrderBy(b => b.CreatedAt);
+        var branch = await branchQ.FirstOrDefaultAsync();
+        if (branch is null) return ("—", "—", "—");
+        var settings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branch.Id);
+        return (settings?.SellerName ?? branch.Name, branch.CommercialRegistration ?? "—", settings?.VatRegistrationNumber ?? "—");
     }
 
     // ───────────────────────────────────────────────────────────────────────
@@ -3366,11 +3435,30 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         if (error != null) return BadRequest(new { message = error });
         var result = await BuildTobaccoExciseAsync(rangeFrom, rangeTo, branchId, cashierId);
         var headers = new[] { "SKU", "Barcode", "Product Name", "Brand", "Category", "Branch", "Employee", "Units Sold", "Taxable Price", "Excise Rate", "Excise Amount", "VAT Amount", "Returns Qty", "Excise Reversal", "Net Excise", "Compliance Status" };
-        var rows = result.Rows.Select(r => new object?[]
+
+        var rows = new List<object?[]>
         {
-            r.Sku, r.Barcode, r.ProductName, r.Brand, r.Category, r.Branch, r.Employee, r.UnitsSold, r.TaxablePrice, r.ExciseRate, r.ExciseAmount,
-            r.VatAmount, r.ReturnsQty, r.ExciseReversal, r.NetExcise, r.ComplianceStatus,
-        }).ToList();
+            new object?[] { "Legal Company Name", result.LegalCompanyName, "", "", "", "", "", "", "", "", "", "", "", "", "", "" },
+            new object?[] { "Commercial Registration (CR)", result.CommercialRegistrationNumber, "", "", "", "", "", "", "", "", "", "", "", "", "", "" },
+            new object?[] { "VAT Registration Number", result.VatRegistrationNumber, "", "", "", "", "", "", "", "", "", "", "", "", "", "" },
+            new object?[] { "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "" },
+        };
+        // Subtotal per branch, then a grand total — same "clear subtotal and grand total
+        // calculations" requirement REP-002 asked for, applied to the report that's actually
+        // tobacco-only (BuildFeeReportAsync's generic Service Charges report doesn't need this
+        // company-identity treatment since it isn't reporting a tax).
+        foreach (var branchGroup in result.Rows.GroupBy(r => r.Branch))
+        {
+            foreach (var r in branchGroup)
+                rows.Add(new object?[]
+                {
+                    r.Sku, r.Barcode, r.ProductName, r.Brand, r.Category, r.Branch, r.Employee, r.UnitsSold, r.TaxablePrice, r.ExciseRate, r.ExciseAmount,
+                    r.VatAmount, r.ReturnsQty, r.ExciseReversal, r.NetExcise, r.ComplianceStatus,
+                });
+            rows.Add(new object?[] { "", "", "", "", "", $"Subtotal — {branchGroup.Key}", "", "", "", "", branchGroup.Sum(r => r.ExciseAmount), "", "", "", branchGroup.Sum(r => r.NetExcise), "" });
+        }
+        rows.Add(new object?[] { "", "", "", "", "", "GRAND TOTAL", "", "", "", "", result.Rows.Sum(r => r.ExciseAmount), "", "", "", result.Rows.Sum(r => r.NetExcise), "" });
+
         await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
             $"{{\"report\":\"tobacco-excise\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
         var kpis = new (string, string)[]
@@ -3379,7 +3467,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Tobacco Units Sold", result.Kpis.TobaccoUnitsSold.ToString("0.##")), ("Excise Refunds", result.Kpis.ExciseRefunds.ToString("0.##")),
             ("Top Tobacco SKU", result.Kpis.TopTobaccoSku ?? "—"), ("Compliance Exceptions", result.Kpis.ComplianceExceptions.ToString()),
         };
-        return await BuildExportFile(format, "Tobacco Excise Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Tobacco Excise Report",
+            $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}\n{result.LegalCompanyName} · CR: {result.CommercialRegistrationNumber} · VAT: {result.VatRegistrationNumber}",
             kpis, headers, rows, $"tobacco-excise-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -3441,6 +3530,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         .OrderByDescending(r => r.ExciseAmount)
         .ToList();
 
+        var (legalName, cr, vat) = await ResolveCompanyInfoAsync(branchId);
+
         return new TobaccoExciseResult
         {
             Kpis = new TobaccoExciseKpis
@@ -3450,6 +3541,9 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 TopTobaccoSku = rows.FirstOrDefault()?.Sku, ComplianceExceptions = rows.Count(r => r.ComplianceStatus != "ok"),
             },
             Rows = rows,
+            LegalCompanyName = legalName,
+            CommercialRegistrationNumber = cr,
+            VatRegistrationNumber = vat,
         };
     }
 
@@ -4115,6 +4209,180 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     // ───────────────────────────────────────────────────────────────────────
     // Shared helpers
     // ───────────────────────────────────────────────────────────────────────
+
+    // ───────────────────────────────────────────────────────────────────────
+    // N. Loyalty Program (LOY-001)
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("loyalty")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetLoyaltyReport([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        return Ok(await BuildLoyaltyReportAsync(rangeFrom, rangeTo, branchId));
+    }
+
+    [HttpGet("loyalty/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportLoyaltyReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildLoyaltyReportAsync(rangeFrom, rangeTo, branchId);
+        var headers = new[] { "Branch", "Points Earned", "Points Redeemed", "Points Expired", "Redemption Value (SAR)", "Active Members" };
+        var rows = result.ByBranch.Select(r => new object?[]
+        {
+            r.BranchName, r.PointsEarned, r.PointsRedeemed, r.PointsExpired, r.RedemptionValue, r.ActiveMembers,
+        }).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+            $"{{\"report\":\"loyalty\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.ByBranch.Count}}}");
+        var kpis = new (string, string)[]
+        {
+            ("Points Earned", result.Kpis.TotalPointsEarned.ToString("0.##")),
+            ("Points Redeemed", result.Kpis.TotalPointsRedeemed.ToString("0.##")),
+            ("Points Expired", result.Kpis.TotalPointsExpired.ToString("0.##")),
+            ("Redemption Value (SAR)", result.Kpis.TotalRedemptionValue.ToString("0.##")),
+            ("Active Members", result.Kpis.TotalActiveMembers.ToString()),
+        };
+        return await BuildExportFile(format, "Loyalty Program Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            kpis, headers, rows, $"loyalty-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    // Separate export (own headers/rows shape) rather than folding into ExportLoyaltyReport
+    // above — BuildExportFile only writes one flat table per file, and the branch table's
+    // columns don't line up with the customer table's.
+    [HttpGet("loyalty/customers/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportLoyaltyCustomersReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildLoyaltyReportAsync(rangeFrom, rangeTo, branchId);
+        var headers = new[] { "Customer", "Phone", "Branch(es)", "Tier", "Current Balance", "Points Earned", "Points Redeemed", "Points Expired", "Redemption Value (SAR)", "Last Activity" };
+        var rows = result.ByCustomer.Select(r => new object?[]
+        {
+            r.CustomerName, r.Phone, r.Branches, r.Tier, r.CurrentBalance, r.PointsEarned, r.PointsRedeemed, r.PointsExpired, r.RedemptionValue, r.LastActivityAt.ToString("yyyy-MM-dd HH:mm"),
+        }).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+            $"{{\"report\":\"loyalty_customers\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.ByCustomer.Count}}}");
+        var kpis = new (string, string)[]
+        {
+            ("Points Earned", result.Kpis.TotalPointsEarned.ToString("0.##")),
+            ("Points Redeemed", result.Kpis.TotalPointsRedeemed.ToString("0.##")),
+            ("Points Expired", result.Kpis.TotalPointsExpired.ToString("0.##")),
+            ("Redemption Value (SAR)", result.Kpis.TotalRedemptionValue.ToString("0.##")),
+            ("Active Members", result.Kpis.TotalActiveMembers.ToString()),
+        };
+        return await BuildExportFile(format, "Loyalty Program Report — By Customer", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            kpis, headers, rows, $"loyalty-customers-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    private async Task<LoyaltyReportResult> BuildLoyaltyReportAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId)
+    {
+        // Same branch-claim override every other report in this controller applies — a Branch
+        // Manager cannot see another branch's loyalty activity by passing a different branchId.
+        var (scopeRole, scopeBranchId) = GetCallerContext();
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+
+        var branchesQ = db.Branches.Where(b => b.Status == "active");
+        if (branchId.HasValue) branchesQ = branchesQ.Where(b => b.Id == branchId);
+        var branches = await branchesQ.ToListAsync();
+
+        // Joined via navigation (Include), not a Contains() over a materialized id list — the
+        // MySQL EF provider in use here fails to type-map a List<Guid> parameter in a Contains()
+        // translation (same issue worked around elsewhere in OrdersController/DataSeeder).
+        var txnQ = db.LoyaltyTransactions.Include(t => t.Customer)
+            .Where(t => t.CreatedAt >= rangeFrom && t.CreatedAt < rangeToExclusive);
+        if (branchId.HasValue) txnQ = txnQ.Where(t => t.BranchId == branchId);
+        var txns = await txnQ.Select(t => new
+        {
+            t.BranchId,
+            t.CustomerId,
+            t.TransactionType,
+            t.Points,
+            t.MonetaryValue,
+            t.CreatedAt,
+            CustomerName = t.Customer!.FullName,
+            CustomerPhone = t.Customer!.Phone,
+            CustomerTier = t.Customer!.Tier,
+            CustomerBalance = t.Customer!.LoyaltyBalance,
+        }).ToListAsync();
+
+        var byBranch = txns.Where(t => t.BranchId.HasValue).ToLookup(t => t.BranchId!.Value);
+        var rows = branches.Select(b =>
+        {
+            var branchTxns = byBranch[b.Id];
+            return new LoyaltyReportRow
+            {
+                BranchId = b.Id,
+                BranchName = b.Name,
+                PointsEarned = branchTxns.Where(t => t.TransactionType == "earn").Sum(t => t.Points),
+                PointsRedeemed = -branchTxns.Where(t => t.TransactionType == "redeem").Sum(t => t.Points),
+                PointsExpired = -branchTxns.Where(t => t.TransactionType == "expire").Sum(t => t.Points),
+                RedemptionValue = branchTxns.Where(t => t.TransactionType == "redeem").Sum(t => t.MonetaryValue ?? 0),
+                ActiveMembers = branchTxns.Select(t => t.CustomerId).Distinct().Count(),
+            };
+        }).ToList();
+
+        var tierBreakdown = txns
+            .GroupBy(t => t.CustomerId)
+            .Select(g => g.First())
+            .GroupBy(t => t.CustomerTier)
+            .Select(g => new LoyaltyTierRow { Tier = g.Key, Members = g.Count(), TotalBalance = g.Sum(t => t.CustomerBalance) })
+            .ToList();
+
+        // Full id->name map, not just the (possibly branch-filtered) `branches` list above — a
+        // customer transacting at a branch outside the current filter/active set (e.g. it was
+        // since deactivated) should still show a real name here instead of falling through to
+        // the "—" placeholder.
+        var branchNameMap = await db.Branches.ToDictionaryAsync(b => b.Id, b => b.Name);
+        var byCustomer = txns
+            .GroupBy(t => t.CustomerId)
+            .Select(g =>
+            {
+                var first = g.First();
+                var branchNames = g.Where(t => t.BranchId.HasValue)
+                    .Select(t => t.BranchId!.Value).Distinct()
+                    .Select(id => branchNameMap.GetValueOrDefault(id, "—"))
+                    .OrderBy(n => n).ToList();
+                return new LoyaltyCustomerRow
+                {
+                    CustomerId = g.Key,
+                    CustomerName = first.CustomerName,
+                    Phone = first.CustomerPhone,
+                    Branches = string.Join(", ", branchNames),
+                    Tier = first.CustomerTier,
+                    CurrentBalance = first.CustomerBalance,
+                    PointsEarned = g.Where(t => t.TransactionType == "earn").Sum(t => t.Points),
+                    PointsRedeemed = -g.Where(t => t.TransactionType == "redeem").Sum(t => t.Points),
+                    PointsExpired = -g.Where(t => t.TransactionType == "expire").Sum(t => t.Points),
+                    RedemptionValue = g.Where(t => t.TransactionType == "redeem").Sum(t => t.MonetaryValue ?? 0),
+                    LastActivityAt = g.Max(t => t.CreatedAt),
+                };
+            })
+            .OrderByDescending(r => r.CurrentBalance)
+            .ToList();
+
+        return new LoyaltyReportResult
+        {
+            ByBranch = rows,
+            ByCustomer = byCustomer,
+            TierBreakdown = tierBreakdown,
+            Kpis = new LoyaltyReportKpis
+            {
+                TotalPointsEarned = rows.Sum(r => r.PointsEarned),
+                TotalPointsRedeemed = rows.Sum(r => r.PointsRedeemed),
+                TotalPointsExpired = rows.Sum(r => r.PointsExpired),
+                TotalRedemptionValue = rows.Sum(r => r.RedemptionValue),
+                TotalActiveMembers = txns.Select(t => t.CustomerId).Distinct().Count(),
+            },
+        };
+    }
 
     /// <summary>Builds a CSV or PDF export file from the same headers/rows/KPIs, per the FRD's multi-format export rule.</summary>
     private async Task<FileContentResult> BuildExportFile(
@@ -4912,6 +5180,10 @@ public sealed class DiscountRow
     public string? CouponCode { get; init; }
     public decimal DiscountPct { get; init; }
     public decimal DiscountAmount { get; init; }
+    // The slice of DiscountAmount that came from redeemed loyalty points — populated regardless
+    // of DiscountType, so an order combining a coupon with loyalty redemption still reports its
+    // loyalty portion even though the row's primary type is "coupon".
+    public decimal LoyaltyDiscountAmount { get; init; }
     public decimal NetSalesAfterDiscount { get; init; }
     // A discount comes straight off net sales with no change to COGS, so its margin impact
     // equals the discount amount given up (FRD §7.15 "Margin Impact" column).
@@ -4922,6 +5194,7 @@ public sealed class DiscountsKpis
 {
     public decimal TotalDiscountValue { get; init; }
     public decimal ManualDiscountValue { get; init; }
+    public decimal LoyaltyDiscountValue { get; init; }
     public int CouponUsage { get; init; }
     public decimal DiscountPctOfSales { get; init; }
     public decimal? MarginImpact { get; set; }
@@ -4993,26 +5266,30 @@ public sealed class TaxReportResult
     public List<TaxReportRow> Rows { get; init; } = [];
 }
 
+// Business-configured surcharges (delivery fee, card-payment surcharge) — Order.CustomFeeAmount.
+// Deliberately NOT tobacco: KSA only recognizes VAT and tobacco excise as real taxes, so this
+// report doesn't carry the legal-entity/CR/VAT treatment the Tobacco Excise report does — a
+// service charge isn't a tax and shouldn't be presented like one on a compliance export.
 public sealed class FeeRow
 {
-    public string FeeId { get; init; } = "";
-    public string FeeType { get; init; } = "";
     public string TransactionId { get; init; } = "";
     public string InvoiceNo { get; init; } = "";
     public DateTime DateTime { get; init; }
     public string Branch { get; init; } = "";
     public string Cashier { get; init; } = "";
     public string CustomerType { get; init; } = "";
-    public decimal FeeAmount { get; init; }
-    public decimal NetFee { get; init; }
+    // Which configured charge this row is (e.g. "Delivery Service Fee (SAR 5)"). Orders that
+    // predate the named breakdown (OrderServiceCharge) fall back to "Service Charge" so the
+    // amount still appears somewhere rather than being silently dropped.
+    public string ChargeName { get; init; } = "";
+    public decimal ServiceChargeAmount { get; init; }
 }
 
 public sealed class FeeReportKpis
 {
-    public decimal TotalFeesCollected { get; init; }
+    public decimal TotalServiceCharges { get; init; }
     public int TransactionsWithFees { get; init; }
     public decimal AverageFeePerTransaction { get; init; }
-    public decimal TotalTobaccoFees { get; init; }
 }
 
 public sealed class FeeReportResult
@@ -5055,6 +5332,11 @@ public sealed class TobaccoExciseResult
 {
     public TobaccoExciseKpis Kpis { get; init; } = new();
     public List<TobaccoExciseRow> Rows { get; init; } = [];
+    // REP-002: legal entity identity for export/print — this is a real KSA tax (tobacco excise),
+    // unlike the generic Service Charges report, which doesn't carry this since it isn't a tax.
+    public string LegalCompanyName { get; init; } = "";
+    public string CommercialRegistrationNumber { get; init; } = "";
+    public string VatRegistrationNumber { get; init; } = "";
 }
 
 public sealed class ProfitMarginRow
@@ -5179,4 +5461,57 @@ public sealed class EmployeeAuditRow
     public string DeviceName { get; init; } = "—";
     public string RelatedTransaction { get; init; } = "—";
     public string Severity { get; init; } = "info";
+}
+
+public sealed class LoyaltyReportRow
+{
+    public Guid BranchId { get; init; }
+    public string BranchName { get; init; } = "";
+    public decimal PointsEarned { get; init; }
+    public decimal PointsRedeemed { get; init; }
+    public decimal PointsExpired { get; init; }
+    public decimal RedemptionValue { get; init; }
+    public int ActiveMembers { get; init; }
+}
+
+public sealed class LoyaltyTierRow
+{
+    public string Tier { get; init; } = "";
+    public int Members { get; init; }
+    public decimal TotalBalance { get; init; }
+}
+
+public sealed class LoyaltyCustomerRow
+{
+    public Guid CustomerId { get; init; }
+    public string CustomerName { get; init; } = "";
+    public string Phone { get; init; } = "";
+    // Comma-joined names of every branch this customer had loyalty activity at within the
+    // selected range — a customer can earn/redeem at more than one branch, so this isn't a
+    // single BranchId the way LoyaltyReportRow's is.
+    public string Branches { get; init; } = "";
+    public string Tier { get; init; } = "";
+    public decimal CurrentBalance { get; init; }
+    public decimal PointsEarned { get; init; }
+    public decimal PointsRedeemed { get; init; }
+    public decimal PointsExpired { get; init; }
+    public decimal RedemptionValue { get; init; }
+    public DateTime LastActivityAt { get; init; }
+}
+
+public sealed class LoyaltyReportKpis
+{
+    public decimal TotalPointsEarned { get; init; }
+    public decimal TotalPointsRedeemed { get; init; }
+    public decimal TotalPointsExpired { get; init; }
+    public decimal TotalRedemptionValue { get; init; }
+    public int TotalActiveMembers { get; init; }
+}
+
+public sealed class LoyaltyReportResult
+{
+    public List<LoyaltyReportRow> ByBranch { get; init; } = [];
+    public List<LoyaltyCustomerRow> ByCustomer { get; init; } = [];
+    public List<LoyaltyTierRow> TierBreakdown { get; init; } = [];
+    public LoyaltyReportKpis Kpis { get; init; } = new();
 }

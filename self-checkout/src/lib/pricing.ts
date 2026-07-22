@@ -6,6 +6,7 @@ export interface DisplayLine {
   quantity: number; // paid + bonus units
   bonusQty: number;
   isBonusOnly: boolean;
+  tobaccoFeeAmount: number;
 }
 
 export interface PricingRow {
@@ -64,13 +65,16 @@ export function computePricing(args: {
   branchId: string | null;
   customer: Customer | null;
   tobaccoFeeEnabled: boolean;
+  // Configurable rate/minimum, read off the tobacco_excise rule row — was hardcoded (25 SAR,
+  // 100%) here. Undefined falls back to those same historical defaults.
+  tobaccoRule?: TaxFeeRule;
   // productId → resolved unit price (FRD §12). Optional and empty-by-default on purpose: an absent
   // entry means "no price rule applies", which resolves to basePrice — exactly what this engine
   // did before price rules existed. So a failed/omitted fetch degrades to the old prices rather
   // than to zero.
   priceMap?: Map<string, number>;
 }): PricingResult {
-  const { lines, coupon, products, activeDiscounts, activeOffers: allActiveOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled, priceMap } = args;
+  const { lines, coupon, products, activeDiscounts, activeOffers: allActiveOffers, customFeeRules, taxRate, branchId, customer, tobaccoFeeEnabled, tobaccoRule, priceMap } = args;
 
   // The single place a unit price is sourced in this engine. Every site that used to read
   // `product.basePrice` directly now goes through here, so the kiosk and the staffed till
@@ -108,14 +112,14 @@ export function computePricing(args: {
 
   const displayLines: DisplayLine[] = lines.map((l) => {
     const bonusQty = bonusByProduct.get(l.product.id) ?? 0;
-    return { product: l.product, quantity: l.quantity + bonusQty, bonusQty, isBonusOnly: false };
+    return { product: l.product, quantity: l.quantity + bonusQty, bonusQty, isBonusOnly: false, tobaccoFeeAmount: 0 };
   });
   const paidProductIds = new Set(lines.map((l) => l.product.id));
   for (const [productId, bonusQty] of bonusByProduct) {
     if (paidProductIds.has(productId) || bonusQty <= 0) continue;
     const product = products.find((p) => p.id === productId);
     if (!product) continue;
-    displayLines.push({ product, quantity: bonusQty, bonusQty, isBonusOnly: true });
+    displayLines.push({ product, quantity: bonusQty, bonusQty, isBonusOnly: true, tobaccoFeeAmount: 0 });
   }
 
   const bundleRows: PricingRow[] = [];
@@ -128,16 +132,23 @@ export function computePricing(args: {
 
   const subtotal = displayLines.reduce((s, l) => s + l.quantity * priceOf(l.product), 0);
 
-  // ─── KSA tobacco excise — min 25 SAR or 100% of base price, whichever is higher, per unit.
-  // Bonus units still leave the shelf and are still excisable, so this runs over displayLines
-  // (gross), same as the staff POS. Added to the taxable base below, not netted against
-  // discounts — VAT applies on top of price + excise, matching how excise tax actually stacks.
+  // ─── KSA tobacco excise — min(minimumExciseAmount) or excisePercentage% of base price,
+  // whichever is higher, per unit — both configurable via the tobacco_excise rule row (was
+  // hardcoded 25 SAR / 100% here). Bonus units still leave the shelf and are still excisable,
+  // so this runs over displayLines (gross), same as the staff POS. Added to the taxable base
+  // below, not netted against discounts — VAT applies on top of price + excise, matching how
+  // excise tax actually stacks.
+  const tobaccoExciseMinimum = tobaccoRule?.minimumExciseAmount ?? 25;
+  const tobaccoExcisePercentage = tobaccoRule?.excisePercentage ?? 100;
   function calcTobaccoFee(basePrice: number): number {
-    return basePrice <= 25 ? 25 : basePrice;
+    return Math.max(tobaccoExciseMinimum, basePrice * tobaccoExcisePercentage / 100);
   }
-  const tobaccoExcise = tobaccoFeeEnabled
-    ? displayLines.reduce((sum, l) => (l.product.isTobacco ? sum + l.quantity * calcTobaccoFee(priceOf(l.product)) : sum), 0)
-    : 0;
+  if (tobaccoFeeEnabled) {
+    for (const l of displayLines) {
+      if (l.product.isTobacco) l.tobaccoFeeAmount = l.quantity * calcTobaccoFee(priceOf(l.product));
+    }
+  }
+  const tobaccoExcise = displayLines.reduce((sum, l) => sum + l.tobaccoFeeAmount, 0);
 
   // ─── Coupon ────────────────────────────────────────────────────────────────
   const couponDiscount = coupon

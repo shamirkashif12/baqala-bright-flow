@@ -30,7 +30,6 @@ public class DiscountCreationService(BaqalaDbContext db) : IDiscountCreationServ
             StartDate = req.StartDate,
             EndDate = req.EndDate,
             RequiresCustomer = req.RequiresCustomer ?? false,
-            MinCustomerTier = req.MinCustomerTier,
             ExcludedProductIdsJson = req.ExcludedProductIds is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(req.ExcludedProductIds) : null,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,

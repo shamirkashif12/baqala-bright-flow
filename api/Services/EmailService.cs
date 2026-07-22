@@ -198,8 +198,14 @@ public class SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> l
                         }
 
                         Row("Subtotal", $"SAR {order.Subtotal:F2}");
-                        if (order.DiscountAmount > 0)
-                            Row("Discount", $"-SAR {order.DiscountAmount:F2}");
+                        // DiscountAmount is the all-inclusive total (coupon + auto-discounts +
+                        // loyalty) — break the loyalty portion out into its own line rather than
+                        // lumping it in, same as the reprinted receipt in the Orders page.
+                        var nonLoyaltyDiscount = order.DiscountAmount - order.LoyaltyDiscountAmount;
+                        if (nonLoyaltyDiscount > 0.005m)
+                            Row("Discount", $"-SAR {nonLoyaltyDiscount:F2}");
+                        if (order.LoyaltyPointsRedeemed > 0)
+                            Row($"Loyalty Redeemed ({order.LoyaltyPointsRedeemed:F0} pts)", $"-SAR {order.LoyaltyDiscountAmount:F2}");
 
                         var taxableBase = order.Subtotal - order.DiscountAmount;
                         var vatPct = taxableBase > 0 ? order.TaxAmount / taxableBase * 100 : 0;

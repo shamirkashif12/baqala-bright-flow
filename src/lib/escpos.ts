@@ -12,6 +12,8 @@ export interface ReceiptData {
   items: { name: string; qty: number; price: number }[];
   subtotal: number;
   discount: number;
+  loyaltyPointsRedeemed?: number;
+  loyaltyDiscountAmount?: number;
   vat: number;
   total: number;
   taxLabel: string;
@@ -87,8 +89,11 @@ export function buildEscPos(r: ReceiptData): Uint8Array {
   }
   div();
 
-  // Totals
-  row("Subtotal", `SAR ${fmt(r.subtotal - r.discount)}`);
+  // Totals — Subtotal here is net of coupon/auto/manual discounts only; loyalty redemption gets
+  // its own row below so it's visible on the printed receipt instead of silently folded in.
+  const loyaltyAmt = r.loyaltyDiscountAmount ?? 0;
+  row("Subtotal", `SAR ${fmt(r.subtotal - (r.discount - loyaltyAmt))}`);
+  if (r.loyaltyPointsRedeemed) row(`Loyalty Redeemed (${r.loyaltyPointsRedeemed} pts)`, `-SAR ${fmt(loyaltyAmt)}`);
   if (r.tobaccoExcise && r.tobaccoExcise > 0) row("Tobacco Excise", `SAR ${fmt(r.tobaccoExcise)}`);
   for (const fee of r.fees ?? []) row(fee.name, `SAR ${fmt(fee.amount)}`);
   if (r.vat > 0) row(r.taxLabel ?? "VAT 15%", `SAR ${fmt(r.vat)}`);

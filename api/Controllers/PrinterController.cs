@@ -284,7 +284,12 @@ public class PrinterController(IConfiguration config) : ControllerBase
         // The real ZATCA Phase 2 QR (base64 TLV, 9 tags incl. hash/signature/cert) from the
         // signed ZatcaInvoice. When absent (Phase 2 not onboarded, or submission failed), falls
         // back to a locally-built Phase-1-style 5-tag QR below.
-        string? ZatcaQrCode = null
+        string? ZatcaQrCode = null,
+        // Breakout of how much of Discount came from redeemed loyalty points — mirrors
+        // Order.LoyaltyPointsRedeemed/LoyaltyDiscountAmount, so the printed receipt can show it as
+        // its own line instead of folding it silently into "Discount".
+        double? LoyaltyPointsRedeemed = null,
+        double? LoyaltyDiscountAmount = null
     );
 
     [HttpPost("print-receipt")]
@@ -396,7 +401,12 @@ public class PrinterController(IConfiguration config) : ControllerBase
         Divider();
 
         // ── Totals ──────────────────────────────────────────────────────────
-        Row("Subtotal", $"SAR {Fmt(r.Subtotal - r.Discount)}");
+        // Subtotal here is net of coupon/auto/manual discounts only; loyalty redemption gets its
+        // own row below so it's visible on the printed receipt instead of silently folded in.
+        var loyaltyAmt = r.LoyaltyDiscountAmount ?? 0;
+        Row("Subtotal", $"SAR {Fmt(r.Subtotal - (r.Discount - loyaltyAmt))}");
+        if (r.LoyaltyPointsRedeemed > 0)
+            Row($"Loyalty Redeemed ({r.LoyaltyPointsRedeemed:F0} pts)", $"-SAR {Fmt(loyaltyAmt)}");
         if (r.TobaccoExcise > 0)
             Row("Tobacco Excise", $"SAR {Fmt(r.TobaccoExcise!.Value)}");
         foreach (var fee in r.Fees ?? [])

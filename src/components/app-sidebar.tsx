@@ -47,6 +47,7 @@ import {
   CalendarDays,
   Clock,
   Plane,
+  Gift,
   CalendarCheck2,
   AlarmClockOff,
 } from "lucide-react";
@@ -124,8 +125,10 @@ const navGroups: NavGroup[] = [
       { title: "Expenses",                    url: "/expenses",        icon: Wallet,       module: "Accounting & Finance" },
       { title: "Purchase Orders",             url: "/purchase-orders", icon: ClipboardList, module: "Purchase Orders" },
       { title: "Coupons, Discounts & Offers", url: "/coupons",         icon: TicketPercent,  module: "Coupons" },
+      { title: "Loyalty Program",             url: "/loyalty-program", icon: Gift,           module: "Loyalty Program" },
       { title: "Customer Returns",            url: "/returns",         icon: ReturnIcon,   module: "Returns" },
       { title: "Tax, Fees & Tobacco",         url: "/tax-fees",        icon: Cigarette,    module: "Tax & Fees" },
+      { title: "Service Charges",             url: "/service-charges", icon: Truck,        module: "Tax & Fees" },
     ],
   },
   {

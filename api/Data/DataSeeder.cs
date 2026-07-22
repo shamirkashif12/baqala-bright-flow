@@ -1269,6 +1269,7 @@ public static class DataSeeder
                 P(r, "Cashier Shifts",      true,  true,  true,  true,  true,  true),
                 P(r, "Orders",              true,  true,  true,  true,  true,  true),
                 P(r, "Coupons",             true,  true,  true,  true,  true,  true),
+                P(r, "Loyalty Program",     true,  true,  true,  true,  true,  true),
                 P(r, "Customers",           true,  true,  true,  true,  true,  true),
                 P(r, "Returns",             true,  true,  true,  true,  true,  true),
                 P(r, "Inventory",           true,  true,  true,  true,  true,  true),
@@ -1308,6 +1309,7 @@ public static class DataSeeder
                 P(r, "Cashier Shifts",      true,  false, false, false, true,  true),
                 P(r, "Orders",              true,  true,  true,  false, true,  true),
                 P(r, "Coupons",             true,  true,  true,  true,  true,  false),
+                P(r, "Loyalty Program",     true,  false, true,  false, false, true),
                 P(r, "Customers",           true,  true,  true,  false, false, true),
                 P(r, "Returns",             true,  true,  true,  false, true,  true),
                 P(r, "Inventory",           true,  true,  true,  false, true,  true),
@@ -1347,6 +1349,7 @@ public static class DataSeeder
                 P(r, "Cashier Shifts",      true,  true,  false, false, false, false),
                 P(r, "Orders",              true,  true,  false, false, false, false),
                 P(r, "Coupons",             true,  false, false, false, false, false),
+                P(r, "Loyalty Program",     true,  false, false, false, false, false),
                 P(r, "Customers",           true,  true,  false, false, false, false),
                 P(r, "Returns",             true,  true,  false, false, true,  false),
                 P(r, "Inventory",           true,  false, false, false, false, false),
@@ -1386,6 +1389,7 @@ public static class DataSeeder
                 P(r, "Cashier Shifts",      false, false, false, false, false, false),
                 P(r, "Orders",              true,  false, false, false, false, false),
                 P(r, "Coupons",             false, false, false, false, false, false),
+                P(r, "Loyalty Program",     false, false, false, false, false, false),
                 P(r, "Customers",           false, false, false, false, false, false),
                 P(r, "Returns",             false, false, false, false, false, false),
                 P(r, "Inventory",           true,  true,  true,  false, true,  true),
@@ -1425,6 +1429,7 @@ public static class DataSeeder
                 P(r, "Cashier Shifts",      true,  true,  true,  false, true,  true),
                 P(r, "Orders",              true,  true,  true,  false, true,  true),
                 P(r, "Coupons",             true,  false, false, false, true,  false),
+                P(r, "Loyalty Program",     true,  false, false, false, false, false),
                 P(r, "Customers",           true,  true,  true,  false, false, false),
                 P(r, "Returns",             true,  true,  true,  false, true,  true),
                 P(r, "Inventory",           true,  true,  true,  false, true,  true),
@@ -1464,6 +1469,7 @@ public static class DataSeeder
                 P(r, "Cashier Shifts",      true,  false, false, false, false, true),
                 P(r, "Orders",              true,  false, false, false, false, true),
                 P(r, "Coupons",             true,  false, false, false, false, true),
+                P(r, "Loyalty Program",     true,  false, false, false, false, true),
                 P(r, "Customers",           true,  false, false, false, false, true),
                 P(r, "Returns",             true,  false, false, false, true,  true),
                 P(r, "Inventory",           true,  false, false, false, false, true),
@@ -1503,6 +1509,9 @@ public static class DataSeeder
                 P(r, "Cashier Shifts",      false, false, false, false, false, false),
                 P(r, "Orders",              true,  false, false, false, false, true),
                 P(r, "Coupons",             true,  true,  true,  false, false, true),
+                // Loyalty Program: Marketing owns rewards/campaigns/referrals (BRD §4), so it's
+                // the designated administrator of loyalty configuration — same access as Coupons.
+                P(r, "Loyalty Program",     true,  true,  true,  false, false, true),
                 P(r, "Customers",           true,  true,  true,  false, false, true),
                 // Marketing is scoped to rewards/campaigns/referrals only (BRD §4)
                 // — no Returns, Finance or Rules Engine visibility.
@@ -1544,6 +1553,7 @@ public static class DataSeeder
                 P(r, "Cashier Shifts",      false, false, false, false, false, false),
                 P(r, "Orders",              true,  false, false, false, false, false),
                 P(r, "Coupons",             false, false, false, false, false, false),
+                P(r, "Loyalty Program",     false, false, false, false, false, false),
                 P(r, "Customers",           false, false, false, false, false, false),
                 P(r, "Returns",             false, false, false, false, false, false),
                 P(r, "Inventory",           true,  false, false, false, false, false),
@@ -1629,7 +1639,7 @@ public static class DataSeeder
     {
         db.Discounts.AddRange(
             new Discount { Id = Guid.NewGuid(), Name = "Senior Citizen 5%",     AppliesTo = "all",    DiscountType = "percentage", Value = 5,  IsActive = true,  RequiresCustomer = true, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new Discount { Id = Guid.NewGuid(), Name = "Loyalty Tier Gold 10%", AppliesTo = "all",    DiscountType = "percentage", Value = 10, IsActive = true,  RequiresCustomer = true, MinCustomerTier = "gold", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new Discount { Id = Guid.NewGuid(), Name = "Loyalty Tier Gold 10%", AppliesTo = "all",    DiscountType = "percentage", Value = 10, IsActive = true,  RequiresCustomer = true, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
             new Discount { Id = Guid.NewGuid(), Name = "Eid Week-end 15%",      AppliesTo = "all",    DiscountType = "percentage", Value = 15, IsActive = false, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
         );
         await db.SaveChangesAsync();
@@ -1646,7 +1656,6 @@ public static class DataSeeder
         foreach (var d in patches)
         {
             d.RequiresCustomer = true;
-            if (d.Name.Contains("Gold") && d.MinCustomerTier is null) d.MinCustomerTier = "gold";
         }
 
         if (patches.Count > 0)

@@ -99,9 +99,6 @@ public class Product
     [Column("tax_percentage")]
     public decimal TaxPercentage { get; set; } = 0;
 
-    [Column("custom_fee")]
-    public decimal CustomFee { get; set; } = 0;
-
     [Column("is_tobacco")]
     public bool IsTobacco { get; set; } = false;
 

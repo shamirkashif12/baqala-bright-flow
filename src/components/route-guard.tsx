@@ -61,9 +61,11 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/expense-types",       module: "Accounting & Finance" },
   { url: "/purchase-orders",     module: "Purchase Orders" },
   { url: "/coupons",             module: "Coupons" },
+  { url: "/loyalty-program",     module: "Loyalty Program" },
   { url: "/returns",             module: "Returns" },
   { url: "/refunds",             module: "Returns" },
   { url: "/tax-fees",            module: "Tax & Fees" },
+  { url: "/service-charges",     module: "Tax & Fees" },
   { url: "/tax-reports",         module: "Tax & Fees" },
   // Suppliers
   { url: "/suppliers",           module: "Suppliers" },

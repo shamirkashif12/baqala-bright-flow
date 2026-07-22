@@ -11,6 +11,7 @@ import {
   FileBarChart, Download, TrendingUp, Calendar, Building2, ShoppingCart, Tag, Truck, Boxes,
   Ban, RotateCcw, Percent, CreditCard, ShieldCheck, DollarSign, AlertTriangle, Cigarette, Coins,
   ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, ArrowLeftRight, Receipt, PackageSearch, Sparkles, Gavel, ShieldAlert,
+  UserCheck, CalendarCheck, History, Gift,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/")({ component: Reports });
@@ -82,14 +83,16 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/employee-audit-center", exportFile: () => api.exportEmployeeAuditCenter({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "discounts", name: "Discount Report", desc: "Discounts applied across periods", icon: Percent, color: "warning",
       href: "/reports/discounts", exportFile: () => api.exportDiscountsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "loyalty", name: "Loyalty Program", desc: "Points earned, redeemed and expired by branch", icon: Gift, color: "success",
+      href: "/reports/loyalty", exportFile: () => api.exportLoyaltyReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "payment-methods", name: "Payment Methods", desc: "Cash / Card / STC Pay split", icon: CreditCard, color: "primary",
       href: "/reports/payment-methods", exportFile: () => api.exportPaymentMethodsReport({ from: todayStr(), to: todayStr(), exportedBy }) },
     { code: "vat-zatca", name: "VAT / ZATCA Report", desc: "Tax filing-ready VAT summary", icon: ShieldCheck, color: "success",
       href: "/reports/vat-zatca", exportFile: () => api.exportVatZatcaReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "tax", name: "Tax Report", desc: "Tax breakdown by branch and cashier", icon: Coins, color: "success",
       href: "/reports/tax", exportFile: () => api.exportTaxReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
-    { code: "fees", name: "Fee Report", desc: "Custom fees collected & detail", icon: DollarSign, color: "success",
-      href: "/reports/fees", exportFile: () => api.exportFeeReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "service-charges", name: "Service Charges Report", desc: "Delivery fee & surcharges collected — not a tax", icon: Truck, color: "primary",
+      href: "/reports/service-charges", exportFile: () => api.exportFeeReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "tobacco-excise", name: "Tobacco Excise Report", desc: "Excise tax on tobacco products", icon: Cigarette, color: "warning",
       href: "/reports/tobacco-excise", exportFile: () => api.exportTobaccoExciseReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "profit-margin", name: "Profit Margin", desc: "Gross & net margin by product", icon: DollarSign, color: "success",
