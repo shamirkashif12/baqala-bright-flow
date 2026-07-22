@@ -804,6 +804,8 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deletingProduct, setDeletingProduct] = useState(false);
   const [form, setForm] = useState({
     name: "", sku: "", barcode: "", categoryId: "",
     saleUnitType: "single" as "single" | "pack", itemsPerPack: "",
@@ -882,6 +884,24 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
       onDone(); onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to save."); }
     finally { setSaving(false); }
+  };
+
+  const handleDeleteProduct = async () => {
+    if (!item?.product?.id) return;
+    setDeletingProduct(true);
+    try {
+      const res = await api.deleteProduct(item.product.id);
+      // A manager (holds Inventory:Approve) discontinues immediately — empty response. Anyone
+      // else's request is queued instead (see ProductsController.Delete), and the product stays
+      // live until a manager decides it in the Approval Center.
+      toast.success(res?.approvalRequestId ? "Deletion request sent for manager approval." : "Product deleted.");
+      setConfirmDelete(false);
+      onDone(); onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete this product.");
+    } finally {
+      setDeletingProduct(false);
+    }
   };
 
   const addRule = async () => {
@@ -1075,7 +1095,32 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow mt-2" onClick={handleSave} disabled={saving}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Save Changes
         </Button>
+        <Button variant="outline" className="w-full text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive mt-2"
+          onClick={() => setConfirmDelete(true)}>
+          <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete Product
+        </Button>
       </DialogContent>
+
+      <Dialog open={confirmDelete} onOpenChange={v => !v && setConfirmDelete(false)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Delete Product</DialogTitle></DialogHeader>
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+            <p>
+              Delete <span className="font-medium">{item?.product?.name ?? "this product"}</span>?
+              This discontinues it everywhere — across every branch, not just this one — and it will
+              no longer be sellable. If you don't have manager approval rights, this will be sent
+              for approval instead of taking effect right away.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 mt-1">
+            <Button variant="outline" onClick={() => setConfirmDelete(false)} disabled={deletingProduct}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteProduct} disabled={deletingProduct}>
+              {deletingProduct ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete Product
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

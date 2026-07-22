@@ -184,8 +184,11 @@ export const api = {
     request<Product>("/api/products", { method: "POST", body: JSON.stringify(data) }),
   updateProduct: (id: string, data: Partial<Product>) =>
     request<Product>(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  // A caller with Inventory:Approve deletes (discontinues) immediately — response body is empty
+  // (204). Anyone else's request is queued in the Approval Center instead (202, with a message
+  // and approvalRequestId) and the product stays live until a manager decides it.
   deleteProduct: (id: string) =>
-    request<void>(`/api/products/${id}`, { method: "DELETE" }),
+    request<{ message: string; approvalRequestId: string } | undefined>(`/api/products/${id}`, { method: "DELETE" }),
 
   // Pricing (FRD §12) — branch / customer-tier / scheduled / pack price rules.
   //
