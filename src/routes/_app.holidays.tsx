@@ -19,6 +19,7 @@ import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { localDateStr } from "@/lib/utils";
 import { exportRowsAsCsv } from "@/lib/csv-export";
+import { useCompanyHeader } from "@/lib/use-company-header";
 
 export const Route = createFileRoute("/_app/holidays")({ component: Holidays });
 
@@ -86,6 +87,7 @@ function HolidaysTab() {
   const { branches } = useBranch();
   const { canCreate, canEdit, canDelete } = usePermission("HR Master Data");
   const branchLocked = user?.role !== "tenant_admin";
+  const companyHeader = useCompanyHeader();
 
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [loading, setLoading] = useState(true);
@@ -170,7 +172,8 @@ function HolidaysTab() {
     exportRowsAsCsv(
       ["Name", "Date", "Type", "Branch", "Status", "Description"],
       filtered.map(h => [h.name, h.date, h.holidayType, h.branch?.name ?? "All Branches", h.status, h.description ?? ""]),
-      `holidays-${localDateStr()}.csv`
+      `holidays-${localDateStr()}.csv`,
+      companyHeader
     );
   };
 

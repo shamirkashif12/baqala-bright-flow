@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { exportRowsAsCsv } from "@/lib/csv-export";
+import { useCompanyHeader } from "@/lib/use-company-header";
 import { localDateStr } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/departments")({ component: Departments });
@@ -86,6 +87,7 @@ function DepartmentsTab() {
   const { canCreate, canEdit, canDelete } = usePermission("HR Master Data");
   const navigate = useNavigate();
   const branchLocked = user?.role !== "tenant_admin";
+  const companyHeader = useCompanyHeader();
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -163,7 +165,8 @@ function DepartmentsTab() {
   const handleExport = () => exportRowsAsCsv(
     ["Name", "Branch", "Manager", "Status"],
     filtered.map(d => [d.name, d.branch?.name ?? "All Branches", d.managerEmployee?.fullName ?? "", d.status]),
-    `departments-${localDateStr(new Date())}.csv`
+    `departments-${localDateStr(new Date())}.csv`,
+    companyHeader
   );
 
   return (

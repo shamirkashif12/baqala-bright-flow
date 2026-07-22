@@ -374,7 +374,7 @@ function Dashboard() {
     const branchId = branch !== "all" ? branch : undefined;
     Promise.all([
       api.getStock({ branchId, lowStock: true }),
-      api.getInventoryDashboardReport({ from: firstOfMonthStr(), to: todayStr(), branchId }),
+      api.getInventoryDashboardReport({ from: firstOfMonthStr(), to: todayStr(), branchId: branchId ? [branchId] : undefined }),
     ])
       .then(([items, report]) => { setInventoryItems(items); setInvReport(report); setInventoryTabLoaded(true); })
       .catch(() => {})

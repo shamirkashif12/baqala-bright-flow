@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, IBatchConsumptionService batchConsumption, IStockMovementService stockMovements, ILogger<OrdersController> logger) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, IBatchConsumptionService batchConsumption, IStockMovementService stockMovements, IOrderVoidService orderVoidService, ILogger<OrdersController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's orders —
     // mirrors ReportsController.GetCallerContext. Previously branchId was just an optional query
@@ -482,7 +482,22 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 }),
                 // A discounted sale is the one a manager actually wants to spot in the trail.
                 severity: order.DiscountAmount > 0 ? "warning" : "info",
-                module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId));
+                module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId), terminalId: order.TerminalId);
+
+            // Employee Audit Center — "Gave discount" needs to be its own filterable activity
+            // type, not just a field buried inside create_order's snapshot.
+            if (order.DiscountAmount > 0)
+            {
+                await audit.LogAsync(
+                    action: "Gave Discount",
+                    entityType: "Order",
+                    entityId: order.Id,
+                    userId: order.CashierId,
+                    branchId: order.BranchId,
+                    details: System.Text.Json.JsonSerializer.Serialize(new { order.OrderNumber, order.DiscountAmount, order.Subtotal }),
+                    severity: "warning",
+                    module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId), terminalId: order.TerminalId);
+            }
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for order {OrderId}", order.Id); }
 
@@ -496,7 +511,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 branchId: order.BranchId,
                 details: $"{checkoutWithoutShiftRole} completed order {order.OrderNumber} with no open shift — sale has no ShiftId to reconcile against.",
                 severity: "warning",
-                module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId));
+                module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId), terminalId: order.TerminalId);
         }
 
         // ── ZATCA Phase 2: auto-create + submit e-invoice ──────────────────────
@@ -782,6 +797,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             PaymentMethod = order.Payments.FirstOrDefault()?.PaymentMethod,
             Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
         });
+        var oldDiscount = order.DiscountAmount;
 
         // Reconcile inventory by the delta between old and new quantity per product — mirrors the
         // decrement block in Create. Grouped by product first so a product simply changing
@@ -901,7 +917,24 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             details: afterSnapshot,
             severity: "info",
             beforeValue: beforeSnapshot,
-            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()));
+            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
+
+        // Employee Audit Center — "Gave discount" as its own filterable activity type, same as
+        // Create's. Only fires when the edit actually increases the discount (a fresh grant),
+        // not every edit of an already-discounted order.
+        if (order.DiscountAmount > oldDiscount)
+        {
+            await audit.LogAsync(
+                action: "Gave Discount",
+                entityType: "Order",
+                entityId: order.Id,
+                userId: CallerId(),
+                branchId: order.BranchId,
+                details: System.Text.Json.JsonSerializer.Serialize(new { order.OrderNumber, order.DiscountAmount, order.Subtotal }),
+                severity: "warning",
+                beforeValue: System.Text.Json.JsonSerializer.Serialize(new { DiscountAmount = oldDiscount }),
+                module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
+        }
 
         var updated = await db.Orders
             .Include(o => o.Items).ThenInclude(i => i.Product)
@@ -911,8 +944,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return Ok(updated);
     }
 
-    // Order void — permission-gated only, same as Edit above. A caller without Orders:Delete is
-    // blocked outright; there is no flag-then-approve fallback.
+    // Order void — a caller with Orders:Approve (i.e. already a manager) voids immediately
+    // (self-approve, same precedent as the Wastage/InventoryAdjustment flow). Anyone else's void
+    // request is queued in the Approval Center instead of executing — the order is left
+    // untouched until a manager approves or rejects it there.
     [RequirePermission("Orders", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> VoidOrder(Guid id, [FromBody] OrderVoidRequest req)
@@ -925,8 +960,25 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (settings?.RequireReasonForVoid == true && string.IsNullOrWhiteSpace(req.Reason))
             return BadRequest(new { message = "A reason is required to void this order." });
 
+        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Orders", PermAction.Approve);
+        if (!canSelfApprove)
+        {
+            var pending = new ApprovalRequest
+            {
+                RequestType = "order_cancellation",
+                EntityType = "Order",
+                EntityId = order.Id,
+                BranchId = order.BranchId,
+                RequestedBy = CallerId() ?? Guid.Empty,
+                Reason = req.Reason,
+            };
+            db.ApprovalRequests.Add(pending);
+            await db.SaveChangesAsync();
+            return Accepted(new { message = "Void request sent for manager approval.", approvalRequestId = pending.Id });
+        }
+
         var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new { order.OrderStatus, order.PaymentStatus });
-        await ApplyVoidAsync(order, req.Reason);
+        await orderVoidService.VoidAsync(order, req.Reason);
 
         await audit.LogAsync(
             action: "void_order",
@@ -938,60 +990,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             severity: "info",
             beforeValue: beforeSnapshot,
             notes: req.Reason,
-            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()));
+            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
 
         return Ok(order);
-    }
-
-    private async Task ApplyVoidAsync(Order order, string? reason)
-    {
-        // Reverse inventory for every line — the items already left the shelf when the sale rang up.
-        foreach (var item in order.Items)
-        {
-            var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == order.BranchId);
-            if (stock != null)
-            {
-                stock.Quantity += item.Quantity;
-                stock.LastUpdated = DateTime.UtcNow;
-                stock.UpdatedAt = DateTime.UtcNow;
-            }
-        }
-
-        // Best-effort, mirrors the same restore Create's ConsumeFefoAsync call needs undoing — without
-        // this the specific batch a voided sale drew down never gets its RemainingQuantity (and
-        // therefore its expiry visibility in the Inventory batch drill-down) back.
-        foreach (var item in order.Items)
-        {
-            try { await batchConsumption.RestoreFefoAsync(item.ProductId, order.BranchId, warehouseId: null, item.Quantity); }
-            catch (Exception ex) { logger.LogError(ex, "Batch restore failed for voided order {OrderId} product {ProductId}", order.Id, item.ProductId); }
-        }
-
-        // Reverse this order's contribution to its shift's running totals — otherwise a void
-        // leaves CashSales/CardSales/DigitalSales/TotalSales overstated relative to the real
-        // (now-cancelled) sale, the same class of reconciliation-variance bug as an order that
-        // was never counted in the first place.
-        if (order.ShiftId.HasValue)
-        {
-            var shift = await db.CashierShifts.FindAsync(order.ShiftId.Value);
-            if (shift is not null)
-            {
-                foreach (var pay in order.Payments)
-                {
-                    switch (pay.PaymentMethod)
-                    {
-                        case "cash": shift.CashSales -= pay.Amount; break;
-                        case "card": shift.CardSales -= pay.Amount; break;
-                        default: shift.DigitalSales -= pay.Amount; break;
-                    }
-                    shift.TotalSales -= pay.Amount;
-                }
-            }
-        }
-
-        order.OrderStatus = "cancelled";
-        order.VoidReason = reason;
-        order.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
     }
 
     [RequirePermission("POS", PermAction.Create)]

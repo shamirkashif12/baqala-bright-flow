@@ -19,6 +19,7 @@ import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { localDateStr } from "@/lib/utils";
 import { exportRowsAsCsv } from "@/lib/csv-export";
+import { useCompanyHeader } from "@/lib/use-company-header";
 
 export const Route = createFileRoute("/_app/hrm-attendance")({ component: HrmAttendance });
 
@@ -161,6 +162,7 @@ function HrmAttendanceTab() {
   // single-row result, so hide them rather than show controls that silently do nothing.
   const canViewAll = canApprove || canEdit;
   const branchLocked = user?.role !== "tenant_admin";
+  const companyHeader = useCompanyHeader();
 
   const [rows, setRows] = useState<StaffAttendance[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -214,7 +216,8 @@ function HrmAttendanceTab() {
     exportRowsAsCsv(
       ["Date", "Employee", "Employee ID", "Branch", "Department", "Shift", "Check-In", "Check-Out", "Total Hours", "Status", "Late (min)", "Early Leave (min)", "Correction Status", "Remarks"],
       visibleRows.map(r => [r.date ?? "", r.employee?.fullName ?? "", r.employee?.employeeCode ?? "", r.branchId, r.employee?.department?.name ?? "", r.shift?.name ?? "", timeStr(r.checkIn), timeStr(r.checkOut), totalHours(r), r.status, r.lateMinutes, r.earlyLeaveMinutes, r.isCorrected ? "Corrected" : "Original", r.remarks ?? ""]),
-      `attendance-${dateFrom}-to-${dateTo}.csv`
+      `attendance-${dateFrom}-to-${dateTo}.csv`,
+      companyHeader
     );
   };
   useEffect(() => {

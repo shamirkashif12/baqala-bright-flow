@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { PerformanceTierBadge } from "@/components/report-filters/performance-tier-badge";
+import { MetricCard } from "@/components/metric-card";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -17,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PaginatedDataTable } from "@/components/module-placeholder";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { toast } from "sonner";
-import { TrendingDown, Hourglass } from "lucide-react";
+import { TrendingDown, Hourglass, Sparkles, TrendingUp, Minus, PackageX } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/inventory-dashboard")({ component: InventoryDashboard });
@@ -37,9 +39,9 @@ function InventoryDashboard() {
 
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [warehouseId, setWarehouseId] = useState("all");
-  const [categoryId, setCategoryId] = useState("all");
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [deadOnly, setDeadOnly] = useState(false);
   const [data, setData] = useState<InventoryDashboardReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,15 +49,17 @@ function InventoryDashboard() {
   // filters this user has.
   const [scope, setScope] = useState<InventorySnapshotScope | null>(null);
 
-  const { categories } = useReportFilterOptions(branchId, categoryId);
+  const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
+  const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
+  const { categories } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
 
   useEffect(() => { api.getInventorySnapshotScope().then(setScope).catch(() => {}); }, []);
 
   const filters = useMemo(() => ({
-    branchId: branchId !== "all" ? branchId : undefined,
-    warehouseId: warehouseId !== "all" ? warehouseId : undefined,
-    categoryId: categoryId !== "all" ? categoryId : undefined,
-  }), [branchId, warehouseId, categoryId]);
+    branchId: branchIds.length ? branchIds : undefined,
+    warehouseId: warehouseIds.length ? warehouseIds : undefined,
+    categoryId: categoryIds.length ? categoryIds : undefined,
+  }), [branchIds, warehouseIds, categoryIds]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -73,7 +77,7 @@ function InventoryDashboard() {
   // Filtered client-side: the rows are already loaded and bounded by the report's own scope, so a
   // refetch would be a round-trip for a predicate the browser can apply instantly.
   const agingRows = useMemo(
-    () => (data?.agingRows ?? []).filter((r) => !deadOnly || r.isDeadStock),
+    () => (data?.agingRows ?? []).filter((r) => !deadOnly || r.classification === "Dead Stock"),
     [data?.agingRows, deadOnly],
   );
 
@@ -91,30 +95,41 @@ function InventoryDashboard() {
         <Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} />
         <Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} />
         {!lockedBranchId && scope?.canFilterBranch && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+          </div>
         )}
         {scope?.canFilterWarehouse && (
-          <Select value={warehouseId} onValueChange={setWarehouseId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Warehouses" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Warehouses</SelectItem>
-              {scope.warehouses.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Warehouses"
+              options={scope.warehouses.map((w) => ({ id: w.id, label: w.name }))}
+              selected={warehouseIds}
+              onChange={setWarehouseIds}
+            />
+          </div>
         )}
-        <Select value={categoryId} onValueChange={setCategoryId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={categories.map((c) => ({ id: c.id, label: c.name }))}
+            selected={categoryIds}
+            onChange={setCategoryIds}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
+        <MetricCard label="Star Products" value={String(data?.kpis.starCount ?? 0)} icon={Sparkles} accent="success" />
+        <MetricCard label="High Performers" value={String(data?.kpis.highPerformerCount ?? 0)} icon={TrendingUp} />
+        <MetricCard label="Average Performers" value={String(data?.kpis.averagePerformerCount ?? 0)} icon={Minus} />
+        <MetricCard label="Slow Moving" value={String(data?.kpis.slowMovingCount ?? 0)} icon={TrendingDown} accent="warning" />
+        <MetricCard label="Dead Stock" value={String(data?.deadStockSkus ?? 0)} icon={PackageX} accent="destructive" />
       </div>
 
       <Card className="p-6 border-border/60 shadow-card">
@@ -160,10 +175,12 @@ function InventoryDashboard() {
           </div>
         </div>
         <p className="text-xs text-muted-foreground mb-4">
-          <span className="font-medium text-foreground">Dead stock</span> = on hand with no sales in the selected period.{" "}
-          <span className="font-medium text-foreground">Slow moving</span> = sold, but below the average velocity
-          ({avgMoved.toFixed(1)} units/SKU across moving stock).{" "}
-          <span className="font-medium text-foreground">Moving</span> = sold at or above average.
+          <span className="font-medium text-foreground">Status</span> is the same Star Products / High Performers /
+          Average Performers / Slow Moving / Dead Stock classification as the Product Performance report — a
+          weighted score across sales value, units sold, turnover, margin and recency, with{" "}
+          <span className="font-medium text-foreground">Dead Stock</span> overriding the score whenever a product
+          on hand hasn't sold in 90+ days (or ever). Units Moved shown against the average across moving stock
+          ({avgMoved.toFixed(1)} units/SKU).
         </p>
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
@@ -214,15 +231,8 @@ function InventoryDashboard() {
                 ),
               },
               {
-                key: "isDeadStock", label: "Status",
-                // Three-way: nothing sold at all (dead) → sold below the average velocity (slow) →
-                // at/above average (moving). The average excludes dead stock, so a slow mover is
-                // genuinely lagging its peers rather than being dragged down by idle SKUs.
-                render: (r: InventoryAgingRow) => r.isDeadStock
-                  ? <Badge variant="destructive" className="text-[10px]">Dead stock</Badge>
-                  : r.unitsMovedInPeriod < avgMoved
-                    ? <Badge variant="secondary" className="text-[10px]">Slow moving</Badge>
-                    : <Badge variant="outline" className="text-[10px]">Moving</Badge>,
+                key: "classification", label: "Status",
+                render: (r: InventoryAgingRow) => <PerformanceTierBadge tier={r.classification} />,
               },
             ]}
             rows={agingRows}

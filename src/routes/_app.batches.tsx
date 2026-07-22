@@ -21,6 +21,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge as StatusBadge } from "@/components/batch-status-badge";
+import { useCompanyHeader } from "@/lib/use-company-header";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/batches")({ component: Batches });
@@ -45,7 +46,7 @@ function SeverityBadge({ severity }: { severity: RecallSeverity }) {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-function exportCSV(data: InventoryBatch[], branches: Branch[], warehouses: Warehouse[]) {
+function exportCSV(data: InventoryBatch[], branches: Branch[], warehouses: Warehouse[], companyHeader: string) {
   const locationName = (b: InventoryBatch) => b.branchId
     ? branches.find(br => br.id === b.branchId)?.name ?? ""
     : warehouses.find(w => w.id === b.warehouseId)?.name ?? "";
@@ -66,7 +67,9 @@ function exportCSV(data: InventoryBatch[], branches: Branch[], warehouses: Wareh
       b.status,
     ]),
   ];
-  const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+  const lines = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(","));
+  if (companyHeader) lines.unshift(`"${companyHeader.replace(/"/g, '""')}"`, "");
+  const csv = lines.join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
   a.download = `batches-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -327,6 +330,7 @@ function RecallImpactDialog({ recallId, onClose }: { recallId: string | null; on
 
 function Batches() {
   const { user } = useAuth();
+  const companyHeader = useCompanyHeader();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -514,7 +518,7 @@ function Batches() {
             </Button>
           )}
         </div>
-        <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => exportCSV(filtered, branches, warehouses)} disabled={filtered.length === 0}>
+        <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => exportCSV(filtered, branches, warehouses, companyHeader)} disabled={filtered.length === 0}>
           <Download className="h-4 w-4" /> Export ({filtered.length})
         </Button>
       </div>

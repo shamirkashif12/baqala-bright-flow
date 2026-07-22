@@ -4,6 +4,7 @@ import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -50,12 +51,13 @@ function WasteSpoilage() {
 
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [reason, setReason] = useState("all");
-  const [categoryId, setCategoryId] = useState("all");
-  const [productId, setProductId] = useState("all");
-  const [adjustedBy, setAdjustedBy] = useState("all");
-  const [approvalStatus, setApprovalStatus] = useState("all");
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
+  const [adjustedByIds, setAdjustedByIds] = useState<string[]>([]);
+  const [approvalStatuses, setApprovalStatuses] = useState<string[]>([]);
   const [isTobacco, setIsTobacco] = useState(false);
   const [data, setData] = useState<WasteSpoilageData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,22 +66,25 @@ function WasteSpoilage() {
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const { categories, products, employees: users } = useReportFilterOptions(branchId, categoryId);
+  const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
+  const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
+  const { categories, products, employees: users, warehouses } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
 
-  useEffect(() => { setAdjustedBy("all"); }, [branchId]);
+  useEffect(() => { setAdjustedByIds([]); }, [branchIds]);
   useEffect(() => {
-    if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
-  }, [products, productId]);
+    setProductIds((prev) => prev.filter((id) => products.some((p) => p.id === id)));
+  }, [products]);
 
   const filters = useMemo(() => ({
-    branchId: branchId !== "all" ? branchId : undefined,
+    branchId: branchIds.length ? branchIds : undefined,
+    warehouseId: warehouseIds.length ? warehouseIds : undefined,
     reason: reason !== "all" ? reason : undefined,
-    categoryId: categoryId !== "all" ? categoryId : undefined,
-    productId: productId !== "all" ? productId : undefined,
-    adjustedBy: adjustedBy !== "all" ? adjustedBy : undefined,
-    approvalStatus: approvalStatus !== "all" ? approvalStatus : undefined,
+    categoryId: categoryIds.length ? categoryIds : undefined,
+    productId: productIds.length ? productIds : undefined,
+    adjustedBy: adjustedByIds.length ? adjustedByIds : undefined,
+    approvalStatus: approvalStatuses.length ? approvalStatuses : undefined,
     isTobacco: isTobacco || undefined,
-  }), [branchId, reason, categoryId, productId, adjustedBy, approvalStatus, isTobacco]);
+  }), [branchIds, warehouseIds, reason, categoryIds, productIds, adjustedByIds, approvalStatuses, isTobacco]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -156,13 +161,24 @@ function WasteSpoilage() {
           <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
         </div>
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+          </div>
+        )}
+        {!lockedBranchId && (
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Warehouses"
+              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+              selected={warehouseIds}
+              onChange={setWarehouseIds}
+            />
+          </div>
         )}
         <Select value={reason} onValueChange={setReason}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Reason" /></SelectTrigger>
@@ -173,36 +189,42 @@ function WasteSpoilage() {
             <SelectItem value="expired">Expired</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={categoryId} onValueChange={setCategoryId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={productId} onValueChange={setProductId}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Products</SelectItem>
-            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={adjustedBy} onValueChange={setAdjustedBy}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Employees</SelectItem>
-            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={approvalStatus} onValueChange={setApprovalStatus}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Approval" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Approvals</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={categories.map((c) => ({ id: c.id, label: c.name }))}
+            selected={categoryIds}
+            onChange={setCategoryIds}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Products"
+            options={products.map((p) => ({ id: p.id, label: p.name }))}
+            selected={productIds}
+            onChange={setProductIds}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Employees"
+            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+            selected={adjustedByIds}
+            onChange={setAdjustedByIds}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Approvals"
+            options={[
+              { id: "pending", label: "Pending" },
+              { id: "approved", label: "Approved" },
+              { id: "rejected", label: "Rejected" },
+            ]}
+            selected={approvalStatuses}
+            onChange={setApprovalStatuses}
+          />
+        </div>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
           Tobacco only

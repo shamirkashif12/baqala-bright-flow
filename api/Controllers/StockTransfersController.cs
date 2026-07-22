@@ -29,13 +29,20 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             Items = t.Items.Select(i => new { i.ProductId, i.RequestedQuantity, i.ApprovedQuantity, i.ReceivedQuantity }),
         });
 
+    // FRD §2.4 / Employee Audit Center — resolves the acting user to their linked Employee record
+    // so "Moved stock" rows show an employee name in the report, same as Orders/Returns/Auth
+    // already do. Previously missing here, so every stock-transfer audit row rendered no employee.
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? (await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()) : null;
+
     private async Task LogTransferAsync(string action, StockTransfer t, Guid? userId, string severity = "info", string? beforeValue = null)
     {
         try
         {
             await audit.LogAsync(action: action, entityType: "StockTransfer", entityId: t.Id,
                 userId: userId, branchId: t.DestBranchId ?? t.SourceBranchId,
-                details: TransferAuditDetails(t), severity: severity, beforeValue: beforeValue);
+                details: TransferAuditDetails(t), severity: severity, beforeValue: beforeValue,
+                module: "Stock Transfers", employeeId: await ResolveEmployeeIdAsync(userId));
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for transfer {TransferId} ({Action})", t.Id, action); }
     }
@@ -416,11 +423,19 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     public async Task<IActionResult> Create([FromBody] CreateTransferRequest req)
     {
         var reqItems = req.Items ?? [];
-        var transferProducts = await db.Products
-            .Where(p => reqItems.Select(i => i.ProductId).Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id);
+        // A parameterized Guid list .Contains(...) inside a live EF Where() throws on this MySQL
+        // provider ("Expression '@Select' in the SQL tree does not have a type mapping assigned")
+        // — see the ef-mysql-inlist-gotcha memory. Materialize first, then filter in memory. This
+        // was throwing on every stock transfer create with at least one item.
+        var transferProductIds = reqItems.Select(i => i.ProductId).ToHashSet();
+        var transferProducts = (await db.Products.ToListAsync())
+            .Where(p => transferProductIds.Contains(p.Id))
+            .ToDictionary(p => p.Id);
+        if (reqItems.Count == 0) return BadRequest(new { message = "Add at least one item to the transfer." });
         foreach (var i in reqItems)
         {
+            if (i.RequestedQuantity <= 0) return BadRequest(new { message = "Requested quantity must be greater than zero for every item." });
+            if (!transferProducts.ContainsKey(i.ProductId)) return BadRequest(new { message = "One of the selected products could not be found." });
             var err = QuantityValidation.ValidateWholeUnit(transferProducts.GetValueOrDefault(i.ProductId), i.RequestedQuantity, "Requested quantity");
             if (err is not null) return BadRequest(new { message = err });
         }
@@ -509,22 +524,31 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         db.StockTransfers.Add(transfer);
         await db.SaveChangesAsync();
 
-        if (transfer.DestBranchId.HasValue)
+        // Best-effort: the transfer row is already committed above, so a notification failure
+        // here must not turn into a 500 for a transfer that actually succeeded.
+        try
         {
-            await notifications.NotifyRoleAsync(["Manager", "Admin"], transfer.DestBranchId,
-                "Inventory", "Stock Transfer Pending Acceptance", "Stock Transfer Pending Acceptance",
-                $"Transfer {transfer.TransferNumber} pending acceptance",
-                entityType: "StockTransfer", entityId: transfer.Id);
-        }
+            if (transfer.DestBranchId.HasValue)
+            {
+                await notifications.NotifyRoleAsync(["Manager", "Admin"], transfer.DestBranchId,
+                    "Inventory", "Stock Transfer Pending Acceptance", "Stock Transfer Pending Acceptance",
+                    $"Transfer {transfer.TransferNumber} pending acceptance",
+                    entityType: "StockTransfer", entityId: transfer.Id);
+            }
 
-        // Return-to-supplier transfer — confirm to whoever created it, since there's no branch
-        // recipient to notify (the "destination" is the supplier, not a Users-linked entity).
-        if (transfer.TransferType == "warehouse_to_supplier" && transfer.CreatedBy != Guid.Empty)
+            // Return-to-supplier transfer — confirm to whoever created it, since there's no branch
+            // recipient to notify (the "destination" is the supplier, not a Users-linked entity).
+            if (transfer.TransferType == "warehouse_to_supplier" && transfer.CreatedBy != Guid.Empty)
+            {
+                await notifications.NotifyUserAsync(transfer.CreatedBy,
+                    "Suppliers / Purchase Orders", "Supplier Return Created", "Supplier Return Created",
+                    $"Supplier return created: {transfer.TransferNumber}",
+                    entityType: "StockTransfer", entityId: transfer.Id);
+            }
+        }
+        catch (Exception ex)
         {
-            await notifications.NotifyUserAsync(transfer.CreatedBy,
-                "Suppliers / Purchase Orders", "Supplier Return Created", "Supplier Return Created",
-                $"Supplier return created: {transfer.TransferNumber}",
-                entityType: "StockTransfer", entityId: transfer.Id);
+            logger.LogError(ex, "Failed to send Stock Transfer Created notification for transfer {TransferId}", transfer.Id);
         }
 
         await LogTransferAsync("create_stock_transfer", transfer, transfer.CreatedBy == Guid.Empty ? CallerId() : transfer.CreatedBy);
@@ -546,9 +570,12 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         // quantity and any tracked expiry need the same validation as the other entry points.
         // Unlike those two, 0 is a legitimate value here (the frontend lets a receiver record a
         // fully lost/undelivered line item with a discrepancy note) — only negative is invalid.
-        var receiveProducts = await db.Products
-            .Where(p => transfer.Items.Select(i => i.ProductId).Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id);
+        // See ef-mysql-inlist-gotcha memory — a parameterized Guid list .Contains(...) inside a
+        // live EF Where() throws on this MySQL provider. Materialize first, then filter in memory.
+        var receiveTransferProductIds = transfer.Items.Select(i => i.ProductId).ToHashSet();
+        var receiveProducts = (await db.Products.ToListAsync())
+            .Where(p => receiveTransferProductIds.Contains(p.Id))
+            .ToDictionary(p => p.Id);
         foreach (var recv in req.Items ?? [])
         {
             if (recv.ReceivedQuantity < 0)

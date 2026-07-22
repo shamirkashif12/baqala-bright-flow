@@ -9,20 +9,21 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Minus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
-  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft, Check,
+  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft,
 } from "lucide-react";
 import { BatchExpandRow } from "@/components/batch-expand-row";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { fileToCompressedDataUrl } from "@/lib/image";
+import { useCompanyHeader } from "@/lib/use-company-header";
 import { localDateStr } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -297,47 +298,6 @@ function ReceiveStockDialog({ open, onClose, warehouses, branches, destBranchId,
 
 // ─── Add Product Dialog ───────────────────────────────────────────────────────
 
-// Compact multi-select dropdown for branches. A collapsed trigger ("3 branches") instead of an
-// always-open checklist, so the Add Product form stays short no matter how many branches exist.
-function BranchMultiSelect({ branches, selected, onToggle, invalid }: {
-  branches: Branch[]; selected: string[]; onToggle: (id: string) => void; invalid?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const label = selected.length === 0
-    ? "Select branches…"
-    : selected.length === branches.length
-      ? "All branches"
-      : selected.length <= 2
-        ? branches.filter(b => selected.includes(b.id)).map(b => b.name).join(", ")
-        : `${selected.length} branches selected`;
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button type="button"
-          className={`h-9 w-full rounded-lg border px-3 text-sm flex items-center justify-between gap-2 ${invalid ? "border-destructive/60 ring-1 ring-destructive/30" : "border-border/60"} bg-transparent hover:bg-muted/30`}>
-          <span className={`truncate ${selected.length === 0 ? "text-muted-foreground" : ""}`}>{label}</span>
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-1 max-h-64 overflow-y-auto" align="start">
-        {branches.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">No branches.</p>}
-        {branches.map(b => {
-          const on = selected.includes(b.id);
-          return (
-            <button key={b.id} type="button" onClick={() => onToggle(b.id)}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-muted/50 text-left">
-              <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${on ? "bg-primary border-primary text-primary-foreground" : "border-border/60"}`}>
-                {on && <Check className="h-3 w-3" />}
-              </span>
-              <span className="truncate">{b.name}</span>
-            </button>
-          );
-        })}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 function generateSKU(name: string): string {
   const words = name.trim().split(/\s+/).filter(w => w.length >= 2);
   const parts = words.slice(0, 3).map(w => w.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3));
@@ -415,13 +375,6 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   // the pricing section below offers a per-branch price for exactly these branches — "the product
   // is added in those only", so there is nowhere else to price it.
   const [branchIds, setBranchIds] = useState<string[]>([]);
-  const toggleBranch = (id: string) => {
-    setBranchIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-    // Drop any per-branch price for a branch that's no longer selected — it can't be priced if the
-    // product isn't stocked there.
-    setBranchPrices(prev => { const next = { ...prev }; delete next[id]; return next; });
-    setError("");
-  };
 
   // ─── Independent extra prices (FRD §12) ───────────────────────────────────
   //
@@ -643,8 +596,23 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
           </FieldRow>
           <div className="col-span-2">
             <FieldRow label="Branches * (stock the product into these)">
-              <BranchMultiSelect branches={branches} selected={branchIds} onToggle={toggleBranch}
-                invalid={submitted && missingFields.includes("Branch")} />
+              <SearchableMultiSelect
+                placeholder="Select branches…"
+                options={branches.map(b => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={(ids) => {
+                  setBranchIds(ids);
+                  // Drop any per-branch price for a branch that's no longer selected — it can't
+                  // be priced if the product isn't stocked there.
+                  setBranchPrices(prev => {
+                    const next = { ...prev };
+                    for (const id of Object.keys(next)) if (!ids.includes(id)) delete next[id];
+                    return next;
+                  });
+                  setError("");
+                }}
+                className={submitted && missingFields.includes("Branch") ? "border-destructive/60 ring-1 ring-destructive/30" : undefined}
+              />
               <p className="text-[10px] text-muted-foreground mt-1">
                 The opening quantity below is received into each selected branch. Set per-branch prices in
                 the pricing section further down.
@@ -1310,7 +1278,7 @@ type StockItem = InventoryStock & {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-function exportCSV(data: StockItem[]) {
+function exportCSV(data: StockItem[], companyHeader: string) {
   const rows: string[][] = [
     ["Product", "SKU", "Barcode", "Category", "Branch", "Qty", "Reorder Level", "Stock Status", "Expiry Date", "Cost Price (SAR)", "Selling Price (SAR)", "VAT %", "Custom Fee (SAR)"],
     ...data.map(s => [
@@ -1329,7 +1297,9 @@ function exportCSV(data: StockItem[]) {
       String(s.product?.customFee ?? 0),
     ]),
   ];
-  const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+  const lines = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(","));
+  if (companyHeader) lines.unshift(`"${companyHeader.replace(/"/g, '""')}"`, "");
+  const csv = lines.join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
   a.download = `inventory-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -1342,6 +1312,7 @@ function Inventory() {
   const { user } = useAuth();
   const { canCreate, canEdit, canDelete } = usePermission("Inventory");
   const navigate = useNavigate();
+  const companyHeader = useCompanyHeader();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
 
   const [stock, setStock] = useState<StockItem[]>([]);
@@ -1351,9 +1322,9 @@ function Inventory() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
-  const [productFilter, setProductFilter] = useState("all");
+  const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
+  const [branchFilters, setBranchFilters] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [productFilters, setProductFilters] = useState<string[]>([]);
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
 
@@ -1379,8 +1350,9 @@ function Inventory() {
   const [branchPrice, setBranchPrice] = useState<Map<string, number>>(new Map());
 
   // Only meaningful once a single branch is in view — a locked branch-scoped user, or an admin
-  // who's picked one in the filter. "All branches" has no single destination to receive against.
-  const effectiveBranchId = lockedBranchId ?? (branchFilter !== "all" ? branchFilter : null);
+  // who's picked exactly one in the filter. "All branches" (or 2+ selected) has no single
+  // destination to receive against.
+  const effectiveBranchId = lockedBranchId ?? (branchFilters.length === 1 ? branchFilters[0] : null);
 
   const loadIncomingTransfers = () => {
     if (!effectiveBranchId) { setIncomingTransfers([]); return; }
@@ -1466,7 +1438,7 @@ function Inventory() {
   }, [stock]);
 
   useEffect(() => {
-    if (lockedBranchId) setBranchFilter(lockedBranchId);
+    if (lockedBranchId) setBranchFilters([lockedBranchId]);
   }, [lockedBranchId]);
 
   async function handleDeleteStock() {
@@ -1496,28 +1468,29 @@ function Inventory() {
     const byId = new Map<string, string>();
     for (const s of stock) {
       if (!s.productId || !s.product?.name) continue;
-      if (categoryFilter !== "all" && s.product?.category?.name !== categoryFilter) continue;
-      if (branchFilter !== "all" && s.branchId !== branchFilter) continue;
+      if (categoryFilters.length && !categoryFilters.includes(s.product?.category?.name ?? "")) continue;
+      if (branchFilters.length && !branchFilters.includes(s.branchId)) continue;
       byId.set(s.productId, s.product.name);
     }
     return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [stock, categoryFilter, branchFilter]);
+  }, [stock, categoryFilters, branchFilters]);
 
-  // Keep the selection honest when a category/branch change removes it from the list — otherwise
-  // the table silently shows nothing while a stale product name is still displayed in the picker.
+  // Keep the selection honest when a category/branch change removes options from the list —
+  // otherwise the table silently shows nothing while a stale product name is still displayed in
+  // the picker.
   useEffect(() => {
-    if (productFilter !== "all" && !productOptions.some(p => p.id === productFilter)) setProductFilter("all");
-  }, [productOptions, productFilter]);
+    setProductFilters((prev) => prev.filter((id) => productOptions.some((p) => p.id === id)));
+  }, [productOptions]);
 
   const filtered = useMemo(() => stock.filter(s => {
     const mq = !q || (s.product?.name?.toLowerCase().includes(q.toLowerCase()) || s.product?.sku?.toLowerCase().includes(q.toLowerCase()) || s.product?.barcode?.toLowerCase().includes(q.toLowerCase()));
-    const mc = categoryFilter === "all" || s.product?.category?.name === categoryFilter;
-    const mb = branchFilter === "all" || s.branchId === branchFilter;
-    const mp = productFilter === "all" || s.productId === productFilter;
+    const mc = categoryFilters.length === 0 || categoryFilters.includes(s.product?.category?.name ?? "");
+    const mb = branchFilters.length === 0 || branchFilters.includes(s.branchId);
+    const mp = productFilters.length === 0 || productFilters.includes(s.productId);
     const mef = !expiryFrom || (!!s.expiryDate && s.expiryDate >= expiryFrom);
     const met = !expiryTo || (!!s.expiryDate && s.expiryDate <= expiryTo + "T23:59:59");
     return mq && mc && mb && mp && mef && met;
-  }), [stock, q, categoryFilter, branchFilter, productFilter, expiryFrom, expiryTo]);
+  }), [stock, q, categoryFilters, branchFilters, productFilters, expiryFrom, expiryTo]);
 
   // Metrics
   const totalSKUs = stock.length;
@@ -1636,28 +1609,31 @@ function Inventory() {
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></span>
           <Input className="h-9 pl-9 bg-muted/40" placeholder="Search by item name, SKU, barcode…" value={q} onChange={e => setQ(e.target.value)} />
         </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Categories" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={productFilter} onValueChange={setProductFilter}>
-          <SelectTrigger className="h-9 w-48"><SelectValue placeholder="All Products" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Products</SelectItem>
-            {productOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={categories.map(c => ({ id: c.name, label: c.name }))}
+            selected={categoryFilters}
+            onChange={setCategoryFilters}
+          />
+        </div>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Products"
+            options={productOptions.map(p => ({ id: p.id, label: p.name }))}
+            selected={productFilters}
+            onChange={setProductFilters}
+          />
+        </div>
         {!lockedBranchId && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilters}
+              onChange={setBranchFilters}
+            />
+          </div>
         )}
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
@@ -1670,7 +1646,7 @@ function Inventory() {
             </Button>
           )}
         </div>
-        <Button variant="outline" className="h-9 gap-1.5 ml-auto" onClick={() => exportCSV(filtered)} disabled={filtered.length === 0}>
+        <Button variant="outline" className="h-9 gap-1.5 ml-auto" onClick={() => exportCSV(filtered, companyHeader)} disabled={filtered.length === 0}>
           <Download className="h-4 w-4" />Export ({filtered.length})
         </Button>
       </div>

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type Category, type Product, type Terminal, type User } from "@/lib/api";
+import { api, type Category, type Product, type Terminal, type User, type Warehouse, type Supplier } from "@/lib/api";
 
 /**
- * Shared lookup lists for the common report filter set (FRD §1.1 — Branch, Employee,
- * Device/Terminal, Product, Category, Date Range). Each report page owns its own filter *state*
- * (they don't all apply the same subset), but the option lists behind Employee/Terminal/Product/
- * Category are identical everywhere, so they're loaded once here instead of being re-fetched and
- * re-filtered in each of the ~10 report routes.
+ * Shared lookup lists for the common report filter set (FRD §1.1 — Branch, Warehouse, Employee,
+ * Device/Terminal, Product, Category, Supplier, Date Range). Each report page owns its own filter
+ * *state* (they don't all apply the same subset), but the option lists behind Employee/Terminal/
+ * Product/Category/Warehouse/Supplier are identical everywhere, so they're loaded once here instead
+ * of being re-fetched and re-filtered in each report route.
  *
  * Employees and terminals are branch-scoped: picking a branch must not leave another branch's
  * cashier selected, which would silently return an empty report. Passing `branchId` keeps both
@@ -17,11 +17,15 @@ export function useReportFilterOptions(branchId?: string, categoryId?: string) {
   const [products, setProducts] = useState<Product[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   const scopedBranchId = branchId && branchId !== "all" ? branchId : undefined;
 
   useEffect(() => { api.getCategories().then(setCategories).catch(() => {}); }, []);
   useEffect(() => { api.getProducts({ status: "active" }).then(setProducts).catch(() => {}); }, []);
+  useEffect(() => { api.getWarehouses().then(setWarehouses).catch(() => {}); }, []);
+  useEffect(() => { api.getSuppliers({ status: "active" }).then(setSuppliers).catch(() => {}); }, []);
 
   useEffect(() => {
     // Any staff role can ring up a sale (a manager covering a register), so this is every active
@@ -42,5 +46,5 @@ export function useReportFilterOptions(branchId?: string, categoryId?: string) {
     [products, categoryId],
   );
 
-  return { categories, products: productOptions, employees, terminals };
+  return { categories, products: productOptions, employees, terminals, warehouses, suppliers };
 }

@@ -153,12 +153,27 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreatePoRequest req)
     {
+        // Everything below used to surface as an unhandled DbUpdateException (generic 500) once it
+        // hit SaveChangesAsync — a bad/missing SupplierId or WarehouseId FK, no destination at all,
+        // or an empty item list. Validate up front so the caller gets an actionable 400 instead.
         var poReqItems = req.Items ?? [];
-        var poProducts = await db.Products
-            .Where(p => poReqItems.Select(i => i.ProductId).Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id);
+        if (poReqItems.Count == 0) return BadRequest(new { message = "Add at least one item to the purchase order." });
+        if (req.WarehouseId is null && req.BranchId is null) return BadRequest(new { message = "Select a destination warehouse or branch for the purchase order." });
+        if (!await db.Suppliers.AnyAsync(s => s.Id == req.SupplierId)) return BadRequest(new { message = "Selected supplier could not be found." });
+        if (req.WarehouseId.HasValue && !await db.Warehouses.AnyAsync(w => w.Id == req.WarehouseId)) return BadRequest(new { message = "Selected warehouse could not be found." });
+        if (req.BranchId.HasValue && !await db.Branches.AnyAsync(b => b.Id == req.BranchId)) return BadRequest(new { message = "Selected branch could not be found." });
+
+        // A parameterized Guid list .Contains(...) inside a live EF Where() throws on this MySQL
+        // provider ("Expression '@Select' in the SQL tree does not have a type mapping assigned")
+        // — see the ef-mysql-inlist-gotcha memory. Materialize first, then filter in memory.
+        var poProductIds = poReqItems.Select(i => i.ProductId).ToHashSet();
+        var poProducts = (await db.Products.ToListAsync())
+            .Where(p => poProductIds.Contains(p.Id))
+            .ToDictionary(p => p.Id);
         foreach (var i in poReqItems)
         {
+            if (i.OrderedQuantity <= 0) return BadRequest(new { message = "Ordered quantity must be greater than zero for every item." });
+            if (!poProducts.ContainsKey(i.ProductId)) return BadRequest(new { message = "One of the selected products could not be found." });
             var err = QuantityValidation.ValidateWholeUnit(poProducts.GetValueOrDefault(i.ProductId), i.OrderedQuantity, "Ordered quantity");
             if (err is not null) return BadRequest(new { message = err });
         }
@@ -203,12 +218,21 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         // branch manager tenant-wide (NotifyRoleAsync treats a null branchId as unscoped).
         // alsoUserId guarantees the orderer is reached (even as Inventory Staff) exactly once —
         // it used to also get a separate NotifyUserAsync, double-notifying Manager/Admin orderers.
-        var poRoles = po.BranchId.HasValue ? new[] { "Manager", "Admin" } : new[] { "Admin" };
-        await notifications.NotifyRoleAsync(poRoles, po.BranchId,
-            "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
-            $"Purchase Order {po.PoNumber} created",
-            entityType: "PurchaseOrder", entityId: po.Id,
-            alsoUserId: po.OrderedBy != Guid.Empty ? po.OrderedBy : null);
+        // Best-effort: the PO row is already committed above, so a notification failure here must
+        // not turn into a 500 for a purchase order that actually succeeded.
+        try
+        {
+            var poRoles = po.BranchId.HasValue ? new[] { "Manager", "Admin" } : new[] { "Admin" };
+            await notifications.NotifyRoleAsync(poRoles, po.BranchId,
+                "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
+                $"Purchase Order {po.PoNumber} created",
+                entityType: "PurchaseOrder", entityId: po.Id,
+                alsoUserId: po.OrderedBy != Guid.Empty ? po.OrderedBy : null);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to send Purchase Order Created notification for PO {PoId}", po.Id);
+        }
 
         return CreatedAtAction(nameof(GetById), new { id = po.Id }, po);
     }
@@ -264,9 +288,12 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         // Same stock-write guard as InventoryController.ReceiveBatch — receiving against a PO
         // is a second, previously-unvalidated route to write InventoryBatch rows, so it needs
         // the same quantity/expiry checks rather than trusting the receive payload as-is.
-        var receiveProducts = await db.Products
-            .Where(p => items.Select(i => i.ProductId).Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id);
+        // See ef-mysql-inlist-gotcha memory — a parameterized Guid list .Contains(...) inside a
+        // live EF Where() throws on this MySQL provider. Materialize first, then filter in memory.
+        var receiveProductIds = items.Select(i => i.ProductId).ToHashSet();
+        var receiveProducts = (await db.Products.ToListAsync())
+            .Where(p => receiveProductIds.Contains(p.Id))
+            .ToDictionary(p => p.Id);
         foreach (var recv in items)
         {
             if (recv.Quantity <= 0)
@@ -362,6 +389,7 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         var anyReceived = po.Items.Any(i => i.ReceivedQuantity > 0);
         po.Status = allReceived ? "fully_received" : (anyReceived ? "partial_received" : po.Status);
         if (allReceived) po.ReceivedDate = DateTime.UtcNow;
+        po.ReceivedBy = CallerId();
         po.UpdatedAt = DateTime.UtcNow;
 
         // Update supplier's last supply date

@@ -13,6 +13,7 @@ public class ProductsController(
     BaqalaDbContext db,
     INotificationService notifications,
     IAuditService audit,
+    IProductDeletionService productDeletion,
     ILogger<ProductsController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
@@ -20,7 +21,7 @@ public class ProductsController(
 
     // The catalog fields a reviewer cares about, in the shape src/lib/audit-changes.ts diffs.
     // Catalog rows are tenant-wide, so these audit rows carry no branchId.
-    private static object Snapshot(Product p) => new
+    internal static object Snapshot(Product p) => new
     {
         name = p.Name,
         sku = p.Sku,
@@ -176,19 +177,34 @@ public class ProductsController(
         return Ok(product);
     }
 
+    // A caller with Inventory:Approve (i.e. already a manager) deletes immediately (self-approve,
+    // same precedent as the Wastage/InventoryAdjustment flow). Anyone else's delete request is
+    // queued in the Approval Center instead — the product stays live until decided.
     [RequirePermission("Inventory", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
-        var before = Snapshot(product);
-        product.Status = "discontinued";
-        product.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
+
+        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Inventory", PermAction.Approve);
+        if (!canSelfApprove)
+        {
+            var pending = new ApprovalRequest
+            {
+                RequestType = "item_deletion",
+                EntityType = "Product",
+                EntityId = product.Id,
+                RequestedBy = CallerId() ?? Guid.Empty,
+            };
+            db.ApprovalRequests.Add(pending);
+            await db.SaveChangesAsync();
+            return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
+        }
+
         // "Deleted Items" in the Employee Audit Center. Note this is a soft delete (status flips to
         // discontinued), so the before/after reads as a status change rather than a vanished row.
-        await TryAudit("delete_product", product, severity: "warning", before: before);
+        await productDeletion.DeleteProductAsync(id, CallerId());
         return NoContent();
     }
 
@@ -231,8 +247,23 @@ public class ProductsController(
     {
         var category = await db.Categories.FindAsync(id);
         if (category is null) return NotFound();
-        db.Categories.Remove(category);
-        await db.SaveChangesAsync();
+
+        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Inventory", PermAction.Approve);
+        if (!canSelfApprove)
+        {
+            var pending = new ApprovalRequest
+            {
+                RequestType = "item_deletion",
+                EntityType = "Category",
+                EntityId = category.Id,
+                RequestedBy = CallerId() ?? Guid.Empty,
+            };
+            db.ApprovalRequests.Add(pending);
+            await db.SaveChangesAsync();
+            return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
+        }
+
+        await productDeletion.DeleteCategoryAsync(id, CallerId());
         return NoContent();
     }
 

@@ -54,6 +54,9 @@ builder.Services.AddScoped<IStockAlertService, StockAlertService>();
 builder.Services.AddScoped<IBatchConsumptionService, BatchConsumptionService>();
 builder.Services.AddScoped<IPriceResolutionService, PriceResolutionService>();
 builder.Services.AddScoped<IStockMovementService, StockMovementService>();
+builder.Services.AddScoped<IOrderVoidService, OrderVoidService>();
+builder.Services.AddScoped<IProductDeletionService, ProductDeletionService>();
+builder.Services.AddScoped<IDiscountCreationService, DiscountCreationService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 builder.Services.AddHostedService<UsbPrinterAutoInstallService>();
 

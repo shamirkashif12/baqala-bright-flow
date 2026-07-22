@@ -12,7 +12,7 @@ import {
   Receipt, CreditCard, Database, KeyRound,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type ZatcaSettings } from "@/lib/api";
+import { api, type ZatcaSettings, type CompanyProfile } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { useI18n } from "@/lib/i18n";
 import { isLang } from "@/locales/languages";
@@ -94,6 +94,44 @@ function Settings() {
       toast.success(successMsg);
     } catch {
       toast.error("Failed to save settings — please try again.");
+    }
+  }
+
+  // ── Company Legal Identity (company-wide, shown on every print/export) ────
+  const [company, setCompany] = useState({ legalName: "", crNumber: "", vatNumber: "" });
+  const [companyLoading, setCompanyLoading] = useState(false);
+  const [companySaving, setCompanySaving] = useState(false);
+  const [companyLoadError, setCompanyLoadError] = useState(false);
+
+  const loadCompany = useCallback(() => {
+    setCompanyLoading(true);
+    api.getCompanyProfile()
+      .then((data: CompanyProfile) => {
+        setCompany({
+          legalName: data.legalName ?? "",
+          crNumber: data.crNumber ?? "",
+          vatNumber: data.vatNumber ?? "",
+        });
+        setCompanyLoadError(false);
+      })
+      .catch(() => setCompanyLoadError(true))
+      .finally(() => setCompanyLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (activeSection !== "Business Profile") return;
+    loadCompany();
+  }, [activeSection, loadCompany]);
+
+  async function saveCompany() {
+    setCompanySaving(true);
+    try {
+      await api.updateCompanyProfile(company);
+      toast.success("Company legal identity saved");
+    } catch {
+      toast.error("Failed to save company legal identity");
+    } finally {
+      setCompanySaving(false);
     }
   }
 
@@ -228,8 +266,40 @@ function Settings() {
           {activeSection === "Business Profile" && (
             <>
               <Card className="p-6 border-border/60 shadow-card">
-                <h3 className="font-semibold text-lg">Business Profile</h3>
-                <p className="text-sm text-muted-foreground">Used on every invoice, receipt and ZATCA submission.</p>
+                <h3 className="font-semibold text-lg">Company Legal Identity</h3>
+                <p className="text-sm text-muted-foreground">One legal name, CR and VAT number for the whole business — shown on every printed receipt and every exported report, regardless of branch.</p>
+                {companyLoadError && (
+                  <div className="mt-4">
+                    <LoadErrorBanner onRetry={loadCompany} message="Failed to load company legal identity — fields below may not reflect saved values. Do not save until this is resolved." />
+                  </div>
+                )}
+                {companyLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground mt-6">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading company legal identity…
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid sm:grid-cols-2 gap-4 mt-6">
+                      <div className="sm:col-span-2"><Label>Legal Name</Label>
+                        <Input value={company.legalName} onChange={e => setCompany(p => ({ ...p, legalName: e.target.value }))} placeholder="Baqala Al Faisal Trading Co." className="mt-1.5" /></div>
+                      <div><Label>CR Number</Label>
+                        <Input value={company.crNumber} onChange={e => setCompany(p => ({ ...p, crNumber: e.target.value }))} placeholder="1010123456" className="mt-1.5" /></div>
+                      <div><Label>VAT Number</Label>
+                        <Input value={company.vatNumber} onChange={e => setCompany(p => ({ ...p, vatNumber: e.target.value }))} placeholder="300012345600003" className="mt-1.5" /></div>
+                    </div>
+                    <div className="flex justify-end gap-2 mt-6">
+                      <Button variant="outline" onClick={loadCompany}>Cancel</Button>
+                      <Button className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={saveCompany} disabled={companySaving}>
+                        {companySaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save company legal identity"}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </Card>
+
+              <Card className="p-6 border-border/60 shadow-card">
+                <h3 className="font-semibold text-lg">Branch Details</h3>
+                <p className="text-sm text-muted-foreground">Per-branch contact info and display name — see Company Legal Identity above for the name/CR/VAT shown on documents.</p>
                 <div className="grid sm:grid-cols-2 gap-4 mt-6">
                   <div><Label>Business name (English)</Label>
                     <Input value={biz.nameEn} onChange={e => setBiz(p => ({ ...p, nameEn: e.target.value }))} className="mt-1.5" /></div>

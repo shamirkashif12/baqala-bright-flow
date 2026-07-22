@@ -265,19 +265,25 @@ public class InventoryAdjustment
 }
 
 // Stock Filters — "Stocking review": a physical count session that snapshots system quantity per
-// product at start, records what was actually counted (e.g. via barcode scan), and on completion
-// posts InventoryAdjustment rows for any variance — reusing the existing adjustment pipeline
-// rather than writing a second one.
+// product at start, records what was actually counted (e.g. via barcode scan), and on final
+// approval posts InventoryAdjustment rows for any variance — reusing the existing adjustment
+// pipeline rather than writing a second one.
 [Table("stock_counts")]
 public class StockCount
 {
     [Key, Column("id")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [Required, Column("branch_id")]
-    public Guid BranchId { get; set; }
+    // Destination: exactly one of Branch or Warehouse — same nullable-pair convention as
+    // InventoryAdjustment/InventoryBatch, so a warehouse stock-take can be recorded and reported
+    // the same way a branch one is.
+    [Column("branch_id")]
+    public Guid? BranchId { get; set; }
 
-    // Optional scope — count just one category instead of the whole branch.
+    [Column("warehouse_id")]
+    public Guid? WarehouseId { get; set; }
+
+    // Optional scope — count just one category instead of the whole branch/warehouse.
     [Column("category_id")]
     public Guid? CategoryId { get; set; }
 
@@ -294,15 +300,42 @@ public class StockCount
     [MaxLength(20), Column("count_type")]
     public string? CountType { get; set; }
 
-    // draft (open, still counting) | completed | cancelled
+    // draft (open, still counting) | pending_review | pending_approval | approved | rejected | cancelled
+    // A completed count no longer applies its variance immediately — it must clear a reviewer and
+    // then an approver first (maker-checker, same shape as InventoryAdjustment's wastage gate).
+    // "approved" is the only status at which StockApplied can be true.
     [Required, MaxLength(20), Column("status")]
     public string Status { get; set; } = "draft";
 
+    // Who performed the physical count (submitted it for review). Distinct from StartedBy, which
+    // is whoever opened the session — the same person in most shops, but not necessarily.
     [Column("started_by")]
     public Guid? StartedBy { get; set; }
 
     [Column("completed_by")]
     public Guid? CompletedBy { get; set; }
+
+    [Column("reviewed_by")]
+    public Guid? ReviewedBy { get; set; }
+
+    [Column("reviewed_at")]
+    public DateTime? ReviewedAt { get; set; }
+
+    [Column("approved_by")]
+    public Guid? ApprovedBy { get; set; }
+
+    [Column("approved_at")]
+    public DateTime? ApprovedAt { get; set; }
+
+    // Set on rejection at either the review or the approval stage.
+    [MaxLength(500), Column("rejection_reason")]
+    public string? RejectionReason { get; set; }
+
+    // Whether the counted variance has actually been written to on-hand stock. false from
+    // "pending_review" through "pending_approval" — nothing moves until Approve. true only once
+    // Status reaches "approved". Mirrors InventoryAdjustment.StockApplied.
+    [Column("stock_applied")]
+    public bool StockApplied { get; set; }
 
     [Column("notes")]
     public string? Notes { get; set; }
@@ -321,7 +354,12 @@ public class StockCount
 
     // Navigation
     public Branch? Branch { get; set; }
+    public Warehouse? Warehouse { get; set; }
     public Category? Category { get; set; }
+    public User? StartedByUser { get; set; }
+    public User? CompletedByUser { get; set; }
+    public User? ReviewedByUser { get; set; }
+    public User? ApprovedByUser { get; set; }
     public ICollection<StockCountItem> Items { get; set; } = [];
 }
 

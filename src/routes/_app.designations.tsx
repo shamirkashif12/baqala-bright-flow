@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { api, type Designation, type Department } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 import { exportRowsAsCsv } from "@/lib/csv-export";
+import { useCompanyHeader } from "@/lib/use-company-header";
 import { localDateStr } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/designations")({ component: Designations });
@@ -69,6 +70,7 @@ function DesignationFormFields({
 function DesignationsTab() {
   const { canCreate, canEdit, canDelete } = usePermission("HR Master Data");
   const navigate = useNavigate();
+  const companyHeader = useCompanyHeader();
 
   const [designations, setDesignations] = useState<Designation[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -136,7 +138,8 @@ function DesignationsTab() {
   const handleExport = () => exportRowsAsCsv(
     ["Name", "Department", "Grade", "Status"],
     filtered.map(d => [d.name, d.department?.name ?? "", d.grade ?? "", d.status]),
-    `designations-${localDateStr(new Date())}.csv`
+    `designations-${localDateStr(new Date())}.csv`,
+    companyHeader
   );
 
   return (

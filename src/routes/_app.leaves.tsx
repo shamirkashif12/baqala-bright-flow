@@ -20,6 +20,7 @@ import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { localDateStr } from "@/lib/utils";
 import { exportRowsAsCsv } from "@/lib/csv-export";
+import { useCompanyHeader } from "@/lib/use-company-header";
 import { fileToDataUrl } from "@/lib/image";
 
 export const Route = createFileRoute("/_app/leaves")({ component: Leaves });
@@ -113,6 +114,7 @@ function LeavesTab() {
   // single-employee result, so hide them.
   const canViewAll = canApprove || canEdit;
   const branchLocked = user?.role !== "tenant_admin";
+  const companyHeader = useCompanyHeader();
 
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
@@ -215,7 +217,8 @@ function LeavesTab() {
     exportRowsAsCsv(
       ["Employee", "Employee ID", "Leave Type", "From", "To", "Days", "Reason", "Status", "Approved By", "Rejection Reason"],
       filtered.map(l => [l.employee?.fullName ?? "", l.employee?.employeeCode ?? "", l.leaveType?.name ?? "", l.fromDate, l.toDate, l.totalDays, l.reason, l.status, l.approver?.fullName ?? "", l.rejectionReason ?? ""]),
-      `leave-requests-${localDateStr()}.csv`
+      `leave-requests-${localDateStr()}.csv`,
+      companyHeader
     );
   };
 

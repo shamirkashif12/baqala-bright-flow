@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
   FileBarChart, Download, TrendingUp, Calendar, Building2, ShoppingCart, Tag, Truck, Boxes,
   Ban, RotateCcw, Percent, CreditCard, ShieldCheck, DollarSign, AlertTriangle, Cigarette, Coins,
-  ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, UserCheck, CalendarCheck, History,
+  ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, ArrowLeftRight, Receipt, PackageSearch, Sparkles, Gavel, ShieldAlert,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/")({ component: Reports });
@@ -52,6 +52,12 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/category-performance", exportFile: () => api.exportCategoryPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "supplier-performance", name: "Supplier Performance", desc: "Lead time, fill rate, dues", icon: Truck, color: "warning",
       href: "/reports/supplier-performance", exportFile: () => api.exportSupplierPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "supplier-returns", name: "Supplier Returns Report", desc: "Full transaction detail for stock returned to suppliers", icon: PackageSearch, color: "warning",
+      href: "/reports/supplier-returns", exportFile: () => api.exportSupplierReturnsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "stock-transfer", name: "Stock Transfer Report", desc: "Full history of stock moved between warehouses and branches", icon: ArrowLeftRight, color: "primary",
+      href: "/reports/stock-transfer", exportFile: () => api.exportStockTransferReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "purchase-orders-report", name: "Purchase Reports", desc: "Complete purchase order detail, drill into every product", icon: Receipt, color: "success",
+      href: "/reports/purchase-orders", exportFile: () => api.exportPurchaseOrderReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch & warehouse", icon: Boxes, color: "warning",
       href: "/reports/inventory-snapshot", exportFile: () => api.exportInventorySnapshotReport({ exportedBy }) },
     { code: "stock-reconciliation", name: "Stock Reconciliation", desc: "Stock review / audit — system vs counted", icon: ClipboardCheck, color: "primary",
@@ -60,6 +66,8 @@ function buildReports(exportedBy?: string): ReportCard[] {
     // of the export affordance the others share.
     { code: "inventory-dashboard", name: "Inventory Aging", desc: "Product age, days since movement, slow-moving & dead stock", icon: Hourglass, color: "primary",
       href: "/reports/inventory-dashboard" },
+    { code: "inventory-aging-performance", name: "Product Performance", desc: "Star Products, High/Average/Slow performers & Dead Stock by sales, turnover & profitability", icon: Sparkles, color: "success",
+      href: "/reports/inventory-aging-performance", exportFile: () => api.exportProductPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "low-stock", name: "Low Stock Report", desc: "Items below reorder thresholds", icon: AlertTriangle, color: "destructive",
       href: "/reports/low-stock", exportFile: () => api.exportLowStockReport({ onlyLowStock: true, exportedBy }) },
     { code: "waste-spoilage", name: "Waste / Spoilage Report", desc: "Expired & damaged write-offs", icon: Ban, color: "destructive",
@@ -70,6 +78,8 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/attendance-shift", exportFile: () => api.exportAttendanceShiftReport({ from: todayStr(), to: todayStr(), exportedBy }) },
     { code: "audit-trail", name: "Audit Trail Report", desc: "Critical events across system", icon: ClipboardList, color: "primary",
       href: "/reports/audit-trail", exportFile: () => api.exportAuditTrailReport({ exportedBy }) },
+    { code: "employee-audit-center", name: "Employee Audit Center", desc: "Full employee activity history for audit and misuse tracking", icon: ShieldAlert, color: "destructive",
+      href: "/reports/employee-audit-center", exportFile: () => api.exportEmployeeAuditCenter({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "discounts", name: "Discount Report", desc: "Discounts applied across periods", icon: Percent, color: "warning",
       href: "/reports/discounts", exportFile: () => api.exportDiscountsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "payment-methods", name: "Payment Methods", desc: "Cash / Card / STC Pay split", icon: CreditCard, color: "primary",
@@ -84,12 +94,11 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/tobacco-excise", exportFile: () => api.exportTobaccoExciseReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "profit-margin", name: "Profit Margin", desc: "Gross & net margin by product", icon: DollarSign, color: "success",
       href: "/reports/profit-margin", exportFile: () => api.exportProfitMarginReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
-    { code: "hrm-attendance", name: "Attendance Report", desc: "Employee attendance across dates and branches", icon: UserCheck, color: "primary",
-      href: "/reports/hrm-attendance", exportFile: () => api.exportHrAttendanceReport({ dateFrom: todayStr(), dateTo: todayStr(), exportedBy }) },
-    { code: "shift-closing", name: "Shift Closing Report", desc: "Shift closing completion and exceptions", icon: CalendarCheck, color: "primary",
-      href: "/reports/shift-closing", exportFile: () => api.exportShiftClosingReport({ dateFrom: todayStr(), dateTo: todayStr(), exportedBy }) },
-    { code: "employee-activity", name: "Employee Activity Report", desc: "Audit trail of employee actions across HRM and POS", icon: History, color: "primary",
-      href: "/reports/employee-activity", exportFile: () => api.exportEmployeeActivityReport({ dateFrom: `${firstOfMonthStr()}T00:00:00`, dateTo: `${todayStr()}T23:59:59`, exportedBy }) },
+    { code: "approval-center", name: "Approval Center", desc: "Every manager approval in one place — discounts, cancellations, deletions, refunds & more", icon: Gavel, color: "primary",
+      href: "/reports/approval-center" },
+    // Attendance Report, Shift Closing Report and Employee Activity Report are intentionally not
+    // listed here — they're already reachable from the "Human Resources" sidebar group, and were
+    // previously duplicated on this tab too.
   ];
 }
 

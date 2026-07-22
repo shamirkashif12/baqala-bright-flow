@@ -18,6 +18,7 @@ import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { exportRowsAsCsv } from "@/lib/csv-export";
+import { useCompanyHeader } from "@/lib/use-company-header";
 import { localDateStr } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/work-shifts")({ component: WorkShifts });
@@ -155,6 +156,7 @@ function WorkShiftsTab() {
   // meaningless over that single-shift result, so hide them.
   const canViewAll = canApprove || canEdit;
   const branchLocked = user?.role !== "tenant_admin";
+  const companyHeader = useCompanyHeader();
 
   const [shifts, setShifts] = useState<WorkShift[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -292,7 +294,8 @@ function WorkShiftsTab() {
   const handleExport = () => exportRowsAsCsv(
     ["Shift Name", "Branch", "Working Days", "Start", "End", "Grace In (m)", "Grace Out (m)", "Assigned", "Status"],
     filtered.map(s => [s.name, s.branch?.name ?? "All Branches", s.workingDays, s.startTime, s.endTime, s.graceInMinutes, s.graceOutMinutes, s.assignedEmployees ?? 0, s.status]),
-    `shifts-${localDateStr(new Date())}.csv`
+    `shifts-${localDateStr(new Date())}.csv`,
+    companyHeader
   );
 
   return (

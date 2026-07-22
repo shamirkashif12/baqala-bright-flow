@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -37,11 +37,11 @@ function SupplierPerformance() {
 
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
-  const [supplierId, setSupplierId] = useState("all");
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [productId, setProductId] = useState("all");
-  const [createdBy, setCreatedBy] = useState("all");
-  const [approvedBy, setApprovedBy] = useState("all");
+  const [supplierIds, setSupplierIds] = useState<string[]>([]);
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [productIds, setProductIds] = useState<string[]>([]);
+  const [createdByIds, setCreatedByIds] = useState<string[]>([]);
+  const [approvedByIds, setApprovedByIds] = useState<string[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -50,28 +50,30 @@ function SupplierPerformance() {
 
   useEffect(() => { api.getSuppliers().then(setSuppliers).catch(() => {}); }, []);
   useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
-  useEffect(() => { api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then(setUsers).catch(() => {}); }, [branchId]);
+  useEffect(() => {
+    api.getUsers({ branchId: branchIds.length === 1 ? branchIds[0] : undefined }).then(setUsers).catch(() => {});
+  }, [branchIds]);
 
   const load = useCallback(() => {
     setLoading(true);
     api.getSupplierPerformanceReport({
-      from, to, supplierId: supplierId !== "all" ? supplierId : undefined,
-      branchId: branchId !== "all" ? branchId : undefined, productId: productId !== "all" ? productId : undefined,
-      createdBy: createdBy !== "all" ? createdBy : undefined, approvedBy: approvedBy !== "all" ? approvedBy : undefined,
+      from, to, supplierId: supplierIds.length ? supplierIds : undefined,
+      branchId: branchIds.length ? branchIds : undefined, productId: productIds.length ? productIds : undefined,
+      createdBy: createdByIds.length ? createdByIds : undefined, approvedBy: approvedByIds.length ? approvedByIds : undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, supplierId, branchId, productId, createdBy, approvedBy]);
+  }, [from, to, supplierIds, branchIds, productIds, createdByIds, approvedByIds]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportSupplierPerformanceReport({
-        from, to, supplierId: supplierId !== "all" ? supplierId : undefined,
-        branchId: branchId !== "all" ? branchId : undefined, productId: productId !== "all" ? productId : undefined,
-        createdBy: createdBy !== "all" ? createdBy : undefined, approvedBy: approvedBy !== "all" ? approvedBy : undefined,
+        from, to, supplierId: supplierIds.length ? supplierIds : undefined,
+        branchId: branchIds.length ? branchIds : undefined, productId: productIds.length ? productIds : undefined,
+        createdBy: createdByIds.length ? createdByIds : undefined, approvedBy: approvedByIds.length ? approvedByIds : undefined,
         exportedBy: user?.id, format,
       });
       downloadBlob(blob, `supplier-performance-${from}-to-${to}.${format}`);
@@ -93,43 +95,48 @@ function SupplierPerformance() {
           <span className="text-xs text-muted-foreground">–</span>
           <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
         </div>
-        <Select value={supplierId} onValueChange={setSupplierId}>
-          <SelectTrigger className="h-9 w-48"><SelectValue placeholder="Supplier" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Suppliers</SelectItem>
-            {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Suppliers"
+            options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+            selected={supplierIds}
+            onChange={setSupplierIds}
+          />
+        </div>
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+          </div>
         )}
-        <Select value={productId} onValueChange={setProductId}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Products</SelectItem>
-            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={createdBy} onValueChange={setCreatedBy}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Created By" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Created By: Anyone</SelectItem>
-            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={approvedBy} onValueChange={setApprovedBy}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Approved By" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Approved By: Anyone</SelectItem>
-            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Products"
+            options={products.map((p) => ({ id: p.id, label: p.name }))}
+            selected={productIds}
+            onChange={setProductIds}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="Created By: Anyone"
+            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+            selected={createdByIds}
+            onChange={setCreatedByIds}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="Approved By: Anyone"
+            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+            selected={approvedByIds}
+            onChange={setApprovedByIds}
+          />
+        </div>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

@@ -15,6 +15,7 @@ import { api, type InventoryBatch, type Branch, type Warehouse, type StockMoveme
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge } from "@/components/batch-status-badge";
+import { useCompanyHeader } from "@/lib/use-company-header";
 
 // Per-branch picking strategy — mirrors BatchConsumptionService.StrategySettingKey on the backend.
 // Absent/unrecognised means FEFO (the grocery-safe default), matching the service's Normalize().
@@ -60,7 +61,7 @@ function locationName(b: InventoryBatch, branches: Branch[], warehouses: Warehou
     : warehouses.find(w => w.id === b.warehouseId)?.name ?? "—";
 }
 
-function exportCSV(fileTag: string, data: InventoryBatch[], branches: Branch[], warehouses: Warehouse[]) {
+function exportCSV(fileTag: string, data: InventoryBatch[], branches: Branch[], warehouses: Warehouse[], companyHeader: string) {
   const rows: string[][] = [
     ["Product", "SKU", "Batch #", "Location", "Supplier", "Received Date", "Expiry Date", "Qty Received", "Qty Remaining", "Purchase Cost (SAR)", "Status"],
     ...data.map(b => [
@@ -77,7 +78,9 @@ function exportCSV(fileTag: string, data: InventoryBatch[], branches: Branch[], 
       b.status,
     ]),
   ];
-  const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+  const lines = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(","));
+  if (companyHeader) lines.unshift(`"${companyHeader.replace(/"/g, '""')}"`, "");
+  const csv = lines.join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
   a.download = `batch-tracking-${fileTag}-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -343,6 +346,7 @@ function BatchLocationPanel({
   onView: (b: InventoryBatch) => void;
 }) {
   const { canEdit: canEditStrategy } = usePermission("Settings");
+  const companyHeader = useCompanyHeader();
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -485,7 +489,7 @@ function BatchLocationPanel({
             </Button>
           )}
         </div>
-        <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => exportCSV(locationType, filtered, branches, warehouses)} disabled={filtered.length === 0}>
+        <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => exportCSV(locationType, filtered, branches, warehouses, companyHeader)} disabled={filtered.length === 0}>
           <Download className="h-4 w-4" /> Export ({filtered.length})
         </Button>
       </div>

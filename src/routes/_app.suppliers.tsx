@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,8 +17,9 @@ import { StatusBadge } from "@/components/module-placeholder";
 import { Truck, Eye, Pencil, Plus, Trash2, Package, CheckCircle, Clock, ShoppingCart } from "lucide-react";
 import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
-import { api, type Supplier, type PurchaseOrder, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
+import { api, type Supplier, type SupplierDocument, type PurchaseOrder, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
+import { fileToDataUrl } from "@/lib/image";
 
 export const Route = createFileRoute("/_app/suppliers")({ component: Suppliers });
 
@@ -26,8 +28,18 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 }
 
 
-type SupplierForm = { name: string; contactPerson: string; contactNumber: string; email: string; city: string; supplyType: string; status: string; };
-const emptyForm: SupplierForm = { name: "", contactPerson: "", contactNumber: "", email: "", city: "", supplyType: "warehouse", status: "active" };
+type SupplierForm = {
+  name: string; contactPerson: string; contactNumber: string; email: string; city: string; supplyType: string; status: string;
+  legalName: string; crNumber: string; vatNumber: string; address: string; category: string; paymentTerms: string; creditLimit: string;
+  bankName: string; bankAccountHolder: string; bankAccountNumber: string; bankIban: string; notes: string;
+};
+const emptyForm: SupplierForm = {
+  name: "", contactPerson: "", contactNumber: "", email: "", city: "", supplyType: "warehouse", status: "active",
+  legalName: "", crNumber: "", vatNumber: "", address: "", category: "", paymentTerms: "", creditLimit: "",
+  bankName: "", bankAccountHolder: "", bankAccountNumber: "", bankIban: "", notes: "",
+};
+
+const SUPPLIER_CATEGORIES = ["Food & Beverage", "Tobacco", "Packaging", "Cleaning & Hygiene", "General Goods", "Other"];
 
 // Module-scope component — NOT inside SuppliersTab, so it never remounts on parent re-render
 function SupplierFormFields({
@@ -35,24 +47,40 @@ function SupplierFormFields({
   setForm,
   onSave,
   saving,
+  mode,
 }: {
   form: SupplierForm;
   setForm: React.Dispatch<React.SetStateAction<SupplierForm>>;
   onSave: () => void;
   saving: boolean;
+  mode: "create" | "edit";
 }) {
-  const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
   const setS = (k: keyof SupplierForm) => (v: string) =>
     setForm(p => ({ ...p, [k]: v }));
+  const req = mode === "create";
+  const label = (text: string, required: boolean) => required ? `${text} *` : text;
   return (
     <div className="mt-4 space-y-3">
-      <FieldRow label="Name"><Input value={form.name} onChange={set("name")} className="h-9" placeholder="Al-Barakah Trading" /></FieldRow>
-      <FieldRow label="Contact Person"><Input value={form.contactPerson} onChange={set("contactPerson")} className="h-9" /></FieldRow>
-      <FieldRow label="Phone"><Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" /></FieldRow>
+      <FieldRow label={label("Name", true)}><Input value={form.name} onChange={set("name")} className="h-9" placeholder="Al-Barakah Trading" required={req} /></FieldRow>
+      <FieldRow label="Legal Name"><Input value={form.legalName} onChange={set("legalName")} className="h-9" placeholder="Registered legal business name (if different)" /></FieldRow>
+      <FieldRow label={label("CR Number", true)}><Input value={form.crNumber} onChange={set("crNumber")} className="h-9" placeholder="Commercial Registration number" required={req} /></FieldRow>
+      <FieldRow label={label("VAT Number", true)}><Input value={form.vatNumber} onChange={set("vatNumber")} className="h-9" placeholder="15-digit VAT registration number" required={req} /></FieldRow>
+      <FieldRow label={label("Contact Person", true)}><Input value={form.contactPerson} onChange={set("contactPerson")} className="h-9" required={req} /></FieldRow>
+      <FieldRow label={label("Phone", true)}><Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" required={req} /></FieldRow>
       <FieldRow label="Email"><Input value={form.email} onChange={set("email")} className="h-9" type="email" /></FieldRow>
+      <FieldRow label={label("Address", true)}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} /></FieldRow>
       <FieldRow label="City"><Input value={form.city} onChange={set("city")} className="h-9" /></FieldRow>
-      <FieldRow label="Supply Type">
+      <FieldRow label={label("Supplier Type / Category", true)}>
+        <Select value={form.category} onValueChange={setS("category")}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Select category" /></SelectTrigger>
+          <SelectContent>
+            {SUPPLIER_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </FieldRow>
+      <FieldRow label="Supply Channel">
         <Select value={form.supplyType} onValueChange={setS("supplyType")}>
           <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -62,6 +90,13 @@ function SupplierFormFields({
           </SelectContent>
         </Select>
       </FieldRow>
+      <FieldRow label="Payment Terms"><Input value={form.paymentTerms} onChange={set("paymentTerms")} className="h-9" placeholder="e.g. Net 30, COD, Advance Payment" /></FieldRow>
+      <FieldRow label="Credit Limit (SAR)"><Input value={form.creditLimit} onChange={set("creditLimit")} className="h-9" type="number" min="0" step="0.01" /></FieldRow>
+      <FieldRow label="Bank Name"><Input value={form.bankName} onChange={set("bankName")} className="h-9" /></FieldRow>
+      <FieldRow label="Bank Account Holder"><Input value={form.bankAccountHolder} onChange={set("bankAccountHolder")} className="h-9" /></FieldRow>
+      <FieldRow label="Bank Account Number"><Input value={form.bankAccountNumber} onChange={set("bankAccountNumber")} className="h-9" /></FieldRow>
+      <FieldRow label="IBAN"><Input value={form.bankIban} onChange={set("bankIban")} className="h-9" placeholder="SAxx xxxx xxxx xxxx xxxx xxxx" /></FieldRow>
+      <FieldRow label="Notes"><Textarea value={form.notes} onChange={set("notes")} rows={2} placeholder="Any other useful information about this supplier" /></FieldRow>
       <FieldRow label="Status">
         <Select value={form.status} onValueChange={setS("status")}>
           <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
@@ -74,6 +109,116 @@ function SupplierFormFields({
       <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving}>
         {saving ? "Saving…" : "Save"}
       </Button>
+    </div>
+  );
+}
+
+const SUPPLIER_DOC_TYPES = ["CR Certificate", "VAT Certificate", "Contract", "Bank Letter", "Other"];
+
+function supplierDocStatus(doc: SupplierDocument): { label: string; tone: string } {
+  if (!doc.expiryDate) return { label: "Complete", tone: "bg-success/15 text-success" };
+  const days = Math.ceil((new Date(doc.expiryDate).getTime() - Date.now()) / 86400000);
+  if (days < 0) return { label: "Expired", tone: "bg-destructive/15 text-destructive" };
+  if (days <= 30) return { label: "Expiring Soon", tone: "bg-warning/20 text-warning-foreground" };
+  return { label: "Complete", tone: "bg-success/15 text-success" };
+}
+
+function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
+  const { canEdit, canDelete } = usePermission("Suppliers");
+  const [documents, setDocuments] = useState<SupplierDocument[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [documentType, setDocumentType] = useState(SUPPLIER_DOC_TYPES[0]);
+  const [expiryDate, setExpiryDate] = useState("");
+  const [file, setFile] = useState<{ name: string; url: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const reload = () => { api.getSupplierDocuments(supplier.id).then(setDocuments).catch(() => {}); };
+  useEffect(reload, [supplier.id]);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try {
+      const url = await fileToDataUrl(f);
+      setFile({ name: f.name, url });
+    } catch {
+      toast.error("Failed to read file.");
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setSaving(true);
+    try {
+      await api.uploadSupplierDocument(supplier.id, { documentType, fileName: file.name, fileUrl: file.url, expiryDate: expiryDate || undefined });
+      setUploading(false);
+      setFile(null);
+      setExpiryDate("");
+      reload();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to upload document.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (docId: string) => {
+    if (!confirm("Delete this document?")) return;
+    try {
+      await api.deleteSupplierDocument(supplier.id, docId);
+      reload();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to delete document.");
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Legal Documents</p>
+        {canEdit && !uploading && (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setUploading(true)}>Upload Document</Button>
+        )}
+      </div>
+      {uploading && (
+        <div className="rounded-xl border border-border/60 p-3 space-y-2 mb-3">
+          <Select value={documentType} onValueChange={setDocumentType}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>{SUPPLIER_DOC_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} placeholder="Expiry date (optional)" className="h-9" />
+          <Button size="sm" variant="outline" className="w-full" onClick={() => fileInputRef.current?.click()}>{file ? file.name : "Choose File (PDF/JPG/PNG)"}</Button>
+          <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleFile} />
+          <div className="flex gap-2">
+            <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!file || saving} onClick={handleUpload}>
+              {saving ? "Uploading…" : "Save"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setUploading(false); setFile(null); }}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {documents.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No documents uploaded yet.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {documents.map(d => {
+            const st = supplierDocStatus(d);
+            return (
+              <div key={d.id} className="flex items-center justify-between text-xs border-b border-border/40 pb-1.5">
+                <div>
+                  <span className="font-medium">{d.documentType}</span>
+                  <span className="text-muted-foreground"> · {d.fileName}{d.expiryDate && ` · exp. ${d.expiryDate}`}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="outline" className={`text-[10px] border-0 ${st.tone}`}>{st.label}</Badge>
+                  {canDelete && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => handleDelete(d.id)}><Trash2 className="h-3 w-3" /></Button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -190,19 +335,32 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
             </div>
 
             <Tabs defaultValue="overview">
-              <TabsList className="grid grid-cols-3 h-8">
+              <TabsList className="grid grid-cols-4 h-8">
                 <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
                 <TabsTrigger value="purchase-orders" className="text-xs">Orders</TabsTrigger>
                 <TabsTrigger value="ledger" className="text-xs">Ledger</TabsTrigger>
+                <TabsTrigger value="documents" className="text-xs">Documents</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview" className="mt-4 space-y-3">
                 {([
+                  ["Legal Name", supplier.legalName ?? "—"],
+                  ["CR Number", supplier.crNumber ?? "—"],
+                  ["VAT Number", supplier.vatNumber ?? "—"],
                   ["Contact Person", supplier.contactPerson ?? "—"],
                   ["Phone", supplier.contactNumber ?? "—"],
                   ["Email", supplier.email ?? "—"],
+                  ["Address", supplier.address ?? "—"],
                   ["City", supplier.city ?? "—"],
-                  ["Supply Type", supplier.supplyType ?? "—"],
+                  ["Category", supplier.category ?? "—"],
+                  ["Supply Channel", supplier.supplyType ?? "—"],
+                  ["Payment Terms", supplier.paymentTerms ?? "—"],
+                  ["Credit Limit", supplier.creditLimit != null ? `SAR ${supplier.creditLimit.toLocaleString()}` : "—"],
+                  ["Bank Name", supplier.bankName ?? "—"],
+                  ["Bank Account Holder", supplier.bankAccountHolder ?? "—"],
+                  ["Bank Account Number", supplier.bankAccountNumber ?? "—"],
+                  ["IBAN", supplier.bankIban ?? "—"],
+                  ["Notes", supplier.notes ?? "—"],
                   ["Status", supplier.status],
                 ] as [string, string][]).map(([l, v]) => (
                   <div key={l} className="flex justify-between border-b border-border/40 pb-2 text-sm">
@@ -420,6 +578,10 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                   </div>
                 )}
               </TabsContent>
+
+              <TabsContent value="documents" className="mt-4">
+                <SupplierDocumentsSection supplier={supplier} />
+              </TabsContent>
             </Tabs>
           </>
         )}
@@ -452,17 +614,25 @@ function SuppliersTab() {
 
   const openEdit = (s: Supplier) => {
     setEditSupplier(s);
-    setForm({ name: s.name, contactPerson: s.contactPerson ?? "", contactNumber: s.contactNumber ?? "", email: s.email ?? "", city: s.city ?? "", supplyType: s.supplyType ?? "warehouse", status: s.status });
+    setForm({
+      name: s.name, contactPerson: s.contactPerson ?? "", contactNumber: s.contactNumber ?? "", email: s.email ?? "", city: s.city ?? "",
+      supplyType: s.supplyType ?? "warehouse", status: s.status,
+      legalName: s.legalName ?? "", crNumber: s.crNumber ?? "", vatNumber: s.vatNumber ?? "", address: s.address ?? "", category: s.category ?? "",
+      paymentTerms: s.paymentTerms ?? "", creditLimit: s.creditLimit != null ? String(s.creditLimit) : "",
+      bankName: s.bankName ?? "", bankAccountHolder: s.bankAccountHolder ?? "", bankAccountNumber: s.bankAccountNumber ?? "", bankIban: s.bankIban ?? "",
+      notes: s.notes ?? "",
+    });
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
+      const payload = { ...form, creditLimit: form.creditLimit === "" ? undefined : Number(form.creditLimit) };
       if (editSupplier) {
-        await api.updateSupplier(editSupplier.id, form);
+        await api.updateSupplier(editSupplier.id, payload);
         setEditSupplier(null);
       } else {
-        await api.createSupplier(form);
+        await api.createSupplier(payload);
         setCreateOpen(false);
       }
       load();
@@ -576,17 +746,17 @@ function SuppliersTab() {
 
       {/* Edit sheet */}
       <Sheet open={!!editSupplier} onOpenChange={v => !v && setEditSupplier(null)}>
-        <SheetContent>
+        <SheetContent className="overflow-y-auto">
           <SheetHeader><SheetTitle>Edit Supplier</SheetTitle></SheetHeader>
-          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} />
+          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="edit" />
         </SheetContent>
       </Sheet>
 
       {/* Create sheet */}
       <Sheet open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
-        <SheetContent>
+        <SheetContent className="overflow-y-auto">
           <SheetHeader><SheetTitle>Add Supplier</SheetTitle></SheetHeader>
-          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} />
+          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="create" />
         </SheetContent>
       </Sheet>
     </div>

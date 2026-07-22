@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -27,6 +28,15 @@ const COUNT_TYPE_LABELS: Record<string, string> = {
   reconciliation: "Reconciliation",
 };
 
+const STATUS_OPTIONS = [
+  { id: "draft", label: "In progress" },
+  { id: "pending_review", label: "Pending Review" },
+  { id: "pending_approval", label: "Pending Approval" },
+  { id: "approved", label: "Approved" },
+  { id: "rejected", label: "Rejected" },
+  { id: "cancelled", label: "Cancelled" },
+];
+
 const firstOfMonthStr = () => {
   const d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
@@ -42,34 +52,37 @@ function StockReconciliation() {
 
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [categoryId, setCategoryId] = useState("all");
-  const [productId, setProductId] = useState("all");
-  const [countedBy, setCountedBy] = useState("all");
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
+  const [countedByIds, setCountedByIds] = useState<string[]>([]);
   const [countType, setCountType] = useState("all");
-  const [status, setStatus] = useState("all");
+  const [statuses, setStatuses] = useState<string[]>([]);
   const [varianceOnly, setVarianceOnly] = useState(false);
   const [data, setData] = useState<ReconData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const { categories, products, employees } = useReportFilterOptions(branchId, categoryId);
+  const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
+  const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
+  const { categories, products, employees, warehouses } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
 
-  // Drop selections the current branch/category no longer offers, so the table can't silently
-  // empty while a stale name is still shown in the picker.
-  useEffect(() => { setCountedBy("all"); }, [branchId]);
+  // Drop selections the current product list no longer offers, so the table can't silently empty
+  // while a stale name is still shown in the picker.
   useEffect(() => {
-    if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
-  }, [products, productId]);
+    setProductIds((prev) => prev.filter((id) => products.some((p) => p.id === id)));
+  }, [products]);
 
   const filters = useMemo(() => ({
-    branchId: branchId !== "all" ? branchId : undefined,
-    categoryId: categoryId !== "all" ? categoryId : undefined,
-    productId: productId !== "all" ? productId : undefined,
-    countedBy: countedBy !== "all" ? countedBy : undefined,
+    branchId: branchIds.length ? branchIds : undefined,
+    warehouseId: warehouseIds.length ? warehouseIds : undefined,
+    categoryId: categoryIds.length ? categoryIds : undefined,
+    productId: productIds.length ? productIds : undefined,
+    countedBy: countedByIds.length ? countedByIds : undefined,
     countType: countType !== "all" ? countType : undefined,
-    status: status !== "all" ? status : undefined,
+    status: statuses.length ? statuses : undefined,
     varianceOnly: varianceOnly || undefined,
-  }), [branchId, categoryId, productId, countedBy, countType, status, varianceOnly]);
+  }), [branchIds, warehouseIds, categoryIds, productIds, countedByIds, countType, statuses, varianceOnly]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -103,38 +116,55 @@ function StockReconciliation() {
         <Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} />
         <Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} />
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+          </div>
         )}
-        <Select value={categoryId} onValueChange={setCategoryId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={productId} onValueChange={setProductId}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Products</SelectItem>
-            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        {/* Matches either end of a session — whoever started the count or signed it off. */}
-        <Select value={countedBy} onValueChange={setCountedBy}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Employees</SelectItem>
-            {employees.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {/* Warehouse stock-takes are reviewed/approved by tenant_admin only (no warehouse-scoped
+            role exists yet), so this filter is only meaningful for the same admin view as Branch. */}
+        {!lockedBranchId && (
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Warehouses"
+              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+              selected={warehouseIds}
+              onChange={setWarehouseIds}
+            />
+          </div>
+        )}
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={categories.map((c) => ({ id: c.id, label: c.name }))}
+            selected={categoryIds}
+            onChange={setCategoryIds}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Products"
+            options={products.map((p) => ({ id: p.id, label: p.name }))}
+            selected={productIds}
+            onChange={setProductIds}
+          />
+        </div>
+        {/* Matches either end of a session — whoever started the count or performed/signed it off. */}
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Employees"
+            options={employees.map((u) => ({ id: u.id, label: u.fullName }))}
+            selected={countedByIds}
+            onChange={setCountedByIds}
+          />
+        </div>
         {/* The FRD's three named filters — Stock Review / Stock Audit / Inventory Reconciliation.
-            They all describe a StockCount session; count_type is what tells them apart. */}
+            They all describe a StockCount session; count_type is what tells them apart. Kept
+            single-select — it's a fixed 3-value intent field, not a location/entity list. */}
         <Select value={countType} onValueChange={setCountType}>
           <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Count Type" /></SelectTrigger>
           <SelectContent>
@@ -144,15 +174,14 @@ function StockReconciliation() {
             <SelectItem value="reconciliation">Inventory Reconciliation</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="draft">In progress</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={STATUS_OPTIONS}
+            selected={statuses}
+            onChange={setStatuses}
+          />
+        </div>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={varianceOnly} onCheckedChange={(v) => setVarianceOnly(v === true)} />
           Variance only
@@ -160,11 +189,12 @@ function StockReconciliation() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
         <MetricCard label="Count Sessions" value={String(kpis?.sessionCount ?? 0)} icon={ClipboardCheck} accent="primary" />
         <MetricCard label="Items Counted" value={String(kpis?.itemsCounted ?? 0)} icon={ListChecks} />
         <MetricCard label="Items With Variance" value={String(kpis?.itemsWithVariance ?? 0)} icon={Scale} accent="warning" />
         <MetricCard label="Count Accuracy" value={`${kpis?.accuracyPct ?? 0}%`} icon={Target} accent="success" />
+        <MetricCard label="Awaiting Sign-off" value={String((kpis?.pendingReviewCount ?? 0) + (kpis?.pendingApprovalCount ?? 0))} icon={ClipboardCheck} accent="warning" />
         {canViewCost && (
           <MetricCard
             label="Net Variance Value"
@@ -196,7 +226,11 @@ function StockReconciliation() {
               render: (r: StockReconciliationRow) =>
                 new Date(r.startedAt).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" }),
             },
-            { key: "branch", label: "Branch" },
+            {
+              key: "location",
+              label: "Branch / Warehouse",
+              render: (r: StockReconciliationRow) => r.branch ?? (r.warehouse ? `${r.warehouse} (Warehouse)` : "—"),
+            },
             { key: "sku", label: "SKU" },
             { key: "productName", label: "Product" },
             { key: "category", label: "Category" },
@@ -222,8 +256,14 @@ function StockReconciliation() {
                 }]
               : []),
             { key: "startedBy", label: "Started By" },
-            { key: "completedBy", label: "Completed By", render: (r: StockReconciliationRow) => r.completedBy ?? "—" },
-            { key: "status", label: "Status", render: (r: StockReconciliationRow) => <StatusBadge status={r.status} /> },
+            { key: "performedBy", label: "Performed By", render: (r: StockReconciliationRow) => r.performedBy ?? "—" },
+            { key: "reviewedBy", label: "Reviewed By", render: (r: StockReconciliationRow) => r.reviewedBy ?? "—" },
+            { key: "approvedBy", label: "Approved By", render: (r: StockReconciliationRow) => r.approvedBy ?? "—" },
+            {
+              key: "status",
+              label: "Reconciliation Status",
+              render: (r: StockReconciliationRow) => <StatusBadge status={r.status.replace(/_/g, " ")} />,
+            },
           ]}
           rows={data?.rows ?? []}
         />

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -28,10 +29,10 @@ function InventorySnapshot() {
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
   const { branches } = useBranch();
 
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [categoryId, setCategoryId] = useState("all");
-  const [productId, setProductId] = useState("all");
-  const [warehouseId, setWarehouseId] = useState("all");
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
+  const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [locationType, setLocationType] = useState("all");
   const [isTobacco, setIsTobacco] = useState(false);
   const [data, setData] = useState<InventorySnapshotReport | null>(null);
@@ -40,24 +41,26 @@ function InventorySnapshot() {
   // pool-specific until the server has answered, rather than flashing controls it may revoke.
   const [scope, setScope] = useState<InventorySnapshotScope | null>(null);
 
-  const { categories, products } = useReportFilterOptions(branchId, categoryId);
+  const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
+  const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
+  const { categories, products } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
 
   useEffect(() => {
     api.getInventorySnapshotScope().then(setScope).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
-  }, [products, productId]);
+    setProductIds((prev) => prev.filter((id) => products.some((p) => p.id === id)));
+  }, [products]);
 
   const filters = useMemo(() => ({
-    branchId: branchId !== "all" ? branchId : undefined,
-    categoryId: categoryId !== "all" ? categoryId : undefined,
-    productId: productId !== "all" ? productId : undefined,
-    warehouseId: warehouseId !== "all" ? warehouseId : undefined,
+    branchId: branchIds.length ? branchIds : undefined,
+    categoryId: categoryIds.length ? categoryIds : undefined,
+    productId: productIds.length ? productIds : undefined,
+    warehouseId: warehouseIds.length ? warehouseIds : undefined,
     locationType: locationType !== "all" ? locationType : undefined,
     isTobacco: isTobacco || undefined,
-  }), [branchId, categoryId, productId, warehouseId, locationType, isTobacco]);
+  }), [branchIds, categoryIds, productIds, warehouseIds, locationType, isTobacco]);
 
   // Only meaningful when both pools are visible; a single-pool user has nothing to switch between.
   const showLocationType = !!scope?.canFilterBranch && !!scope?.canFilterWarehouse;
@@ -103,22 +106,24 @@ function InventorySnapshot() {
             branch user (e.g. cashier) sees no warehouse control because they hold no warehouse
             stock, and a warehouse user sees no branch control for the mirror reason. */}
         {!lockedBranchId && scope?.canFilterBranch && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+          </div>
         )}
         {scope?.canFilterWarehouse && (
-          <Select value={warehouseId} onValueChange={setWarehouseId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Warehouses" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Warehouses</SelectItem>
-              {scope.warehouses.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Warehouses"
+              options={scope.warehouses.map((w) => ({ id: w.id, label: w.name }))}
+              selected={warehouseIds}
+              onChange={setWarehouseIds}
+            />
+          </div>
         )}
         {showLocationType && (
           <Select value={locationType} onValueChange={setLocationType}>
@@ -130,20 +135,22 @@ function InventorySnapshot() {
             </SelectContent>
           </Select>
         )}
-        <Select value={categoryId} onValueChange={setCategoryId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={productId} onValueChange={setProductId}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Products</SelectItem>
-            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={categories.map((c) => ({ id: c.id, label: c.name }))}
+            selected={categoryIds}
+            onChange={setCategoryIds}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Products"
+            options={products.map((p) => ({ id: p.id, label: p.name }))}
+            selected={productIds}
+            onChange={setProductIds}
+          />
+        </div>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
           Tobacco only

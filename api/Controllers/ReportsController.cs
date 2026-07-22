@@ -128,7 +128,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Transactions", result.Kpis.Transactions.ToString()), ("VAT Collected", result.Kpis.VatCollected.ToString("0.##")),
             ("Tobacco Fees", result.Kpis.TobaccoFees.ToString("0.##")),
         };
-        return BuildExportFile(format, "Daily Sales Report", $"Date: {day:yyyy-MM-dd}", kpis, headers, rows, $"daily-sales-{day:yyyy-MM-dd}");
+        return await BuildExportFile(format, "Daily Sales Report", $"Date: {day:yyyy-MM-dd}", kpis, headers, rows, $"daily-sales-{day:yyyy-MM-dd}");
     }
 
     private async Task<DailySalesResult> BuildDailySalesAsync(
@@ -306,7 +306,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         }
         kpis.Add(("Transactions", result.Kpis.Transactions.ToString()));
         kpis.Add(("Tobacco Fees", result.Kpis.TobaccoFees.ToString("0.##")));
-        return BuildExportFile(format, "Monthly Sales Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Monthly Sales Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis.ToArray(), headers, rows, $"monthly-sales-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -501,7 +501,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Top Cashier", result.Kpis.TopCashier ?? "—"), ("Total Sales", result.Kpis.TotalSales.ToString("0.##")),
             ("Cash Variance", result.Kpis.CashVariance.ToString("0.##")), ("Voids", result.Kpis.VoidCount.ToString()),
         };
-        return BuildExportFile(format, "Cashier Sales Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Cashier Sales Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"cashier-sales-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -634,7 +634,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Wallet Amount", result.Kpis.WalletAmount.ToString("0.##")), ("Refund Value", result.Kpis.RefundValue.ToString("0.##")),
             ("Payment Fees", result.Kpis.PaymentFees.ToString("0.##")), ("Tobacco Fees", result.Kpis.TobaccoFees.ToString("0.##")),
         };
-        return BuildExportFile(format, "Payment Methods Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Payment Methods Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"payment-methods-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -717,27 +717,27 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("low-stock")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetLowStock(
-        [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] Guid? productId,
+        [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? productId,
         [FromQuery] bool isTobacco = false, [FromQuery] bool onlyLowStock = true)
     {
-        var result = await BuildLowStockAsync(branchId, categoryId, productId, isTobacco, onlyLowStock);
+        var result = await BuildLowStockAsync(branchId ?? [], categoryId ?? [], productId ?? [], isTobacco, onlyLowStock);
         return Ok(result);
     }
 
     [HttpGet("low-stock/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportLowStock(
-        [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] Guid? productId,
+        [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? productId,
         [FromQuery] bool isTobacco = false, [FromQuery] bool onlyLowStock = true, [FromQuery] Guid? exportedBy = null,
         [FromQuery] string? format = "csv")
     {
-        var result = await BuildLowStockAsync(branchId, categoryId, productId, isTobacco, onlyLowStock);
+        var result = await BuildLowStockAsync(branchId ?? [], categoryId ?? [], productId ?? [], isTobacco, onlyLowStock);
         var headers = new[] { "SKU", "Product Name", "Category", "Branch", "Tobacco", "Available Qty", "Reorder Level", "Recommended Reorder Qty", "Preferred Supplier", "Last Sold Date", "Urgency" };
         var rows = result.Rows.Select(r => new object?[]
         {
             r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.AvailableQty, r.ReorderLevel, r.RecommendedReorderQty, r.PreferredSupplier, r.LastSoldDate, r.Urgency,
         }).ToList();
-        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId?.FirstOrDefault(),
             $"{{\"report\":\"low-stock\",\"onlyLowStock\":{onlyLowStock.ToString().ToLowerInvariant()},\"rows\":{result.Rows.Count}}}");
         var kpis = new (string, string)[]
         {
@@ -745,24 +745,29 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Out of Stock", result.Kpis.OutOfStockSkus.ToString()), ("Est. Reorder Value", result.Kpis.EstimatedReorderValue.ToString("0.##")),
             ("Suppliers to Contact", result.Kpis.SuppliersToContact.ToString()),
         };
-        return BuildExportFile(format, "Low Stock Report", onlyLowStock ? "Below reorder threshold only" : "All stock",
+        return await BuildExportFile(format, "Low Stock Report", onlyLowStock ? "Below reorder threshold only" : "All stock",
             kpis, headers, rows, $"low-stock-{DateTime.UtcNow:yyyy-MM-dd}");
     }
 
-    private async Task<LowStockResult> BuildLowStockAsync(Guid? branchId, Guid? categoryId, Guid? productId, bool isTobacco, bool onlyLowStock)
+    private async Task<LowStockResult> BuildLowStockAsync(Guid[] branchIds, Guid[] categoryIds, Guid[] productIds, bool isTobacco, bool onlyLowStock)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
-        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchIds = [scopeBranchId.Value];
+
+        // Branch/category/product are narrowed in-memory below, not via SQL .Contains(...) — the
+        // MySQL EF Core provider used here cannot assign a type mapping to a parameterized Guid[]
+        // IN-list, which throws at query time (see the ef-mysql-inlist-gotcha memory).
         var stockQ = db.InventoryStocks
             .Include(s => s.Product).ThenInclude(p => p!.Category)
             .Include(s => s.Branch)
             .Where(s => s.Product != null && s.Branch != null);
-        if (branchId.HasValue) stockQ = stockQ.Where(s => s.BranchId == branchId);
-        if (categoryId.HasValue) stockQ = stockQ.Where(s => s.Product!.CategoryId == categoryId);
-        if (productId.HasValue) stockQ = stockQ.Where(s => s.ProductId == productId);
         if (isTobacco) stockQ = stockQ.Where(s => s.Product!.IsTobacco);
 
         var stocks = await stockQ.ToListAsync();
+        if (branchIds.Length > 0) stocks = [.. stocks.Where(s => branchIds.Contains(s.BranchId))];
+        if (categoryIds.Length > 0) stocks = [.. stocks.Where(s => s.Product!.CategoryId.HasValue && categoryIds.Contains(s.Product!.CategoryId!.Value))];
+        if (productIds.Length > 0) stocks = [.. stocks.Where(s => productIds.Contains(s.ProductId))];
+
         var withAvailability = stocks
             .Select(s => new { Stock = s, Available = s.Quantity - s.ReservedQuantity })
             .Where(x => !onlyLowStock || x.Available <= x.Stock.ReorderLevel)
@@ -771,14 +776,10 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var productIdSet = withAvailability.Select(x => x.Stock.ProductId).ToHashSet();
         var branchIdSet = withAvailability.Select(x => x.Stock.BranchId).ToHashSet();
 
-        // Best-effort "preferred supplier" = most recently received batch's supplier for that product+branch.
-        // Scoped by the same branchId/categoryId filters as the stock query (rather than a
-        // productIds/branchIds.Contains(...) list) — the MySQL EF Core provider used here cannot assign
-        // a type mapping to a parameterized List<Guid> IN-list, which throws at query time.
+        // Best-effort "preferred supplier" = most recently received batch's supplier for that
+        // product+branch. Fetched with only the tobacco filter at the SQL level, then narrowed
+        // in-memory the same way as stockQ above, for the same IN-list reason.
         var batchesQ = db.InventoryBatches.Include(b => b.Product).Include(b => b.Supplier).Where(b => b.Supplier != null);
-        if (branchId.HasValue) batchesQ = batchesQ.Where(b => b.BranchId == branchId);
-        if (categoryId.HasValue) batchesQ = batchesQ.Where(b => b.Product != null && b.Product.CategoryId == categoryId);
-        if (productId.HasValue) batchesQ = batchesQ.Where(b => b.ProductId == productId);
         if (isTobacco) batchesQ = batchesQ.Where(b => b.Product != null && b.Product.IsTobacco);
         var latestBatches = await batchesQ
             .OrderByDescending(b => b.ReceivedDate)
@@ -790,9 +791,6 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .ToDictionary(g => g.Key, g => g.First().SupplierName);
 
         var lastSoldQ = db.OrderItems.Include(i => i.Order).Include(i => i.Product).Where(i => i.Order != null);
-        if (branchId.HasValue) lastSoldQ = lastSoldQ.Where(i => i.Order!.BranchId == branchId);
-        if (categoryId.HasValue) lastSoldQ = lastSoldQ.Where(i => i.Product != null && i.Product.CategoryId == categoryId);
-        if (productId.HasValue) lastSoldQ = lastSoldQ.Where(i => i.ProductId == productId);
         if (isTobacco) lastSoldQ = lastSoldQ.Where(i => i.Product != null && i.Product.IsTobacco);
         var lastSold = await lastSoldQ
             .GroupBy(i => new { i.ProductId, BranchId = i.Order!.BranchId })
@@ -849,12 +847,71 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("inventory-snapshot")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetInventorySnapshot(
-        [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] Guid? productId, [FromQuery] bool isTobacco = false,
-        [FromQuery] Guid? warehouseId = null, [FromQuery] string? locationType = null)
+        [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? productId, [FromQuery] bool isTobacco = false,
+        [FromQuery] Guid[]? warehouseId = null, [FromQuery] string? locationType = null)
     {
-        var result = await BuildInventorySnapshotAsync(branchId, categoryId, productId, isTobacco, warehouseId, locationType);
+        var result = await BuildInventorySnapshotFilteredAsync(branchId ?? [], categoryId ?? [], productId ?? [], isTobacco, warehouseId ?? [], locationType);
         if (!await CanViewFinanceAsync()) MaskInventorySnapshotCost(result);
         return Ok(result);
+    }
+
+    // Multi-select wrapper: BuildInventorySnapshotAsync's own two-pool/scope logic stays single-
+    // value (it's shared by the dashboard and product-performance builders too, and its
+    // scope-resolution is delicate) — this calls it unfiltered by id lists, then narrows to the
+    // requested branch/warehouse/category/product ids in memory and recomputes Kpis from the
+    // narrowed set. Never via SQL .Contains(...) — the MySQL EF Core provider throws on a
+    // parameterized Guid[] IN-list (see the ef-mysql-inlist-gotcha memory).
+    private async Task<InventorySnapshotResult> BuildInventorySnapshotFilteredAsync(
+        Guid[] branchIds, Guid[] categoryIds, Guid[] productIds, bool isTobacco, Guid[] warehouseIds, string? locationType)
+    {
+        var full = await BuildInventorySnapshotAsync(null, null, null, isTobacco, null, locationType);
+        var rows = await FilterSnapshotRowsAsync(full.Rows, branchIds, warehouseIds, categoryIds, productIds);
+        rows = [.. rows.OrderByDescending(r => r.StockCostValue)];
+        return new InventorySnapshotResult
+        {
+            Kpis = new InventorySnapshotKpis
+            {
+                TotalStockValue = rows.Sum(r => r.StockCostValue),
+                SkuCount = rows.Select(r => r.Sku).Distinct().Count(),
+                AvailableQty = rows.Sum(r => r.AvailableQty),
+                ReservedQty = rows.Sum(r => r.ReservedQty),
+                OutOfStockSkus = rows.Count(r => r.StockStatus == "out of stock"),
+                NegativeStockExceptions = rows.Count(r => r.StockStatus == "negative"),
+            },
+            Rows = rows,
+            SnapshotAt = full.SnapshotAt,
+        };
+    }
+
+    // Shared by the snapshot report and the dashboard's own multi-select narrowing — a branch
+    // selection also narrows the warehouse pool to warehouses linked to any of the selected
+    // branches, mirroring BuildInventorySnapshotAsync's single-value behavior (branchId narrows
+    // both pools via BranchWarehouse) so multi-select doesn't quietly change what "select a branch"
+    // means for a caller who never touches the warehouse filter.
+    private async Task<List<InventorySnapshotRow>> FilterSnapshotRowsAsync(
+        List<InventorySnapshotRow> rows, Guid[] branchIds, Guid[] warehouseIds, Guid[] categoryIds, Guid[] productIds)
+    {
+        if (branchIds.Length == 0 && warehouseIds.Length == 0 && categoryIds.Length == 0 && productIds.Length == 0)
+            return rows;
+
+        HashSet<Guid>? linkedWarehouseIds = null;
+        if (branchIds.Length > 0 && warehouseIds.Length == 0)
+        {
+            var allBw = await db.BranchWarehouses.ToListAsync();
+            linkedWarehouseIds = [.. allBw.Where(bw => branchIds.Contains(bw.BranchId)).Select(bw => bw.WarehouseId)];
+        }
+
+        Dictionary<Guid, Guid?>? productCategoryIds = categoryIds.Length > 0
+            ? await db.Products.Select(p => new { p.Id, p.CategoryId }).ToDictionaryAsync(p => p.Id, p => p.CategoryId)
+            : null;
+
+        return [.. rows.Where(r =>
+            (branchIds.Length == 0 || r.LocationType != "branch" || branchIds.Contains(r.LocationId))
+            && (warehouseIds.Length > 0
+                ? (r.LocationType != "warehouse" || warehouseIds.Contains(r.LocationId))
+                : (linkedWarehouseIds == null || r.LocationType != "warehouse" || linkedWarehouseIds.Contains(r.LocationId)))
+            && (productCategoryIds == null || (productCategoryIds.TryGetValue(r.ProductId, out var cid) && cid.HasValue && categoryIds.Contains(cid.Value)))
+            && (productIds.Length == 0 || productIds.Contains(r.ProductId)))];
     }
 
     /// <summary>
@@ -885,11 +942,11 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("inventory-snapshot/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportInventorySnapshot(
-        [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId, [FromQuery] Guid? productId, [FromQuery] bool isTobacco = false,
+        [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? productId, [FromQuery] bool isTobacco = false,
         [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv",
-        [FromQuery] Guid? warehouseId = null, [FromQuery] string? locationType = null)
+        [FromQuery] Guid[]? warehouseId = null, [FromQuery] string? locationType = null)
     {
-        var result = await BuildInventorySnapshotAsync(branchId, categoryId, productId, isTobacco, warehouseId, locationType);
+        var result = await BuildInventorySnapshotFilteredAsync(branchId ?? [], categoryId ?? [], productId ?? [], isTobacco, warehouseId ?? [], locationType);
         var includeCost = await CanViewFinanceAsync();
         if (!includeCost) MaskInventorySnapshotCost(result);
         var headers = includeCost
@@ -907,7 +964,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                   r.RetailValue, r.LastMovementDate, r.StockStatus,
               }
         ).ToList();
-        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId?.FirstOrDefault(),
             $"{{\"report\":\"inventory-snapshot\",\"rows\":{result.Rows.Count}}}");
         var kpis = new List<(string, string)>();
         if (includeCost) kpis.Add(("Total Stock Value", result.Kpis.TotalStockValue.ToString("0.##")));
@@ -916,7 +973,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         kpis.Add(("Reserved Qty", result.Kpis.ReservedQty.ToString("0.##")));
         kpis.Add(("Out of Stock SKUs", result.Kpis.OutOfStockSkus.ToString()));
         kpis.Add(("Negative Stock Exceptions", result.Kpis.NegativeStockExceptions.ToString()));
-        return BuildExportFile(format, "Inventory Snapshot Report", $"Snapshot as of {result.SnapshotAt:yyyy-MM-dd HH:mm} UTC", kpis.ToArray(), headers, rows, $"inventory-snapshot-{DateTime.UtcNow:yyyy-MM-dd}");
+        return await BuildExportFile(format, "Inventory Snapshot Report", $"Snapshot as of {result.SnapshotAt:yyyy-MM-dd HH:mm} UTC", kpis.ToArray(), headers, rows, $"inventory-snapshot-{DateTime.UtcNow:yyyy-MM-dd}");
     }
 
     private static void MaskInventorySnapshotCost(InventorySnapshotResult r)
@@ -1050,13 +1107,13 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("inventory-dashboard")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetInventoryDashboard(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
-        [FromQuery] Guid? warehouseId, [FromQuery] Guid? categoryId, [FromQuery] string? locationType,
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? categoryId, [FromQuery] string? locationType,
         [FromQuery] int moverLimit = 10)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildInventoryDashboardAsync(rangeFrom, rangeTo, branchId, warehouseId, categoryId, locationType, moverLimit);
+        var result = await BuildInventoryDashboardAsync(rangeFrom, rangeTo, branchId ?? [], warehouseId ?? [], categoryId ?? [], locationType, moverLimit);
         if (!await CanViewFinanceAsync())
         {
             result.Kpis.TotalStockValue = 0;
@@ -1069,31 +1126,42 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     }
 
     private async Task<InventoryDashboardResult> BuildInventoryDashboardAsync(
-        DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? warehouseId,
-        Guid? categoryId, string? locationType, int moverLimit)
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] branchIds, Guid[] warehouseIds,
+        Guid[] categoryIds, string? locationType, int moverLimit)
     {
         var scope = ResolveInventoryScope();
-        if (scope.ForcedBranchId.HasValue) branchId = scope.ForcedBranchId;
+        if (scope.ForcedBranchId.HasValue) { branchIds = [scope.ForcedBranchId.Value]; warehouseIds = []; }
         moverLimit = Math.Clamp(moverLimit, 1, 50);
+        var hasLocationFilter = branchIds.Length > 0 || warehouseIds.Length > 0;
 
         // Reuse the snapshot builder so the dashboard's stock figures can never disagree with the
-        // Inventory report's — same scoping, same two-pool union, same status ladder.
-        var snapshot = await BuildInventorySnapshotAsync(branchId, categoryId, null, false, warehouseId, locationType);
+        // Inventory report's — same scoping, same two-pool union, same status ladder. Fetched
+        // unfiltered by id lists (scope/tobacco/locationType only), then narrowed to the requested
+        // branch/warehouse/category in memory — never via SQL .Contains(...) on a Guid[] (see the
+        // ef-mysql-inlist-gotcha memory), which is why every sub-query below follows the same shape.
+        var fullSnapshot = await BuildInventorySnapshotAsync(null, null, null, false, null, locationType);
+        var snapshot = await FilterSnapshotRowsAsync(fullSnapshot.Rows, branchIds, warehouseIds, categoryIds, []);
 
         var ledgerStart = await db.StockMovements.OrderBy(m => m.CreatedAt).Select(m => (DateTime?)m.CreatedAt).FirstOrDefaultAsync();
 
         // Sales are the only movement type that represents genuine outbound demand — transfers just
         // relocate stock, and counting them would rank a heavily-restocked SKU as "fast moving".
-        var salesQ = db.StockMovements.Where(m =>
-            m.MovementType == "sale" && m.CreatedAt >= rangeFrom && m.CreatedAt < rangeToExclusive);
-        if (branchId.HasValue) salesQ = salesQ.Where(m => m.BranchId == branchId);
-        if (warehouseId.HasValue) salesQ = salesQ.Where(m => m.WarehouseId == warehouseId);
+        // Not category-scoped, matching the report's original single-value behavior.
+        var salesRaw = await db.StockMovements
+            .Where(m => m.MovementType == "sale" && m.CreatedAt >= rangeFrom && m.CreatedAt < rangeToExclusive)
+            .Select(m => new { m.ProductId, m.BranchId, m.WarehouseId, m.Quantity })
+            .ToListAsync();
+        var scopedSales = hasLocationFilter
+            ? salesRaw.Where(m =>
+                (branchIds.Length > 0 && m.BranchId.HasValue && branchIds.Contains(m.BranchId.Value)) ||
+                (warehouseIds.Length > 0 && m.WarehouseId.HasValue && warehouseIds.Contains(m.WarehouseId.Value)))
+            : salesRaw.AsEnumerable();
 
-        var soldByProduct = await salesQ
+        var soldByProduct = scopedSales
             .GroupBy(m => m.ProductId)
             // Sale quantities are stored negative (outbound); negate so "units moved" reads positive.
             .Select(g => new { ProductId = g.Key, Units = g.Sum(x => -x.Quantity) })
-            .ToListAsync();
+            .ToList();
 
         var productIds = soldByProduct.Select(x => x.ProductId).ToList();
         var productMeta = new Dictionary<Guid, (string Sku, string Name, decimal Cost)>();
@@ -1118,7 +1186,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
         // Cost of goods sold over the period, from the ledger.
         var cogs = movers.Sum(m => m.CogsValue);
-        var stockValue = snapshot.Rows.Sum(r => r.StockCostValue);
+        var stockValue = snapshot.Sum(r => r.StockCostValue);
 
         // Turnover = COGS ÷ average inventory at cost. There are no historical stock snapshots, so
         // *current* value stands in for the average — it drifts from the textbook figure whenever
@@ -1126,28 +1194,34 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         // headline accounting number.
         var turnover = stockValue <= 0 ? 0 : Math.Round(cogs / stockValue, 2);
 
-        var wastageQ = db.InventoryAdjustments.Include(a => a.Product).Where(a =>
+        var wastageRaw = await db.InventoryAdjustments.Include(a => a.Product).Where(a =>
             (a.AdjustmentType == "waste" || a.AdjustmentType == "damage" || a.AdjustmentType == "expired"
                 || a.AdjustmentType == "theft" || a.AdjustmentType == "other")
             // Only value that has actually left inventory: auto/immediate write-offs (approval_status
             // null) or approved ones. A pending write-off hasn't been signed off or reduced stock yet.
             && (a.ApprovalStatus == null || a.ApprovalStatus == "approved")
-            && a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive);
-        if (branchId.HasValue) wastageQ = wastageQ.Where(a => a.BranchId == branchId);
-        if (warehouseId.HasValue) wastageQ = wastageQ.Where(a => a.WarehouseId == warehouseId);
-        if (categoryId.HasValue) wastageQ = wastageQ.Where(a => a.Product != null && a.Product.CategoryId == categoryId);
-        var wastage = await wastageQ.ToListAsync();
+            && a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive)
+            .ToListAsync();
+        var wastage = wastageRaw.Where(a =>
+            (!hasLocationFilter
+                || (branchIds.Length > 0 && a.BranchId.HasValue && branchIds.Contains(a.BranchId.Value))
+                || (warehouseIds.Length > 0 && a.WarehouseId.HasValue && warehouseIds.Contains(a.WarehouseId.Value)))
+            && (categoryIds.Length == 0 || (a.Product != null && a.Product.CategoryId.HasValue && categoryIds.Contains(a.Product.CategoryId.Value))));
         var wastageValue = wastage.Sum(a => a.Quantity * (a.Product?.CostPrice ?? a.Product?.BasePrice ?? 0));
 
         // "Pending" = raised but not yet fully received — the POs someone is still waiting on.
         // Cancelled and fully_received are settled and deliberately excluded.
-        var poQ = db.PurchaseOrders.Where(p =>
-            p.Status == "draft" || p.Status == "sent" || p.Status == "partial_received");
-        if (branchId.HasValue) poQ = poQ.Where(p => p.BranchId == branchId);
-        if (warehouseId.HasValue) poQ = poQ.Where(p => p.WarehouseId == warehouseId);
-        var pendingPos = await poQ.CountAsync();
+        var pendingPosRaw = await db.PurchaseOrders.Where(p =>
+            p.Status == "draft" || p.Status == "sent" || p.Status == "partial_received")
+            .Select(p => new { p.BranchId, p.WarehouseId })
+            .ToListAsync();
+        var pendingPos = hasLocationFilter
+            ? pendingPosRaw.Count(p =>
+                (branchIds.Length > 0 && p.BranchId.HasValue && branchIds.Contains(p.BranchId.Value)) ||
+                (warehouseIds.Length > 0 && p.WarehouseId.HasValue && warehouseIds.Contains(p.WarehouseId.Value)))
+            : pendingPosRaw.Count;
 
-        var aging = BuildAgingBuckets(snapshot.Rows);
+        var aging = BuildAgingBuckets(snapshot);
 
         // §2.7 — per-product aging. "Days since last movement" comes from the ledger where the
         // ledger has a row for that product+location, and falls back to the stock row's LastUpdated
@@ -1175,7 +1249,14 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var nowUtc = DateTime.UtcNow;
         var soldLookup = soldByProduct.ToDictionary(x => x.ProductId, x => x.Units);
 
-        var agingRows = snapshot.Rows
+        // Same Star/High/Average/Slow/Dead Stock classification the Product Performance report
+        // uses (composite sales+turnover+margin+recency score — see ProductPerformanceThresholds),
+        // computed with this report's own filters so a product's tier can never disagree between
+        // the two pages. Keyed by product, since the score is a per-product figure, not per-location.
+        var perf = await BuildProductPerformanceAsync(rangeFrom, rangeToExclusive, branchIds, warehouseIds, categoryIds, []);
+        var classificationByProduct = perf.Rows.ToDictionary(r => r.ProductId, r => (r.Classification, r.PerformanceScore));
+
+        var agingRows = snapshot
             .Where(r => r.OnHandQty > 0)
             .Select(r =>
             {
@@ -1187,6 +1268,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                     ? (int)(nowUtc - received).TotalDays
                     : null;
                 var unitsMoved = soldLookup.TryGetValue(r.ProductId, out var u) ? u : 0;
+                var (tier, score) = classificationByProduct.TryGetValue(r.ProductId, out var c) ? c : ("Slow Moving Products", 0m);
                 return new InventoryAgingRow
                 {
                     ProductId = r.ProductId,
@@ -1207,10 +1289,17 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                     // Distinct from slow-moving (moved, just not much) — dead stock is capital that
                     // hasn't turned at all.
                     IsDeadStock = unitsMoved <= 0,
+                    Classification = tier,
+                    PerformanceScore = score,
                 };
             })
             .OrderByDescending(r => r.DaysSinceLastMovement).ThenByDescending(r => r.StockValue)
             .ToList();
+
+        // Tier counts are distinct PRODUCTS on hand in this scope (not location-rows), matching how
+        // Product Performance's own KPI tiles count — a product held at 3 branches is still one SKU.
+        var productIdsOnHand = agingRows.Select(r => r.ProductId).Distinct().ToList();
+        int CountTier(string tier) => productIdsOnHand.Count(pid => classificationByProduct.TryGetValue(pid, out var c) && c.Classification == tier);
 
         // Rank once; Top takes the busiest, Slow takes the least-busy of what's LEFT, so a product
         // can never appear in both cards (see the comment at the assignment below).
@@ -1224,17 +1313,21 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             {
                 TotalStockValue = stockValue,
                 // On-hand minus reserved — what could actually be sold or shipped right now.
-                AvailableStockQty = snapshot.Rows.Sum(r => r.AvailableQty),
-                OutOfStockProducts = snapshot.Rows.Count(r => r.StockStatus == "out of stock"),
+                AvailableStockQty = snapshot.Sum(r => r.AvailableQty),
+                OutOfStockProducts = snapshot.Count(r => r.StockStatus == "out of stock"),
                 // Reported as they are: stock is allowed to go negative (sales don't clamp, and a
                 // missing row is created negative), so this is a real exception count to chase,
                 // not a decorative zero.
-                NegativeInventoryItems = snapshot.Rows.Count(r => r.StockStatus == "negative"),
-                LowStockProducts = snapshot.Rows.Count(r => r.StockStatus == "low"),
+                NegativeInventoryItems = snapshot.Count(r => r.StockStatus == "negative"),
+                LowStockProducts = snapshot.Count(r => r.StockStatus == "low"),
                 PendingPurchaseOrders = pendingPos,
                 WastageValue = wastageValue,
                 InventoryTurnover = turnover,
                 CogsValue = cogs,
+                StarCount = CountTier("Star Products"),
+                HighPerformerCount = CountTier("High Performers"),
+                AveragePerformerCount = CountTier("Average Performers"),
+                SlowMovingCount = CountTier("Slow Moving Products"),
             },
             // Top and slow movers are drawn from the same ranked list but must never overlap — with
             // fewer than 2×moverLimit products that moved, the single busiest product was otherwise
@@ -1246,8 +1339,10 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             SlowMoving = [.. rankedMovers.Where(m => !topMoverIds.Contains(m.ProductId)).OrderBy(m => m.UnitsMoved).Take(moverLimit)],
             Aging = aging,
             AgingRows = agingRows,
-            DeadStockSkus = agingRows.Count(r => r.IsDeadStock),
-            DeadStockValue = agingRows.Where(r => r.IsDeadStock).Sum(r => r.StockValue),
+            // Aligned with the Classification tier rather than the row-level IsDeadStock flag, so
+            // this count and the Star/High/Average/Slow tiles above always add up to the same total.
+            DeadStockSkus = CountTier("Dead Stock"),
+            DeadStockValue = agingRows.Where(r => r.Classification == "Dead Stock").Sum(r => r.StockValue),
             DataWindow = new InventoryDataWindow
             {
                 LedgerStart = ledgerStart,
@@ -1351,7 +1446,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Total Tobacco Fees", result.Kpis.TotalTobaccoFees.ToString("0.##")),
         };
         if (includeMargin) kpis.Add(("Overall Margin %", result.Kpis.OverallMarginPct?.ToString("0.0") ?? "N/A"));
-        return BuildExportFile(format, "Branch Sales Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Branch Sales Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis.ToArray(), headers, rows, $"branch-sales-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -1500,7 +1595,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Active Terminals", result.Kpis.ActiveTerminals.ToString()), ("Offline Terminals", result.Kpis.OfflineTerminals.ToString()),
             ("Terminal Sales", result.Kpis.TerminalSales.ToString("0.##")), ("Avg Uptime %", result.Kpis.AvgUptimePct.ToString("0.0")),
         };
-        return BuildExportFile(format, "Terminal Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Terminal Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"terminal-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -1627,7 +1722,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Return Rate %", result.Kpis.ReturnRatePct.ToString("0.0")), ("Total Tobacco Fees", result.Kpis.TotalTobaccoFees.ToString("0.##")),
         };
         if (includeMargin) kpis.Add(("Gross Margin %", result.Kpis.GrossMarginPct?.ToString("0.0") ?? "N/A"));
-        return BuildExportFile(format, "Product Sales Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Product Sales Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis.ToArray(), headers, rows, $"product-sales-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -1711,6 +1806,300 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     }
 
     // ───────────────────────────────────────────────────────────────────────
+    // 9b. Inventory Aging & Product Performance
+    //
+    // Classifies every product into one of five tiers — Star Products, High Performers, Average
+    // Performers, Slow Moving Products, Dead Stock — by combining sales performance (units, value,
+    // margin — same aggregation as BuildProductSalesAsync), aging/turnover (from the stock ledger,
+    // same idea as BuildInventoryDashboardAsync's per-product aging), and on-hand value (reusing
+    // BuildInventorySnapshotAsync so the stock figures can never disagree with the Inventory report).
+    //
+    // Classification is a weighted percentile rank across the filtered product set, not a hardcoded
+    // score — see ProductPerformanceThresholds for the exact weights/cutoffs, kept in one place so
+    // they're auditable and easy to retune. Dead Stock is a separate override, checked first: stock
+    // sitting on hand with no sale in DeadStockDays (or ever) is dead regardless of how it scores on
+    // everything else.
+    // ───────────────────────────────────────────────────────────────────────
+
+    private static class ProductPerformanceThresholds
+    {
+        // Weight of each dimension in the composite 0-100 score. Sums to 1.0.
+        public const decimal WeightSalesValue = 0.35m;
+        public const decimal WeightUnitsSold = 0.20m;
+        public const decimal WeightTurnover = 0.20m;
+        public const decimal WeightMargin = 0.15m;
+        public const decimal WeightRecency = 0.10m;
+
+        // On-hand stock with no sale in this many days (or never sold) is Dead Stock regardless of
+        // composite score — capital that hasn't turned at all is the report's headline finding, not
+        // something a middling score on other dimensions should be able to hide.
+        public const int DeadStockDays = 90;
+
+        // Composite-percentile cutoffs for the remaining four tiers (checked top-down).
+        public const decimal StarCutoff = 80m;
+        public const decimal HighPerformerCutoff = 60m;
+        public const decimal AveragePerformerCutoff = 40m;
+        public const decimal SlowMovingCutoff = 20m;
+    }
+
+    [HttpGet("inventory-aging-performance")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetProductPerformance(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? productId)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildProductPerformanceAsync(rangeFrom, rangeTo, branchId ?? [], warehouseId ?? [], categoryId ?? [], productId ?? []);
+        if (!await CanViewFinanceAsync()) MaskProductPerformanceCost(result);
+        return Ok(result);
+    }
+
+    [HttpGet("inventory-aging-performance/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportProductPerformance(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? productId,
+        [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var result = await BuildProductPerformanceAsync(rangeFrom, rangeTo, branchId ?? [], warehouseId ?? [], categoryId ?? [], productId ?? []);
+        var includeCost = await CanViewFinanceAsync();
+        if (!includeCost) MaskProductPerformanceCost(result);
+        var headers = includeCost
+            ? new[] { "SKU", "Product Name", "Category", "Units Sold", "Sales Value", "COGS", "Gross Profit", "Margin %", "Current Stock Qty", "Current Stock Value", "Days In Stock", "Days Since Last Sale", "Turnover", "Score", "Classification" }
+            : new[] { "SKU", "Product Name", "Category", "Units Sold", "Sales Value", "Current Stock Qty", "Days In Stock", "Days Since Last Sale", "Turnover", "Score", "Classification" };
+        var rows = result.Rows.Select(r => includeCost
+            ? new object?[] { r.Sku, r.ProductName, r.Category, r.UnitsSold, r.SalesValue, r.Cogs, r.GrossProfit, r.MarginPct?.ToString("0.0") ?? "N/A", r.CurrentStockQty, r.CurrentStockValue, r.DaysInStock, r.DaysSinceLastSale, r.TurnoverRatio, r.PerformanceScore, r.Classification }
+            : new object?[] { r.Sku, r.ProductName, r.Category, r.UnitsSold, r.SalesValue, r.CurrentStockQty, r.DaysInStock, r.DaysSinceLastSale, r.TurnoverRatio, r.PerformanceScore, r.Classification }
+        ).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId?.FirstOrDefault(),
+            $"{{\"report\":\"inventory-aging-performance\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
+        var kpis = new List<(string, string)> {
+            ("Products Analyzed", result.Kpis.ProductCount.ToString()),
+            ("Star Products", result.Kpis.StarCount.ToString()),
+            ("High Performers", result.Kpis.HighPerformerCount.ToString()),
+            ("Average Performers", result.Kpis.AveragePerformerCount.ToString()),
+            ("Slow Moving", result.Kpis.SlowMovingCount.ToString()),
+            ("Dead Stock SKUs", result.Kpis.DeadStockCount.ToString()),
+        };
+        if (includeCost)
+        {
+            kpis.Add(("Total Sales Value", result.Kpis.TotalSalesValue.ToString("0.##")));
+            kpis.Add(("Dead Stock Value", result.Kpis.DeadStockValue.ToString("0.##")));
+        }
+        return await BuildExportFile(format, "Inventory Aging & Product Performance Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            kpis.ToArray(), headers, rows, $"inventory-aging-performance-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    private static void MaskProductPerformanceCost(ProductPerformanceResult r)
+    {
+        r.Kpis.TotalSalesValue = 0; r.Kpis.DeadStockValue = 0;
+        foreach (var row in r.Rows) { row.Cogs = 0; row.GrossProfit = 0; row.MarginPct = null; row.CurrentStockValue = 0; }
+    }
+
+    private async Task<ProductPerformanceResult> BuildProductPerformanceAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] branchIds, Guid[] warehouseIds,
+        Guid[] categoryIds, Guid[] productIds)
+    {
+        var (scopeRole, scopeBranchId) = GetCallerContext();
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchIds = [scopeBranchId.Value];
+
+        var hasLocationFilter = branchIds.Length > 0 || warehouseIds.Length > 0;
+
+        // Sales leg — same aggregation as BuildProductSalesAsync: units, net sales, COGS, gross
+        // profit for the requested period. Orders are branch-only (warehouses don't sell directly),
+        // so a warehouse-only filter with no branch legitimately yields zero sales rows.
+        // Branch/category/product are NOT applied as SQL .Contains(...) here — the MySQL EF Core
+        // provider throws on a parameterized Guid[] IN-list (see the ef-mysql-inlist-gotcha memory);
+        // fetch scoped only by date range + payment status, then narrow in-memory below.
+        var rawItems = await db.OrderItems.Include(i => i.Order).Include(i => i.Product).ThenInclude(p => p!.Category)
+            .Where(i => i.Order != null && i.Order.CreatedAt >= rangeFrom && i.Order.CreatedAt < rangeToExclusive && i.Order.PaymentStatus == "paid")
+            .Select(i => new {
+                i.ProductId, BranchId = i.Order!.BranchId, CategoryId = i.Product!.CategoryId,
+                Sku = i.Product!.Sku, Name = i.Product.Name,
+                Category = i.Product.Category != null ? i.Product.Category.Name : "Uncategorized",
+                Qty = i.Quantity, Gross = i.UnitPrice * i.Quantity, i.DiscountAmount, Cogs = i.Quantity * (i.Product.CostPrice ?? 0m),
+            }).ToListAsync();
+
+        if (branchIds.Length > 0) rawItems = [.. rawItems.Where(x => branchIds.Contains(x.BranchId))];
+        if (categoryIds.Length > 0) rawItems = [.. rawItems.Where(x => x.CategoryId.HasValue && categoryIds.Contains(x.CategoryId.Value))];
+        if (productIds.Length > 0) rawItems = [.. rawItems.Where(x => productIds.Contains(x.ProductId))];
+
+        var salesByProduct = rawItems.GroupBy(x => x.ProductId).ToDictionary(g => g.Key, g => new
+        {
+            Sku = g.First().Sku, Name = g.First().Name, Category = g.First().Category,
+            UnitsSold = g.Sum(x => x.Qty),
+            NetSales = g.Sum(x => x.Gross - x.DiscountAmount),
+            Cogs = g.Sum(x => x.Cogs),
+        });
+
+        // On-hand leg — reuse the snapshot builder unfiltered (it already applies the caller's own
+        // branch/warehouse scope) so stock qty/value here can never disagree with the Inventory
+        // report, then narrow to the requested locations/category/product in memory.
+        var snapshot = await BuildInventorySnapshotAsync(null, null, null, false, null, null);
+        var productCategoryIds = await db.Products.Select(p => new { p.Id, p.CategoryId }).ToDictionaryAsync(p => p.Id, p => p.CategoryId);
+
+        var scopedStockRows = snapshot.Rows.Where(r =>
+            (!hasLocationFilter
+                || (branchIds.Length > 0 && r.LocationType == "branch" && branchIds.Contains(r.LocationId))
+                || (warehouseIds.Length > 0 && r.LocationType == "warehouse" && warehouseIds.Contains(r.LocationId)))
+            && (productIds.Length == 0 || productIds.Contains(r.ProductId))
+            && (categoryIds.Length == 0 || (productCategoryIds.TryGetValue(r.ProductId, out var cid) && cid.HasValue && categoryIds.Contains(cid.Value))));
+
+        var stockByProduct = scopedStockRows.GroupBy(r => r.ProductId).ToDictionary(g => g.Key, g => new
+        {
+            Sku = g.First().Sku, Name = g.First().ProductName, Category = g.First().Category,
+            OnHandQty = g.Sum(r => r.OnHandQty), StockValue = g.Sum(r => r.StockCostValue),
+        });
+
+        // Age of the oldest batch still holding quantity, across whichever locations are in scope —
+        // same idea as BuildInventoryDashboardAsync's per-location aging, aggregated to one number
+        // per product (the oldest stock anywhere it's held). Grouped by location at the SQL level
+        // (cheap — no Guid[] IN-list involved), then narrowed to the requested locations in-memory.
+        var oldestByLocation = await db.InventoryBatches.Where(b => b.RemainingQuantity > 0)
+            .GroupBy(b => new { b.ProductId, b.BranchId, b.WarehouseId })
+            .Select(g => new { g.Key.ProductId, g.Key.BranchId, g.Key.WarehouseId, Oldest = g.Min(b => b.ReceivedDate) })
+            .ToListAsync();
+        var scopedOldest = hasLocationFilter
+            ? oldestByLocation.Where(x =>
+                (branchIds.Length > 0 && x.BranchId.HasValue && branchIds.Contains(x.BranchId.Value)) ||
+                (warehouseIds.Length > 0 && x.WarehouseId.HasValue && warehouseIds.Contains(x.WarehouseId.Value)))
+            : oldestByLocation.AsEnumerable();
+        var oldestByProduct = scopedOldest.GroupBy(x => x.ProductId).ToDictionary(g => g.Key, g => g.Min(x => x.Oldest));
+
+        // Last SALE specifically (not "last movement" — that conflates sales with transfers/
+        // adjustments). Deliberately unbounded by the report's date range: a product that sold last
+        // quarter but not this month is not "never sold", and clipping to the period would make every
+        // report window manufacture its own dead stock. Bound only by how far the ledger reaches back.
+        // Same grouped-then-narrow-in-memory approach as oldestByLocation above.
+        var lastSaleByLocation = await db.StockMovements.Where(m => m.MovementType == "sale")
+            .GroupBy(m => new { m.ProductId, m.BranchId, m.WarehouseId })
+            .Select(g => new { g.Key.ProductId, g.Key.BranchId, g.Key.WarehouseId, Last = g.Max(m => m.CreatedAt) })
+            .ToListAsync();
+        var scopedLastSale = hasLocationFilter
+            ? lastSaleByLocation.Where(x =>
+                (branchIds.Length > 0 && x.BranchId.HasValue && branchIds.Contains(x.BranchId.Value)) ||
+                (warehouseIds.Length > 0 && x.WarehouseId.HasValue && warehouseIds.Contains(x.WarehouseId.Value)))
+            : lastSaleByLocation.AsEnumerable();
+        var lastSaleByProduct = scopedLastSale.GroupBy(x => x.ProductId).ToDictionary(g => g.Key, g => g.Max(x => x.Last));
+
+        var nowUtc = DateTime.UtcNow;
+        var productIdUniverse = stockByProduct.Keys.Union(salesByProduct.Keys).ToList();
+
+        var draft = productIdUniverse.Select(pid =>
+        {
+            var stock = stockByProduct.GetValueOrDefault(pid);
+            var sales = salesByProduct.GetValueOrDefault(pid);
+            var onHandQty = stock?.OnHandQty ?? 0;
+            var stockValue = stock?.StockValue ?? 0;
+            var unitsSold = sales?.UnitsSold ?? 0;
+            var netSales = sales?.NetSales ?? 0;
+            var cogs = sales?.Cogs ?? 0;
+            var grossProfit = netSales - cogs;
+            decimal? marginPct = netSales > 0 ? Math.Round(grossProfit / netSales * 100, 1) : null;
+            int? daysInStock = oldestByProduct.TryGetValue(pid, out var received) ? (int)(nowUtc - received).TotalDays : null;
+            int? daysSinceLastSale = lastSaleByProduct.TryGetValue(pid, out var last) ? (int)(nowUtc - last).TotalDays : null;
+            var turnover = stockValue > 0 ? Math.Round(cogs / stockValue, 2) : 0;
+            return (
+                ProductId: pid,
+                Sku: stock?.Sku ?? sales?.Sku ?? "—",
+                Name: stock?.Name ?? sales?.Name ?? "—",
+                Category: stock?.Category ?? sales?.Category ?? "Uncategorized",
+                UnitsSold: unitsSold, NetSales: netSales, Cogs: cogs, GrossProfit: grossProfit, MarginPct: marginPct,
+                OnHandQty: onHandQty, StockValue: stockValue, DaysInStock: daysInStock, DaysSinceLastSale: daysSinceLastSale,
+                Turnover: turnover
+            );
+        })
+        // A product with neither current stock nor any sale in the period has nothing to say —
+        // excluding it keeps the report to products that are actually in play, not the full catalog.
+        .Where(x => x.OnHandQty > 0 || x.UnitsSold > 0)
+        .ToList();
+
+        // Percentile-rank each dimension across this filtered set (0 = worst, 100 = best), so the
+        // composite score is relative to what's actually in view rather than an arbitrary absolute
+        // scale that would need retuning per tenant/catalog size.
+        static Dictionary<Guid, decimal> PercentileRanks(IEnumerable<(Guid Id, decimal Value)> values)
+        {
+            var sorted = values.OrderBy(v => v.Value).ToList();
+            var result = new Dictionary<Guid, decimal>();
+            for (var i = 0; i < sorted.Count; i++)
+                result[sorted[i].Id] = sorted.Count == 1 ? 100m : Math.Round((decimal)i / (sorted.Count - 1) * 100, 2);
+            return result;
+        }
+
+        var salesValuePct = PercentileRanks(draft.Select(x => (x.ProductId, x.NetSales)));
+        var unitsSoldPct = PercentileRanks(draft.Select(x => (x.ProductId, x.UnitsSold)));
+        var turnoverPct = PercentileRanks(draft.Select(x => (x.ProductId, x.Turnover)));
+        var marginPct = PercentileRanks(draft.Select(x => (x.ProductId, x.MarginPct ?? 0)));
+        // Recency inverted: a HIGH days-since-last-sale is bad, so its percentile rank is flipped
+        // before folding into the composite. Never sold at all is worst-case — ranked as if it were
+        // older than the oldest observed sale, not silently excluded from the ranking.
+        var worstDays = draft.Count == 0 ? 0 : draft.Max(x => x.DaysSinceLastSale ?? 0) + 1;
+        var recencyPct = PercentileRanks(draft.Select(x => (x.ProductId, (decimal)(x.DaysSinceLastSale ?? worstDays))))
+            .ToDictionary(kv => kv.Key, kv => 100m - kv.Value);
+
+        var rows = draft.Select(x =>
+        {
+            var score = Math.Round(
+                ProductPerformanceThresholds.WeightSalesValue * salesValuePct.GetValueOrDefault(x.ProductId) +
+                ProductPerformanceThresholds.WeightUnitsSold * unitsSoldPct.GetValueOrDefault(x.ProductId) +
+                ProductPerformanceThresholds.WeightTurnover * turnoverPct.GetValueOrDefault(x.ProductId) +
+                ProductPerformanceThresholds.WeightMargin * marginPct.GetValueOrDefault(x.ProductId) +
+                ProductPerformanceThresholds.WeightRecency * recencyPct.GetValueOrDefault(x.ProductId), 1);
+
+            var isDeadStockOverride = x.OnHandQty > 0
+                && (x.DaysSinceLastSale == null || x.DaysSinceLastSale > ProductPerformanceThresholds.DeadStockDays);
+
+            var classification = isDeadStockOverride ? "Dead Stock"
+                : score >= ProductPerformanceThresholds.StarCutoff ? "Star Products"
+                : score >= ProductPerformanceThresholds.HighPerformerCutoff ? "High Performers"
+                : score >= ProductPerformanceThresholds.AveragePerformerCutoff ? "Average Performers"
+                : score >= ProductPerformanceThresholds.SlowMovingCutoff ? "Slow Moving Products"
+                : x.OnHandQty > 0 ? "Dead Stock" : "Slow Moving Products";
+
+            return new ProductPerformanceRow
+            {
+                ProductId = x.ProductId,
+                Sku = x.Sku,
+                ProductName = x.Name,
+                Category = x.Category,
+                UnitsSold = x.UnitsSold,
+                SalesValue = x.NetSales,
+                Cogs = x.Cogs,
+                GrossProfit = x.GrossProfit,
+                MarginPct = x.MarginPct,
+                CurrentStockQty = x.OnHandQty,
+                CurrentStockValue = x.StockValue,
+                DaysInStock = x.DaysInStock,
+                DaysSinceLastSale = x.DaysSinceLastSale,
+                TurnoverRatio = x.Turnover,
+                PerformanceScore = score,
+                Classification = classification,
+            };
+        })
+        .OrderByDescending(r => r.PerformanceScore)
+        .ToList();
+
+        return new ProductPerformanceResult
+        {
+            Kpis = new ProductPerformanceKpis
+            {
+                ProductCount = rows.Count,
+                StarCount = rows.Count(r => r.Classification == "Star Products"),
+                HighPerformerCount = rows.Count(r => r.Classification == "High Performers"),
+                AveragePerformerCount = rows.Count(r => r.Classification == "Average Performers"),
+                SlowMovingCount = rows.Count(r => r.Classification == "Slow Moving Products"),
+                DeadStockCount = rows.Count(r => r.Classification == "Dead Stock"),
+                DeadStockValue = rows.Where(r => r.Classification == "Dead Stock").Sum(r => r.CurrentStockValue),
+                TotalSalesValue = rows.Sum(r => r.SalesValue),
+            },
+            Rows = rows,
+        };
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
     // 10. Category Performance (RPT-SALES-CATEGORY)
     // ───────────────────────────────────────────────────────────────────────
 
@@ -1756,7 +2145,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Total Tobacco Fees", result.Kpis.TotalTobaccoFees.ToString("0.##")),
         };
         if (includeMargin) kpis.Add(("Highest Margin Category", result.Kpis.HighestMarginCategory ?? "—"));
-        return BuildExportFile(format, "Category Performance Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Category Performance Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis.ToArray(), headers, rows, $"category-performance-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -1857,24 +2246,24 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("supplier-performance")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetSupplierPerformance(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? supplierId,
-        [FromQuery] Guid? branchId, [FromQuery] Guid? productId, [FromQuery] Guid? createdBy, [FromQuery] Guid? approvedBy)
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId,
+        [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? productId, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        return Ok(await BuildSupplierPerformanceAsync(rangeFrom, rangeTo, supplierId, branchId, productId, createdBy, approvedBy));
+        return Ok(await BuildSupplierPerformanceAsync(rangeFrom, rangeTo, supplierId ?? [], branchId ?? [], productId ?? [], createdBy ?? [], approvedBy ?? []));
     }
 
     [HttpGet("supplier-performance/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportSupplierPerformance(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? supplierId,
-        [FromQuery] Guid? branchId, [FromQuery] Guid? productId, [FromQuery] Guid? createdBy, [FromQuery] Guid? approvedBy,
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId,
+        [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? productId, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy,
         [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildSupplierPerformanceAsync(rangeFrom, rangeTo, supplierId, branchId, productId, createdBy, approvedBy);
+        var result = await BuildSupplierPerformanceAsync(rangeFrom, rangeTo, supplierId ?? [], branchId ?? [], productId ?? [], createdBy ?? [], approvedBy ?? []);
         var headers = new[] { "Supplier ID", "Supplier Name", "PO Count", "Ordered Qty", "Received Qty", "Fill Rate %", "Average Lead Time (days)", "Late Deliveries", "Purchase Value", "Outstanding Dues", "Supplier Returns Qty", "RTS Value", "Last PO Date" };
         var rows = result.Rows.Select(r => new object?[]
         {
@@ -1889,25 +2278,29 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Total Purchase Value", result.Kpis.TotalPurchaseValue.ToString("0.##")), ("Outstanding Dues", result.Kpis.OutstandingDues.ToString("0.##")),
             ("RTS Value", result.Kpis.RtsValue.ToString("0.##")),
         };
-        return BuildExportFile(format, "Supplier Performance Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Supplier Performance Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"supplier-performance-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
-    private async Task<SupplierPerformanceResult> BuildSupplierPerformanceAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? supplierId, Guid? branchId = null, Guid? productId = null, Guid? createdBy = null, Guid? approvedBy = null)
+    private async Task<SupplierPerformanceResult> BuildSupplierPerformanceAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] supplierIds, Guid[] branchIds, Guid[] productIds, Guid[] createdByIds, Guid[] approvedByIds)
     {
-        var poQ = db.PurchaseOrders.Include(p => p.Supplier).Include(p => p.Items)
-            .Where(p => p.CreatedAt >= rangeFrom && p.CreatedAt < rangeToExclusive && p.Status != "cancelled");
-        if (supplierId.HasValue) poQ = poQ.Where(p => p.SupplierId == supplierId);
-        if (branchId.HasValue) poQ = poQ.Where(p => p.BranchId == branchId);
-        if (productId.HasValue) poQ = poQ.Where(p => p.Items.Any(i => i.ProductId == productId));
-        if (createdBy.HasValue) poQ = poQ.Where(p => p.CreatedBy == createdBy);
-        if (approvedBy.HasValue) poQ = poQ.Where(p => p.ApprovedBy == approvedBy);
-        var pos = await poQ.ToListAsync();
+        // Supplier/branch/product/actor are narrowed in memory below, not via SQL .Contains(...) —
+        // the MySQL EF Core provider throws on a parameterized Guid[] IN-list (see the
+        // ef-mysql-inlist-gotcha memory).
+        var pos = await db.PurchaseOrders.Include(p => p.Supplier).Include(p => p.Items)
+            .Where(p => p.CreatedAt >= rangeFrom && p.CreatedAt < rangeToExclusive && p.Status != "cancelled")
+            .ToListAsync();
+        if (supplierIds.Length > 0) pos = [.. pos.Where(p => supplierIds.Contains(p.SupplierId))];
+        if (branchIds.Length > 0) pos = [.. pos.Where(p => p.BranchId.HasValue && branchIds.Contains(p.BranchId.Value))];
+        if (productIds.Length > 0) pos = [.. pos.Where(p => p.Items.Any(i => productIds.Contains(i.ProductId)))];
+        if (createdByIds.Length > 0) pos = [.. pos.Where(p => createdByIds.Contains(p.CreatedBy))];
+        if (approvedByIds.Length > 0) pos = [.. pos.Where(p => p.ApprovedBy.HasValue && approvedByIds.Contains(p.ApprovedBy.Value))];
 
-        var rtsQ = db.StockTransfers.Include(t => t.Items)
-            .Where(t => t.TransferType == "warehouse_to_supplier" && t.CreatedAt >= rangeFrom && t.CreatedAt < rangeToExclusive && t.DestSupplierId != null);
-        if (supplierId.HasValue) rtsQ = rtsQ.Where(t => t.DestSupplierId == supplierId);
-        var rtsBySupplier = (await rtsQ.ToListAsync())
+        var rtsRaw = await db.StockTransfers.Include(t => t.Items)
+            .Where(t => t.TransferType == "warehouse_to_supplier" && t.CreatedAt >= rangeFrom && t.CreatedAt < rangeToExclusive && t.DestSupplierId != null)
+            .ToListAsync();
+        var rtsBySupplier = (supplierIds.Length > 0 ? rtsRaw.Where(t => supplierIds.Contains(t.DestSupplierId!.Value)) : rtsRaw.AsEnumerable())
             .GroupBy(t => t.DestSupplierId!.Value)
             .ToDictionary(g => g.Key, g => (
                 Qty: g.SelectMany(t => t.Items).Sum(i => i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity),
@@ -1961,13 +2354,13 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("waste-spoilage")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetWasteSpoilage(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] string? reason,
-        [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? adjustedBy, [FromQuery] bool isTobacco = false,
-        [FromQuery] Guid? warehouseId = null, [FromQuery] Guid? approvedBy = null, [FromQuery] string? approvalStatus = null)
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId, [FromQuery] string? reason,
+        [FromQuery] Guid[]? productId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? adjustedBy, [FromQuery] bool isTobacco = false,
+        [FromQuery] Guid[]? warehouseId = null, [FromQuery] Guid[]? approvedBy = null, [FromQuery] string[]? approvalStatus = null)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildWasteSpoilageAsync(rangeFrom, rangeTo, branchId, reason, productId, categoryId, adjustedBy, isTobacco, warehouseId, approvedBy, approvalStatus);
+        var result = await BuildWasteSpoilageAsync(rangeFrom, rangeTo, branchId ?? [], reason, productId ?? [], categoryId ?? [], adjustedBy ?? [], isTobacco, warehouseId ?? [], approvedBy ?? [], approvalStatus ?? []);
         if (!await CanViewFinanceAsync()) MaskWasteSpoilageCost(result);
         return Ok(result);
     }
@@ -1975,14 +2368,14 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("waste-spoilage/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportWasteSpoilage(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] string? reason,
-        [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? adjustedBy, [FromQuery] bool isTobacco = false,
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId, [FromQuery] string? reason,
+        [FromQuery] Guid[]? productId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? adjustedBy, [FromQuery] bool isTobacco = false,
         [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv",
-        [FromQuery] Guid? warehouseId = null, [FromQuery] Guid? approvedBy = null, [FromQuery] string? approvalStatus = null)
+        [FromQuery] Guid[]? warehouseId = null, [FromQuery] Guid[]? approvedBy = null, [FromQuery] string[]? approvalStatus = null)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildWasteSpoilageAsync(rangeFrom, rangeTo, branchId, reason, productId, categoryId, adjustedBy, isTobacco, warehouseId, approvedBy, approvalStatus);
+        var result = await BuildWasteSpoilageAsync(rangeFrom, rangeTo, branchId ?? [], reason, productId ?? [], categoryId ?? [], adjustedBy ?? [], isTobacco, warehouseId ?? [], approvedBy ?? [], approvalStatus ?? []);
         var includeCost = await CanViewFinanceAsync();
         if (!includeCost) MaskWasteSpoilageCost(result);
         var headers = includeCost
@@ -1992,7 +2385,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ? new object?[] { r.WasteId, r.DateTime, r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.BatchNumber ?? "—", r.ExpiryDate, r.Qty, r.Reason, r.CreatedBy, r.ApprovedBy ?? "—", r.ApprovalStatus ?? "—", r.CostValue, r.Notes }
             : new object?[] { r.WasteId, r.DateTime, r.Sku, r.ProductName, r.Category, r.Branch, r.IsTobacco ? "Yes" : "No", r.BatchNumber ?? "—", r.ExpiryDate, r.Qty, r.Reason, r.CreatedBy, r.ApprovedBy ?? "—", r.ApprovalStatus ?? "—", r.Notes }
         ).ToList();
-        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId?.FirstOrDefault(),
             $"{{\"report\":\"waste-spoilage\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
         var kpis = new List<(string, string)> {
             ("Damaged Items", result.Kpis.DamagedItems.ToString()), ("Expired Items", result.Kpis.ExpiredItems.ToString()),
@@ -2000,7 +2393,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         };
         if (includeCost) kpis.Insert(0, ("Total Write-off Value", result.Kpis.TotalWriteOffValue.ToString("0.##")));
         if (includeCost) kpis.Add(("Waste % of Sales", result.Kpis.WastePctOfSales.ToString("0.00")));
-        return BuildExportFile(format, "Waste / Spoilage Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Waste / Spoilage Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis.ToArray(), headers, rows, $"waste-spoilage-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2014,25 +2407,28 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     // 12b. Stock Reconciliation (RPT-INV-RECON)
     //
     // The FRD names three filters — "Stock Review", "Stock Audit", "Inventory Reconciliation" —
-    // which in this schema are one thing: a StockCount session (start → count → complete, posting
-    // variance as adjustments). stock_count_items already carries system_quantity, counted_quantity
-    // and variance; nothing has ever read them. This report is that read.
+    // which in this schema are one thing: a StockCount session (start → count → review → approve,
+    // posting variance as adjustments only on final approval). stock_count_items already carries
+    // system_quantity, counted_quantity and variance; nothing has ever read them. This report is
+    // that read.
     //
-    // Branch-only by design: StockCount has no warehouse_id, so there is genuinely no warehouse
-    // stock-take to report on. A warehouse filter here would be a control over data that does not
-    // exist. See the two-pool note at BuildInventorySnapshotAsync.
+    // Branch AND warehouse: StockCount now carries an optional warehouse_id alongside branch_id
+    // (exactly one set, same pair as InventoryAdjustment), so a warehouse stock-take reports here
+    // too — each row names whichever location the session was for.
     // ───────────────────────────────────────────────────────────────────────
 
     [HttpGet("stock-reconciliation")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetStockReconciliation(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
-        [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? countedBy,
-        [FromQuery] string? status, [FromQuery] bool varianceOnly = false, [FromQuery] string? countType = null)
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? productId, [FromQuery] Guid[]? categoryId,
+        [FromQuery] Guid[]? countedBy, [FromQuery] string[]? status, [FromQuery] bool varianceOnly = false,
+        [FromQuery] string? countType = null)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildStockReconciliationAsync(rangeFrom, rangeTo, branchId, productId, categoryId, countedBy, status, varianceOnly, countType);
+        var result = await BuildStockReconciliationAsync(rangeFrom, rangeTo, branchId ?? [], warehouseId ?? [],
+            productId ?? [], categoryId ?? [], countedBy ?? [], status ?? [], varianceOnly, countType);
         if (!await CanViewFinanceAsync()) MaskStockReconciliationCost(result);
         return Ok(result);
     }
@@ -2040,24 +2436,25 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpGet("stock-reconciliation/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportStockReconciliation(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId,
-        [FromQuery] Guid? productId, [FromQuery] Guid? categoryId, [FromQuery] Guid? countedBy,
-        [FromQuery] string? status, [FromQuery] bool varianceOnly = false, [FromQuery] string? countType = null,
-        [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv")
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? productId, [FromQuery] Guid[]? categoryId,
+        [FromQuery] Guid[]? countedBy, [FromQuery] string[]? status, [FromQuery] bool varianceOnly = false,
+        [FromQuery] string? countType = null, [FromQuery] Guid? exportedBy = null, [FromQuery] string? format = "csv")
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
-        var result = await BuildStockReconciliationAsync(rangeFrom, rangeTo, branchId, productId, categoryId, countedBy, status, varianceOnly, countType);
+        var result = await BuildStockReconciliationAsync(rangeFrom, rangeTo, branchId ?? [], warehouseId ?? [],
+            productId ?? [], categoryId ?? [], countedBy ?? [], status ?? [], varianceOnly, countType);
         var includeCost = await CanViewFinanceAsync();
         if (!includeCost) MaskStockReconciliationCost(result);
         var headers = includeCost
-            ? new[] { "Count ID", "Count Type", "Started At", "Completed At", "Branch", "SKU", "Product Name", "Category", "System Qty", "Counted Qty", "Variance", "Variance Value", "Started By", "Completed By", "Status" }
-            : new[] { "Count ID", "Count Type", "Started At", "Completed At", "Branch", "SKU", "Product Name", "Category", "System Qty", "Counted Qty", "Variance", "Started By", "Completed By", "Status" };
+            ? new[] { "Count ID", "Count Type", "Started At", "Completed At", "Branch/Warehouse", "SKU", "Product Name", "Category", "System Qty", "Counted Qty", "Variance", "Variance Value", "Started By", "Performed By", "Reviewed By", "Approved By", "Reconciliation Status" }
+            : new[] { "Count ID", "Count Type", "Started At", "Completed At", "Branch/Warehouse", "SKU", "Product Name", "Category", "System Qty", "Counted Qty", "Variance", "Started By", "Performed By", "Reviewed By", "Approved By", "Reconciliation Status" };
         var rows = result.Rows.Select(r => includeCost
-            ? new object?[] { r.CountId, r.CountType ?? "unspecified", r.StartedAt, r.CompletedAt, r.Branch, r.Sku, r.ProductName, r.Category, r.SystemQty, r.CountedQty, r.Variance, r.VarianceValue, r.StartedBy, r.CompletedBy ?? "—", r.Status }
-            : new object?[] { r.CountId, r.CountType ?? "unspecified", r.StartedAt, r.CompletedAt, r.Branch, r.Sku, r.ProductName, r.Category, r.SystemQty, r.CountedQty, r.Variance, r.StartedBy, r.CompletedBy ?? "—", r.Status }
+            ? new object?[] { r.CountId, r.CountType ?? "unspecified", r.StartedAt, r.CompletedAt, r.Branch ?? r.Warehouse ?? "—", r.Sku, r.ProductName, r.Category, r.SystemQty, r.CountedQty, r.Variance, r.VarianceValue, r.StartedBy, r.PerformedBy ?? "—", r.ReviewedBy ?? "—", r.ApprovedBy ?? "—", r.Status }
+            : new object?[] { r.CountId, r.CountType ?? "unspecified", r.StartedAt, r.CompletedAt, r.Branch ?? r.Warehouse ?? "—", r.Sku, r.ProductName, r.Category, r.SystemQty, r.CountedQty, r.Variance, r.StartedBy, r.PerformedBy ?? "—", r.ReviewedBy ?? "—", r.ApprovedBy ?? "—", r.Status }
         ).ToList();
-        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId?.FirstOrDefault(),
             $"{{\"report\":\"stock-reconciliation\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
         var kpis = new List<(string, string)> {
             ("Count Sessions", result.Kpis.SessionCount.ToString()),
@@ -2065,9 +2462,11 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Items With Variance", result.Kpis.ItemsWithVariance.ToString()),
             ("Count Accuracy %", result.Kpis.AccuracyPct.ToString("0.00")),
             ("Net Variance Units", result.Kpis.NetVarianceUnits.ToString("0.##")),
+            ("Pending Review", result.Kpis.PendingReviewCount.ToString()),
+            ("Pending Approval", result.Kpis.PendingApprovalCount.ToString()),
         };
         if (includeCost) kpis.Add(("Net Variance Value", result.Kpis.NetVarianceValue.ToString("0.##")));
-        return BuildExportFile(format, "Stock Reconciliation Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Stock Reconciliation Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis.ToArray(), headers, rows, $"stock-reconciliation-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2078,48 +2477,67 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     }
 
     private async Task<StockReconciliationResult> BuildStockReconciliationAsync(
-        DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? productId,
-        Guid? categoryId, Guid? countedBy, string? status, bool varianceOnly, string? countType = null)
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] branchIds, Guid[] warehouseIds, Guid[] productIds,
+        Guid[] categoryIds, Guid[] countedByIds, string[] statuses, bool varianceOnly, string? countType = null)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
-        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+        // Branch-scoped roles are pinned to their own branch regardless of what was requested, and
+        // never see warehouse sessions — reviewing/approving a warehouse count is tenant_admin-only
+        // (see StockCountsController), so surfacing them here would show a branch user a session
+        // they can never act on.
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue)
+        {
+            branchIds = [scopeBranchId.Value];
+            warehouseIds = [];
+        }
 
         // Ranged on StartedAt, not CompletedAt: an open session has no completion date, and a
         // reconciliation report that hides in-progress counts is exactly the one you can't use to
-        // chase them up.
-        var countQ = db.StockCounts
+        // chase them up. Branch/warehouse/status/countedBy are NOT applied as SQL .Contains(...)
+        // filters here — the MySQL EF Core provider used in this repo throws at query time on a
+        // parameterized Guid[]/string[] IN-list (see the ef-mysql-inlist-gotcha memory / the
+        // identical comment on the StockCountItems loop below). Sessions in a date range are few
+        // — "a branch runs a handful a month" — so fetching them all and narrowing in-memory is cheap.
+        var counts = await db.StockCounts
             .Include(c => c.Branch)
-            .Where(c => c.StartedAt >= rangeFrom && c.StartedAt < rangeToExclusive);
-        if (branchId.HasValue) countQ = countQ.Where(c => c.BranchId == branchId);
-        if (!string.IsNullOrEmpty(status)) countQ = countQ.Where(c => c.Status == status);
+            .Include(c => c.Warehouse)
+            .Where(c => c.StartedAt >= rangeFrom && c.StartedAt < rangeToExclusive)
+            .ToListAsync();
+
+        if (branchIds.Length > 0 || warehouseIds.Length > 0)
+            counts = [.. counts.Where(c =>
+                (branchIds.Length > 0 && c.BranchId.HasValue && branchIds.Contains(c.BranchId.Value)) ||
+                (warehouseIds.Length > 0 && c.WarehouseId.HasValue && warehouseIds.Contains(c.WarehouseId.Value)))];
+        if (statuses.Length > 0) counts = [.. counts.Where(c => statuses.Contains(c.Status))];
         // The FRD's three filters. "unspecified" selects sessions that predate count_type — they
         // are a real group a user needs to find, not an absence to hide.
-        if (countType == "unspecified") countQ = countQ.Where(c => c.CountType == null);
-        else if (!string.IsNullOrEmpty(countType)) countQ = countQ.Where(c => c.CountType == countType);
-        // Either end of the session — whoever opened it or whoever signed it off.
-        if (countedBy.HasValue) countQ = countQ.Where(c => c.StartedBy == countedBy || c.CompletedBy == countedBy);
+        if (countType == "unspecified") counts = [.. counts.Where(c => c.CountType == null)];
+        else if (!string.IsNullOrEmpty(countType)) counts = [.. counts.Where(c => c.CountType == countType)];
+        // Either end of the session — whoever opened it or whoever performed/signed it off.
+        if (countedByIds.Length > 0) counts = [.. counts.Where(c =>
+            (c.StartedBy.HasValue && countedByIds.Contains(c.StartedBy.Value)) ||
+            (c.CompletedBy.HasValue && countedByIds.Contains(c.CompletedBy.Value)))];
 
-        var counts = await countQ.ToListAsync();
         var countIds = counts.Select(c => c.Id).ToList();
 
-        // One query per session rather than a `countIds.Contains(...)` IN-list: the MySQL EF
-        // provider can't translate a parameterized Guid list (see InventoryScope). Sessions are
-        // few — a branch runs a handful a month — so this stays cheap.
+        // One query per session rather than a `countIds.Contains(...)` IN-list — same provider
+        // limitation. Product/category narrowing also happens in-memory below rather than as a
+        // second .Contains(...) on this query, for the same reason.
         var items = new List<Models.StockCountItem>();
         foreach (var id in countIds)
         {
             var itemQ = db.StockCountItems
                 .Include(i => i.Product).ThenInclude(p => p!.Category)
                 .Where(i => i.StockCountId == id && i.Product != null);
-            if (productId.HasValue) itemQ = itemQ.Where(i => i.ProductId == productId);
-            if (categoryId.HasValue) itemQ = itemQ.Where(i => i.Product!.CategoryId == categoryId);
             if (varianceOnly) itemQ = itemQ.Where(i => i.Variance != null && i.Variance != 0);
             items.AddRange(await itemQ.ToListAsync());
         }
+        if (productIds.Length > 0) items = [.. items.Where(i => productIds.Contains(i.ProductId))];
+        if (categoryIds.Length > 0) items = [.. items.Where(i => i.Product!.CategoryId.HasValue && categoryIds.Contains(i.Product!.CategoryId!.Value))];
 
-        // Resolve the two actor columns to names in one pass. StockCount has no user navigation
-        // (started_by/completed_by are bare Guids with no FK), so this is a manual join.
-        var userIds = counts.SelectMany(c => new[] { c.StartedBy, c.CompletedBy })
+        // Resolve the four actor columns to names in one pass. StockCount's actor fields are bare
+        // Guids with no FK, so this is a manual join.
+        var userIds = counts.SelectMany(c => new[] { c.StartedBy, c.CompletedBy, c.ReviewedBy, c.ApprovedBy })
             .Where(g => g.HasValue).Select(g => g!.Value).Distinct().ToList();
         var userNames = new Dictionary<Guid, string>();
         foreach (var uid in userIds)
@@ -2141,7 +2559,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 CountType = c.CountType,
                 StartedAt = c.StartedAt,
                 CompletedAt = c.CompletedAt,
-                Branch = c.Branch?.Name ?? "—",
+                Branch = c.Branch?.Name,
+                Warehouse = c.Warehouse?.Name,
                 Sku = i.Product.Sku,
                 ProductName = i.Product.Name,
                 Category = i.Product.Category?.Name ?? "—",
@@ -2153,8 +2572,13 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 // number finance actually wants.
                 VarianceValue = (i.Variance ?? 0) * costPrice,
                 StartedBy = NameOf(c.StartedBy),
-                CompletedBy = c.CompletedBy.HasValue ? NameOf(c.CompletedBy) : null,
+                // Who physically performed the count (submitted it for review) — distinct from
+                // StartedBy, which is whoever opened the session.
+                PerformedBy = c.CompletedBy.HasValue ? NameOf(c.CompletedBy) : null,
+                ReviewedBy = c.ReviewedBy.HasValue ? NameOf(c.ReviewedBy) : null,
+                ApprovedBy = c.ApprovedBy.HasValue ? NameOf(c.ApprovedBy) : null,
                 Status = c.Status,
+                RejectionReason = c.RejectionReason,
                 CountedAt = i.CountedAt,
             };
         })
@@ -2177,38 +2601,52 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 NetVarianceUnits = counted.Sum(r => r.Variance ?? 0),
                 NetVarianceValue = counted.Sum(r => r.VarianceValue),
                 AbsVarianceValue = counted.Sum(r => Math.Abs(r.VarianceValue)),
+                PendingReviewCount = counts.Count(c => c.Status == "pending_review"),
+                PendingApprovalCount = counts.Count(c => c.Status == "pending_approval"),
             },
             Rows = rows,
         };
     }
 
     private async Task<WasteSpoilageResult> BuildWasteSpoilageAsync(
-        DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, string? reasonFilter,
-        Guid? productId = null, Guid? categoryId = null, Guid? adjustedBy = null, bool isTobacco = false,
-        Guid? warehouseId = null, Guid? approvedBy = null, string? approvalStatus = null)
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] branchIds, string? reasonFilter,
+        Guid[] productIds, Guid[] categoryIds, Guid[] adjustedByIds, bool isTobacco,
+        Guid[] warehouseIds, Guid[] approvedByIds, string[] approvalStatuses)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
-        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) { branchIds = [scopeBranchId.Value]; warehouseIds = []; }
+
+        // Branch/warehouse/category/product/actor/status are narrowed in memory below, not via SQL
+        // .Contains(...) — the MySQL EF Core provider throws on a parameterized Guid[]/string[]
+        // IN-list (see the ef-mysql-inlist-gotcha memory).
         var adjQ = db.InventoryAdjustments.Include(a => a.Product).ThenInclude(p => p!.Category).Include(a => a.Branch).Include(a => a.Batch)
             // Both user navigations are needed for the FRD's "created by" / "approved by" columns —
             // without them the projection below only has Guids to render.
             .Include(a => a.AdjustedByUser).Include(a => a.ApprovedByUser)
             .Where(a => (a.AdjustmentType == "waste" || a.AdjustmentType == "damage" || a.AdjustmentType == "expired"
                 || a.AdjustmentType == "theft" || a.AdjustmentType == "other") && a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive);
-        if (branchId.HasValue) adjQ = adjQ.Where(a => a.BranchId == branchId);
-        if (warehouseId.HasValue) adjQ = adjQ.Where(a => a.WarehouseId == warehouseId);
         if (!string.IsNullOrEmpty(reasonFilter)) adjQ = adjQ.Where(a => a.AdjustmentType == reasonFilter);
-        if (productId.HasValue) adjQ = adjQ.Where(a => a.ProductId == productId);
-        if (categoryId.HasValue) adjQ = adjQ.Where(a => a.Product != null && a.Product.CategoryId == categoryId);
-        if (adjustedBy.HasValue) adjQ = adjQ.Where(a => a.AdjustedBy == adjustedBy);
-        if (approvedBy.HasValue) adjQ = adjQ.Where(a => a.ApprovedBy == approvedBy);
-        if (!string.IsNullOrEmpty(approvalStatus)) adjQ = adjQ.Where(a => a.ApprovalStatus == approvalStatus);
         if (isTobacco) adjQ = adjQ.Where(a => a.Product != null && a.Product.IsTobacco);
         var adjustments = await adjQ.OrderByDescending(a => a.CreatedAt).ToListAsync();
 
-        var salesQ = db.Orders.Where(o => o.CreatedAt >= rangeFrom && o.CreatedAt < rangeToExclusive && o.PaymentStatus == "paid");
-        if (branchId.HasValue) salesQ = salesQ.Where(o => o.BranchId == branchId);
-        var totalSales = await salesQ.SumAsync(o => o.TotalAmount - o.TaxAmount);
+        if (branchIds.Length > 0 || warehouseIds.Length > 0)
+            adjustments = [.. adjustments.Where(a =>
+                (branchIds.Length > 0 && a.BranchId.HasValue && branchIds.Contains(a.BranchId.Value)) ||
+                (warehouseIds.Length > 0 && a.WarehouseId.HasValue && warehouseIds.Contains(a.WarehouseId.Value)))];
+        if (productIds.Length > 0) adjustments = [.. adjustments.Where(a => productIds.Contains(a.ProductId))];
+        if (categoryIds.Length > 0) adjustments = [.. adjustments.Where(a => a.Product != null && a.Product.CategoryId.HasValue && categoryIds.Contains(a.Product.CategoryId.Value))];
+        if (adjustedByIds.Length > 0) adjustments = [.. adjustments.Where(a => a.AdjustedBy.HasValue && adjustedByIds.Contains(a.AdjustedBy.Value))];
+        if (approvedByIds.Length > 0) adjustments = [.. adjustments.Where(a => a.ApprovedBy.HasValue && approvedByIds.Contains(a.ApprovedBy.Value))];
+        if (approvalStatuses.Length > 0) adjustments = [.. adjustments.Where(a => a.ApprovalStatus != null && approvalStatuses.Contains(a.ApprovalStatus))];
+
+        var salesByBranch = await db.Orders
+            .Where(o => o.CreatedAt >= rangeFrom && o.CreatedAt < rangeToExclusive && o.PaymentStatus == "paid")
+            .GroupBy(o => o.BranchId)
+            .Select(g => new { BranchId = g.Key, Total = g.Sum(o => o.TotalAmount - o.TaxAmount) })
+            .ToListAsync();
+        var totalSales = branchIds.Length > 0
+            ? salesByBranch.Where(x => branchIds.Contains(x.BranchId)).Sum(x => x.Total)
+            : salesByBranch.Sum(x => x.Total);
 
         var rows = adjustments.Select(a =>
         {
@@ -2291,7 +2729,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("VAT Reversed", result.Kpis.VatReversed.ToString("0.##")), ("Top Return Reason", result.Kpis.TopReturnReason ?? "—"),
             ("Refunds Pending", result.Kpis.RefundsPending.ToString()),
         };
-        return BuildExportFile(format, "Return / Refund Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Return / Refund Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"returns-refunds-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2400,7 +2838,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Cash Variance", result.Kpis.CashVariance.ToString("0.##")), ("Total Staff Hours", result.Kpis.TotalStaffHours.ToString("0.#")),
             ("Missing Closures", result.Kpis.MissingClosures.ToString()),
         };
-        return BuildExportFile(format, "Attendance / Shift Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Attendance / Shift Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"attendance-shift-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2515,7 +2953,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Override Count", result.Kpis.OverrideCount.ToString()), ("Configuration Changes", result.Kpis.ConfigurationChanges.ToString()),
             ("Exports Generated", result.Kpis.ExportsGenerated.ToString()),
         };
-        return BuildExportFile(format, "Audit Trail Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Audit Trail Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"audit-trail-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2617,7 +3055,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Coupon Usage", result.Kpis.CouponUsage.ToString()), ("Discount % of Sales", result.Kpis.DiscountPctOfSales.ToString("0.0")),
         };
         if (includeMargin) kpis.Add(("Margin Impact", result.Kpis.MarginImpact?.ToString("0.##") ?? "N/A"));
-        return BuildExportFile(format, "Discount Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Discount Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis.ToArray(), headers, rows, $"discounts-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2706,7 +3144,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("VAT Reversed", result.Kpis.VatReversed.ToString("0.##")), ("ZATCA Success", result.Kpis.ZatcaSuccess.ToString()),
             ("ZATCA Pending", result.Kpis.ZatcaPending.ToString()), ("ZATCA Errors", result.Kpis.ZatcaErrors.ToString()),
         };
-        return BuildExportFile(format, "VAT / ZATCA Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "VAT / ZATCA Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"vat-zatca-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2776,7 +3214,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Total Taxable Amount", result.Kpis.TotalTaxableAmount.ToString("0.##")), ("VAT Amount", result.Kpis.VatAmount.ToString("0.##")),
             ("Zero-rated Sales", result.Kpis.ZeroRatedSales.ToString("0.##")), ("Net Tax Payable", result.Kpis.NetTaxPayable.ToString("0.##")),
         };
-        return BuildExportFile(format, "Tax Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Tax Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"tax-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2855,7 +3293,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Total Fees Collected", result.Kpis.TotalFeesCollected.ToString("0.##")), ("Transactions with Fees", result.Kpis.TransactionsWithFees.ToString()),
             ("Average Fee per Transaction", result.Kpis.AverageFeePerTransaction.ToString("0.##")), ("Total Tobacco Fees", result.Kpis.TotalTobaccoFees.ToString("0.##")),
         };
-        return BuildExportFile(format, "Fee Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Fee Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"fees-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -2941,7 +3379,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Tobacco Units Sold", result.Kpis.TobaccoUnitsSold.ToString("0.##")), ("Excise Refunds", result.Kpis.ExciseRefunds.ToString("0.##")),
             ("Top Tobacco SKU", result.Kpis.TopTobaccoSku ?? "—"), ("Compliance Exceptions", result.Kpis.ComplianceExceptions.ToString()),
         };
-        return BuildExportFile(format, "Tobacco Excise Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return await BuildExportFile(format, "Tobacco Excise Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
             kpis, headers, rows, $"tobacco-excise-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -3053,7 +3491,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Gross Profit", result.Kpis.GrossProfit.ToString("0.##")), ("Gross Margin %", result.Kpis.GrossMarginPct?.ToString("0.0") ?? "N/A"),
             ("Net Margin %", result.Kpis.NetMarginPct?.ToString("0.0") ?? "N/A"), ("Low Margin SKUs", result.Kpis.LowMarginSkus.ToString()),
         };
-        return BuildExportFile(format, "Profit Margin Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd} · Grouped by {groupBy ?? "product"}",
+        return await BuildExportFile(format, "Profit Margin Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd} · Grouped by {groupBy ?? "product"}",
             kpis, headers, rows, $"profit-margin-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -3163,20 +3601,535 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     }
 
     // ───────────────────────────────────────────────────────────────────────
+    // Supplier Returns Report — full transaction detail for stock returned to suppliers (RTS),
+    // one row per returned line item. RTS has no dedicated entity — it's StockTransfer/
+    // StockTransferItem rows where TransferType == "warehouse_to_supplier".
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("supplier-returns")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetSupplierReturnsReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? branchId, [FromQuery] string[]? status, [FromQuery] string? reason)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        return Ok(await BuildSupplierReturnsReportAsync(rangeFrom, rangeTo, supplierId ?? [], warehouseId ?? [], branchId ?? [], status ?? [], reason));
+    }
+
+    [HttpGet("supplier-returns/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportSupplierReturnsReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? branchId, [FromQuery] string[]? status, [FromQuery] string? reason,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var rows = await BuildSupplierReturnsReportAsync(rangeFrom, rangeTo, supplierId ?? [], warehouseId ?? [], branchId ?? [], status ?? [], reason);
+        var headers = new[] { "Return Number", "Return Date", "Supplier", "Warehouse", "Returned By", "Approved By", "Product", "SKU", "Returned Qty", "Unit Cost", "Total Value", "Reason", "Status", "Notes" };
+        var exportRows = rows.SelectMany(r => r.Items.Select(i => new object?[]
+        {
+            r.ReturnNumber, r.ReturnDate, r.SupplierName, r.WarehouseName, r.ReturnedBy, r.ApprovedBy,
+            i.ProductName, i.Sku, i.ReturnedQuantity, i.UnitCost, i.TotalValue, i.Reason, r.Status, i.Notes,
+        })).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId?.FirstOrDefault(),
+            $"{{\"report\":\"supplier-returns\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{rows.Count}}}");
+        return await BuildExportFile(format, "Supplier Returns Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            [], headers, exportRows, $"supplier-returns-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    private async Task<List<SupplierReturnsReportRow>> BuildSupplierReturnsReportAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] supplierIds, Guid[] warehouseIdFilters, Guid[] branchIds, string[] statuses, string? reason)
+    {
+        var (callerRole, callerBranchId) = GetCallerContext();
+
+        // Supplier/warehouse/status are narrowed in memory below, not via SQL .Contains(...) — the
+        // MySQL EF Core provider throws on a parameterized Guid[]/string[] IN-list (see the
+        // ef-mysql-inlist-gotcha memory).
+        var q = db.StockTransfers
+            .Include(t => t.DestSupplier).Include(t => t.SourceWarehouse).Include(t => t.CreatedByUser).Include(t => t.ApprovedByUser)
+            .Include(t => t.Items).ThenInclude(i => i.Product)
+            .Where(t => t.TransferType == "warehouse_to_supplier" && t.CreatedAt >= rangeFrom && t.CreatedAt < rangeToExclusive);
+
+        if (!string.IsNullOrEmpty(reason)) q = q.Where(t => t.ReturnReason == reason);
+
+        var transfers = await q.OrderByDescending(t => t.CreatedAt).ToListAsync();
+
+        if (supplierIds.Length > 0) transfers = [.. transfers.Where(t => t.DestSupplierId.HasValue && supplierIds.Contains(t.DestSupplierId.Value))];
+        if (warehouseIdFilters.Length > 0) transfers = [.. transfers.Where(t => t.SourceWarehouseId.HasValue && warehouseIdFilters.Contains(t.SourceWarehouseId.Value))];
+        if (statuses.Length > 0) transfers = [.. transfers.Where(t => statuses.Contains(t.Status))];
+
+        // A warehouse can serve more than one branch (many-to-many branch_warehouses) — resolve a
+        // "primary" branch per warehouse, best-effort like the RTS tab does. Used ONLY to apply the
+        // branch filter / role-based branch scoping below — RTS has no real BranchId of its own, so
+        // this never becomes a "Branch" field on the row (see SupplierReturnsReportRow). Filtered
+        // in-memory (not via .Where(warehouseIds.Contains(...))) — the MySQL EF Core provider used
+        // here cannot assign a type mapping to a parameterized List<Guid> IN-list (same constraint
+        // noted throughout this controller and OrdersController).
+        var distinctWarehouseIds = transfers.Where(t => t.SourceWarehouseId.HasValue).Select(t => t.SourceWarehouseId!.Value).Distinct().ToHashSet();
+        var branchIdByWarehouse = (await db.BranchWarehouses.ToListAsync())
+            .Where(bw => distinctWarehouseIds.Contains(bw.WarehouseId))
+            .GroupBy(bw => bw.WarehouseId)
+            .ToDictionary(g => g.Key, g => (Guid?)g.First().BranchId);
+
+        bool MatchesBranch(BaqalaPOS.Api.Models.StockTransfer t, Guid branch) =>
+            t.SourceWarehouseId.HasValue && branchIdByWarehouse.TryGetValue(t.SourceWarehouseId.Value, out var bId) && bId == branch;
+
+        if (branchIds.Length > 0) transfers = [.. transfers.Where(t => branchIds.Any(b => MatchesBranch(t, b)))];
+        else if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            transfers = [.. transfers.Where(t => MatchesBranch(t, callerBranchId.Value))];
+
+        return transfers.Select(t =>
+        {
+            var items = t.Items.Select(i => new SupplierReturnsReportItem
+            {
+                ProductName = i.Product?.Name ?? "—",
+                Sku = i.Product?.Sku ?? "—",
+                ReturnedQuantity = i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity,
+                UnitCost = i.UnitCost ?? 0m,
+                TotalValue = (i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity) * (i.UnitCost ?? 0m),
+                Reason = i.ReturnReason ?? t.ReturnReason ?? "—",
+                Notes = i.Notes ?? t.Notes,
+            }).ToList();
+            return new SupplierReturnsReportRow
+            {
+                ReturnNumber = t.TransferNumber ?? "—",
+                ReturnDate = t.CompletedDate ?? t.CreatedAt,
+                SupplierName = t.DestSupplier?.Name ?? "—",
+                WarehouseName = t.SourceWarehouse?.Name ?? "—",
+                ReturnedBy = t.CreatedByUser?.FullName ?? "—",
+                ApprovedBy = t.ApprovedByUser?.FullName ?? "—",
+                Status = t.Status,
+                TotalValue = items.Sum(i => i.TotalValue),
+                Items = items,
+            };
+        }).ToList();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Stock Transfer Report — full transaction detail for warehouse↔warehouse, branch↔branch and
+    // warehouse↔branch stock movements, one row per transferred line item. Excludes
+    // "warehouse_to_supplier" (RTS), which has its own Supplier Returns Report above.
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("stock-transfer-report")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetStockTransferReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? transferType, [FromQuery] string[]? status,
+        [FromQuery] Guid[]? sourceBranchId, [FromQuery] Guid[]? sourceWarehouseId, [FromQuery] Guid[]? destBranchId, [FromQuery] Guid[]? destWarehouseId,
+        [FromQuery] Guid[]? productId, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        return Ok(await BuildStockTransferReportAsync(rangeFrom, rangeTo, transferType, status ?? [], sourceBranchId ?? [], sourceWarehouseId ?? [], destBranchId ?? [], destWarehouseId ?? [], productId ?? [], createdBy ?? [], approvedBy ?? []));
+    }
+
+    [HttpGet("stock-transfer-report/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportStockTransferReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? transferType, [FromQuery] string[]? status,
+        [FromQuery] Guid[]? sourceBranchId, [FromQuery] Guid[]? sourceWarehouseId, [FromQuery] Guid[]? destBranchId, [FromQuery] Guid[]? destWarehouseId,
+        [FromQuery] Guid[]? productId, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var rows = await BuildStockTransferReportAsync(rangeFrom, rangeTo, transferType, status ?? [], sourceBranchId ?? [], sourceWarehouseId ?? [], destBranchId ?? [], destWarehouseId ?? [], productId ?? [], createdBy ?? [], approvedBy ?? []);
+        var headers = new[] { "Transfer Number", "Type", "Source", "Destination", "Status", "Created By", "Approved By", "Received By", "Product", "SKU", "Quantity", "Unit Cost", "Total Cost", "Created At", "Completed At", "Notes" };
+        var exportRows = rows.Select(r => new object?[]
+        {
+            r.TransferNumber, r.TransferType, r.SourceLocation, r.DestinationLocation, r.Status, r.CreatedBy, r.ApprovedBy, r.ReceivedBy,
+            r.ProductName, r.Sku, r.Quantity, r.UnitCost, r.TotalCost, r.CreatedAt, r.CompletedDate, r.Notes,
+        }).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, sourceBranchId?.FirstOrDefault() ?? destBranchId?.FirstOrDefault(),
+            $"{{\"report\":\"stock-transfer\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{rows.Count}}}");
+        return await BuildExportFile(format, "Stock Transfer Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            [], headers, exportRows, $"stock-transfer-report-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    private async Task<List<StockTransferReportRow>> BuildStockTransferReportAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, string? transferType, string[] statuses,
+        Guid[] sourceBranchIds, Guid[] sourceWarehouseIds, Guid[] destBranchIds, Guid[] destWarehouseIds,
+        Guid[] productIds, Guid[] createdByIds, Guid[] approvedByIds)
+    {
+        var (callerRole, callerBranchId) = GetCallerContext();
+
+        // Branch/warehouse/product/status/actor filters are narrowed in memory below, not via SQL
+        // .Contains(...) — the MySQL EF Core provider throws on a parameterized Guid[]/string[]
+        // IN-list (see the ef-mysql-inlist-gotcha memory).
+        var q = db.StockTransfers
+            .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.DestBranch).Include(t => t.DestWarehouse)
+            .Include(t => t.CreatedByUser).Include(t => t.ApprovedByUser).Include(t => t.ReceivedByUser)
+            .Include(t => t.Items).ThenInclude(i => i.Product)
+            .Where(t => t.TransferType != "warehouse_to_supplier" && t.CreatedAt >= rangeFrom && t.CreatedAt < rangeToExclusive);
+
+        if (!string.IsNullOrEmpty(transferType)) q = q.Where(t => t.TransferType == transferType);
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            q = q.Where(t => t.SourceBranchId == callerBranchId || t.DestBranchId == callerBranchId);
+
+        var transfers = await q.OrderByDescending(t => t.CreatedAt).ToListAsync();
+
+        if (statuses.Length > 0) transfers = [.. transfers.Where(t => statuses.Contains(t.Status))];
+        if (sourceBranchIds.Length > 0) transfers = [.. transfers.Where(t => t.SourceBranchId.HasValue && sourceBranchIds.Contains(t.SourceBranchId.Value))];
+        if (sourceWarehouseIds.Length > 0) transfers = [.. transfers.Where(t => t.SourceWarehouseId.HasValue && sourceWarehouseIds.Contains(t.SourceWarehouseId.Value))];
+        if (destBranchIds.Length > 0) transfers = [.. transfers.Where(t => t.DestBranchId.HasValue && destBranchIds.Contains(t.DestBranchId.Value))];
+        if (destWarehouseIds.Length > 0) transfers = [.. transfers.Where(t => t.DestWarehouseId.HasValue && destWarehouseIds.Contains(t.DestWarehouseId.Value))];
+        if (productIds.Length > 0) transfers = [.. transfers.Where(t => t.Items.Any(i => productIds.Contains(i.ProductId)))];
+        if (createdByIds.Length > 0) transfers = [.. transfers.Where(t => createdByIds.Contains(t.CreatedBy))];
+        if (approvedByIds.Length > 0) transfers = [.. transfers.Where(t => t.ApprovedBy.HasValue && approvedByIds.Contains(t.ApprovedBy.Value))];
+
+        return transfers.SelectMany(t => t.Items.Select(i => new StockTransferReportRow
+        {
+            TransferNumber = t.TransferNumber ?? "—",
+            TransferType = t.TransferType,
+            SourceLocation = t.SourceBranch?.Name ?? t.SourceWarehouse?.Name ?? "—",
+            DestinationLocation = t.DestBranch?.Name ?? t.DestWarehouse?.Name ?? "—",
+            Status = t.Status,
+            CreatedBy = t.CreatedByUser?.FullName ?? "—",
+            ApprovedBy = t.ApprovedByUser?.FullName ?? "—",
+            ReceivedBy = t.ReceivedByUser?.FullName ?? "—",
+            ProductName = i.Product?.Name ?? "—",
+            Sku = i.Product?.Sku ?? "—",
+            Quantity = i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity,
+            UnitCost = i.UnitCost ?? 0m,
+            TotalCost = (i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity) * (i.UnitCost ?? 0m),
+            CreatedAt = t.CreatedAt,
+            CompletedDate = t.CompletedDate,
+            Notes = i.Notes ?? t.Notes,
+        })).ToList();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Purchase Reports — full purchase-order detail with nested line items, so a manager can
+    // drill into a PO's products/quantities/costs without leaving the report.
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("purchase-order-report")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetPurchaseOrderReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] string[]? status, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy, [FromQuery] Guid[]? productId)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        return Ok(await BuildPurchaseOrderReportAsync(rangeFrom, rangeTo, supplierId ?? [], branchId ?? [], warehouseId ?? [], status ?? [], createdBy ?? [], approvedBy ?? [], productId ?? []));
+    }
+
+    [HttpGet("purchase-order-report/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportPurchaseOrderReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? warehouseId, [FromQuery] string[]? status, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy, [FromQuery] Guid[]? productId,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var pos = await BuildPurchaseOrderReportAsync(rangeFrom, rangeTo, supplierId ?? [], branchId ?? [], warehouseId ?? [], status ?? [], createdBy ?? [], approvedBy ?? [], productId ?? []);
+        var headers = new[] { "PO Number", "Supplier", "Warehouse", "Purchase Date", "Status", "Payment Status", "Created By", "Approved By", "Received By", "Product", "SKU", "Qty Ordered", "Qty Received", "Unit Cost", "Line Total", "PO Total" };
+        var exportRows = pos.SelectMany(p => p.Items.Select(i => new object?[]
+        {
+            p.PoNumber, p.SupplierName, p.LocationName, p.PurchaseDate, p.Status, p.PaymentStatus, p.CreatedBy, p.ApprovedBy, p.ReceivedBy,
+            i.ProductName, i.Sku, i.OrderedQuantity, i.ReceivedQuantity, i.UnitCost, i.Subtotal, p.TotalAmount,
+        })).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId?.FirstOrDefault(),
+            $"{{\"report\":\"purchase-order\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{exportRows.Count}}}");
+        return await BuildExportFile(format, "Purchase Reports", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            [], headers, exportRows, $"purchase-order-report-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    private async Task<List<PurchaseOrderReportRow>> BuildPurchaseOrderReportAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] supplierIds, Guid[] branchIds, Guid[] warehouseIds,
+        string[] statuses, Guid[] createdByIds, Guid[] approvedByIds, Guid[] productIds)
+    {
+        var (callerRole, callerBranchId) = GetCallerContext();
+
+        // Supplier/branch/warehouse/status/actor/product are narrowed in memory below, not via SQL
+        // .Contains(...) — the MySQL EF Core provider throws on a parameterized Guid[]/string[]
+        // IN-list (see the ef-mysql-inlist-gotcha memory).
+        var q = db.PurchaseOrders
+            .Include(p => p.Supplier).Include(p => p.Branch).Include(p => p.Warehouse)
+            .Include(p => p.CreatedByUser).Include(p => p.ApprovedByUser).Include(p => p.ReceivedByUser)
+            .Include(p => p.Items).ThenInclude(i => i.Product)
+            .Where(p => p.CreatedAt >= rangeFrom && p.CreatedAt < rangeToExclusive);
+
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            q = q.Where(p => p.BranchId == callerBranchId);
+
+        var pos = await q.OrderByDescending(p => p.CreatedAt).ToListAsync();
+
+        if (supplierIds.Length > 0) pos = [.. pos.Where(p => supplierIds.Contains(p.SupplierId))];
+        if (branchIds.Length > 0) pos = [.. pos.Where(p => p.BranchId.HasValue && branchIds.Contains(p.BranchId.Value))];
+        if (warehouseIds.Length > 0) pos = [.. pos.Where(p => p.WarehouseId.HasValue && warehouseIds.Contains(p.WarehouseId.Value))];
+        if (statuses.Length > 0) pos = [.. pos.Where(p => statuses.Contains(p.Status))];
+        if (createdByIds.Length > 0) pos = [.. pos.Where(p => createdByIds.Contains(p.CreatedBy))];
+        if (approvedByIds.Length > 0) pos = [.. pos.Where(p => p.ApprovedBy.HasValue && approvedByIds.Contains(p.ApprovedBy.Value))];
+        if (productIds.Length > 0) pos = [.. pos.Where(p => p.Items.Any(i => productIds.Contains(i.ProductId)))];
+
+        return pos.Select(p => new PurchaseOrderReportRow
+        {
+            Id = p.Id,
+            PoNumber = p.PoNumber ?? "—",
+            SupplierName = p.Supplier?.Name ?? "—",
+            LocationName = p.Warehouse?.Name ?? p.Branch?.Name ?? "—",
+            PurchaseDate = p.CreatedAt,
+            Status = p.Status,
+            PaymentStatus = p.PaymentStatus,
+            CreatedBy = p.CreatedByUser?.FullName ?? "—",
+            ApprovedBy = p.ApprovedByUser?.FullName ?? "—",
+            ReceivedBy = p.ReceivedByUser?.FullName ?? "—",
+            TotalAmount = p.TotalAmount,
+            Items = p.Items.Select(i => new PurchaseOrderReportItem
+            {
+                ProductName = i.Product?.Name ?? "—",
+                Sku = i.Product?.Sku ?? "—",
+                OrderedQuantity = i.OrderedQuantity,
+                ReceivedQuantity = i.ReceivedQuantity,
+                UnitCost = i.UnitCost,
+                Subtotal = i.Subtotal,
+            }).ToList(),
+        }).ToList();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Employee Audit Center — a curated, human-readable activity history for misuse tracking:
+    // item add/edit/delete, cancellations, approvals, discounts, refunds, and stock movement.
+    // Deliberately separate from the HRM Employee Activity Report (the raw audit trail under
+    // Human Resources) — this is a general Reports-tab report scoped to exactly these 8 action
+    // categories, with JSON old/new-value snapshots humanized into plain text instead of raw JSON.
+    // ───────────────────────────────────────────────────────────────────────
+
+    // Maps a raw AuditLog.Action string to (broad filter category, specific display label). Only
+    // actions present here are ever shown in this report — everything else (logins, HR admin
+    // changes, report exports, etc.) is out of scope by design.
+    private static readonly Dictionary<string, (string Category, string Label)> EmployeeAuditActionMap =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["create_product"] = ("Added Item", "Added Item"),
+            ["update_product"] = ("Edited Item", "Edited Item"),
+            ["delete_product"] = ("Deleted Item", "Deleted Item"),
+            ["void_order"] = ("Cancelled Item", "Cancelled Order"),
+            ["Leave approved"] = ("Approved Request", "Approved Leave Request"),
+            ["Leave rejected"] = ("Approved Request", "Rejected Leave Request"),
+            ["approve_inventory_adjustment"] = ("Approved Request", "Approved Inventory Adjustment"),
+            ["reject_inventory_adjustment"] = ("Approved Request", "Rejected Inventory Adjustment"),
+            ["approve_stock_count"] = ("Approved Request", "Approved Stock Count"),
+            ["reject_stock_count"] = ("Approved Request", "Rejected Stock Count"),
+            ["Gave Discount"] = ("Gave Discount", "Gave Discount"),
+            ["create_refund"] = ("Refunded Order", "Processed Refund"),
+            ["approve_refund"] = ("Refunded Order", "Approved Refund"),
+            ["reject_refund"] = ("Refunded Order", "Rejected Refund"),
+            ["create_stock_transfer"] = ("Moved Stock", "Created Stock Transfer"),
+            ["receive_stock_transfer"] = ("Moved Stock", "Received Stock Transfer"),
+            ["approve_stock_transfer"] = ("Moved Stock", "Approved Stock Transfer"),
+            ["reject_stock_transfer"] = ("Moved Stock", "Rejected Stock Transfer"),
+            ["ship_stock_transfer"] = ("Moved Stock", "Shipped Stock Transfer"),
+            ["cancel_stock_transfer"] = ("Moved Stock", "Cancelled Stock Transfer"),
+            ["receive_batch"] = ("Moved Stock", "Received Stock Batch"),
+        };
+
+    [HttpGet("employee-audit-center")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetEmployeeAuditCenter(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? employeeId, [FromQuery] string[]? category, [FromQuery] string? search)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        return Ok(await BuildEmployeeAuditCenterAsync(rangeFrom, rangeTo, branchId ?? [], employeeId ?? [], category ?? [], search));
+    }
+
+    [HttpGet("employee-audit-center/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportEmployeeAuditCenter(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? employeeId, [FromQuery] string[]? category, [FromQuery] string? search,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var rows = await BuildEmployeeAuditCenterAsync(rangeFrom, rangeTo, branchId ?? [], employeeId ?? [], category ?? [], search);
+        var headers = new[] { "Date & Time", "Employee", "Action", "Old Value", "New Value", "Branch", "Device", "Related Transaction" };
+        var exportRows = rows.Select(r => new object?[]
+        {
+            r.CreatedAt, r.EmployeeName, r.ActionLabel, r.OldValueSummary, r.NewValueSummary, r.BranchName, r.DeviceName, r.RelatedTransaction,
+        }).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, branchId?.FirstOrDefault(),
+            $"{{\"report\":\"employee-audit-center\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{rows.Count}}}");
+        return await BuildExportFile(format, "Employee Audit Center", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            [], headers, exportRows, $"employee-audit-center-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    // Mirrors HrReportsController.IsHrManagerTierAsync — whoever actually manages other employees
+    // (Approve/Edit on HR Attendance/Shifts/Leave, or Edit on Employees) sees the full branch + an
+    // employee filter; everyone else (e.g. Cashier) only sees rows tied to their own user/employee
+    // record. Kept local rather than shared — a small, self-contained predicate, and
+    // ReportsController has no other dependency on HrReportsController.
+    private async Task<bool> IsAuditManagerTierAsync() =>
+        await PermissionCheck.HasPermissionAsync(User, db, "HR Attendance", PermAction.Approve)
+        || await PermissionCheck.HasPermissionAsync(User, db, "HR Attendance", PermAction.Edit)
+        || await PermissionCheck.HasPermissionAsync(User, db, "HR Shifts", PermAction.Approve)
+        || await PermissionCheck.HasPermissionAsync(User, db, "HR Shifts", PermAction.Edit)
+        || await PermissionCheck.HasPermissionAsync(User, db, "Leave Management", PermAction.Approve)
+        || await PermissionCheck.HasPermissionAsync(User, db, "Leave Management", PermAction.Edit)
+        || await PermissionCheck.HasPermissionAsync(User, db, "Employees", PermAction.Edit);
+
+    private async Task<Guid?> GetOwnEmployeeIdForAuditAsync(Guid? callerId) =>
+        callerId.HasValue ? await db.Employees.Where(e => e.UserId == callerId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
+
+    private async Task<List<EmployeeAuditRow>> BuildEmployeeAuditCenterAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] branchIds, Guid[] employeeIds, string[] categories, string? search)
+    {
+        var (callerRole, callerBranchId) = GetCallerContext();
+
+        // Branch/employee selection is narrowed in memory below, not via SQL .Contains(...) — the
+        // MySQL EF Core provider throws on a parameterized Guid[] IN-list (see the
+        // ef_mysql_inlist_gotcha lesson). Date range stays a SQL-side filter since it's scalar.
+        var query = db.AuditLogs.Include(a => a.User).Include(a => a.Employee).Include(a => a.Branch).Include(a => a.Terminal)
+            .Where(a => a.CreatedAt >= rangeFrom && a.CreatedAt < rangeToExclusive);
+
+        var all = await query.OrderByDescending(a => a.CreatedAt).Take(2000).ToListAsync();
+
+        if (!await IsAuditManagerTierAsync())
+        {
+            var callerId = CallerId();
+            var ownEmployeeId = await GetOwnEmployeeIdForAuditAsync(callerId);
+            all = [.. all.Where(a => a.UserId == callerId || (ownEmployeeId.HasValue && a.EmployeeId == ownEmployeeId))];
+        }
+        else
+        {
+            if (employeeIds.Length > 0) all = [.. all.Where(a => a.EmployeeId.HasValue && employeeIds.Contains(a.EmployeeId.Value))];
+            if (branchIds.Length > 0) all = [.. all.Where(a => a.BranchId.HasValue && branchIds.Contains(a.BranchId.Value))];
+            else if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+                all = [.. all.Where(a => a.BranchId == callerBranchId)];
+        }
+
+        var curated = all.Where(a => EmployeeAuditActionMap.ContainsKey(a.Action)).ToList();
+
+        if (categories.Length > 0)
+            curated = curated.Where(a => categories.Contains(EmployeeAuditActionMap[a.Action].Category)).ToList();
+        if (!string.IsNullOrEmpty(search))
+            curated = curated.Where(a =>
+                (a.Employee?.FullName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (a.User?.FullName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                EmployeeAuditActionMap[a.Action].Label.Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        // "Related Transaction" — resolve a human reference number per entity type actually
+        // present, one id at a time (not a batch .Contains() lookup — same IN-list constraint as
+        // above). The working set here is small (the curated/filtered rows only), so this stays cheap.
+        var orderIds = curated.Where(a => a.EntityType == "Order" && a.EntityId.HasValue).Select(a => a.EntityId!.Value).Distinct().ToList();
+        var transferIds = curated.Where(a => a.EntityType == "StockTransfer" && a.EntityId.HasValue).Select(a => a.EntityId!.Value).Distinct().ToList();
+        var returnIds = curated.Where(a => a.EntityType == "CustomerReturn" && a.EntityId.HasValue).Select(a => a.EntityId!.Value).Distinct().ToList();
+        var productIds = curated.Where(a => a.EntityType == "Product" && a.EntityId.HasValue).Select(a => a.EntityId!.Value).Distinct().ToList();
+
+        var orderNumbers = new Dictionary<Guid, string?>();
+        foreach (var id in orderIds) orderNumbers[id] = await db.Orders.Where(o => o.Id == id).Select(o => o.OrderNumber).FirstOrDefaultAsync();
+        var transferNumbers = new Dictionary<Guid, string?>();
+        foreach (var id in transferIds) transferNumbers[id] = await db.StockTransfers.Where(t => t.Id == id).Select(t => t.TransferNumber).FirstOrDefaultAsync();
+        var returnNumbers = new Dictionary<Guid, string?>();
+        foreach (var id in returnIds) returnNumbers[id] = await db.CustomerReturns.Where(r => r.Id == id).Select(r => r.ReturnNumber).FirstOrDefaultAsync();
+        var productNames = new Dictionary<Guid, string?>();
+        foreach (var id in productIds)
+        {
+            var p = await db.Products.Where(x => x.Id == id).Select(x => new { x.Name, x.Sku }).FirstOrDefaultAsync();
+            productNames[id] = p is null ? null : $"{p.Name} ({p.Sku})";
+        }
+
+        string RelatedTransaction(BaqalaPOS.Api.Models.AuditLog a)
+        {
+            if (!a.EntityId.HasValue) return "—";
+            var id = a.EntityId.Value;
+            var resolved = a.EntityType switch
+            {
+                "Order" => orderNumbers.GetValueOrDefault(id),
+                "StockTransfer" => transferNumbers.GetValueOrDefault(id),
+                "CustomerReturn" => returnNumbers.GetValueOrDefault(id),
+                "Product" => productNames.GetValueOrDefault(id),
+                _ => null,
+            };
+            return resolved ?? $"{a.EntityType ?? "Record"} #{id.ToString()[..8]}";
+        }
+
+        return curated.Select(a =>
+        {
+            var (cat, label) = EmployeeAuditActionMap[a.Action];
+            return new EmployeeAuditRow
+            {
+                Id = a.Id,
+                CreatedAt = a.CreatedAt,
+                EmployeeName = a.Employee?.FullName ?? a.User?.FullName ?? "—",
+                ActionCategory = cat,
+                ActionLabel = label,
+                OldValueSummary = HumanizeJsonSnapshot(a.OldValues),
+                NewValueSummary = HumanizeJsonSnapshot(a.NewValues) ?? a.Notes,
+                BranchName = a.Branch?.Name ?? "—",
+                DeviceName = a.Terminal?.Name ?? "—",
+                RelatedTransaction = RelatedTransaction(a),
+                Severity = a.Severity,
+            };
+        }).ToList();
+    }
+
+    // Turns a JSON snapshot like {"OrderNumber":"ORD-2","DiscountAmount":15} into a plain-text
+    // summary — "Order Number: ORD-2, Discount Amount: 15" — instead of showing raw JSON in the
+    // report. Falls back to the raw string if it isn't a JSON object (already human text).
+    private static string? HumanizeJsonSnapshot(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return json;
+            var parts = new List<string>();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Name.Equals("Items", StringComparison.OrdinalIgnoreCase)) continue; // line items — too verbose for a one-line summary
+                var value = prop.Value.ValueKind switch
+                {
+                    System.Text.Json.JsonValueKind.Array => $"{prop.Value.GetArrayLength()} item(s)",
+                    System.Text.Json.JsonValueKind.Null => null,
+                    System.Text.Json.JsonValueKind.Object => null,
+                    System.Text.Json.JsonValueKind.True => "Yes",
+                    System.Text.Json.JsonValueKind.False => "No",
+                    _ => prop.Value.ToString(),
+                };
+                if (value != null) parts.Add($"{HumanizePropertyName(prop.Name)}: {value}");
+            }
+            return parts.Count > 0 ? string.Join(", ", parts) : null;
+        }
+        catch { return json; }
+    }
+
+    // "OrderNumber" -> "Order Number", "discountAmount" -> "Discount Amount"
+    private static string HumanizePropertyName(string name)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(name[i]) && !char.IsUpper(name[i - 1])) sb.Append(' ');
+            sb.Append(i == 0 ? char.ToUpperInvariant(name[i]) : name[i]);
+        }
+        return sb.ToString();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
     // Shared helpers
     // ───────────────────────────────────────────────────────────────────────
 
     /// <summary>Builds a CSV or PDF export file from the same headers/rows/KPIs, per the FRD's multi-format export rule.</summary>
-    private FileContentResult BuildExportFile(
+    private async Task<FileContentResult> BuildExportFile(
         string? format, string title, string filterSummary, (string Label, string Value)[] kpis,
         string[] headers, IReadOnlyList<object?[]> rows, string baseFileName)
     {
+        var company = await db.CompanyProfiles.FindAsync(BaqalaPOS.Api.Models.CompanyProfile.SingletonId);
+        var companyHeader = ExportFileBuilder.FormatCompanyHeader(company);
+
         if (string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase))
         {
-            var pdfBytes = ReportPdfWriter.Write(title, filterSummary, kpis, headers, rows);
+            var pdfBytes = ReportPdfWriter.Write(title, filterSummary, kpis, headers, rows, companyHeader);
             return File(pdfBytes, "application/pdf", $"{baseFileName}.pdf");
         }
-        var csvBytes = CsvWriter.Write(headers, rows);
+        var csvBytes = CsvWriter.Write(headers, rows, companyHeader);
         return File(csvBytes, "text/csv", $"{baseFileName}.csv");
     }
 
@@ -3405,6 +4358,13 @@ public sealed class InventoryDashboardKpis
     public decimal WastageValue { get; set; }
     public decimal InventoryTurnover { get; init; }
     public decimal CogsValue { get; init; }
+    // Same five-tier classification as the Product Performance report (see ProductPerformanceThresholds),
+    // counted across distinct products on hand in this scope. Dead Stock's own count/value live on
+    // the result as DeadStockSkus/DeadStockValue, matching where they already were.
+    public int StarCount { get; init; }
+    public int HighPerformerCount { get; init; }
+    public int AveragePerformerCount { get; init; }
+    public int SlowMovingCount { get; init; }
 }
 
 public sealed class InventoryMoverRow
@@ -3463,6 +4423,11 @@ public sealed class InventoryAgingRow
     public decimal UnitsMovedInPeriod { get; init; }
     public string AgeBucket { get; init; } = "";
     public bool IsDeadStock { get; init; }
+    // Star Products | High Performers | Average Performers | Slow Moving Products | Dead Stock —
+    // same composite classification as the Product Performance report, per product (identical
+    // across every location-row that product appears in).
+    public string Classification { get; init; } = "";
+    public decimal PerformanceScore { get; init; }
 }
 
 public sealed class InventoryDashboardResult
@@ -3488,7 +4453,9 @@ public sealed class StockReconciliationRow
     public string? CountType { get; init; }
     public DateTime StartedAt { get; init; }
     public DateTime? CompletedAt { get; init; }
-    public string Branch { get; init; } = "";
+    // Exactly one of Branch/Warehouse is set, matching the session's own nullable-pair scope.
+    public string? Branch { get; init; }
+    public string? Warehouse { get; init; }
     public string Sku { get; init; } = "";
     public string ProductName { get; init; } = "";
     public string Category { get; init; } = "";
@@ -3499,8 +4466,13 @@ public sealed class StockReconciliationRow
     public decimal? Variance { get; init; }
     public decimal VarianceValue { get; set; }
     public string StartedBy { get; init; } = "";
-    public string? CompletedBy { get; init; }
+    // Who physically performed the count (submitted it for review).
+    public string? PerformedBy { get; init; }
+    public string? ReviewedBy { get; init; }
+    public string? ApprovedBy { get; init; }
+    // draft | pending_review | pending_approval | approved | rejected | cancelled
     public string Status { get; init; } = "";
+    public string? RejectionReason { get; init; }
     public DateTime? CountedAt { get; init; }
 }
 
@@ -3514,6 +4486,8 @@ public sealed class StockReconciliationKpis
     public decimal NetVarianceUnits { get; init; }
     public decimal NetVarianceValue { get; set; }
     public decimal AbsVarianceValue { get; set; }
+    public int PendingReviewCount { get; init; }
+    public int PendingApprovalCount { get; init; }
 }
 
 public sealed class StockReconciliationResult
@@ -3664,6 +4638,50 @@ public sealed class ProductSalesResult
 {
     public ProductSalesKpis Kpis { get; init; } = new();
     public List<ProductSalesRow> Rows { get; init; } = [];
+}
+
+public sealed class ProductPerformanceRow
+{
+    public Guid ProductId { get; init; }
+    public string Sku { get; init; } = "";
+    public string ProductName { get; init; } = "";
+    public string Category { get; init; } = "";
+    public decimal UnitsSold { get; init; }
+    public decimal SalesValue { get; init; }
+    public decimal Cogs { get; set; }
+    public decimal GrossProfit { get; set; }
+    public decimal? MarginPct { get; set; }
+    public decimal CurrentStockQty { get; init; }
+    public decimal CurrentStockValue { get; set; }
+    // Age of the oldest batch still holding quantity anywhere in scope. Null when there's no batch
+    // record at all (stock predates batch tracking, or there's no stock on hand).
+    public int? DaysInStock { get; init; }
+    // Null = never sold (within what the ledger can see) — distinct from 0, which is "sold today".
+    public int? DaysSinceLastSale { get; init; }
+    public decimal TurnoverRatio { get; init; }
+    // 0-100 weighted composite rank that produced Classification — exposed so the tier is never a
+    // black box; see ProductPerformanceThresholds for the exact weights.
+    public decimal PerformanceScore { get; init; }
+    // Star Products | High Performers | Average Performers | Slow Moving Products | Dead Stock
+    public string Classification { get; init; } = "";
+}
+
+public sealed class ProductPerformanceKpis
+{
+    public int ProductCount { get; init; }
+    public int StarCount { get; init; }
+    public int HighPerformerCount { get; init; }
+    public int AveragePerformerCount { get; init; }
+    public int SlowMovingCount { get; init; }
+    public int DeadStockCount { get; init; }
+    public decimal DeadStockValue { get; set; }
+    public decimal TotalSalesValue { get; set; }
+}
+
+public sealed class ProductPerformanceResult
+{
+    public ProductPerformanceKpis Kpis { get; init; } = new();
+    public List<ProductPerformanceRow> Rows { get; init; } = [];
 }
 
 public sealed class CategoryPerformanceRow
@@ -4069,4 +5087,96 @@ public sealed class ProfitMarginResult
 {
     public ProfitMarginKpis Kpis { get; init; } = new();
     public List<ProfitMarginRow> Rows { get; init; } = [];
+}
+
+public sealed class SupplierReturnsReportItem
+{
+    public string ProductName { get; init; } = "—";
+    public string Sku { get; init; } = "—";
+    public decimal ReturnedQuantity { get; init; }
+    public decimal UnitCost { get; init; }
+    public decimal TotalValue { get; init; }
+    public string Reason { get; init; } = "—";
+    public string? Notes { get; init; }
+}
+
+// One row per RTS transaction with nested line items (mirrors PurchaseOrderReportRow's
+// Items list + eye-icon drawer) rather than one row per product — a return with several
+// products used to repeat every header field across rows instead. Deliberately has no
+// Branch field: RTS is a warehouse-only transaction (StockTransfer.SourceWarehouseId) with
+// no real BranchId of its own — any "branch" is a best-effort inference through the
+// warehouse's branch associations, so it's used only for role-based scoping in
+// BuildSupplierReturnsReportAsync, never surfaced as a column here.
+public sealed class SupplierReturnsReportRow
+{
+    public string ReturnNumber { get; init; } = "—";
+    public DateTime ReturnDate { get; init; }
+    public string SupplierName { get; init; } = "—";
+    public string WarehouseName { get; init; } = "—";
+    public string ReturnedBy { get; init; } = "—";
+    public string ApprovedBy { get; init; } = "—";
+    public string Status { get; init; } = "—";
+    public decimal TotalValue { get; init; }
+    public List<SupplierReturnsReportItem> Items { get; init; } = [];
+}
+
+public sealed class StockTransferReportRow
+{
+    public string TransferNumber { get; init; } = "—";
+    public string TransferType { get; init; } = "—";
+    public string SourceLocation { get; init; } = "—";
+    public string DestinationLocation { get; init; } = "—";
+    public string Status { get; init; } = "—";
+    public string CreatedBy { get; init; } = "—";
+    public string ApprovedBy { get; init; } = "—";
+    public string ReceivedBy { get; init; } = "—";
+    public string ProductName { get; init; } = "—";
+    public string Sku { get; init; } = "—";
+    public decimal Quantity { get; init; }
+    public decimal UnitCost { get; init; }
+    public decimal TotalCost { get; init; }
+    public DateTime CreatedAt { get; init; }
+    public DateTime? CompletedDate { get; init; }
+    public string? Notes { get; init; }
+}
+
+public sealed class PurchaseOrderReportItem
+{
+    public string ProductName { get; init; } = "—";
+    public string Sku { get; init; } = "—";
+    public decimal OrderedQuantity { get; init; }
+    public decimal ReceivedQuantity { get; init; }
+    public decimal UnitCost { get; init; }
+    public decimal Subtotal { get; init; }
+}
+
+public sealed class PurchaseOrderReportRow
+{
+    public Guid Id { get; init; }
+    public string PoNumber { get; init; } = "—";
+    public string SupplierName { get; init; } = "—";
+    public string LocationName { get; init; } = "—";
+    public DateTime PurchaseDate { get; init; }
+    public string Status { get; init; } = "—";
+    public string PaymentStatus { get; init; } = "—";
+    public string CreatedBy { get; init; } = "—";
+    public string ApprovedBy { get; init; } = "—";
+    public string ReceivedBy { get; init; } = "—";
+    public decimal TotalAmount { get; init; }
+    public List<PurchaseOrderReportItem> Items { get; init; } = [];
+}
+
+public sealed class EmployeeAuditRow
+{
+    public Guid Id { get; init; }
+    public DateTime CreatedAt { get; init; }
+    public string EmployeeName { get; init; } = "—";
+    public string ActionCategory { get; init; } = "—";
+    public string ActionLabel { get; init; } = "—";
+    public string? OldValueSummary { get; init; }
+    public string? NewValueSummary { get; init; }
+    public string BranchName { get; init; } = "—";
+    public string DeviceName { get; init; } = "—";
+    public string RelatedTransaction { get; init; } = "—";
+    public string Severity { get; init; } = "info";
 }

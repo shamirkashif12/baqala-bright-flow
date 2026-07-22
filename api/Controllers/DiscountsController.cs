@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,8 +9,11 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/discounts")]
-public class DiscountsController(BaqalaDbContext db) : ControllerBase
+public class DiscountsController(BaqalaDbContext db, IDiscountCreationService discountCreation) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] bool? isActive)
     {
@@ -28,32 +32,31 @@ public class DiscountsController(BaqalaDbContext db) : ControllerBase
         return d is null ? NotFound() : Ok(d);
     }
 
+    // A caller with Coupons:Approve (i.e. already a manager) creates the discount immediately
+    // (self-approve, same precedent as the Wastage/InventoryAdjustment flow). Anyone else's
+    // request is queued in the Approval Center instead — no Discount row exists until approved.
     [RequirePermission("Coupons", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] DiscountRequest req)
     {
-        var discount = new Discount
+        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Coupons", PermAction.Approve);
+        if (!canSelfApprove)
         {
-            Id = Guid.NewGuid(),
-            Name = req.Name,
-            NameAr = req.NameAr,
-            AppliesTo = req.AppliesTo ?? "all",
-            ProductId = req.ProductId,
-            CategoryId = req.CategoryId,
-            BranchId = req.BranchId,
-            DiscountType = req.DiscountType ?? "percentage",
-            Value = req.Value,
-            IsActive = req.IsActive ?? true,
-            StartDate = req.StartDate,
-            EndDate = req.EndDate,
-            RequiresCustomer = req.RequiresCustomer ?? false,
-            MinCustomerTier = req.MinCustomerTier,
-            ExcludedProductIdsJson = SerializeExclusions(req.ExcludedProductIds),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        };
-        db.Discounts.Add(discount);
-        await db.SaveChangesAsync();
+            var pending = new ApprovalRequest
+            {
+                RequestType = "discount",
+                EntityType = "Discount",
+                EntityId = null,
+                BranchId = req.BranchId,
+                RequestedBy = CallerId() ?? Guid.Empty,
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(req),
+            };
+            db.ApprovalRequests.Add(pending);
+            await db.SaveChangesAsync();
+            return Accepted(new { message = "Discount request sent for manager approval.", approvalRequestId = pending.Id });
+        }
+
+        var discount = await discountCreation.CreateAsync(req);
         return CreatedAtAction(nameof(GetById), new { id = discount.Id }, discount);
     }
 

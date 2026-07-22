@@ -120,7 +120,15 @@ function evenSplit(total: number, ids: string[]): Record<string, number> {
   return out;
 }
 
-const emptyItem = (warehouseIds: string[]): POItemDraft => ({ productId: "", productName: "", qtyByWarehouse: evenSplit(1, warehouseIds), unitCost: 0 });
+// Default total of one unit *per selected warehouse* — not a flat 1 — so a fresh row starts with
+// every warehouse already covered instead of evenSplit(1, ids) dumping the whole unit on the
+// first warehouse and leaving the rest at 0 (which is what tripped the "no quantity allocated"
+// validation for any warehouse past the first).
+const emptyItem = (warehouseIds: string[]): POItemDraft => ({
+  productId: "", productName: "",
+  qtyByWarehouse: evenSplit(warehouseIds.length || 1, warehouseIds),
+  unitCost: 0,
+});
 
 const TOTAL_STEPS = 5;
 
@@ -168,15 +176,18 @@ function CreatePOWizard({
   const handleClose = () => { reset(); onClose(); };
 
   // Keep every item's warehouse split in sync with the current delivery-location selection —
-  // redistributing its existing total evenly across whichever warehouses are now selected —
-  // so switching warehouses in Step 2 never leaves stale/missing allocations for Step 3.
+  // dropping warehouses that were deselected and adding newly-selected ones at 0 — WITHOUT
+  // touching quantities already set for warehouses that remain selected. Previously this
+  // redistributed the item's total evenly across the new warehouse set on every change, which
+  // silently wiped any manual split the user had already entered in Step 3.
   useEffect(() => {
     setItems(prev => prev.map(it => {
       const keys = Object.keys(it.qtyByWarehouse);
       const sameSet = keys.length === warehouseIds.length && warehouseIds.every(id => id in it.qtyByWarehouse);
       if (sameSet) return it;
-      const total = keys.reduce((s, k) => s + (it.qtyByWarehouse[k] || 0), 0) || (keys.length === 0 ? 1 : 0);
-      return { ...it, qtyByWarehouse: evenSplit(total, warehouseIds) };
+      const next: Record<string, number> = {};
+      warehouseIds.forEach(id => { next[id] = it.qtyByWarehouse[id] ?? 0; });
+      return { ...it, qtyByWarehouse: next };
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warehouseIds.join(",")]);
@@ -213,7 +224,7 @@ function CreatePOWizard({
       const emptyWarehouse = warehouseIds.find(whId => !valid.some(it => (it.qtyByWarehouse[whId] || 0) > 0));
       if (emptyWarehouse) {
         const name = warehouses.find(w => w.id === emptyWarehouse)?.name ?? "a selected warehouse";
-        setError(`${name} has no quantity allocated — split at least one item to it, or remove it in Step 2.`);
+        setError(`${name} has no quantity allocated. Click the Qty field on any item above to open its per-warehouse split and enter a quantity for ${name}, or remove ${name} from Step 2.`);
         return false;
       }
     }
@@ -374,8 +385,17 @@ function CreatePOWizard({
                   {warehouseIds.length > 1 ? (
                     <Popover>
                       <PopoverTrigger asChild>
-                        <button type="button" className="h-9 rounded-md border border-input bg-background text-xs font-medium text-right px-1.5 hover:bg-muted">
+                        <button
+                          type="button"
+                          title="Click to split this item's quantity across warehouses"
+                          className={`h-9 flex items-center justify-end gap-0.5 rounded-md border text-xs font-medium px-1.5 hover:bg-muted ${
+                            warehouseIds.some(whId => (it.qtyByWarehouse[whId] || 0) === 0)
+                              ? "border-warning/60 bg-warning/10 text-warning-foreground"
+                              : "border-input bg-background"
+                          }`}
+                        >
                           {totalQty(it)}
+                          <ChevronDown className="h-3 w-3 opacity-60 shrink-0" />
                         </button>
                       </PopoverTrigger>
                       <PopoverContent className="w-64 p-3 space-y-2" align="end">

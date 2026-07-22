@@ -5,9 +5,14 @@ namespace BaqalaPOS.Api.Services;
 /// <summary>UTF-8 (with BOM, for Excel/Arabic compatibility) CSV writer used by report exports.</summary>
 public static class CsvWriter
 {
-    public static byte[] Write(string[] headers, IEnumerable<object?[]> rows)
+    public static byte[] Write(string[] headers, IEnumerable<object?[]> rows, string? companyHeader = null)
     {
         var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(companyHeader))
+        {
+            sb.AppendLine(Escape(companyHeader));
+            sb.AppendLine();
+        }
         sb.AppendLine(string.Join(",", headers.Select(Escape)));
         foreach (var row in rows)
         {

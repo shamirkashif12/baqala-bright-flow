@@ -29,6 +29,12 @@ public class PurchaseOrder
     [Column("approved_by")]
     public Guid? ApprovedBy { get; set; }
 
+    // Who actually received the delivery against this PO (set by Receive). Mirrors
+    // StockTransfer.ReceivedBy — was previously only recorded in the stock-movement audit log,
+    // never persisted on the PO itself.
+    [Column("received_by")]
+    public Guid? ReceivedBy { get; set; }
+
     // Who actually created this PO record — distinct from OrderedBy (the requester it was placed
     // on behalf of). Backfilled to OrderedBy for rows that predate this column.
     [Required, Column("created_by")]
@@ -84,6 +90,7 @@ public class PurchaseOrder
     public User? OrderedByUser { get; set; }
     public User? ApprovedByUser { get; set; }
     public User? CreatedByUser { get; set; }
+    public User? ReceivedByUser { get; set; }
     public ICollection<PurchaseOrderItem> Items { get; set; } = [];
     public ICollection<SupplierPayment> Payments { get; set; } = [];
 }

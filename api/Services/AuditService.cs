@@ -22,7 +22,11 @@ public interface IAuditService
         // employeeId = X). Both optional/nullable so every existing POS call site (which predates
         // these) keeps compiling unchanged.
         string? module = null,
-        Guid? employeeId = null);
+        Guid? employeeId = null,
+        // Which POS terminal the action happened on — the Employee Audit Center's "Device"
+        // column. Only meaningful for terminal-bound actions (orders, refunds); optional so
+        // every other call site is unaffected.
+        Guid? terminalId = null);
 }
 
 public class AuditService(BaqalaDbContext db, IHttpContextAccessor httpContextAccessor) : IAuditService
@@ -38,7 +42,8 @@ public class AuditService(BaqalaDbContext db, IHttpContextAccessor httpContextAc
         string? beforeValue = null,
         string? notes = null,
         string? module = null,
-        Guid? employeeId = null)
+        Guid? employeeId = null,
+        Guid? terminalId = null)
     {
         // The FRD's Audit Trail "IP Address" column was always blank — nothing ever captured
         // it. The caller's HttpContext is available here (this runs inside a request), so read
@@ -68,6 +73,7 @@ public class AuditService(BaqalaDbContext db, IHttpContextAccessor httpContextAc
             CreatedAt = DateTime.UtcNow,
             Module = module,
             EmployeeId = employeeId,
+            TerminalId = terminalId,
         });
         await db.SaveChangesAsync();
     }

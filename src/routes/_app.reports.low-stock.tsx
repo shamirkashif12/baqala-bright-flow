@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -33,26 +33,28 @@ function LowStock() {
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
   const { branches } = useBranch();
 
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [categoryId, setCategoryId] = useState("all");
-  const [productId, setProductId] = useState("all");
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
   const [isTobacco, setIsTobacco] = useState(false);
   const [data, setData] = useState<LowStockReport | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const { categories, products } = useReportFilterOptions(branchId, categoryId);
+  const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
+  const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
+  const { categories, products } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
 
   useEffect(() => {
-    if (productId !== "all" && !products.some((p) => p.id === productId)) setProductId("all");
-  }, [products, productId]);
+    setProductIds((prev) => prev.filter((id) => products.some((p) => p.id === id)));
+  }, [products]);
 
   const filters = useMemo(() => ({
-    branchId: branchId !== "all" ? branchId : undefined,
-    categoryId: categoryId !== "all" ? categoryId : undefined,
-    productId: productId !== "all" ? productId : undefined,
+    branchId: branchIds.length ? branchIds : undefined,
+    categoryId: categoryIds.length ? categoryIds : undefined,
+    productId: productIds.length ? productIds : undefined,
     isTobacco: isTobacco || undefined,
     onlyLowStock: true,
-  }), [branchId, categoryId, productId, isTobacco]);
+  }), [branchIds, categoryIds, productIds, isTobacco]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -87,28 +89,31 @@ function LowStock() {
     >
       <div className="flex flex-wrap items-center gap-2">
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+          </div>
         )}
-        <Select value={categoryId} onValueChange={setCategoryId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={productId} onValueChange={setProductId}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Products</SelectItem>
-            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={categories.map((c) => ({ id: c.id, label: c.name }))}
+            selected={categoryIds}
+            onChange={setCategoryIds}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Products"
+            options={products.map((p) => ({ id: p.id, label: p.name }))}
+            selected={productIds}
+            onChange={setProductIds}
+          />
+        </div>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
           Tobacco only

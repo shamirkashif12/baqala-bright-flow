@@ -55,8 +55,15 @@ public class AuditLog
     [Column("employee_id")]
     public Guid? EmployeeId { get; set; }
 
+    // Which POS terminal/device the action happened on ("Device" column on the Employee Audit
+    // Center). Only populated for actions that actually happen at a terminal (orders, refunds);
+    // warehouse/HR actions have no terminal in scope and stay null.
+    [Column("terminal_id")]
+    public Guid? TerminalId { get; set; }
+
     // Navigation
     public User? User { get; set; }
     public Branch? Branch { get; set; }
     public Employee? Employee { get; set; }
+    public Terminal? Terminal { get; set; }
 }

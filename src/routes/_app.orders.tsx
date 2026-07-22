@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { api, type Order, type Branch, type CustomerReturnItem, type Product } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
+import { useCompanyHeader } from "@/lib/use-company-header";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/orders")({ component: Orders });
@@ -73,7 +74,7 @@ function statusIcon(s: string) {
   return <Clock className="h-4 w-4 text-yellow-500" />;
 }
 
-function exportCSV(orders: Order[]) {
+function exportCSV(orders: Order[], companyHeader: string) {
   const rows = [
     ["Order#", "Branch", "Cashier", "Subtotal", "Discount", "Tax", "Total", "Order Status", "Payment Status", "Date"],
     ...orders.map(o => [
@@ -83,14 +84,16 @@ function exportCSV(orders: Order[]) {
       new Date(o.createdAt).toLocaleString("en-SA"),
     ]),
   ];
-  const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+  const lines = rows.map(r => r.map(c => `"${c}"`).join(","));
+  if (companyHeader) lines.unshift(`"${companyHeader.replace(/"/g, '""')}"`, "");
+  const csv = lines.join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
   a.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 }
 
-function printOrders(orders: Order[]) {
+function printOrders(orders: Order[], companyHeader: string) {
   const rows = orders.map(o => `
     <tr>
       <td>${o.orderNumber}</td>
@@ -118,6 +121,7 @@ function printOrders(orders: Order[]) {
     </style>
   </head><body>
     <h2>Orders Report</h2>
+    ${companyHeader ? `<p class="sub" style="font-weight:600;color:#333">${companyHeader}</p>` : ""}
     <p class="sub">Printed ${new Date().toLocaleString("en-SA")} &nbsp;·&nbsp; ${orders.length} orders</p>
     <table>
       <thead><tr>
@@ -132,7 +136,7 @@ function printOrders(orders: Order[]) {
   setTimeout(() => { win.print(); win.close(); }, 400);
 }
 
-function printReceipt(order: Order) {
+function printReceipt(order: Order, companyHeader: string) {
   const payMethod = order.payments?.[0]?.paymentMethod ?? "—";
   const items = (order.items ?? []).map(item => `
     <tr>
@@ -165,6 +169,7 @@ function printReceipt(order: Order) {
     </style>
   </head><body>
     <div class="center bold large">${order.branch?.name ?? "Store"}</div>
+    ${companyHeader ? `<div class="center small" style="margin-top:2px">${companyHeader}</div>` : ""}
     <div class="center small" style="margin-top:2px">Tax Receipt</div>
     <div class="divider"></div>
     <div class="small">Order: <span class="bold">${order.orderNumber}</span></div>
@@ -748,6 +753,7 @@ function OrderDetail({ orderId, onStatusChanged }: {
   orderId: string; onStatusChanged: () => void;
 }) {
   const { canEdit, canApprove, canDelete: canDeleteOrder } = usePermission("Orders");
+  const companyHeader = useCompanyHeader();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -804,7 +810,7 @@ function OrderDetail({ orderId, onStatusChanged }: {
           <SBadge status={order.orderStatus} />
           <SBadge status={order.paymentStatus} />
           <div className="flex gap-1.5 mt-0.5">
-            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => printReceipt(order)}>
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => printReceipt(order, companyHeader)}>
               <Printer className="h-3.5 w-3.5" /> Print
             </Button>
             {!["cancelled", "refunded"].includes(order.orderStatus) && (
@@ -994,6 +1000,7 @@ function OrderDetail({ orderId, onStatusChanged }: {
 // ─── POS Tab ──────────────────────────────────────────────────────────────────
 function POSTab() {
   const { user } = useAuth();
+  const companyHeader = useCompanyHeader();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -1096,10 +1103,10 @@ function POSTab() {
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => load()}>
           <RefreshCw className="h-4 w-4" /> Refresh
         </Button>
-        <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => exportCSV(filtered)} disabled={filtered.length === 0}>
+        <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => exportCSV(filtered, companyHeader)} disabled={filtered.length === 0}>
           <Download className="h-4 w-4" /> Export CSV
         </Button>
-        <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => printOrders(filtered)} disabled={filtered.length === 0}>
+        <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => printOrders(filtered, companyHeader)} disabled={filtered.length === 0}>
           <Printer className="h-4 w-4" /> Print
         </Button>
       </div>

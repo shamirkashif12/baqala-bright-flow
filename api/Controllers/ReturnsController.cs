@@ -166,7 +166,7 @@ public class ReturnsController(
                 Items = ret.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.RefundAmount, i.Condition }),
             }),
             severity: "warning",
-            module: "Returns", employeeId: await ResolveEmployeeIdAsync(ret.ProcessedBy ?? CallerId()));
+            module: "Returns", employeeId: await ResolveEmployeeIdAsync(ret.ProcessedBy ?? CallerId()), terminalId: order.TerminalId);
 
         return CreatedAtAction(nameof(GetById), new { id = ret.Id }, ret);
     }
@@ -184,6 +184,7 @@ public class ReturnsController(
             return StatusCode(403, new { message = $"Manager approval is required for refunds over SAR {threshold:F2}." });
 
         var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new { ret.Status, ret.ApprovedBy });
+        var terminalId = await db.Orders.Where(o => o.Id == ret.OrderId).Select(o => (Guid?)o.TerminalId).FirstOrDefaultAsync();
 
         ret.Status = req.Approved ? "approved" : "rejected";
         var sub = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value;
@@ -202,7 +203,7 @@ public class ReturnsController(
             details: System.Text.Json.JsonSerializer.Serialize(new { ret.Status, ret.ApprovedBy, ret.RefundAmount, ret.ReturnNumber }),
             severity: "warning",
             beforeValue: beforeSnapshot,
-            module: "Returns", employeeId: await ResolveEmployeeIdAsync(CallerId()));
+            module: "Returns", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: terminalId);
 
         // Notify both the cashier who raised the return and the manager who acted on it.
         // Previously only ProcessedBy was notified (and only when set), so approving a return that

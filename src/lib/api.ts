@@ -111,11 +111,21 @@ async function requestBlob(path: string): Promise<Blob> {
   return res.blob();
 }
 
-function toQuery(params?: Record<string, string | number | boolean | undefined>): string {
-  const q = new URLSearchParams(
-    Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v !== undefined && v !== "")) as Record<string, string>
-  ).toString();
-  return q ? `?${q}` : "";
+// Array values are appended as repeated params (?key=a&key=b) — the convention ASP.NET Core's
+// [FromQuery] Guid[]/string[] model binding expects for the standardized multi-select filters.
+// An empty array is omitted entirely (no filter), matching a plain omitted single value.
+function toQuery(params?: Record<string, string | number | boolean | string[] | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined || value === "") continue;
+    if (Array.isArray(value)) {
+      for (const v of value) if (v !== undefined && v !== "") q.append(key, v);
+    } else {
+      q.append(key, String(value));
+    }
+  }
+  const s = q.toString();
+  return s ? `?${s}` : "";
 }
 
 export const api = {
@@ -275,17 +285,27 @@ export const api = {
   },
 
   // Stock Counts (Stocking Review)
-  getStockCounts: (params?: { branchId?: string; status?: string }) =>
+  getStockCounts: (params?: { branchId?: string; warehouseId?: string; status?: string }) =>
     request<StockCount[]>(`/api/stock-counts${toQuery(params)}`),
   getStockCount: (id: string) => request<StockCount>(`/api/stock-counts/${id}`),
   // countType records WHY the count is being run (review | audit | reconciliation) — the FRD's
   // three filters read it back. Optional: omitting it records no intent rather than guessing one.
-  startStockCount: (data: { branchId: string; categoryId?: string; startedBy?: string; notes?: string; countType?: string }) =>
+  // Exactly one of branchId/warehouseId.
+  startStockCount: (data: { branchId?: string; warehouseId?: string; categoryId?: string; startedBy?: string; notes?: string; countType?: string }) =>
     request<StockCount>("/api/stock-counts", { method: "POST", body: JSON.stringify(data) }),
   recordStockCount: (id: string, data: { productId: string; countedQuantity: number }) =>
     request<StockCountItem>(`/api/stock-counts/${id}/count`, { method: "POST", body: JSON.stringify(data) }),
+  // Closes counting and submits for review — no longer applies stock. Status moves to pending_review.
   completeStockCount: (id: string, completedBy?: string) =>
     request<StockCount>(`/api/stock-counts/${id}/complete`, { method: "POST", body: JSON.stringify({ completedBy }) }),
+  // First sign-off: approved moves pending_review -> pending_approval; rejecting ends the session
+  // with stock untouched. A rejection reason is required when approved is false.
+  reviewStockCount: (id: string, data: { approved: boolean; reason?: string }) =>
+    request<StockCount>(`/api/stock-counts/${id}/review`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Final sign-off: approving now applies the counted variance to on-hand stock and moves the
+  // session to "approved". Rejecting is a no-op on stock — nothing was ever applied.
+  approveStockCount: (id: string, data: { approved: boolean; reason?: string }) =>
+    request<StockCount>(`/api/stock-counts/${id}/approve`, { method: "PATCH", body: JSON.stringify(data) }),
   cancelStockCount: (id: string) =>
     request<StockCount>(`/api/stock-counts/${id}/cancel`, { method: "PATCH" }),
 
@@ -355,6 +375,11 @@ export const api = {
     request<Supplier>(`/api/suppliers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteSupplier: (id: string) =>
     request<void>(`/api/suppliers/${id}`, { method: "DELETE" }),
+  getSupplierDocuments: (supplierId: string) => request<SupplierDocument[]>(`/api/suppliers/${supplierId}/documents`),
+  uploadSupplierDocument: (supplierId: string, data: Partial<SupplierDocument>) =>
+    request<SupplierDocument>(`/api/suppliers/${supplierId}/documents`, { method: "POST", body: JSON.stringify(data) }),
+  deleteSupplierDocument: (supplierId: string, documentId: string) =>
+    request<void>(`/api/suppliers/${supplierId}/documents/${documentId}`, { method: "DELETE" }),
 
   // Customers
   getCustomers: (params?: { tier?: string; search?: string }) => {
@@ -496,6 +521,14 @@ export const api = {
   completeReturn: (id: string) =>
     request<CustomerReturn>(`/api/returns/${id}/complete`, { method: "PATCH", body: JSON.stringify({}) }),
 
+  // Approval Center
+  getApprovals: (params?: { status?: string; type?: string; branchId?: string; from?: string; to?: string }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
+    return request<ApprovalRow[]>(`/api/approvals${q ? `?${q}` : ""}`);
+  },
+  decideApproval: (id: string, approved: boolean, reason?: string) =>
+    request<ApprovalRow>(`/api/approvals/${id}/decision`, { method: "POST", body: JSON.stringify({ approved, reason }) }),
+
   // Compliance / ZATCA
   getZatcaInvoices: (params?: { branchId?: string; status?: string }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
@@ -508,6 +541,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  getCompanyProfile: () => request<CompanyProfile>("/api/compliance/company-profile"),
+  updateCompanyProfile: (data: Partial<CompanyProfile>) =>
+    request<CompanyProfile>("/api/compliance/company-profile", { method: "PUT", body: JSON.stringify(data) }),
   generateZatcaCsr: (branchId: string) =>
     request<{ csr: string; egsSerial: string }>(`/api/compliance/zatca/onboarding/${branchId}/csr`, { method: "POST" }),
   getZatcaComplianceCsid: (branchId: string, otp: string) =>
@@ -632,19 +668,19 @@ export const api = {
   exportPaymentMethodsReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; hasTobaccoFee?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/payment-methods/export${toQuery(params)}`),
 
-  getLowStockReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean; onlyLowStock?: boolean }) =>
+  getLowStockReport: (params?: { branchId?: string[]; categoryId?: string[]; productId?: string[]; isTobacco?: boolean; onlyLowStock?: boolean }) =>
     request<LowStockReport>(`/api/reports/low-stock${toQuery(params)}`),
-  exportLowStockReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean; onlyLowStock?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportLowStockReport: (params?: { branchId?: string[]; categoryId?: string[]; productId?: string[]; isTobacco?: boolean; onlyLowStock?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/low-stock/export${toQuery(params)}`),
 
-  getInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean; warehouseId?: string; locationType?: string }) =>
+  getInventorySnapshotReport: (params?: { branchId?: string[]; categoryId?: string[]; productId?: string[]; isTobacco?: boolean; warehouseId?: string[]; locationType?: string }) =>
     request<InventorySnapshotReport>(`/api/reports/inventory-snapshot${toQuery(params)}`),
-  exportInventorySnapshotReport: (params?: { branchId?: string; categoryId?: string; productId?: string; isTobacco?: boolean; exportedBy?: string; format?: ReportExportFormat; warehouseId?: string; locationType?: string }) =>
+  exportInventorySnapshotReport: (params?: { branchId?: string[]; categoryId?: string[]; productId?: string[]; isTobacco?: boolean; exportedBy?: string; format?: ReportExportFormat; warehouseId?: string[]; locationType?: string }) =>
     requestBlob(`/api/reports/inventory-snapshot/export${toQuery(params)}`),
   getInventorySnapshotScope: () =>
     request<InventorySnapshotScope>("/api/reports/inventory-snapshot/scope"),
 
-  getInventoryDashboardReport: (params?: { from?: string; to?: string; branchId?: string; warehouseId?: string; categoryId?: string; locationType?: string; moverLimit?: number }) =>
+  getInventoryDashboardReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; locationType?: string; moverLimit?: number }) =>
     request<InventoryDashboardReport>(`/api/reports/inventory-dashboard${toQuery(params)}`),
 
   // FRD §2.1 — the "Stock Review" / "Stock Audit" / "Inventory Reconciliation" filters all describe
@@ -652,10 +688,15 @@ export const api = {
   // started it or completed it).
   // countType: review | audit | reconciliation | unspecified — the FRD's three named filters, plus
   // sessions that predate the column.
-  getStockReconciliationReport: (params?: { from?: string; to?: string; branchId?: string; productId?: string; categoryId?: string; countedBy?: string; status?: string; varianceOnly?: boolean; countType?: string }) =>
+  getStockReconciliationReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; productId?: string[]; categoryId?: string[]; countedBy?: string[]; status?: string[]; varianceOnly?: boolean; countType?: string }) =>
     request<StockReconciliationReport>(`/api/reports/stock-reconciliation${toQuery(params)}`),
-  exportStockReconciliationReport: (params?: { from?: string; to?: string; branchId?: string; productId?: string; categoryId?: string; countedBy?: string; status?: string; varianceOnly?: boolean; countType?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportStockReconciliationReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; productId?: string[]; categoryId?: string[]; countedBy?: string[]; status?: string[]; varianceOnly?: boolean; countType?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/stock-reconciliation/export${toQuery(params)}`),
+
+  getProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[] }) =>
+    request<ProductPerformanceReport>(`/api/reports/inventory-aging-performance${toQuery(params)}`),
+  exportProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/inventory-aging-performance/export${toQuery(params)}`),
 
   getBranchSalesReport: (params?: { from?: string; to?: string; city?: string; branchId?: string; customerType?: string; cashierId?: string; terminalId?: string; productId?: string; categoryId?: string; hasTobaccoFee?: boolean }) =>
     request<BranchSalesReport>(`/api/reports/branch-sales${toQuery(params)}`),
@@ -677,14 +718,34 @@ export const api = {
   exportCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; cashierId?: string; terminalId?: string; productId?: string; hasTobaccoFee?: boolean; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/category-performance/export${toQuery(params)}`),
 
-  getSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string; branchId?: string; productId?: string; createdBy?: string; approvedBy?: string }) =>
+  getSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[] }) =>
     request<SupplierPerformanceReport>(`/api/reports/supplier-performance${toQuery(params)}`),
-  exportSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string; branchId?: string; productId?: string; createdBy?: string; approvedBy?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/supplier-performance/export${toQuery(params)}`),
 
-  getWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; productId?: string; categoryId?: string; adjustedBy?: string; isTobacco?: boolean; warehouseId?: string; approvedBy?: string; approvalStatus?: string }) =>
+  getSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string }) =>
+    request<SupplierReturnsReportRow[]>(`/api/reports/supplier-returns${toQuery(params)}`),
+  exportSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/supplier-returns/export${toQuery(params)}`),
+
+  getStockTransferReport: (params?: { from?: string; to?: string; transferType?: string; status?: string[]; sourceBranchId?: string[]; sourceWarehouseId?: string[]; destBranchId?: string[]; destWarehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[] }) =>
+    request<StockTransferReportRow[]>(`/api/reports/stock-transfer-report${toQuery(params)}`),
+  exportStockTransferReport: (params?: { from?: string; to?: string; transferType?: string; status?: string[]; sourceBranchId?: string[]; sourceWarehouseId?: string[]; destBranchId?: string[]; destWarehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/stock-transfer-report/export${toQuery(params)}`),
+
+  getPurchaseOrderReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; status?: string[]; createdBy?: string[]; approvedBy?: string[]; productId?: string[] }) =>
+    request<PurchaseOrderReportRow[]>(`/api/reports/purchase-order-report${toQuery(params)}`),
+  exportPurchaseOrderReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; status?: string[]; createdBy?: string[]; approvedBy?: string[]; productId?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/purchase-order-report/export${toQuery(params)}`),
+
+  getEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string }) =>
+    request<EmployeeAuditRow[]>(`/api/reports/employee-audit-center${toQuery(params)}`),
+  exportEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/employee-audit-center/export${toQuery(params)}`),
+
+  getWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string[]; reason?: string; productId?: string[]; categoryId?: string[]; adjustedBy?: string[]; isTobacco?: boolean; warehouseId?: string[]; approvedBy?: string[]; approvalStatus?: string[] }) =>
     request<WasteSpoilageReport>(`/api/reports/waste-spoilage${toQuery(params)}`),
-  exportWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string; reason?: string; productId?: string; categoryId?: string; adjustedBy?: string; isTobacco?: boolean; exportedBy?: string; includeCost?: boolean; format?: ReportExportFormat; warehouseId?: string; approvedBy?: string; approvalStatus?: string }) =>
+  exportWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string[]; reason?: string; productId?: string[]; categoryId?: string[]; adjustedBy?: string[]; isTobacco?: boolean; exportedBy?: string; includeCost?: boolean; format?: ReportExportFormat; warehouseId?: string[]; approvedBy?: string[]; approvalStatus?: string[] }) =>
     requestBlob(`/api/reports/waste-spoilage/export${toQuery(params)}`),
 
   getReturnsRefundsReport: (params?: { from?: string; to?: string; branchId?: string; refundMethod?: string; status?: string; customerType?: string; reason?: string; productId?: string; processedBy?: string }) =>
@@ -819,7 +880,7 @@ export const api = {
     printerRequest<{ message: string }>(`/api/printer/${name}`, { method: "DELETE" }),
   printReceipt: (invoice: {
     orderNumber: string; createdAt: string; sellerName: string; branchName: string;
-    vatNumber?: string; customerName?: string; paymentMethod?: string;
+    vatNumber?: string; crNumber?: string; customerName?: string; paymentMethod?: string;
     items: { name: string; qty: number; price: number }[];
     subtotal: number; discount: number; vat: number; total: number; taxLabel: string;
     tobaccoExcise?: number;
@@ -1347,6 +1408,15 @@ export interface Supplier {
   id: string; supplierCode: string; name: string; warehouseName?: string;
   contactPerson?: string; contactNumber?: string; email?: string;
   address?: string; city?: string; supplyType: string; status: string;
+  legalName?: string; crNumber?: string; vatNumber?: string; category?: string;
+  paymentTerms?: string; creditLimit?: number;
+  bankName?: string; bankAccountHolder?: string; bankAccountNumber?: string; bankIban?: string;
+  notes?: string;
+}
+
+export interface SupplierDocument {
+  id: string; supplierId: string; documentType: string; fileName: string; fileUrl: string;
+  issueDate?: string; expiryDate?: string; uploadedBy?: string; uploadedAt: string;
 }
 
 export interface Customer {
@@ -1449,6 +1519,25 @@ export interface CustomerReturnItem {
   quantity: number; unitPrice: number; refundAmount: number;
   condition: string; restock: boolean;
   product?: { id: string; name: string; sku: string };
+}
+
+export interface ApprovalRow {
+  id: string;
+  sourceType: "approval_request" | "return" | "stock_count" | "stock_transfer" | "wastage_adjustment";
+  requestType: "discount" | "order_cancellation" | "item_deletion" | "refund_return" | "stock_count" | "stock_transfer" | "wastage_adjustment";
+  entityLabel: string;
+  branchId?: string; branchName?: string;
+  requestedBy?: string; requestedByName?: string;
+  requestedAt: string;
+  status: string;
+  approvedBy?: string; approvedByName?: string;
+  actionAt?: string;
+  reason?: string; rejectionReason?: string;
+}
+
+export interface CompanyProfile {
+  id?: string; legalName?: string; crNumber?: string; vatNumber?: string;
+  updatedBy?: string; createdAt?: string; updatedAt?: string;
 }
 
 export interface ZatcaSettings {
@@ -1607,13 +1696,16 @@ export interface StockCountItem {
 }
 
 export interface StockCount {
-  id: string; branchId: string; categoryId?: string;
+  id: string; branchId?: string; warehouseId?: string; categoryId?: string;
   // Why the count was run — null for sessions started before this was recorded.
   countType?: "review" | "audit" | "reconciliation" | null;
-  status: string; // draft | completed | cancelled
-  startedBy?: string; completedBy?: string; notes?: string;
-  startedAt: string; completedAt?: string;
+  // draft (counting) | pending_review | pending_approval | approved (stock applied) | rejected | cancelled
+  status: string;
+  startedBy?: string; completedBy?: string; reviewedBy?: string; approvedBy?: string;
+  rejectionReason?: string; stockApplied?: boolean; notes?: string;
+  startedAt: string; completedAt?: string; reviewedAt?: string; approvedAt?: string;
   branch?: { id: string; name: string };
+  warehouse?: { id: string; name: string };
   category?: { id: string; name: string };
   items?: StockCountItem[];
 }
@@ -1838,12 +1930,17 @@ export interface InventoryAgingRow {
   unitsMovedInPeriod: number;
   ageBucket: string;
   isDeadStock: boolean;
+  // Same Star/High/Average/Slow/Dead Stock classification as the Product Performance report —
+  // identical across every location-row for a given product.
+  classification: ProductPerformanceTier;
+  performanceScore: number;
 }
 export interface InventoryDashboardReport {
   kpis: {
     totalStockValue: number; availableStockQty: number; outOfStockProducts: number;
     negativeInventoryItems: number; lowStockProducts: number; pendingPurchaseOrders: number;
     wastageValue: number; inventoryTurnover: number; cogsValue: number;
+    starCount: number; highPerformerCount: number; averagePerformerCount: number; slowMovingCount: number;
   };
   topMoving: InventoryMoverRow[];
   slowMoving: InventoryMoverRow[];
@@ -1859,20 +1956,45 @@ export interface StockReconciliationRow {
   // null for sessions started before count_type existed — shown as "Unspecified".
   countType?: "review" | "audit" | "reconciliation" | null;
   startedAt: string; completedAt?: string | null;
-  branch: string; sku: string; productName: string; category: string;
+  // Exactly one of branch/warehouse is set — render as one combined "Branch / Warehouse" column.
+  branch?: string | null; warehouse?: string | null;
+  sku: string; productName: string; category: string;
   systemQty: number;
   // null while the line is still pending — render "—", never 0.
   countedQty?: number | null; variance?: number | null;
   varianceValue: number;
-  startedBy: string; completedBy?: string | null;
-  status: string; countedAt?: string | null;
+  startedBy: string; performedBy?: string | null; reviewedBy?: string | null; approvedBy?: string | null;
+  status: string; rejectionReason?: string | null; countedAt?: string | null;
 }
 export interface StockReconciliationReport {
   kpis: {
     sessionCount: number; itemsCounted: number; itemsPending: number; itemsWithVariance: number;
     accuracyPct: number; netVarianceUnits: number; netVarianceValue: number; absVarianceValue: number;
+    pendingReviewCount: number; pendingApprovalCount: number;
   };
   rows: StockReconciliationRow[];
+}
+
+// Star Products | High Performers | Average Performers | Slow Moving Products | Dead Stock
+export type ProductPerformanceTier = "Star Products" | "High Performers" | "Average Performers" | "Slow Moving Products" | "Dead Stock";
+export interface ProductPerformanceRow {
+  productId: string; sku: string; productName: string; category: string;
+  unitsSold: number; salesValue: number; cogs: number; grossProfit: number; marginPct?: number | null;
+  currentStockQty: number; currentStockValue: number;
+  // null when there's no batch record at all (predates batch tracking, or nothing on hand).
+  daysInStock?: number | null;
+  // null = never sold (within what the ledger can see) — distinct from 0 ("sold today").
+  daysSinceLastSale?: number | null;
+  turnoverRatio: number;
+  performanceScore: number;
+  classification: ProductPerformanceTier;
+}
+export interface ProductPerformanceReport {
+  kpis: {
+    productCount: number; starCount: number; highPerformerCount: number; averagePerformerCount: number;
+    slowMovingCount: number; deadStockCount: number; deadStockValue: number; totalSalesValue: number;
+  };
+  rows: ProductPerformanceRow[];
 }
 
 // Which pools/filters this caller may use. Resolved server-side because the rule depends on
@@ -1937,6 +2059,33 @@ export interface SupplierPerformanceRow {
 export interface SupplierPerformanceReport {
   kpis: { bestFillRatePct: number; averageLeadTimeDays: number; totalPurchaseValue: number; outstandingDues: number; rtsValue: number };
   rows: SupplierPerformanceRow[];
+}
+
+export interface SupplierReturnsReportItem {
+  productName: string; sku: string; returnedQuantity: number; unitCost: number; totalValue: number; reason: string; notes?: string;
+}
+export interface SupplierReturnsReportRow {
+  returnNumber: string; returnDate: string; supplierName: string; warehouseName: string;
+  returnedBy: string; approvedBy: string; status: string; totalValue: number; items: SupplierReturnsReportItem[];
+}
+
+export interface StockTransferReportRow {
+  transferNumber: string; transferType: string; sourceLocation: string; destinationLocation: string; status: string;
+  createdBy: string; approvedBy: string; receivedBy: string; productName: string; sku: string;
+  quantity: number; unitCost: number; totalCost: number; createdAt: string; completedDate?: string; notes?: string;
+}
+
+export interface PurchaseOrderReportItem {
+  productName: string; sku: string; orderedQuantity: number; receivedQuantity: number; unitCost: number; subtotal: number;
+}
+export interface PurchaseOrderReportRow {
+  id: string; poNumber: string; supplierName: string; locationName: string; purchaseDate: string; status: string; paymentStatus: string;
+  createdBy: string; approvedBy: string; receivedBy: string; totalAmount: number; items: PurchaseOrderReportItem[];
+}
+
+export interface EmployeeAuditRow {
+  id: string; createdAt: string; employeeName: string; actionCategory: string; actionLabel: string;
+  oldValueSummary?: string; newValueSummary?: string; branchName: string; deviceName: string; relatedTransaction: string; severity: string;
 }
 
 export interface WasteSpoilageRow {

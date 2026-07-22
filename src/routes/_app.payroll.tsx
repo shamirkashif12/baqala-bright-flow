@@ -18,6 +18,7 @@ import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { localDateStr } from "@/lib/utils";
 import { exportRowsAsCsv } from "@/lib/csv-export";
+import { useCompanyHeader } from "@/lib/use-company-header";
 
 export const Route = createFileRoute("/_app/payroll")({ component: Payroll });
 
@@ -69,6 +70,7 @@ function CreateRunFields({ branches, onSave, saving, branchLocked, defaultBranch
 function PayrollRunDrawer({ runId, onClose }: { runId: string | null; onClose: () => void }) {
   const [detail, setDetail] = useState<PayrollRunDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const companyHeader = useCompanyHeader();
 
   useEffect(() => {
     if (!runId) { setDetail(null); return; }
@@ -86,7 +88,8 @@ function PayrollRunDrawer({ runId, onClose }: { runId: string | null; onClose: (
               <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => exportRowsAsCsv(
                 ["Employee", "Employee ID", "Basic Salary", "Gross Earnings", "Total Deductions", "Net Payable"],
                 detail.employees.map(e => [e.employee?.fullName ?? "", e.employee?.employeeCode ?? "", e.basicSalary ?? "Masked", e.grossEarnings ?? "Masked", e.totalDeductions ?? "Masked", e.netPayable ?? "Masked"]),
-                `payroll-run-${detail.year}-${detail.month}-${detail.branch?.name ?? ""}.csv`
+                `payroll-run-${detail.year}-${detail.month}-${detail.branch?.name ?? ""}.csv`,
+                companyHeader
               )}>
                 <Download className="h-3.5 w-3.5" /> Export
               </Button>
@@ -132,6 +135,7 @@ function PayrollTab() {
   const { branches } = useBranch();
   const { canCreate, canApprove } = usePermission("Payroll");
   const branchLocked = user?.role !== "tenant_admin";
+  const companyHeader = useCompanyHeader();
 
   const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -223,7 +227,8 @@ function PayrollTab() {
     exportRowsAsCsv(
       ["Payroll Month", "Branch", "Pay Date", "Employees", "Status", "Total Amount"],
       filtered.map(r => [`${MONTH_NAMES[r.month - 1]} ${r.year}`, r.branch?.name ?? "", r.payDate, r.employeeCount, r.status, r.totalAmount ?? "Masked"]),
-      `payroll-runs-${localDateStr()}.csv`
+      `payroll-runs-${localDateStr()}.csv`,
+      companyHeader
     );
   };
 

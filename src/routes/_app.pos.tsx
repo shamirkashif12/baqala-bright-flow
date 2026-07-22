@@ -103,6 +103,7 @@ type InvoiceSnapshot = {
   taxLabel: string;
   branchName: string;
   vatNumber: string;
+  crNumber?: string;
   sellerName: string;
   customerName?: string;
   paymentMethod?: string;
@@ -488,6 +489,7 @@ function POS() {
   const [taxLabel, setTaxLabel] = useState("VAT 15%");
   const [vatNumber, setVatNumber] = useState("300123456700003");
   const [sellerName, setSellerName] = useState("");
+  const [crNumber, setCrNumber] = useState("");
   const [activeShift, setActiveShift] = useState<CashierShift | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -696,6 +698,10 @@ function POS() {
         if (z.vatRegistrationNumber) setVatNumber(z.vatRegistrationNumber);
         if (z.sellerName) setSellerName(z.sellerName);
       })
+      .catch(() => {});
+
+    api.getCompanyProfile()
+      .then((c) => { if (c.crNumber) setCrNumber(c.crNumber); })
       .catch(() => {});
 
     // POS Settings' "cashier can apply coupon"/"cashier can hold order" toggles previously had
@@ -1540,6 +1546,7 @@ function POS() {
       taxLabel,
       branchName: sellerName || branch.name,
       vatNumber,
+      crNumber: crNumber || undefined,
       sellerName: sellerName || branch.name,
       customerName: customer?.fullName,
       paymentMethod: splitPayments ? "Split" : paymentMethod,
@@ -2215,6 +2222,7 @@ function POS() {
                 <div className="text-center space-y-0.5">
                   <p className="font-bold text-sm">{invoice.sellerName}</p>
                   <p className="text-muted-foreground">VAT {invoice.vatNumber}</p>
+                  {invoice.crNumber && <p className="text-muted-foreground">CR {invoice.crNumber}</p>}
                   <p className="text-muted-foreground text-[10px] tracking-widest uppercase mt-1">Invoice No.</p>
                   <p className="font-bold">{invoice.orderNumber}</p>
                   <p className="text-muted-foreground">{new Date(invoice.createdAt).toLocaleString("en-SA")}</p>

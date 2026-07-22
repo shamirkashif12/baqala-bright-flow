@@ -8,7 +8,7 @@ namespace BaqalaPOS.Api.Services;
 /// generation timestamp, KPI tiles and a totals-aware data table — per the Reports FRD's export rules.</summary>
 public static class ReportPdfWriter
 {
-    public static byte[] Write(string title, string filterSummary, (string Label, string Value)[] kpis, string[] headers, IReadOnlyList<object?[]> rows)
+    public static byte[] Write(string title, string filterSummary, (string Label, string Value)[] kpis, string[] headers, IReadOnlyList<object?[]> rows, string? companyHeader = null)
     {
         QuestPDF.Settings.License = LicenseType.Community;
 
@@ -24,6 +24,8 @@ public static class ReportPdfWriter
                 page.Content().Column(col =>
                 {
                     col.Item().Text(title).FontSize(16).Bold();
+                    if (!string.IsNullOrWhiteSpace(companyHeader))
+                        col.Item().Text(companyHeader).FontSize(9).Bold().FontColor("#333333");
                     if (!string.IsNullOrWhiteSpace(filterSummary))
                         col.Item().Text(filterSummary).FontSize(9).FontColor("#555555");
                     col.Item().Text($"Generated {DateTime.UtcNow:dd MMM yyyy HH:mm} UTC · {rows.Count} row(s)")

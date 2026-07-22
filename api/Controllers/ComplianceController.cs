@@ -217,6 +217,36 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         }
     }
 
+    // ─── Company Profile ──────────────────────────────────────────────────────
+    // One company-wide legal identity (name/CR/VAT) shown on every printed receipt and exported
+    // report. Deliberately NOT gated on the "Compliance" module for the GET — POS checkout and
+    // every report export need to read this for any authenticated role, same reasoning as
+    // GetSettings above.
+    [HttpGet("company-profile")]
+    public async Task<IActionResult> GetCompanyProfile()
+    {
+        var profile = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId)
+            ?? throw new InvalidOperationException("Company profile row missing — migration seed did not run.");
+        return Ok(profile);
+    }
+
+    [RequirePermission("Compliance", PermAction.Edit)]
+    [HttpPut("company-profile")]
+    public async Task<IActionResult> UpdateCompanyProfile([FromBody] CompanyProfileUpdateRequest req)
+    {
+        var profile = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId)
+            ?? throw new InvalidOperationException("Company profile row missing — migration seed did not run.");
+
+        profile.LegalName = req.LegalName;
+        profile.CrNumber = req.CrNumber;
+        profile.VatNumber = req.VatNumber;
+        profile.UpdatedBy = Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var uid) ? uid : null;
+        profile.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+        return Ok(profile);
+    }
+
     // ─── Rules Engine ─────────────────────────────────────────────────────────
     [HttpGet("rules")]
     public async Task<IActionResult> GetRules([FromQuery] string? ruleType, [FromQuery] Guid? branchId, [FromQuery] bool includeInactive = false)
@@ -283,6 +313,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
 
 public record ZatcaStatusRequest(string Status, string? Response);
 public record ZatcaOtpRequest(string Otp);
+public record CompanyProfileUpdateRequest(string? LegalName, string? CrNumber, string? VatNumber);
 
 // Request body for PUT zatca/settings/{branchId} — branch display fields plus the mart-wide
 // shared Phase2Enabled/Environment flags (which the controller writes onto ZatcaIdentity).

@@ -9,7 +9,7 @@ public static class ExcelWriter
 {
     public static byte[] Write(
         string title, string filterSummary, string[] headers, IReadOnlyList<object?[]> rows,
-        string? generatedBy = null, string? branch = null)
+        string? generatedBy = null, string? branch = null, string? companyHeader = null)
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(Sanitize(title));
@@ -19,6 +19,14 @@ public static class ExcelWriter
         sheet.Cell(row, 1).Style.Font.Bold = true;
         sheet.Cell(row, 1).Style.Font.FontSize = 14;
         row++;
+
+        if (!string.IsNullOrWhiteSpace(companyHeader))
+        {
+            sheet.Cell(row, 1).Value = companyHeader;
+            sheet.Cell(row, 1).Style.Font.Bold = true;
+            sheet.Cell(row, 1).Style.Font.FontColor = XLColor.FromHtml("#333333");
+            row++;
+        }
 
         if (!string.IsNullOrWhiteSpace(filterSummary))
         {

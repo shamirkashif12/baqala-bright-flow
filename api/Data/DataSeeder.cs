@@ -44,10 +44,24 @@ public static class DataSeeder
         db.Categories.AddRange(catDairy, catBeverages, catMeat, catPantry, catHousehold, catBakery, catSnacks);
 
         // ─── Suppliers ───────────────────────────────────────────────────────
-        var supAlmarai  = Supplier("SUP-001", "Almarai Company",       "Mohammed Al Otaibi", "+966501234567", "warehouse");
-        var supNadec    = Supplier("SUP-002", "Nadec Foods",           "Khalid Al Shehri",   "+966552345678", "warehouse");
-        var supAlRabie  = Supplier("SUP-003", "Al Rabie Saudi Foods",  "Sara Al Qahtani",    "+966563456789", "warehouse");
-        var supSadia    = Supplier("SUP-004", "Sadia Saudi Arabia",    "Faisal Al Harbi",    "+966534567890", "mart_to_mart");
+        // Deliberately uneven profile completeness — demonstrates that new required fields
+        // (CR/VAT/address/category) only gate NEW registrations; these legacy-style seed rows
+        // stay valid (and editable) even where they're missing some or all of the new fields.
+        var supAlmarai  = Supplier("SUP-001", "Almarai Company",       "Mohammed Al Otaibi", "+966501234567", "warehouse",
+            legalName: "Almarai Company for Food Industries", crNumber: "1010012345", vatNumber: "300000012345678003",
+            address: "King Fahd Road, Riyadh 12345", email: "supply@almarai.com", category: "Food & Beverage",
+            paymentTerms: "Net 30", creditLimit: 50000m,
+            bankName: "Al Rajhi Bank", bankAccountHolder: "Almarai Company", bankAccountNumber: "1234567890123", bankIban: "SA0380000000608010167519",
+            notes: "Primary dairy supplier — priority replenishment.");
+        var supNadec    = Supplier("SUP-002", "Nadec Foods",           "Khalid Al Shehri",   "+966552345678", "warehouse",
+            legalName: "National Agricultural Development Company", crNumber: "1010023456", vatNumber: "300000023456678003",
+            address: "Al Malaz District, Riyadh", email: "orders@nadec.com", category: "Food & Beverage",
+            paymentTerms: "Net 30", creditLimit: 40000m);
+        var supAlRabie  = Supplier("SUP-003", "Al Rabie Saudi Foods",  "Sara Al Qahtani",    "+966563456789", "warehouse",
+            legalName: "Al Rabie Saudi Foods Company", crNumber: "1010034567", vatNumber: "300000034567678003",
+            address: "Jeddah Industrial City", category: "Food & Beverage", paymentTerms: "Net 15", creditLimit: 25000m);
+        var supSadia    = Supplier("SUP-004", "Sadia Saudi Arabia",    "Faisal Al Harbi",    "+966534567890", "mart_to_mart",
+            category: "Food & Beverage");
         var supAlOthman = Supplier("SUP-005", "Al Othman Agriculture", "Yousef Al Dossari",  "+966505678901", "both");
         db.Suppliers.AddRange(supAlmarai, supNadec, supAlRabie, supSadia, supAlOthman);
 
@@ -1033,10 +1047,19 @@ public static class DataSeeder
         CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
     };
 
-    private static Supplier Supplier(string code, string name, string contact, string phone, string supplyType) => new()
+    private static Supplier Supplier(
+        string code, string name, string contact, string phone, string supplyType,
+        string? legalName = null, string? crNumber = null, string? vatNumber = null, string? address = null,
+        string? email = null, string? category = null, string? paymentTerms = null, decimal? creditLimit = null,
+        string? bankName = null, string? bankAccountHolder = null, string? bankAccountNumber = null, string? bankIban = null,
+        string? notes = null) => new()
     {
         Id = Guid.NewGuid(), SupplierCode = code, Name = name,
         ContactPerson = contact, ContactNumber = phone, SupplyType = supplyType,
+        LegalName = legalName, CrNumber = crNumber, VatNumber = vatNumber, Address = address, Email = email,
+        Category = category, PaymentTerms = paymentTerms, CreditLimit = creditLimit,
+        BankName = bankName, BankAccountHolder = bankAccountHolder, BankAccountNumber = bankAccountNumber, BankIban = bankIban,
+        Notes = notes,
         Status = "active", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
     };
 

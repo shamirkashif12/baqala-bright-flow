@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
@@ -70,6 +71,8 @@ function StBadge({ status }: { status: string }) {
     fully_received: "bg-green-100 text-green-700",
     approved: "bg-emerald-100 text-emerald-700",
     rejected: "bg-red-100 text-red-700",
+    pending_review: "bg-yellow-100 text-yellow-700",
+    pending_approval: "bg-amber-100 text-amber-700",
     draft: "bg-gray-100 text-gray-600",
     expired: "bg-red-100 text-red-700",
     damage: "bg-red-100 text-red-700",
@@ -526,11 +529,13 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
 
 // ─── Stocking Review (Stock Filters: physical count / live reconciliation) ────
 // Self-contained tab: snapshots system quantity per product at start, lets a manager scan/enter
-// counted quantities, then on completion reconciles any variance through the same
-// InventoryAdjustment pipeline the Stock-Out/Wastage tabs already write to.
-function StockingReviewTab({ branches }: { branches: Branch[] }) {
+// counted quantities, then submits for review. Nothing touches on-hand stock until a reviewer and
+// then an approver both sign off (maker-checker, same shape as the Wastage gate) — the approval
+// step is what finally reconciles the variance through the InventoryAdjustment pipeline the
+// Stock-Out/Wastage tabs already write to.
+function StockingReviewTab({ branches, warehouses }: { branches: Branch[]; warehouses: Warehouse[] }) {
   const { user } = useAuth();
-  const { canCreate, canEdit } = usePermission("Stocks");
+  const { canCreate, canEdit, canApprove } = usePermission("Stocks");
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
 
   const [sessions, setSessions] = useState<StockCount[]>([]);
@@ -540,7 +545,11 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
   const [loading, setLoading] = useState(true);
 
   const [startOpen, setStartOpen] = useState(false);
+  // Warehouse counts are tenant_admin-only (there's no warehouse-scoped role to review/approve
+  // them), so a branch-locked user never sees the toggle — they can only ever count their branch.
+  const [startScope, setStartScope] = useState<"branch" | "warehouse">("branch");
   const [startBranch, setStartBranch] = useState(lockedBranchId ?? "");
+  const [startWarehouse, setStartWarehouse] = useState("");
   const [startCategory, setStartCategory] = useState("all");
   // Why this count is being run. Required — the manager must consciously pick one of the three
   // intents (no silent default), so the Stock Reconciliation report's Count Type filter always
@@ -553,6 +562,10 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
   const [scanQuery, setScanQuery] = useState("");
   const [countInputs, setCountInputs] = useState<Record<string, string>>({});
   const [completing, setCompleting] = useState(false);
+  const [signingOff, setSigningOff] = useState(false);
+  // Which sign-off stage a rejection reason is being collected for — null when no reject dialog is open.
+  const [rejectStage, setRejectStage] = useState<"review" | "approve" | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -572,16 +585,19 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
   };
 
   const handleStart = async () => {
-    if (!startBranch) { toast.error("Select a branch"); return; }
+    if (startScope === "branch" && !startBranch) { toast.error("Select a branch"); return; }
+    if (startScope === "warehouse" && !startWarehouse) { toast.error("Select a warehouse"); return; }
     if (!startCountType) { toast.error("Select a count type"); return; }
     setStarting(true);
     try {
       const session = await api.startStockCount({
-        branchId: startBranch, categoryId: startCategory !== "all" ? startCategory : undefined,
+        branchId: startScope === "branch" ? startBranch : undefined,
+        warehouseId: startScope === "warehouse" ? startWarehouse : undefined,
+        categoryId: startCategory !== "all" ? startCategory : undefined,
         startedBy: user?.id, notes: startNotes || undefined, countType: startCountType,
       });
       toast.success(`Count session started — ${session.items?.length ?? 0} SKUs snapshotted`);
-      setStartOpen(false); setStartNotes(""); setStartCategory("all"); setStartCountType("");
+      setStartOpen(false); setStartNotes(""); setStartCategory("all"); setStartCountType(""); setStartWarehouse("");
       load();
       openSession(session.id);
     } catch (e) {
@@ -624,15 +640,15 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
     if (!active) return;
     const counted = (active.items ?? []).filter(i => i.countedQuantity != null).length;
     const total = active.items?.length ?? 0;
-    if (counted < total && !confirm(`${total - counted} item(s) haven't been counted yet and will be left unchanged. Complete anyway?`)) return;
+    if (counted < total && !confirm(`${total - counted} item(s) haven't been counted yet and will be left unchanged. Submit anyway?`)) return;
     setCompleting(true);
     try {
       const done = await api.completeStockCount(active.id, user?.id);
-      toast.success("Stock count completed — variances reconciled");
+      toast.success("Count submitted for review — stock is unchanged until it's approved");
       setActive(done);
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to complete count");
+      toast.error(e instanceof Error ? e.message : "Failed to submit count");
     } finally {
       setCompleting(false);
     }
@@ -650,25 +666,72 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
     }
   };
 
+  // First sign-off stage: approving hands the session to an approver (nothing on stock yet);
+  // rejecting ends it immediately, still untouched.
+  const handleReview = async (approved: boolean, reason?: string) => {
+    if (!active) return;
+    setSigningOff(true);
+    try {
+      const updated = await api.reviewStockCount(active.id, { approved, reason });
+      toast.success(approved ? "Count reviewed — awaiting final approval" : "Count rejected — stock was never changed");
+      setActive(updated);
+      setRejectStage(null); setRejectReason("");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to record review");
+    } finally {
+      setSigningOff(false);
+    }
+  };
+
+  // Final sign-off: approving now actually applies the counted variance to on-hand stock.
+  const handleApprove = async (approved: boolean, reason?: string) => {
+    if (!active) return;
+    setSigningOff(true);
+    try {
+      const updated = await api.approveStockCount(active.id, { approved, reason });
+      toast.success(approved ? "Count approved — stock updated" : "Count rejected — stock was never changed");
+      setActive(updated);
+      setRejectStage(null); setRejectReason("");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to record approval");
+    } finally {
+      setSigningOff(false);
+    }
+  };
+
+  const confirmReject = () => {
+    if (!rejectReason.trim()) { toast.error("A rejection reason is required"); return; }
+    if (rejectStage === "review") handleReview(false, rejectReason.trim());
+    else if (rejectStage === "approve") handleApprove(false, rejectReason.trim());
+  };
+
   const items = active?.items ?? [];
   const countedCount = items.filter(i => i.countedQuantity != null).length;
   const varianceCount = items.filter(i => i.variance != null && i.variance !== 0).length;
 
   if (active) {
     const isDraft = active.status === "draft";
+    const isPendingReview = active.status === "pending_review";
+    const isPendingApproval = active.status === "pending_approval";
+    const locationLabel = active.branch?.name ?? (active.warehouse ? `${active.warehouse.name} (Warehouse)` : "Count Session");
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <Button variant="ghost" size="sm" className="h-7 text-xs -ml-2 mb-1" onClick={() => setActive(null)}>← Back to sessions</Button>
             <div className="flex items-center gap-2">
-              <h3 className="font-semibold">{active.branch?.name ?? "Count Session"}</h3>
+              <h3 className="font-semibold">{locationLabel}</h3>
               <StBadge status={active.status} />
               {active.category && <span className="text-xs text-muted-foreground">· {active.category.name} only</span>}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
               Started {fmtDate(active.startedAt)} {fmtTime(active.startedAt)} · {countedCount}/{items.length} counted · {varianceCount} with variance
             </p>
+            {active.status === "rejected" && active.rejectionReason && (
+              <p className="text-xs text-destructive mt-1">Rejected: {active.rejectionReason}</p>
+            )}
           </div>
           {isDraft && (canEdit) && (
             <div className="flex gap-2">
@@ -676,9 +739,32 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
                 <X className="h-3.5 w-3.5" /> Cancel Session
               </Button>
               <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={handleComplete} disabled={completing}>
-                <CheckCircle2 className="h-3.5 w-3.5" /> {completing ? "Completing…" : "Complete & Reconcile"}
+                <CheckCircle2 className="h-3.5 w-3.5" /> {completing ? "Submitting…" : "Submit for Review"}
               </Button>
             </div>
+          )}
+          {isPendingReview && canEdit && (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setRejectStage("review"); setRejectReason(""); }} disabled={signingOff}>
+                <X className="h-3.5 w-3.5" /> Reject
+              </Button>
+              <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => handleReview(true)} disabled={signingOff}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Mark Reviewed
+              </Button>
+            </div>
+          )}
+          {isPendingApproval && canApprove && (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setRejectStage("approve"); setRejectReason(""); }} disabled={signingOff}>
+                <X className="h-3.5 w-3.5" /> Reject
+              </Button>
+              <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => handleApprove(true)} disabled={signingOff}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Approve & Reconcile
+              </Button>
+            </div>
+          )}
+          {isPendingApproval && !canApprove && (
+            <span className="text-xs text-muted-foreground">Awaiting final approval</span>
           )}
         </div>
 
@@ -738,6 +824,18 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
             </table>
           </div>
         </Card>
+
+        <Dialog open={rejectStage !== null} onOpenChange={o => { if (!o) { setRejectStage(null); setRejectReason(""); } }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>{rejectStage === "review" ? "Reject at review" : "Reject at final approval"}</DialogTitle></DialogHeader>
+            <p className="text-xs text-muted-foreground">Rejecting leaves stock exactly as it is — nothing counted here was ever applied.</p>
+            <Textarea rows={3} value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Reason for rejection (required)" />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setRejectStage(null); setRejectReason(""); }}>Cancel</Button>
+              <Button variant="destructive" onClick={confirmReject} disabled={signingOff}>Reject</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -745,7 +843,7 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-muted-foreground">Physical stock counts — snapshot system quantity, scan what's actually on the shelf, reconcile the variance.</p>
+        <p className="text-sm text-muted-foreground">Physical stock counts — snapshot system quantity, scan what's actually on the shelf, submit for review, then final approval reconciles the variance.</p>
         {canCreate && (
           <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => setStartOpen(true)}>
             <PlayCircle className="h-3.5 w-3.5" /> Start New Count
@@ -762,7 +860,7 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
               <div key={s.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/30 cursor-pointer" onClick={() => openSession(s.id)}>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{s.branch?.name ?? "—"}</span>
+                    <span className="font-medium text-sm">{s.branch?.name ?? (s.warehouse ? `${s.warehouse.name} (Warehouse)` : "—")}</span>
                     <StBadge status={s.status} />
                     {s.category && <span className="text-xs text-muted-foreground">· {s.category.name}</span>}
                   </div>
@@ -787,11 +885,26 @@ function StockingReviewTab({ branches }: { branches: Branch[] }) {
           <div className="space-y-3">
             {!lockedBranchId && (
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Branch *</Label>
-                <Select value={startBranch} onValueChange={setStartBranch}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
-                  <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <Label className="text-xs text-muted-foreground mb-1 block">Location *</Label>
+                <div className="flex rounded-lg border border-border/60 p-0.5 mb-2 w-fit">
+                  <button type="button"
+                    className={`px-3 py-1 text-xs rounded-md ${startScope === "branch" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                    onClick={() => setStartScope("branch")}>Branch</button>
+                  <button type="button"
+                    className={`px-3 py-1 text-xs rounded-md ${startScope === "warehouse" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                    onClick={() => setStartScope("warehouse")}>Warehouse</button>
+                </div>
+                {startScope === "branch" ? (
+                  <Select value={startBranch} onValueChange={setStartBranch}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+                    <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                ) : (
+                  <Select value={startWarehouse} onValueChange={setStartWarehouse}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
+                    <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
               </div>
             )}
             <div>
@@ -865,8 +978,8 @@ function Stocks() {
 
   const [tab, setTab] = useState("overview");
   const [search, setSearch] = useState("");
-  const [overviewBranch, setOverviewBranch] = useState(lockedBranchId ?? "all");
-  const [categoryFilter, setCategoryFilter] = useState("all"); // stores category ID or "all"
+  const [overviewBranchIds, setOverviewBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [categoryFilterIds, setCategoryFilterIds] = useState<string[]>([]);
   const [allCategoryOptions, setAllCategoryOptions] = useState<{ id: string; name: string }[]>([]);
 
   // Sub-tab filters — passed to BE when tab is active
@@ -889,21 +1002,17 @@ function Stocks() {
   // `.catch(() => [])` used to zero the tiles/list silently as if loaded (86eyag3ny).
   async function fetchOverview() {
     setLoading(true);
-    const sk = await api.getStock({
-      branchId: overviewBranch !== "all" ? overviewBranch : undefined,
-      categoryId: categoryFilter !== "all" ? categoryFilter : undefined,
-    }).catch(() => null);
+    // Fetched unfiltered — Branch/Category are applied client-side (see filteredStock) so both
+    // support multi-select without needing server-side array support on this shared endpoint.
+    const sk = await api.getStock({}).catch(() => null);
     if (sk) {
       setStock(sk);
-      // Rebuild category options from unfiltered load (when no category is active)
-      if (categoryFilter === "all") {
-        const seen = new Map<string, string>();
-        sk.forEach(s => {
-          const c = s.product?.category;
-          if (c?.id && c.name && !seen.has(c.id)) seen.set(c.id, c.name);
-        });
-        setAllCategoryOptions(Array.from(seen.entries()).map(([id, name]) => ({ id, name })));
-      }
+      const seen = new Map<string, string>();
+      sk.forEach(s => {
+        const c = s.product?.category;
+        if (c?.id && c.name && !seen.has(c.id)) seen.set(c.id, c.name);
+      });
+      setAllCategoryOptions(Array.from(seen.entries()).map(([id, name]) => ({ id, name })));
     } else setLoadError(true);
     setLoading(false);
   }
@@ -983,7 +1092,7 @@ function Stocks() {
   // Sync branch filters when user loads (auth hydration after mount)
   useEffect(() => {
     if (lockedBranchId) {
-      setOverviewBranch(lockedBranchId);
+      setOverviewBranchIds([lockedBranchId]);
       setSiBranch(lockedBranchId);
     }
   }, [lockedBranchId]);
@@ -1011,16 +1120,21 @@ function Stocks() {
     else if (tab === "delivery") fetchDeliveries();
     else if (tab === "wastage") fetchDamages();
     else if (tab === "movement") fetchMovement();
-  }, [tab, overviewBranch, categoryFilter, siBranch, siStatus, grnStatus, dlStatus, mvBranch, mvType]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Metrics (from overview stock + pre-fetched expiring count)
-  const totalSKUs = stock.length;
-  const totalUnits = stock.reduce((s, x) => s + x.quantity, 0);
-  const lowStockCount = stock.filter(x => x.quantity <= x.reorderLevel).length;
+  }, [tab, siBranch, siStatus, grnStatus, dlStatus, mvBranch, mvType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = search.toLowerCase();
-  // Category is already BE-filtered; only search filter applied here
-  const filteredStock = stock.filter(s => !q || s.product?.name?.toLowerCase().includes(q));
+  // Branch/Category/search are all applied client-side over the unfiltered fetch (see
+  // fetchOverview) so Branch and Category can both be multi-select.
+  const filteredStock = stock.filter(s =>
+    (!q || s.product?.name?.toLowerCase().includes(q)) &&
+    (overviewBranchIds.length === 0 || overviewBranchIds.includes(s.branchId)) &&
+    (categoryFilterIds.length === 0 || (!!s.product?.category?.id && categoryFilterIds.includes(s.product.category.id)))
+  );
+
+  // Metrics reflect the active Branch/Category filters, not just search.
+  const totalSKUs = filteredStock.length;
+  const totalUnits = filteredStock.reduce((s, x) => s + x.quantity, 0);
+  const lowStockCount = filteredStock.filter(x => x.quantity <= x.reorderLevel).length;
 
   // Sub-tabs: data already fetched from BE with status filter; apply date range FE-side only.
   // The batches endpoint orders by ExpiryDate (FEFO, for the expiry-watch views) — this
@@ -1077,21 +1191,25 @@ function Stocks() {
               <CardTitle className="text-base">Stock Overview</CardTitle>
               <div className="flex items-center gap-2 flex-wrap">
                 {!lockedBranchId && (
-                  <Select value={overviewBranch} onValueChange={setOverviewBranch}>
-                    <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Branches</SelectItem>
-                      {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <div className="w-40">
+                    <SearchableMultiSelect
+                      placeholder="All Branches"
+                      options={branches.map(b => ({ id: b.id, label: b.name }))}
+                      selected={overviewBranchIds}
+                      onChange={setOverviewBranchIds}
+                      className="h-8"
+                    />
+                  </div>
                 )}
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Categories" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {allCategoryOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <div className="w-40">
+                  <SearchableMultiSelect
+                    placeholder="All Categories"
+                    options={allCategoryOptions.map(c => ({ id: c.id, label: c.name }))}
+                    selected={categoryFilterIds}
+                    onChange={setCategoryFilterIds}
+                    className="h-8"
+                  />
+                </div>
                 <Input className="w-52 h-8" placeholder="Search product…" value={search} onChange={e => setSearch(e.target.value)} />
               </div>
             </CardHeader>
@@ -1399,7 +1517,7 @@ function Stocks() {
 
         {/* ── Stocking Review (Stock Filters: live count / reconciliation) ── */}
         <TabsContent value="stocking-review">
-          <StockingReviewTab branches={branches} />
+          <StockingReviewTab branches={branches} warehouses={warehouses} />
         </TabsContent>
 
         {/* ── Reports ── */}

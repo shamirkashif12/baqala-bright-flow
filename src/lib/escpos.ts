@@ -6,6 +6,7 @@ export interface ReceiptData {
   sellerName: string;
   branchName: string;
   vatNumber?: string;
+  crNumber?: string;
   customerName?: string;
   paymentMethod?: string;
   items: { name: string; qty: number; price: number }[];
@@ -65,6 +66,7 @@ export function buildEscPos(r: ReceiptData): Uint8Array {
   text(hdr); lf();
   dblSz(false); bold(false);
   if (r.vatNumber) { text(`VAT: ${r.vatNumber}`); lf(); }
+  if (r.crNumber) { text(`CR: ${r.crNumber}`); lf(); }
   text("TAX INVOICE"); lf();
   left(); div();
 

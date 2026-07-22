@@ -268,6 +268,7 @@ public class PrinterController(IConfiguration config) : ControllerBase
         string SellerName,
         string BranchName,
         string? VatNumber,
+        string? CrNumber,
         string? CustomerName,
         string? PaymentMethod,
         List<ReceiptItem> Items,
@@ -369,6 +370,9 @@ public class PrinterController(IConfiguration config) : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(r.VatNumber))
         { Text($"VAT: {r.VatNumber}"); Lf(); }
+
+        if (!string.IsNullOrWhiteSpace(r.CrNumber))
+        { Text($"CR: {r.CrNumber}"); Lf(); }
 
         Text("TAX INVOICE"); Lf();
         Left();

@@ -26,9 +26,13 @@ function escapeCsvCell(value: unknown): string {
  * server-side. Mirrors the backend CsvWriter's UTF-8-BOM convention so Excel opens Arabic text
  * correctly. Used where a dedicated report/export endpoint (with its own audit logging) isn't
  * warranted — see the HRM Reports pages for that heavier pattern.
+ *
+ * `companyHeader` (from useCompanyHeader()) prepends the same legal name/CR/VAT line the backend
+ * exports carry, separated by a blank row exactly like CsvWriter.Write does server-side.
  */
-export function exportRowsAsCsv(headers: string[], rows: unknown[][], filename: string) {
+export function exportRowsAsCsv(headers: string[], rows: unknown[][], filename: string, companyHeader?: string) {
   const lines = [headers, ...rows].map(row => row.map(escapeCsvCell).join(","));
+  if (companyHeader) lines.unshift(escapeCsvCell(companyHeader), "");
   const csv = "﻿" + lines.join("\r\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   downloadBlob(blob, filename);

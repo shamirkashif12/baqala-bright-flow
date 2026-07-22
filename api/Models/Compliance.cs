@@ -188,3 +188,36 @@ public class ZatcaIdentity
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
+
+// One legal identity for the whole mart, shown on every printed receipt and every exported
+// report/document (legal name, CR/commercial-registration number, VAT number) regardless of which
+// branch generated the document. Singleton row, fixed PK, seeded by migration — same shape as
+// ZatcaIdentity above. Deliberately separate from the per-branch ZatcaSettings/Branch fields:
+// those remain the source of truth for ZATCA-specific compliance (the legally fixed TLV QR spec),
+// while this is the company-wide identity shown to a human reader of a printed document.
+[Table("company_profile")]
+public class CompanyProfile
+{
+    public static readonly Guid SingletonId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+
+    [Key, Column("id")]
+    public Guid Id { get; set; } = SingletonId;
+
+    [MaxLength(500), Column("legal_name")]
+    public string? LegalName { get; set; }
+
+    [MaxLength(50), Column("cr_number")]
+    public string? CrNumber { get; set; }
+
+    [MaxLength(20), Column("vat_number")]
+    public string? VatNumber { get; set; }
+
+    [Column("updated_by")]
+    public Guid? UpdatedBy { get; set; }
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}

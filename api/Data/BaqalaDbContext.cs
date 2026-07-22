@@ -55,6 +55,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
     // Suppliers & Warehouses
     public DbSet<Supplier> Suppliers { get; set; }
+    public DbSet<SupplierDocument> SupplierDocuments { get; set; }
     public DbSet<WarehouseRequest> WarehouseRequests { get; set; }
     public DbSet<WarehouseRequestItem> WarehouseRequestItems { get; set; }
     public DbSet<Warehouse> Warehouses { get; set; }
@@ -83,6 +84,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<ZatcaInvoice> ZatcaInvoices { get; set; }
     public DbSet<ZatcaSettings> ZatcaSettings { get; set; }
     public DbSet<ZatcaIdentity> ZatcaIdentities { get; set; }
+    public DbSet<CompanyProfile> CompanyProfiles { get; set; }
 
     // Rules & Config
     public DbSet<RulesEngine> RulesEngine { get; set; }
@@ -106,6 +108,9 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
     // Audit
     public DbSet<AuditLog> AuditLogs { get; set; }
+
+    // Approval Center — generic maker-checker queue for discounts/cancellations/deletions
+    public DbSet<ApprovalRequest> ApprovalRequests { get; set; }
 
     // Notifications
     public DbSet<Notification> Notifications { get; set; }
@@ -156,6 +161,14 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
         modelBuilder.Entity<ZatcaIdentity>().HasData(new ZatcaIdentity
         {
             Id = ZatcaIdentity.SingletonId,
+            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        });
+
+        // Singleton row: one company-wide legal identity shown on every print/export.
+        modelBuilder.Entity<CompanyProfile>().HasData(new CompanyProfile
+        {
+            Id = CompanyProfile.SingletonId,
             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
         });
@@ -221,6 +234,44 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasOne(a => a.ApprovedByUser)
             .WithMany()
             .HasForeignKey(a => a.ApprovedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── ApprovalRequest: requested_by / approved_by ─────────────────────
+        modelBuilder.Entity<ApprovalRequest>()
+            .HasOne(a => a.RequestedByUser)
+            .WithMany()
+            .HasForeignKey(a => a.RequestedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ApprovalRequest>()
+            .HasOne(a => a.ApprovedByUser)
+            .WithMany()
+            .HasForeignKey(a => a.ApprovedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── StockCount: four User FKs (started/completed/reviewed/approved) ─
+        modelBuilder.Entity<StockCount>()
+            .HasOne(c => c.StartedByUser)
+            .WithMany()
+            .HasForeignKey(c => c.StartedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockCount>()
+            .HasOne(c => c.CompletedByUser)
+            .WithMany()
+            .HasForeignKey(c => c.CompletedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockCount>()
+            .HasOne(c => c.ReviewedByUser)
+            .WithMany()
+            .HasForeignKey(c => c.ReviewedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<StockCount>()
+            .HasOne(c => c.ApprovedByUser)
+            .WithMany()
+            .HasForeignKey(c => c.ApprovedBy)
             .OnDelete(DeleteBehavior.Restrict);
 
         // ─── ProductRecall: two User FKs + optional batch/branch/supplier ────
@@ -340,6 +391,12 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasOne(po => po.CreatedByUser)
             .WithMany()
             .HasForeignKey(po => po.CreatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PurchaseOrder>()
+            .HasOne(po => po.ReceivedByUser)
+            .WithMany()
+            .HasForeignKey(po => po.ReceivedBy)
             .OnDelete(DeleteBehavior.Restrict);
 
         // ─── SupplierPayment: User FK ─────────────────────────────────────────
@@ -569,6 +626,19 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasOne(l => l.Approver)
             .WithMany()
             .HasForeignKey(l => l.ApproverId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── SupplierDocument: Supplier/UploadedBy FKs ───────────────────────
+        modelBuilder.Entity<SupplierDocument>()
+            .HasOne(d => d.Supplier)
+            .WithMany(s => s.Documents)
+            .HasForeignKey(d => d.SupplierId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<SupplierDocument>()
+            .HasOne(d => d.UploadedByUser)
+            .WithMany()
+            .HasForeignKey(d => d.UploadedBy)
             .OnDelete(DeleteBehavior.Restrict);
 
         // ─── EmployeeDocument: Employee/UploadedBy FKs ───────────────────────
