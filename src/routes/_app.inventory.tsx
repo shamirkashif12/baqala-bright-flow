@@ -891,9 +891,10 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     setDeletingProduct(true);
     try {
       const res = await api.deleteProduct(item.product.id);
-      // A manager (holds Inventory:Approve) discontinues immediately — empty response. Anyone
-      // else's request is queued instead (see ProductsController.Delete), and the product stays
-      // live until a manager decides it in the Approval Center.
+      // No self-approve bypass for product deletion (unlike Discounts/Refunds/Void) — every
+      // request queues in the Approval Center and always needs a second person's decision, even
+      // from a manager. res.approvalRequestId is always present; kept as a guard rather than an
+      // assumption in case that ever changes.
       toast.success(res?.approvalRequestId ? "Deletion request sent for manager approval." : "Product deleted.");
       setConfirmDelete(false);
       onDone(); onClose();
@@ -1109,8 +1110,8 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
             <p>
               Delete <span className="font-medium">{item?.product?.name ?? "this product"}</span>?
               This discontinues it everywhere — across every branch, not just this one — and it will
-              no longer be sellable. If you don't have manager approval rights, this will be sent
-              for approval instead of taking effect right away.
+              no longer be sellable. This always goes to a manager for approval first — even you
+              can't action your own request — and only takes effect once approved.
             </p>
           </div>
           <div className="flex justify-end gap-2 mt-1">

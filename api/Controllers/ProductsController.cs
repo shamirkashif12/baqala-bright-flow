@@ -175,9 +175,11 @@ public class ProductsController(
         return Ok(product);
     }
 
-    // A caller with Inventory:Approve (i.e. already a manager) deletes immediately (self-approve,
-    // same precedent as the Wastage/InventoryAdjustment flow). Anyone else's delete request is
-    // queued in the Approval Center instead — the product stays live until decided.
+    // No self-approve bypass, even for a caller who holds Inventory:Approve — every product
+    // deletion queues in the Approval Center and always needs a second person's decision (the
+    // Approval Center UI itself already blocks approving your own request). This is deliberately
+    // stricter than Discounts/Refunds/Order Cancellation, which do let a manager act on their own
+    // request immediately.
     [RequirePermission("Inventory", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
@@ -185,25 +187,16 @@ public class ProductsController(
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
 
-        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Inventory", PermAction.Approve);
-        if (!canSelfApprove)
+        var pending = new ApprovalRequest
         {
-            var pending = new ApprovalRequest
-            {
-                RequestType = "item_deletion",
-                EntityType = "Product",
-                EntityId = product.Id,
-                RequestedBy = CallerId() ?? Guid.Empty,
-            };
-            db.ApprovalRequests.Add(pending);
-            await db.SaveChangesAsync();
-            return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
-        }
-
-        // "Deleted Items" in the Employee Audit Center. Note this is a soft delete (status flips to
-        // discontinued), so the before/after reads as a status change rather than a vanished row.
-        await productDeletion.DeleteProductAsync(id, CallerId());
-        return NoContent();
+            RequestType = "item_deletion",
+            EntityType = "Product",
+            EntityId = product.Id,
+            RequestedBy = CallerId() ?? Guid.Empty,
+        };
+        db.ApprovalRequests.Add(pending);
+        await db.SaveChangesAsync();
+        return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
     }
 
     // ─── Categories ──────────────────────────────────────────────────────────
@@ -239,6 +232,8 @@ public class ProductsController(
         return Ok(category);
     }
 
+    // No self-approve bypass — same reasoning as Delete above, category deletion is the same
+    // "item_deletion" request type and gets the same no-exceptions treatment.
     [RequirePermission("Inventory", PermAction.Delete)]
     [HttpDelete("/api/categories/{id:guid}")]
     public async Task<IActionResult> DeleteCategory(Guid id)
@@ -246,23 +241,16 @@ public class ProductsController(
         var category = await db.Categories.FindAsync(id);
         if (category is null) return NotFound();
 
-        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Inventory", PermAction.Approve);
-        if (!canSelfApprove)
+        var pending = new ApprovalRequest
         {
-            var pending = new ApprovalRequest
-            {
-                RequestType = "item_deletion",
-                EntityType = "Category",
-                EntityId = category.Id,
-                RequestedBy = CallerId() ?? Guid.Empty,
-            };
-            db.ApprovalRequests.Add(pending);
-            await db.SaveChangesAsync();
-            return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
-        }
-
-        await productDeletion.DeleteCategoryAsync(id, CallerId());
-        return NoContent();
+            RequestType = "item_deletion",
+            EntityType = "Category",
+            EntityId = category.Id,
+            RequestedBy = CallerId() ?? Guid.Empty,
+        };
+        db.ApprovalRequests.Add(pending);
+        await db.SaveChangesAsync();
+        return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
     }
 
     // ─── Product Variants ────────────────────────────────────────────────────
