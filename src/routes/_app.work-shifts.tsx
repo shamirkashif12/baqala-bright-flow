@@ -20,6 +20,7 @@ import { usePermission } from "@/lib/use-permission";
 import { exportRowsAsCsv } from "@/lib/csv-export";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { localDateStr } from "@/lib/utils";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 
 export const Route = createFileRoute("/_app/work-shifts")({ component: WorkShifts });
 
@@ -163,10 +164,10 @@ function WorkShiftsTab() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [departmentFilter, setDepartmentFilter] = useState("all");
-  const [employeeFilter, setEmployeeFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
+  const [employeeFilter, setEmployeeFilter] = useState<string[]>([]);
   const [workingDayFilter, setWorkingDayFilter] = useState("all");
   const [effectiveDateFilter, setEffectiveDateFilter] = useState("");
   const [employeeShiftIds, setEmployeeShiftIds] = useState<string[] | null>(null);
@@ -184,7 +185,7 @@ function WorkShiftsTab() {
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
     api.getDepartments({ status: "active" }).then(setDepartments).catch(() => {});
-    api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
     api.getWorkShiftAssignments({ status: "active" }).then(setAssignments).catch(() => {});
   };
   useEffect(load, []);
@@ -192,9 +193,9 @@ function WorkShiftsTab() {
   // FRD 13.2 Employee filter — no "which shifts is employee X assigned to" list endpoint exists,
   // so this reuses the employee's own shift-history endpoint and filters the shift list to it.
   useEffect(() => {
-    if (employeeFilter === "all") { setEmployeeShiftIds(null); return; }
-    api.getEmployeeShiftHistory(employeeFilter)
-      .then(history => setEmployeeShiftIds(history.filter(a => a.status === "active").map(a => a.shiftId)))
+    if (employeeFilter.length === 0) { setEmployeeShiftIds(null); return; }
+    Promise.all(employeeFilter.map(id => api.getEmployeeShiftHistory(id).catch(() => [])))
+      .then(histories => setEmployeeShiftIds(histories.flat().filter(a => a.status === "active").map(a => a.shiftId)))
       .catch(() => setEmployeeShiftIds([]));
   }, [employeeFilter]);
 
@@ -282,9 +283,9 @@ function WorkShiftsTab() {
     : null;
 
   const filtered = shifts.filter(s => {
-    const mb = branchFilter === "all" || s.branchId === branchFilter;
-    const ms = statusFilter === "all" || s.status === statusFilter;
-    const md = departmentFilter === "all" || s.departmentId === departmentFilter;
+    const mb = branchFilter.length === 0 || branchFilter.includes(s.branchId ?? "");
+    const ms = statusFilter.length === 0 || statusFilter.includes(s.status);
+    const md = departmentFilter.length === 0 || departmentFilter.includes(s.departmentId ?? "");
     const me = employeeShiftIds === null || employeeShiftIds.includes(s.id);
     const mw = workingDayFilter === "all" || s.workingDays.split(",").includes(workingDayFilter);
     const md2 = shiftIdsEffectiveOnDate === null || shiftIdsEffectiveOnDate.has(s.id);
@@ -304,39 +305,42 @@ function WorkShiftsTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         {!branchLocked && canViewAll && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[{ id: "active", label: "Active" }, { id: "inactive", label: "Inactive" }]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         {canViewAll && (
-          <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Departments"
+              options={departments.map(d => ({ id: d.id, label: d.name }))}
+              selected={departmentFilter}
+              onChange={setDepartmentFilter}
+            />
+          </div>
         )}
         {canViewAll && (
-          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Employees"
+              options={employees.map(e => ({ id: e.id, label: e.fullName }))}
+              selected={employeeFilter}
+              onChange={setEmployeeFilter}
+            />
+          </div>
         )}
         <Select value={workingDayFilter} onValueChange={setWorkingDayFilter}>
           <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>

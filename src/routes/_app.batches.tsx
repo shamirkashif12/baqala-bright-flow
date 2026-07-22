@@ -21,6 +21,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge as StatusBadge } from "@/components/batch-status-badge";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { toast } from "sonner";
 
@@ -338,11 +339,11 @@ function Batches() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
-  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
-  const [warehouseFilter, setWarehouseFilter] = useState("all");
-  // This page only ever shows the wastage watch-list (near-expiry + expired) — "all" here means
+  const [branchFilter, setBranchFilter] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [warehouseFilter, setWarehouseFilter] = useState<string[]>([]);
+  // This page only ever shows the wastage watch-list (near-expiry + expired) — empty here means
   // "both of those", not every status. Active/consumed batches belong on the Inventory page.
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
 
@@ -391,9 +392,9 @@ function Batches() {
     setLoading(true);
     try {
       const data = await api.getBatches({
-        branchId: lockedBranchId ?? (branchFilter !== "all" ? branchFilter : undefined),
-        warehouseId: warehouseFilter !== "all" ? warehouseFilter : undefined,
-        status: statusFilter !== "all" ? statusFilter : undefined,
+        branchId: lockedBranchId ? [lockedBranchId] : (branchFilter.length ? branchFilter : undefined),
+        warehouseId: warehouseFilter.length ? warehouseFilter : undefined,
+        status: statusFilter.length ? statusFilter : undefined,
       });
       setBatches((data ?? []).filter(b => b.status === "near_expiry" || b.status === "expired"));
       setLoadError(false);
@@ -412,7 +413,7 @@ function Batches() {
 
   // Branch-scoped roles can't be switched away from their own branch
   useEffect(() => {
-    if (lockedBranchId) setBranchFilter(lockedBranchId);
+    if (lockedBranchId) setBranchFilter([lockedBranchId]);
   }, [lockedBranchId]);
 
   // Re-fetch batches from BE whenever a filter changes
@@ -447,8 +448,8 @@ function Batches() {
   const q = search.toLowerCase();
   const filtered = batches.filter(b => {
     const mq = !q || b.product?.name?.toLowerCase().includes(q) || b.product?.sku?.toLowerCase().includes(q) || b.batchNumber.toLowerCase().includes(q);
-    const mbr = lockedBranchId ? b.branchId === lockedBranchId : (branchFilter === "all" || b.branchId === branchFilter);
-    const mwh = warehouseFilter === "all" || b.warehouseId === warehouseFilter;
+    const mbr = lockedBranchId ? b.branchId === lockedBranchId : (branchFilter.length === 0 || branchFilter.includes(b.branchId ?? ""));
+    const mwh = warehouseFilter.length === 0 || warehouseFilter.includes(b.warehouseId ?? "");
     const mef = !expiryFrom || (!!b.expiryDate && b.expiryDate >= expiryFrom);
     const met = !expiryTo || (!!b.expiryDate && b.expiryDate <= expiryTo + "T23:59:59");
     return mq && mbr && mwh && mef && met;
@@ -482,31 +483,36 @@ function Batches() {
           <Input placeholder="Search batch / lot / product…" className="h-9 bg-card" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         {!lockedBranchId && (
-          <Select value={branchFilter} onValueChange={v => { setBranchFilter(v); if (v !== "all") setWarehouseFilter("all"); }}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={v => { setBranchFilter(v); if (v.length) setWarehouseFilter([]); }}
+            />
+          </div>
         )}
         {!lockedBranchId && (
-          <Select value={warehouseFilter} onValueChange={v => { setWarehouseFilter(v); if (v !== "all") setBranchFilter("all"); }}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Warehouses" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Warehouses</SelectItem>
-              {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Warehouses"
+              options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+              selected={warehouseFilter}
+              onChange={v => { setWarehouseFilter(v); if (v.length) setBranchFilter([]); }}
+            />
+          </div>
         )}
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Near Expiry + Expired" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Near Expiry + Expired</SelectItem>
-            <SelectItem value="near_expiry">Near Expiry Only</SelectItem>
-            <SelectItem value="expired">Expired Only</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="Near Expiry + Expired"
+            options={[
+              { id: "near_expiry", label: "Near Expiry Only" },
+              { id: "expired", label: "Expired Only" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
           <Input type="date" className="h-9 w-36" value={expiryFrom} onChange={e => setExpiryFrom(e.target.value)} title="Expiry from" />

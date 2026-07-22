@@ -60,11 +60,11 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
     [RequirePermission("HR Attendance", PermAction.View)]
     [HttpGet]
     public async Task<IActionResult> GetAll(
-        [FromQuery] Guid? branchId,
-        [FromQuery] Guid? departmentId,
-        [FromQuery] Guid? employeeId,
-        [FromQuery] Guid? shiftId,
-        [FromQuery] string? status,
+        [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? departmentId,
+        [FromQuery] Guid[]? employeeId,
+        [FromQuery] Guid[]? shiftId,
+        [FromQuery] string[]? status,
         [FromQuery] DateOnly? dateFrom,
         [FromQuery] DateOnly? dateTo,
         [FromQuery] string? correctionStatus,
@@ -73,7 +73,7 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
     {
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
-            branchId = callerBranchId;
+            branchId = [callerBranchId.Value];
 
         var query = db.StaffAttendances
             .Include(a => a.Employee).ThenInclude(e => e!.Department)
@@ -82,29 +82,45 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
             .Where(a => a.EmployeeId != null)
             .AsQueryable();
 
-        if (!await HasElevatedAccessAsync())
+        var hasElevatedAccess = await HasElevatedAccessAsync();
+        if (!hasElevatedAccess)
         {
             var ownEmployeeId = await GetOwnEmployeeIdAsync(CallerId());
             query = ownEmployeeId.HasValue ? query.Where(a => a.EmployeeId == ownEmployeeId) : query.Where(a => false);
         }
-        else if (employeeId.HasValue) query = query.Where(a => a.EmployeeId == employeeId);
 
-        if (branchId.HasValue) query = query.Where(a => a.BranchId == branchId);
-        if (departmentId.HasValue) query = query.Where(a => a.Employee!.DepartmentId == departmentId);
-        if (shiftId.HasValue) query = query.Where(a => a.ShiftId == shiftId);
-        if (!string.IsNullOrEmpty(status)) query = query.Where(a => a.Status == status);
+        // branchId/departmentId/employeeId/shiftId/status are arrays now (multi-select filters) —
+        // never `.Contains()` a Guid[]/string[] directly against a DbSet-backed IQueryable on this
+        // repo's MySQL provider (see the ef-mysql-inlist-gotcha memory: throws at execution time on
+        // 2+ values despite compiling and passing a single-value smoke test). Only the date-range/
+        // correction-status filters run in SQL below; the array filters are applied in-memory after
+        // materializing.
         if (dateFrom.HasValue) query = query.Where(a => a.Date >= dateFrom);
         if (dateTo.HasValue) query = query.Where(a => a.Date <= dateTo);
         if (correctionStatus == "corrected") query = query.Where(a => a.IsCorrected);
         else if (correctionStatus == "original") query = query.Where(a => !a.IsCorrected);
 
         query = query.OrderByDescending(a => a.Date);
-        var totalCount = await query.CountAsync();
+        var all = await query.ToListAsync();
+
+        IEnumerable<StaffAttendance> scoped = all;
+        // employeeId filter only applies for elevated (view-all) access — a non-elevated caller is
+        // already scoped to their own single employee above, same as the original single-value logic.
+        if (hasElevatedAccess && employeeId is { Length: > 0 })
+            scoped = scoped.Where(a => a.EmployeeId.HasValue && employeeId.Contains(a.EmployeeId.Value));
+        if (branchId is { Length: > 0 }) scoped = scoped.Where(a => branchId.Contains(a.BranchId));
+        if (departmentId is { Length: > 0 })
+            scoped = scoped.Where(a => a.Employee != null && a.Employee.DepartmentId.HasValue && departmentId.Contains(a.Employee.DepartmentId.Value));
+        if (shiftId is { Length: > 0 }) scoped = scoped.Where(a => a.ShiftId.HasValue && shiftId.Contains(a.ShiftId.Value));
+        if (status is { Length: > 0 }) scoped = scoped.Where(a => status.Contains(a.Status));
+
+        var filtered = scoped.ToList();
+        var totalCount = filtered.Count;
         var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
         var effectivePage = page is > 0 ? page.Value : 1;
         var rows = page.HasValue || pageSize.HasValue
-            ? await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync()
-            : await query.ToListAsync();
+            ? filtered.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToList()
+            : filtered;
 
         AttendanceStatusHelper.ApplyDerivedStatus(rows, await LoadActiveHolidaysAsync());
 

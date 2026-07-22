@@ -50,14 +50,14 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
     [HttpGet]
     public async Task<IActionResult> GetAll(
-        [FromQuery] Guid? branchId,
-        [FromQuery] string? status,
-        [FromQuery] string? paymentStatus,
+        [FromQuery] Guid[]? branchId,
+        [FromQuery] string[]? status,
+        [FromQuery] string[]? paymentStatus,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
-        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = [callerBranchId.Value];
 
         var query = db.Orders
             .Include(o => o.Branch)
@@ -65,9 +65,11 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             .Include(o => o.Payments)
             .Include(o => o.Items)
             .AsQueryable();
-        if (branchId.HasValue) query = query.Where(o => o.BranchId == branchId);
-        if (!string.IsNullOrEmpty(status)) query = query.Where(o => o.OrderStatus == status);
-        if (!string.IsNullOrEmpty(paymentStatus)) query = query.Where(o => o.PaymentStatus == paymentStatus);
+        // Branch/status/paymentStatus are arrays — never `.Contains()` a Guid[]/string[] directly
+        // against a DbSet-backed IQueryable on this repo's MySQL provider (see the
+        // ef-mysql-inlist-gotcha memory: it throws at execution time on 2+ values despite compiling
+        // and passing a single-value smoke test). Only the date-range filters run in SQL below; the
+        // array filters are applied in-memory after materializing.
         if (from.HasValue) query = query.Where(o => o.CreatedAt >= from);
         if (to.HasValue) query = query.Where(o => o.CreatedAt <= to);
 
@@ -77,7 +79,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // fields) once their CURRENT branch differs from the caller's own; tenant_admin still
         // sees everyone, matching every other cross-branch exemption in this controller.
         var isAdmin = callerRole == "tenant_admin";
-        var orders = await query.OrderByDescending(o => o.CreatedAt).Take(200)
+        var allOrders = await query.OrderByDescending(o => o.CreatedAt)
             .Select(o => new
             {
                 o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
@@ -93,6 +95,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 ServiceCharges = o.ServiceCharges.Select(s => new { s.Id, s.TaxFeeRuleId, s.Name, s.Amount }),
             })
             .ToListAsync();
+
+        var scoped = allOrders.AsEnumerable();
+        if (branchId is { Length: > 0 }) scoped = scoped.Where(o => branchId.Contains(o.BranchId));
+        if (status is { Length: > 0 }) scoped = scoped.Where(o => status.Contains(o.OrderStatus));
+        if (paymentStatus is { Length: > 0 }) scoped = scoped.Where(o => paymentStatus.Contains(o.PaymentStatus));
+        var orders = scoped.Take(200).ToList();
         return Ok(orders);
     }
 

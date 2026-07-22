@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/module-placeholder";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Plus, Receipt, Tags, CheckCircle, XCircle, X, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Expense, type ExpenseType, type Branch } from "@/lib/api";
@@ -49,7 +50,7 @@ function EntriesTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [branchFilter, setBranchFilter] = useState(lockedBranchId ?? "all");
+  const [branchFilter, setBranchFilter] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
   const [typeFilter, setTypeFilter] = useState("all");
   const [methodFilter, setMethodFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -61,7 +62,7 @@ function EntriesTab() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (lockedBranchId) setBranchFilter(lockedBranchId);
+    if (lockedBranchId) setBranchFilter([lockedBranchId]);
   }, [lockedBranchId]);
 
   useEffect(() => {
@@ -72,7 +73,7 @@ function EntriesTab() {
   const load = useCallback(() => {
     setLoading(true);
     api.getExpenses({
-      branchId: branchFilter !== "all" ? branchFilter : undefined,
+      branchId: branchFilter.length ? branchFilter : undefined,
       paymentMethod: methodFilter !== "all" ? methodFilter.toLowerCase().replace(" ", "_") : undefined,
       expenseTypeId: typeFilter !== "all" ? typeFilter : undefined,
     })
@@ -171,13 +172,14 @@ function EntriesTab() {
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search ref or description…" className="h-9 w-52 flex-shrink-0" />
         {!lockedBranchId && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Types" /></SelectTrigger>

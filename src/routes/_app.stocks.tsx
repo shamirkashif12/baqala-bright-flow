@@ -425,7 +425,7 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
 
   useEffect(() => {
     if (!form.productId || !form.branchId) { setBatches([]); return; }
-    api.getBatches({ productId: form.productId, branchId: form.branchId }).then(setBatches).catch(() => setBatches([]));
+    api.getBatches({ productId: form.productId, branchId: [form.branchId] }).then(setBatches).catch(() => setBatches([]));
   }, [form.productId, form.branchId]);
   const eligibleBatches = batches.filter(b => b.status !== "expired").sort((a, b) => (a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity) - (b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity));
 
@@ -983,11 +983,11 @@ function Stocks() {
   const [allCategoryOptions, setAllCategoryOptions] = useState<{ id: string; name: string }[]>([]);
 
   // Sub-tab filters — passed to BE when tab is active
-  const [siBranch, setSiBranch] = useState(lockedBranchId ?? "all");
-  const [siStatus, setSiStatus] = useState("all");
-  const [grnStatus, setGrnStatus] = useState("all");
-  const [dlStatus, setDlStatus] = useState("all");
-  const [mvBranch, setMvBranch] = useState(lockedBranchId ?? "all");
+  const [siBranch, setSiBranch] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [siStatus, setSiStatus] = useState<string[]>([]);
+  const [grnStatus, setGrnStatus] = useState<string[]>([]);
+  const [dlStatus, setDlStatus] = useState<string[]>([]);
+  const [mvBranch, setMvBranch] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
   const [mvType, setMvType] = useState("all");
 
   // Per-tab date filters (FE-side since BE doesn't expose date range params)
@@ -1020,8 +1020,8 @@ function Stocks() {
   async function fetchBatches() {
     setTabLoading(true);
     const bt = await api.getBatches({
-      branchId: siBranch !== "all" ? siBranch : undefined,
-      status: siStatus !== "all" ? siStatus : undefined,
+      branchId: siBranch.length ? siBranch : undefined,
+      status: siStatus.length ? siStatus : undefined,
     }).catch(() => null);
     if (bt) setBatches(bt); else setLoadError(true);
     setTabLoading(false);
@@ -1046,7 +1046,7 @@ function Stocks() {
   async function fetchPOs() {
     setTabLoading(true);
     const po = await api.getPurchaseOrders({
-      status: grnStatus !== "all" ? grnStatus : undefined,
+      status: grnStatus.length ? grnStatus : undefined,
     }).catch(() => null);
     if (po) setPurchaseOrders(po); else setLoadError(true);
     setTabLoading(false);
@@ -1056,7 +1056,7 @@ function Stocks() {
     setTabLoading(true);
     const dl = await api.getStockTransfers({
       transferType: "warehouse_to_branch",
-      status: dlStatus !== "all" ? dlStatus : undefined,
+      status: dlStatus.length ? dlStatus : undefined,
     }).catch(() => null);
     if (dl) setDeliveries(dl); else setLoadError(true);
     setTabLoading(false);
@@ -1065,7 +1065,7 @@ function Stocks() {
   async function fetchMovement() {
     setTabLoading(true);
     const mv = await api.getStockMovements({
-      branchId: mvBranch !== "all" ? mvBranch : undefined,
+      branchId: mvBranch.length ? mvBranch : undefined,
       movementType: mvType !== "all" ? mvType : undefined,
       limit: 500,
     }).catch(() => null);
@@ -1093,7 +1093,7 @@ function Stocks() {
   useEffect(() => {
     if (lockedBranchId) {
       setOverviewBranchIds([lockedBranchId]);
-      setSiBranch(lockedBranchId);
+      setSiBranch([lockedBranchId]);
     }
   }, [lockedBranchId]);
 
@@ -1264,23 +1264,27 @@ function Stocks() {
               <CardTitle className="text-base">Stock-In Records</CardTitle>
               <div className="flex items-center gap-2 flex-wrap">
                 {!lockedBranchId && (
-                  <Select value={siBranch} onValueChange={setSiBranch}>
-                    <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Branch" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Branches</SelectItem>
-                      {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <div className="w-36">
+                    <SearchableMultiSelect
+                      placeholder="Branch"
+                      options={branches.map(b => ({ id: b.id, label: b.name }))}
+                      selected={siBranch}
+                      onChange={setSiBranch}
+                    />
+                  </div>
                 )}
-                <Select value={siStatus} onValueChange={setSiStatus}>
-                  <SelectTrigger className="h-8 w-32"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="depleted">Depleted</SelectItem>
-                    <SelectItem value="expired">Expired</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="w-32">
+                  <SearchableMultiSelect
+                    placeholder="Status"
+                    options={[
+                      { id: "active", label: "Active" },
+                      { id: "depleted", label: "Depleted" },
+                      { id: "expired", label: "Expired" },
+                    ]}
+                    selected={siStatus}
+                    onChange={setSiStatus}
+                  />
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -1344,16 +1348,19 @@ function Stocks() {
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Goods Received Notes</CardTitle>
               <div className="flex items-center gap-2 flex-wrap">
-                <Select value={grnStatus} onValueChange={setGrnStatus}>
-                  <SelectTrigger className="h-8 w-40"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="partial_received">Partial</SelectItem>
-                    <SelectItem value="fully_received">Fully Received</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="w-40">
+                  <SearchableMultiSelect
+                    placeholder="Status"
+                    options={[
+                      { id: "pending", label: "Pending" },
+                      { id: "partial_received", label: "Partial" },
+                      { id: "fully_received", label: "Fully Received" },
+                      { id: "cancelled", label: "Cancelled" },
+                    ]}
+                    selected={grnStatus}
+                    onChange={setGrnStatus}
+                  />
+                </div>
                 <Input type="date" className="h-8 w-36 text-xs" value={grnDateFrom} onChange={e => setGrnDateFrom(e.target.value)} title="From" />
                 <Input type="date" className="h-8 w-36 text-xs" value={grnDateTo} onChange={e => setGrnDateTo(e.target.value)} title="To" />
               </div>
@@ -1407,16 +1414,19 @@ function Stocks() {
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Store Deliveries</CardTitle>
               <div className="flex items-center gap-2">
-                <Select value={dlStatus} onValueChange={setDlStatus}>
-                  <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="confirmed">Confirmed</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="w-36">
+                  <SearchableMultiSelect
+                    placeholder="Status"
+                    options={[
+                      { id: "pending", label: "Pending" },
+                      { id: "confirmed", label: "Confirmed" },
+                      { id: "completed", label: "Completed" },
+                      { id: "cancelled", label: "Cancelled" },
+                    ]}
+                    selected={dlStatus}
+                    onChange={setDlStatus}
+                  />
+                </div>
                 <Input type="date" className="h-8 w-36 text-xs" value={dlDateFrom} onChange={e => setDlDateFrom(e.target.value)} title="From" />
                 <Input type="date" className="h-8 w-36 text-xs" value={dlDateTo} onChange={e => setDlDateTo(e.target.value)} title="To" />
               </div>
@@ -1447,13 +1457,14 @@ function Stocks() {
               <CardTitle className="text-base">Stock Movement Timeline</CardTitle>
               <div className="flex items-center gap-2 flex-wrap">
                 {!lockedBranchId && (
-                  <Select value={mvBranch} onValueChange={setMvBranch}>
-                    <SelectTrigger className="h-8 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Branches</SelectItem>
-                      {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <div className="w-40">
+                    <SearchableMultiSelect
+                      placeholder="All Branches"
+                      options={branches.map(b => ({ id: b.id, label: b.name }))}
+                      selected={mvBranch}
+                      onChange={setMvBranch}
+                    />
+                  </div>
                 )}
                 <Select value={mvType} onValueChange={setMvType}>
                   <SelectTrigger className="h-8 w-52"><SelectValue placeholder="All Movement Types" /></SelectTrigger>

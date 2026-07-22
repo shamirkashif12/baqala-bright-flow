@@ -22,6 +22,7 @@ import { localDateStr } from "@/lib/utils";
 import { exportRowsAsCsv } from "@/lib/csv-export";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { fileToDataUrl } from "@/lib/image";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 
 export const Route = createFileRoute("/_app/leaves")({ component: Leaves });
 
@@ -122,11 +123,11 @@ function LeavesTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState("all");
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [departmentFilter, setDepartmentFilter] = useState("all");
-  const [approverFilter, setApproverFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
+  const [approverFilter, setApproverFilter] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -146,7 +147,7 @@ function LeavesTab() {
   useEffect(load, []);
   useEffect(() => {
     api.getLeaveTypes({ status: "active" }).then(setLeaveTypes).catch(() => {});
-    api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
     api.getDepartments({ status: "active" }).then(setDepartments).catch(() => {});
   }, []);
 
@@ -202,12 +203,13 @@ function LeavesTab() {
   };
 
   const filtered = leaves.filter(l => {
-    const ms = statusFilter === "all" || l.status === statusFilter;
+    const ms = statusFilter.length === 0 || statusFilter.includes(l.status);
     const mt = typeFilter === "all" || l.leaveTypeId === typeFilter;
-    const effectiveBranch = branchLocked ? user?.branchId : (branchFilter === "all" ? undefined : branchFilter);
-    const mb = !effectiveBranch || l.employee?.branchId === effectiveBranch;
-    const md = departmentFilter === "all" || l.employee?.departmentId === departmentFilter;
-    const mapprover = approverFilter === "all" || l.approverId === approverFilter;
+    const mb = branchLocked
+      ? l.employee?.branchId === user?.branchId
+      : (branchFilter.length === 0 || (l.employee?.branchId != null && branchFilter.includes(l.employee.branchId)));
+    const md = departmentFilter.length === 0 || (l.employee?.departmentId != null && departmentFilter.includes(l.employee.departmentId));
+    const mapprover = approverFilter.length === 0 || (l.approverId != null && approverFilter.includes(l.approverId));
     const mq = !q || l.employee?.fullName.toLowerCase().includes(q.toLowerCase()) || l.employee?.employeeCode.toLowerCase().includes(q.toLowerCase());
     const mdate = (!dateFrom || l.toDate >= dateFrom) && (!dateTo || l.fromDate <= dateTo);
     return ms && mt && mb && md && mapprover && mq && mdate;
@@ -231,31 +233,34 @@ function LeavesTab() {
         <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} placeholder="From" className="h-9 w-36" />
         <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} placeholder="To" className="h-9 w-36" />
         {!branchLocked && canViewAll && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
         {canViewAll && (
-          <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Departments"
+              options={departments.map(d => ({ id: d.id, label: d.name }))}
+              selected={departmentFilter}
+              onChange={setDepartmentFilter}
+            />
+          </div>
         )}
         {canViewAll && (
-          <Select value={approverFilter} onValueChange={setApproverFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Approvers</SelectItem>
-              {approvers.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Approvers"
+              options={approvers.map(a => ({ id: a.id, label: a.fullName }))}
+              selected={approverFilter}
+              onChange={setApproverFilter}
+            />
+          </div>
         )}
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
@@ -264,16 +269,19 @@ function LeavesTab() {
             {leaveTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[
+              { id: "pending", label: "Pending" },
+              { id: "approved", label: "Approved" },
+              { id: "rejected", label: "Rejected" },
+              { id: "cancelled", label: "Cancelled" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export
@@ -363,23 +371,25 @@ function LeaveCalendarTab() {
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
   const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); return d; });
 
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [departmentFilter, setDepartmentFilter] = useState("all");
-  const [employeeFilter, setEmployeeFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
+  const [employeeFilter, setEmployeeFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState("all");
 
   useEffect(() => {
     api.getLeaves({ status: undefined }).then(l => setLeaves(l.filter(x => x.status === "approved" || x.status === "pending"))).catch(() => {});
-    api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
     api.getDepartments({ status: "active" }).then(setDepartments).catch(() => {});
     api.getLeaveTypes({ status: "active" }).then(setLeaveTypes).catch(() => {});
   }, []);
 
   const filtered = leaves.filter(l => {
     const emp = employees.find(e => e.id === l.employeeId);
-    const mb = branchLocked ? emp?.branchId === user?.branchId : (branchFilter === "all" || emp?.branchId === branchFilter);
-    const md = departmentFilter === "all" || emp?.departmentId === departmentFilter;
-    const me = employeeFilter === "all" || l.employeeId === employeeFilter;
+    const mb = branchLocked
+      ? emp?.branchId === user?.branchId
+      : (branchFilter.length === 0 || (emp?.branchId != null && branchFilter.includes(emp.branchId)));
+    const md = departmentFilter.length === 0 || (emp?.departmentId != null && departmentFilter.includes(emp.departmentId));
+    const me = employeeFilter.length === 0 || employeeFilter.includes(l.employeeId);
     const mt = typeFilter === "all" || l.leaveTypeId === typeFilter;
     return mb && md && me && mt;
   });
@@ -402,19 +412,31 @@ function LeaveCalendarTab() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         {!branchLocked && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="all">All Branches</SelectItem>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
-        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="all">All Departments</SelectItem>{departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
-        </Select>
-        <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="all">All Employees</SelectItem>{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}</SelectContent>
-        </Select>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Departments"
+            options={departments.map(d => ({ id: d.id, label: d.name }))}
+            selected={departmentFilter}
+            onChange={setDepartmentFilter}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Employees"
+            options={employees.map(e => ({ id: e.id, label: e.fullName }))}
+            selected={employeeFilter}
+            onChange={setEmployeeFilter}
+          />
+        </div>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All Types</SelectItem>{leaveTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>

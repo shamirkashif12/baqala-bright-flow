@@ -44,7 +44,7 @@ function CashierSales() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.getTerminals({ branchId: branchId !== "all" ? branchId : undefined }).then(setTerminals).catch(() => {});
+    api.getTerminals({ branchId: branchId !== "all" ? [branchId] : undefined }).then(setTerminals).catch(() => {});
     api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setCashiers(u.filter((x) => x.status === "active" && x.roleName === "Cashier"))).catch(() => {});
     setTerminalId("all");
     setCashierId("all");

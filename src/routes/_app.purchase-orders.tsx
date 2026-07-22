@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -997,8 +998,8 @@ function PurchaseOrders() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [createdBy, setCreatedBy] = useState("all");
-  const [approvedBy, setApprovedBy] = useState("all");
+  const [createdBy, setCreatedBy] = useState<string[]>([]);
+  const [approvedBy, setApprovedBy] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
@@ -1012,8 +1013,8 @@ function PurchaseOrders() {
     setLoading(true);
     Promise.allSettled([
       api.getPurchaseOrders({
-        createdBy: createdBy !== "all" ? createdBy : undefined,
-        approvedBy: approvedBy !== "all" ? approvedBy : undefined,
+        createdBy: createdBy.length ? createdBy : undefined,
+        approvedBy: approvedBy.length ? approvedBy : undefined,
       }),
       api.getCreditNotes(),
       api.getStockTransfers({ transferType: "warehouse_to_supplier" }),
@@ -1165,20 +1166,22 @@ function PurchaseOrders() {
           </TabsList>
           <div className="flex items-center gap-1">
             <Input className="h-9 w-48 bg-muted/50" placeholder="Search PO # or supplier…" value={search} onChange={e => setSearch(e.target.value)} />
-            <Select value={createdBy} onValueChange={setCreatedBy}>
-              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Created By" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Created By: Anyone</SelectItem>
-                {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={approvedBy} onValueChange={setApprovedBy}>
-              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Approved By" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Approved By: Anyone</SelectItem>
-                {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Created By"
+                options={users.map(u => ({ id: u.id, label: u.fullName }))}
+                selected={createdBy}
+                onChange={setCreatedBy}
+              />
+            </div>
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Approved By"
+                options={users.map(u => ({ id: u.id, label: u.fullName }))}
+                selected={approvedBy}
+                onChange={setApprovedBy}
+              />
+            </div>
             <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
             <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
             <span className="text-xs text-muted-foreground">–</span>

@@ -31,6 +31,16 @@ function todayStr() {
 
 const RETURN_REASONS = ["expired", "damaged", "quality_issue", "overstock", "other"];
 
+// Reason/Notes are captured per line item, but this table is one row per return — collapse to a
+// single display value: the shared value if every item agrees, otherwise flag it as mixed rather
+// than silently showing just the first item's.
+function summarizeItemField(items: SupplierReturnsReportRow["items"], field: "reason" | "notes") {
+  const values = [...new Set(items.map(i => i[field]).filter((v): v is string => !!v))];
+  if (values.length === 0) return "—";
+  if (values.length === 1) return field === "reason" ? values[0].replace(/_/g, " ") : values[0];
+  return field === "reason" ? `Multiple (${values.length})` : values.join("; ");
+}
+
 function SupplierReturnDetailDrawer({ ret, onClose }: { ret: SupplierReturnsReportRow | null; onClose: () => void }) {
   return (
     <Sheet open={!!ret} onOpenChange={v => !v && onClose()}>
@@ -202,6 +212,10 @@ function SupplierReturnsReport() {
             { key: "returnedBy", label: "Returned By" },
             { key: "approvedBy", label: "Approved By" },
             { key: "items", label: "Products", render: (r: SupplierReturnsReportRow) => `${r.items.length} item${r.items.length !== 1 ? "s" : ""}` },
+            { key: "reason", label: "Return Reason", className: "capitalize", render: (r: SupplierReturnsReportRow) => summarizeItemField(r.items, "reason") },
+            { key: "notes", label: "Notes", render: (r: SupplierReturnsReportRow) => (
+              <span className="line-clamp-2 max-w-[200px] text-xs text-muted-foreground">{summarizeItemField(r.items, "notes")}</span>
+            ) },
             { key: "totalValue", label: "Total Value", render: (r: SupplierReturnsReportRow) => <span className="font-semibold"><SARIcon />{fmtSAR(r.totalValue)}</span> },
             { key: "status", label: "Status", className: "capitalize", render: (r: SupplierReturnsReportRow) => r.status.replace(/_/g, " ") },
             { key: "view", label: "", render: (r: SupplierReturnsReportRow) => (

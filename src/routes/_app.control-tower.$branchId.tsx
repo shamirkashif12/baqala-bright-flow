@@ -68,7 +68,7 @@ function BranchDetail() {
     // transient network error rendered the misleading "Branch not found" page (86eyag3ny).
     Promise.allSettled([
       api.getBranches(),
-      api.getTerminals({ branchId }),
+      api.getTerminals({ branchId: [branchId] }),
       api.getUsers({ branchId }),
     ])
       .then(([branchesR, termsR, staffR]) => {

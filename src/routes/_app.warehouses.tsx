@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -86,7 +87,7 @@ function WarehouseManagement() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<WarehouseType | null>(null);
   const viewWarehouse = (id: string) => navigate({ to: "/warehouses/$warehouseId", params: { warehouseId: id } });
@@ -105,7 +106,7 @@ function WarehouseManagement() {
   const filtered = useMemo(() => {
     return warehouses.filter(w => {
       const mq = !q || w.name.toLowerCase().includes(q.toLowerCase()) || w.code.toLowerCase().includes(q.toLowerCase()) || (w.city?.toLowerCase().includes(q.toLowerCase()) ?? false);
-      const ms = statusFilter === "all" || w.status === statusFilter;
+      const ms = statusFilter.length === 0 || statusFilter.includes(w.status);
       return mq && ms;
     });
   }, [warehouses, q, statusFilter]);
@@ -125,14 +126,17 @@ function WarehouseManagement() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code, city…" className="h-9 w-64" />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[
+              { id: "active", label: "Active" },
+              { id: "inactive", label: "Inactive" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex-1" />
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setCreateOpen(true)}>
@@ -660,8 +664,8 @@ function StockRequestsTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [approvalFilter, setApprovalFilter] = useState("all");
-  const [deliveryFilter, setDeliveryFilter] = useState("all");
+  const [approvalFilter, setApprovalFilter] = useState<string[]>([]);
+  const [deliveryFilter, setDeliveryFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [viewReq, setViewReq] = useState<WarehouseRequest | null>(null);
@@ -670,8 +674,8 @@ function StockRequestsTab() {
   const load = () => {
     setLoading(true);
     api.getWarehouseRequests({
-      approvalStatus: approvalFilter !== "all" ? approvalFilter : undefined,
-      deliveryStatus: deliveryFilter !== "all" ? deliveryFilter : undefined,
+      approvalStatus: approvalFilter.length ? approvalFilter : undefined,
+      deliveryStatus: deliveryFilter.length ? deliveryFilter : undefined,
     })
       .then(r => { setRequests(r); setLoadError(false); })
       // Keep previously loaded requests on failure instead of zeroing the tab (86eyag3ny).
@@ -714,24 +718,30 @@ function StockRequestsTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search request #, branch, supplier…" className="h-9 w-64 flex-shrink-0" />
-        <Select value={approvalFilter} onValueChange={setApprovalFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Statuses" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Approvals</SelectItem>
-            <SelectItem value="request_generated">Pending</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="unapproved">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={deliveryFilter} onValueChange={setDeliveryFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Delivery" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Delivery</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="in_transit">On Way</SelectItem>
-            <SelectItem value="delivered">Delivered</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Approvals"
+            options={[
+              { id: "request_generated", label: "Pending" },
+              { id: "approved", label: "Approved" },
+              { id: "unapproved", label: "Rejected" },
+            ]}
+            selected={approvalFilter}
+            onChange={setApprovalFilter}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Delivery"
+            options={[
+              { id: "pending", label: "Pending" },
+              { id: "in_transit", label: "On Way" },
+              { id: "delivered", label: "Delivered" },
+            ]}
+            selected={deliveryFilter}
+            onChange={setDeliveryFilter}
+          />
+        </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
           <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />

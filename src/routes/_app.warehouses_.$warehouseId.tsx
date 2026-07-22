@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -48,7 +49,7 @@ function WarehouseDetail() {
   const [notFoundFlag, setNotFoundFlag] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
-  const [productFilter, setProductFilter] = useState("all");
+  const [productFilter, setProductFilter] = useState<string[]>([]);
   const [stock, setStock] = useState<WarehouseStock[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
   const [stockLoadError, setStockLoadError] = useState(false);
@@ -81,7 +82,7 @@ function WarehouseDetail() {
   useEffect(() => {
     if (!warehouse) return;
     loadStock();
-    api.getBatches({ warehouseId: warehouse.id }).then(setBatches).catch(() => {});
+    api.getBatches({ warehouseId: [warehouse.id] }).then(setBatches).catch(() => {});
     setLoadingLedger(true);
     Promise.allSettled([
       api.getPurchaseOrders({ warehouseId: warehouse.id }),
@@ -104,9 +105,12 @@ function WarehouseDetail() {
     return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [stock]);
 
-  // Stock reloads when the warehouse changes; drop a selection that isn't held here.
+  // Stock reloads when the warehouse changes; drop selections that aren't held here.
   useEffect(() => {
-    if (productFilter !== "all" && !productOptions.some(p => p.id === productFilter)) setProductFilter("all");
+    if (!productFilter.length) return;
+    const validIds = new Set(productOptions.map(p => p.id));
+    const next = productFilter.filter(id => validIds.has(id));
+    if (next.length !== productFilter.length) setProductFilter(next);
   }, [productOptions, productFilter]);
 
   const filteredStock = useMemo(() => {
@@ -115,7 +119,7 @@ function WarehouseDetail() {
       const mq = !needle
         || s.product?.name.toLowerCase().includes(needle)
         || s.product?.sku?.toLowerCase().includes(needle);
-      const mp = productFilter === "all" || s.productId === productFilter;
+      const mp = !(productFilter.length && !productFilter.includes(s.productId));
       return mq && mp;
     });
   }, [stock, q, productFilter]);
@@ -218,13 +222,14 @@ function WarehouseDetail() {
             <div className="flex items-center justify-between gap-3 mb-4">
               <h3 className="font-bold text-sm flex items-center gap-2"><Package className="h-4 w-4 text-primary" /> Stock by Product</h3>
               <div className="flex items-center gap-2">
-                <Select value={productFilter} onValueChange={setProductFilter}>
-                  <SelectTrigger className="h-8 w-48 text-xs"><SelectValue placeholder="All Products" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Products</SelectItem>
-                    {productOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <div className="w-48">
+                  <SearchableMultiSelect
+                    placeholder="All Products"
+                    options={productOptions.map(p => ({ id: p.id, label: p.name }))}
+                    selected={productFilter}
+                    onChange={setProductFilter}
+                  />
+                </div>
                 <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product name or SKU…" className="h-8 w-64 text-xs" />
               </div>
             </div>

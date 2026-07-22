@@ -225,7 +225,7 @@ public class ApprovalsController(
                     if (pending.EntityType == "Category")
                         await productDeletion.DeleteCategoryAsync(pending.EntityId!.Value, actorId);
                     else
-                        await productDeletion.DeleteProductAsync(pending.EntityId!.Value, actorId);
+                        await productDeletion.DeleteProductAsync(pending.EntityId!.Value, actorId, pending.BranchId);
                     break;
             }
         }

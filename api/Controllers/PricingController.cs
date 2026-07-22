@@ -81,7 +81,7 @@ public class PricingController(
     [RequirePermission("Inventory", PermAction.View)]
     public async Task<IActionResult> GetLists(
         [FromQuery] Guid? productId,
-        [FromQuery] Guid? branchId,
+        [FromQuery] Guid[]? branchId,
         [FromQuery] string? priceType,
         [FromQuery] string? unitType,
         [FromQuery] bool? isActive)
@@ -93,18 +93,23 @@ public class PricingController(
         if (unitType is not null) query = query.Where(r => r.UnitType == unitType);
         if (isActive.HasValue) query = query.Where(r => r.IsActive == isActive.Value);
 
-        // Branch scoping: a branch user sees their own branch's rules plus the tenant-wide ones
-        // that apply to them, never another branch's.
-        var (role, callerBranch) = GetCallerContext();
-        if (role != "tenant_admin" && callerBranch.HasValue)
-            query = query.Where(r => r.BranchId == null || r.BranchId == callerBranch);
-        else if (branchId.HasValue)
-            query = query.Where(r => r.BranchId == branchId);
-
-        return Ok(await query
+        var all = await query
             .OrderBy(r => r.ProductId).ThenBy(r => r.UnitType)
             .ThenByDescending(r => r.EffectiveFrom)
-            .ToListAsync());
+            .ToListAsync();
+
+        // Branch scoping: a branch user sees their own branch's rules plus the tenant-wide ones
+        // that apply to them, never another branch's. branchId is an array (multi-select filter)
+        // — never `.Contains()` a Guid[] directly against a DbSet-backed IQueryable on this repo's
+        // MySQL provider (ef-mysql-inlist-gotcha memory), so it's applied in-memory here instead.
+        var (role, callerBranch) = GetCallerContext();
+        IEnumerable<ProductPriceList> scoped = all;
+        if (role != "tenant_admin" && callerBranch.HasValue)
+            scoped = scoped.Where(r => r.BranchId == null || r.BranchId == callerBranch);
+        else if (branchId is { Length: > 0 })
+            scoped = scoped.Where(r => r.BranchId.HasValue && branchId.Contains(r.BranchId.Value));
+
+        return Ok(scoped.ToList());
     }
 
     [HttpGet("lists/{id:guid}")]

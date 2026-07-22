@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Eye, Pencil, Plus, Trash2, Camera, User as UserIcon, Phone, Building2, IdCard, CalendarClock, MoreHorizontal } from "lucide-react";
@@ -1155,15 +1156,15 @@ function EmployeesTab() {
   const [loadError, setLoadError] = useState(false);
 
   const [q, setQ] = useState("");
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [departmentFilter, setDepartmentFilter] = useState(search.departmentId ?? "all");
-  const [designationFilter, setDesignationFilter] = useState(search.designationId ?? "all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [roleFilter, setRoleFilter] = useState("all");
-  const [contractStatusFilter, setContractStatusFilter] = useState("all");
-  const [documentStatusFilter, setDocumentStatusFilter] = useState("all");
-  const [shiftFilter, setShiftFilter] = useState("all");
-  const [leaveStatusFilter, setLeaveStatusFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState<string[]>(search.departmentId ? [search.departmentId] : []);
+  const [designationFilter, setDesignationFilter] = useState<string[]>(search.designationId ? [search.designationId] : []);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [roleFilter, setRoleFilter] = useState<string[]>([]);
+  const [contractStatusFilter, setContractStatusFilter] = useState<string[]>([]);
+  const [documentStatusFilter, setDocumentStatusFilter] = useState<string[]>([]);
+  const [shiftFilter, setShiftFilter] = useState<string[]>([]);
+  const [leaveStatusFilter, setLeaveStatusFilter] = useState<string[]>([]);
   const [shifts, setShifts] = useState<WorkShift[]>([]);
 
   const [viewEmployee, setViewEmployee] = useState<Employee | null>(null);
@@ -1285,15 +1286,15 @@ function EmployeesTab() {
 
   const filtered = employees.filter(e => {
     const mq = !q || e.fullName.toLowerCase().includes(q.toLowerCase()) || e.employeeCode.toLowerCase().includes(q.toLowerCase()) || e.phone.includes(q) || (e.email?.toLowerCase().includes(q.toLowerCase()) ?? false);
-    const mb = branchFilter === "all" || e.branchId === branchFilter;
-    const md = departmentFilter === "all" || e.departmentId === departmentFilter;
-    const mdes = designationFilter === "all" || e.designationId === designationFilter;
-    const ms = statusFilter === "all" || e.employmentStatus === statusFilter;
-    const mrole = roleFilter === "all" || e.roleId === roleFilter;
-    const mcontract = contractStatusFilter === "all" || contractStatus(e).label.replace(" ", "-").toLowerCase() === contractStatusFilter;
-    const mdoc = documentStatusFilter === "all" || (e.documentStatus ?? "Pending") === documentStatusFilter;
-    const mshift = shiftFilter === "all" || (shiftFilter === "none" ? !e.currentShift : e.currentShift?.shiftId === shiftFilter);
-    const mleave = leaveStatusFilter === "all" || (leaveStatusFilter === "on_leave" ? e.onLeaveToday : leaveStatusFilter === "working" ? !e.onLeaveToday : true);
+    const mb = !branchFilter.length || branchFilter.includes(e.branchId);
+    const md = !departmentFilter.length || (!!e.departmentId && departmentFilter.includes(e.departmentId));
+    const mdes = !designationFilter.length || (!!e.designationId && designationFilter.includes(e.designationId));
+    const ms = !statusFilter.length || statusFilter.includes(e.employmentStatus);
+    const mrole = !roleFilter.length || (!!e.roleId && roleFilter.includes(e.roleId));
+    const mcontract = !contractStatusFilter.length || contractStatusFilter.includes(contractStatus(e).label.replace(" ", "-").toLowerCase());
+    const mdoc = !documentStatusFilter.length || documentStatusFilter.includes(e.documentStatus ?? "Pending");
+    const mshift = !shiftFilter.length || shiftFilter.some(f => f === "none" ? !e.currentShift : e.currentShift?.shiftId === f);
+    const mleave = !leaveStatusFilter.length || leaveStatusFilter.some(f => f === "on_leave" ? e.onLeaveToday : f === "working" ? !e.onLeaveToday : false);
     return mq && mb && md && mdes && ms && mrole && mcontract && mdoc && mshift && mleave;
   });
 
@@ -1302,12 +1303,16 @@ function EmployeesTab() {
   // entry (FRD 4.4), unlike the previous client-side CSV built from already-loaded rows.
   const handleExport = async (format: ReportExportFormat) => {
     try {
+      // exportEmployees' backend action still takes single-value filters (not yet converted to
+      // arrays) — only pass a value through when exactly one is selected in the multi-select;
+      // with 0 or 2+ selected we omit it rather than guess, matching "no filter" over a wrong one.
+      const single = (arr: string[]) => arr.length === 1 ? arr[0] : undefined;
       const blob = await api.exportEmployees({
-        branchId: branchFilter === "all" ? undefined : branchFilter,
-        departmentId: departmentFilter === "all" ? undefined : departmentFilter,
-        designationId: designationFilter === "all" ? undefined : designationFilter,
-        roleId: roleFilter === "all" ? undefined : roleFilter,
-        status: statusFilter === "all" ? undefined : statusFilter,
+        branchId: single(branchFilter),
+        departmentId: single(departmentFilter),
+        designationId: single(designationFilter),
+        roleId: single(roleFilter),
+        status: single(statusFilter),
         search: q || undefined,
         exportedBy: user?.id,
         format,
@@ -1325,82 +1330,98 @@ function EmployeesTab() {
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name, ID or phone…" className="h-9 w-60" />
         {!branchLocked && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
-        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Departments</SelectItem>
-            {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={designationFilter} onValueChange={setDesignationFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Designations</SelectItem>
-            {designations.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-            <SelectItem value="suspended">Suspended</SelectItem>
-            <SelectItem value="resigned">Resigned</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={roleFilter} onValueChange={setRoleFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All ACL Roles</SelectItem>
-            {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={contractStatusFilter} onValueChange={setContractStatusFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Contract Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="expiring-soon">Expiring Soon</SelectItem>
-            <SelectItem value="expired">Expired</SelectItem>
-            <SelectItem value="terminated">Terminated</SelectItem>
-            <SelectItem value="not-set">Not Uploaded</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={documentStatusFilter} onValueChange={setDocumentStatusFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Document Statuses</SelectItem>
-            <SelectItem value="Complete">Complete</SelectItem>
-            <SelectItem value="Pending">Pending</SelectItem>
-            <SelectItem value="Expiring Soon">Expiring Soon</SelectItem>
-            <SelectItem value="Expired">Expired</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={shiftFilter} onValueChange={setShiftFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Shifts</SelectItem>
-            <SelectItem value="none">Not Assigned</SelectItem>
-            {shifts.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={leaveStatusFilter} onValueChange={setLeaveStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Leave: All</SelectItem>
-            <SelectItem value="working">Working</SelectItem>
-            <SelectItem value="on_leave">On Leave</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Departments"
+            options={departments.map(d => ({ id: d.id, label: d.name }))}
+            selected={departmentFilter}
+            onChange={setDepartmentFilter}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Designations"
+            options={designations.map(d => ({ id: d.id, label: d.name }))}
+            selected={designationFilter}
+            onChange={setDesignationFilter}
+          />
+        </div>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[
+              { id: "active", label: "Active" },
+              { id: "inactive", label: "Inactive" },
+              { id: "suspended", label: "Suspended" },
+              { id: "resigned", label: "Resigned" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All ACL Roles"
+            options={roles.map(r => ({ id: r.id, label: r.name }))}
+            selected={roleFilter}
+            onChange={setRoleFilter}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Contract Statuses"
+            options={[
+              { id: "active", label: "Active" },
+              { id: "expiring-soon", label: "Expiring Soon" },
+              { id: "expired", label: "Expired" },
+              { id: "terminated", label: "Terminated" },
+              { id: "not-set", label: "Not Uploaded" },
+            ]}
+            selected={contractStatusFilter}
+            onChange={setContractStatusFilter}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Document Statuses"
+            options={[
+              { id: "Complete", label: "Complete" },
+              { id: "Pending", label: "Pending" },
+              { id: "Expiring Soon", label: "Expiring Soon" },
+              { id: "Expired", label: "Expired" },
+            ]}
+            selected={documentStatusFilter}
+            onChange={setDocumentStatusFilter}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Shifts"
+            options={[{ id: "none", label: "Not Assigned" }, ...shifts.map(s => ({ id: s.id, label: s.name }))]}
+            selected={shiftFilter}
+            onChange={setShiftFilter}
+          />
+        </div>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="Leave: All"
+            options={[
+              { id: "working", label: "Working" },
+              { id: "on_leave", label: "On Leave" },
+            ]}
+            selected={leaveStatusFilter}
+            onChange={setLeaveStatusFilter}
+          />
+        </div>
         <div className="flex-1" />
         <ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} />
         {canCreate && (

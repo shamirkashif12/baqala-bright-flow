@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader as DHeader, DialogTitle as DTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1049,15 +1050,15 @@ function POSTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [stFilter, setStFilter] = useState("all");
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [stFilter, setStFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Sync if user loads after mount (auth hydration)
   useEffect(() => {
-    if (lockedBranchId) setBranchId(lockedBranchId);
+    if (lockedBranchId) setBranchIds([lockedBranchId]);
   }, [lockedBranchId]);
 
   useEffect(() => {
@@ -1067,8 +1068,8 @@ function POSTab() {
   const load = useCallback(() => {
     setLoading(true);
     api.getOrders({
-      branchId: branchId !== "all" ? branchId : undefined,
-      status: stFilter !== "all" ? stFilter : undefined,
+      branchId: branchIds.length ? branchIds : undefined,
+      status: stFilter.length ? stFilter : undefined,
       from: dateFrom || undefined,
       to: dateTo || undefined,
     })
@@ -1077,7 +1078,7 @@ function POSTab() {
       // render zero tiles / an empty list as if loaded (86eyag3ny).
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
-  }, [branchId, stFilter, dateFrom, dateTo]);
+  }, [branchIds, stFilter, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1114,21 +1115,23 @@ function POSTab() {
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search order number, branch, cashier…" className="h-9 w-64 flex-shrink-0" />
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+          </div>
         )}
-        <Select value={stFilter} onValueChange={setStFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Statuses" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {ORDER_STATUSES.map(s => <SelectItem key={s} value={s} className="capitalize">{s.replace(/_/g, " ")}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={ORDER_STATUSES.map(s => ({ id: s, label: s.replace(/_/g, " ") }))}
+            selected={stFilter}
+            onChange={setStFilter}
+          />
+        </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Order Date:</span>
           <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />

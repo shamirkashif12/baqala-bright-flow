@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { RotateCcw, Loader2, Plus, Search, ChevronDown, Check, X, CheckCircle, Truck } from "lucide-react";
@@ -603,7 +604,7 @@ function SupplierReturns() {
   const [loadError, setLoadError] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [rtsOpen, setRtsOpen] = useState(false);
 
   const load = () => {
@@ -634,7 +635,7 @@ function SupplierReturns() {
     if (s && !t.transferNumber.toLowerCase().includes(s) &&
         !(t.destSupplier?.name.toLowerCase().includes(s)) &&
         !(t.sourceWarehouse?.name.toLowerCase().includes(s))) return false;
-    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    if (statusFilter.length && !statusFilter.includes(t.status)) return false;
     return true;
   });
 
@@ -676,18 +677,21 @@ function SupplierReturns() {
           placeholder="Search transfer#, supplier, warehouse…"
           className="h-9 w-72 flex-shrink-0"
         />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Statuses" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="pending_approval">Pending Approval</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="in_transit">In Transit</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[
+              { id: "draft", label: "Draft" },
+              { id: "pending_approval", label: "Pending Approval" },
+              { id: "approved", label: "Approved" },
+              { id: "in_transit", label: "In Transit" },
+              { id: "completed", label: "Completed" },
+              { id: "rejected", label: "Rejected" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex-1" />
         {canCreate && (
           <Button

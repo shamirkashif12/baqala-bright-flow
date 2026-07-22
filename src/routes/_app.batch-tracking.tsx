@@ -15,6 +15,7 @@ import { api, type InventoryBatch, type Branch, type Warehouse, type StockMoveme
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge } from "@/components/batch-status-badge";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { useCompanyHeader } from "@/lib/use-company-header";
 
 // Per-branch picking strategy — mirrors BatchConsumptionService.StrategySettingKey on the backend.
@@ -351,19 +352,19 @@ function BatchLocationPanel({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
-  const [locationFilter, setLocationFilter] = useState(lockedLocationId ?? "all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [locationFilter, setLocationFilter] = useState<string[]>(lockedLocationId ? [lockedLocationId] : []);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
 
   async function load() {
     setLoading(true);
     try {
-      const locationId = lockedLocationId ?? (locationFilter !== "all" ? locationFilter : undefined);
+      const locationIds = lockedLocationId ? [lockedLocationId] : (locationFilter.length ? locationFilter : undefined);
       const data = await api.getBatches({
-        branchId: locationType === "branch" ? locationId : undefined,
-        warehouseId: locationType === "warehouse" ? locationId : undefined,
-        status: statusFilter !== "all" ? statusFilter : undefined,
+        branchId: locationType === "branch" ? locationIds : undefined,
+        warehouseId: locationType === "warehouse" ? locationIds : undefined,
+        status: statusFilter.length ? statusFilter : undefined,
         locationType,
       });
       setBatches(data ?? []);
@@ -376,7 +377,7 @@ function BatchLocationPanel({
   }
 
   useEffect(() => {
-    if (lockedLocationId) setLocationFilter(lockedLocationId);
+    if (lockedLocationId) setLocationFilter([lockedLocationId]);
   }, [lockedLocationId]);
 
   useEffect(() => {
@@ -438,7 +439,7 @@ function BatchLocationPanel({
   // Picking strategy is a per-branch setting (a warehouse has no tenant_settings row to hang it off,
   // matching GetStrategyAsync on the backend), so the card only appears for a single, resolved branch.
   const resolvedBranchId = locationType === "branch"
-    ? (lockedLocationId ?? (locationFilter !== "all" ? locationFilter : null))
+    ? (lockedLocationId ?? (locationFilter.length === 1 ? locationFilter[0] : null))
     : null;
   const resolvedBranchName = resolvedBranchId ? locations.find(l => l.id === resolvedBranchId)?.name ?? "this branch" : "";
 
@@ -464,20 +465,23 @@ function BatchLocationPanel({
           <Input placeholder="Search batch / lot / product…" className="h-9 bg-card" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         {!lockedLocationId && (
-          <Select value={locationFilter} onValueChange={setLocationFilter}>
-            <SelectTrigger className="h-9 w-48"><SelectValue placeholder={`All ${locationLabel}es`} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All {locationLabel}es</SelectItem>
-              {locations.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-48">
+            <SearchableMultiSelect
+              placeholder={`All ${locationLabel}es`}
+              options={locations.map(l => ({ id: l.id, label: l.name }))}
+              selected={locationFilter}
+              onChange={setLocationFilter}
+            />
+          </div>
         )}
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Statuses" /></SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={STATUS_OPTIONS.filter(o => o.value !== "all").map(o => ({ id: o.value, label: o.label }))}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
           <Input type="date" className="h-9 w-36" value={expiryFrom} onChange={e => setExpiryFrom(e.target.value)} title="Expiry from" />

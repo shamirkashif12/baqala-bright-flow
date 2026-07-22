@@ -197,7 +197,7 @@ export const api = {
     request<ResolvedPrice[]>(`/api/pricing/resolve${toQuery(params)}`),
   resolveProductPrice: (productId: string, params?: { branchId?: string; customerTier?: string; priceType?: string; at?: string }) =>
     request<ResolvedPrice>(`/api/pricing/resolve/${productId}${toQuery(params)}`),
-  getPriceLists: (params?: { productId?: string; branchId?: string; priceType?: string; unitType?: "unit" | "pack"; isActive?: boolean }) =>
+  getPriceLists: (params?: { productId?: string; branchId?: string[]; priceType?: string; unitType?: "unit" | "pack"; isActive?: boolean }) =>
     request<ProductPriceList[]>(`/api/pricing/lists${toQuery(params)}`),
   createPriceList: (data: PriceListPayload) =>
     request<ProductPriceList>("/api/pricing/lists", { method: "POST", body: JSON.stringify(data) }),
@@ -256,10 +256,8 @@ export const api = {
   // already explains the stock needs transferring out first).
   deleteInventoryStock: (id: string) =>
     request<void>(`/api/inventory/stock/${id}`, { method: "DELETE" }),
-  getBatches: (params?: { branchId?: string; warehouseId?: string; productId?: string; status?: string; locationType?: "branch" | "warehouse" }) => {
-    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
-    return request<InventoryBatch[]>(`/api/inventory/batches${q ? `?${q}` : ""}`);
-  },
+  getBatches: (params?: { branchId?: string[]; warehouseId?: string[]; productId?: string; status?: string[]; locationType?: "branch" | "warehouse" }) =>
+    request<InventoryBatch[]>(`/api/inventory/batches${toQuery(params)}`),
   getExpiringBatches: (branchId?: string, daysAhead = 30, warehouseId?: string) => {
     const q = new URLSearchParams({ ...(branchId && { branchId }), ...(warehouseId && { warehouseId }), daysAhead: String(daysAhead) }).toString();
     return request<InventoryBatch[]>(`/api/inventory/batches/expiring?${q}`);
@@ -279,10 +277,8 @@ export const api = {
     request<InventoryAdjustment>(`/api/inventory/adjustments/${id}/approval`, {
       method: "PATCH", body: JSON.stringify({ approved, reason }),
     }),
-  getStockMovements: (params?: { productId?: string; branchId?: string; warehouseId?: string; batchId?: string; movementType?: string; from?: string; to?: string; limit?: number }) => {
-    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
-    return request<StockMovement[]>(`/api/inventory/movements${q ? `?${q}` : ""}`);
-  },
+  getStockMovements: (params?: { productId?: string; branchId?: string[]; warehouseId?: string; batchId?: string; movementType?: string; from?: string; to?: string; limit?: number }) =>
+    request<StockMovement[]>(`/api/inventory/movements${toQuery(params)}`),
 
   // Stock Counts (Stocking Review)
   getStockCounts: (params?: { branchId?: string; warehouseId?: string; status?: string }) =>
@@ -310,11 +306,8 @@ export const api = {
     request<StockCount>(`/api/stock-counts/${id}/cancel`, { method: "PATCH" }),
 
   // Orders
-  getOrders: (params?: { branchId?: string; status?: string; paymentStatus?: string; from?: string; to?: string }) => {
-    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
-    const q = new URLSearchParams(filtered).toString();
-    return request<Order[]>(`/api/orders${q ? `?${q}` : ""}`);
-  },
+  getOrders: (params?: { branchId?: string[]; status?: string[]; paymentStatus?: string[]; from?: string; to?: string }) =>
+    request<Order[]>(`/api/orders${toQuery(params)}`),
   getOrder: (id: string) => request<Order>(`/api/orders/${id}`),
   getOrderByNumber: (num: string) => request<Order>(`/api/orders/by-number/${encodeURIComponent(num)}`),
   createOrder: (data: Partial<Order>) =>
@@ -330,10 +323,8 @@ export const api = {
     request<Order>(`/api/orders/${id}`, { method: "DELETE", body: JSON.stringify(data) }),
 
   // Cashier Shifts
-  getShifts: (params?: { branchId?: string; cashierId?: string; terminalId?: string; status?: string; dateFrom?: string; dateTo?: string }) => {
-    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
-    return request<CashierShift[]>(`/api/shifts${q ? `?${q}` : ""}`);
-  },
+  getShifts: (params?: { branchId?: string[]; cashierId?: string; terminalId?: string[]; status?: string[]; dateFrom?: string; dateTo?: string }) =>
+    request<CashierShift[]>(`/api/shifts${toQuery(params)}`),
   getActiveShifts: (branchId?: string) =>
     request<CashierShift[]>(`/api/shifts/active${branchId ? `?branchId=${branchId}` : ""}`),
   openShift: (data: OpenShiftPayload) =>
@@ -344,10 +335,8 @@ export const api = {
     request<CashierShift>(`/api/shifts/${id}/approve-variance`, { method: "POST" }),
 
   // Terminals
-  getTerminals: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
-    return request<Terminal[]>(`/api/terminals${q ? `?${q}` : ""}`);
-  },
+  getTerminals: (params?: { branchId?: string[]; status?: string[] }) =>
+    request<Terminal[]>(`/api/terminals${toQuery(params)}`),
   createTerminal: (data: Partial<Terminal>) =>
     request<Terminal>("/api/terminals", { method: "POST", body: JSON.stringify(data) }),
   updateTerminal: (id: string, data: Partial<Terminal>) =>
@@ -423,11 +412,8 @@ export const api = {
     requestBlob(`/api/reports/loyalty/customers/export${toQuery(params)}`),
 
   // Finance
-  getExpenses: (params?: { branchId?: string; status?: string; paymentMethod?: string; expenseTypeId?: string }) => {
-    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
-    const q = new URLSearchParams(filtered).toString();
-    return request<Expense[]>(`/api/finance/expenses${q ? `?${q}` : ""}`);
-  },
+  getExpenses: (params?: { branchId?: string[]; status?: string; paymentMethod?: string; expenseTypeId?: string }) =>
+    request<Expense[]>(`/api/finance/expenses${toQuery(params)}`),
   createExpense: (data: Partial<Expense>) =>
     request<Expense>("/api/finance/expenses", { method: "POST", body: JSON.stringify(data) }),
   updateExpense: (id: string, data: Partial<Expense>) =>
@@ -462,10 +448,8 @@ export const api = {
     request<TaxFeeRule>(`/api/finance/tax-rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   // Warehouse
-  getWarehouseRequests: (params?: { branchId?: string; approvalStatus?: string; deliveryStatus?: string }) => {
-    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
-    return request<WarehouseRequest[]>(`/api/warehouse/requests${q ? `?${q}` : ""}`);
-  },
+  getWarehouseRequests: (params?: { branchId?: string; approvalStatus?: string[]; deliveryStatus?: string[] }) =>
+    request<WarehouseRequest[]>(`/api/warehouse/requests${toQuery(params)}`),
   createWarehouseRequest: (data: Partial<WarehouseRequest>) =>
     request<WarehouseRequest>("/api/warehouse/requests", { method: "POST", body: JSON.stringify(data) }),
   approveWarehouseRequest: (id: string, approved: boolean, approvedBy: string) =>
@@ -488,11 +472,8 @@ export const api = {
     request<WarehouseStock[]>(`/api/warehouses/${warehouseId}/stock`),
 
   // Purchase Orders
-  getPurchaseOrders: (params?: { supplierId?: string; warehouseId?: string; branchId?: string; createdBy?: string; approvedBy?: string; productId?: string; status?: string; paymentStatus?: string }) => {
-    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
-    const q = new URLSearchParams(filtered).toString();
-    return request<PurchaseOrder[]>(`/api/purchase-orders${q ? `?${q}` : ""}`);
-  },
+  getPurchaseOrders: (params?: { supplierId?: string; warehouseId?: string; branchId?: string; createdBy?: string[]; approvedBy?: string[]; productId?: string; status?: string[]; paymentStatus?: string }) =>
+    request<PurchaseOrder[]>(`/api/purchase-orders${toQuery(params)}`),
   getPurchaseOrder: (id: string) => request<PurchaseOrder>(`/api/purchase-orders/${id}`),
   getPurchaseOrderByNumber: (number: string) =>
     request<PurchaseOrder>(`/api/purchase-orders/by-number/${encodeURIComponent(number)}`),
@@ -510,11 +491,8 @@ export const api = {
   // Stock Transfers
   // branchId/warehouseId match a transfer at EITHER end (source or destination); the directional
   // source*/dest* params remain for the Sending/Receiving Warehouse filters that mean one side.
-  getStockTransfers: (params?: { transferType?: string; status?: string; sourceWarehouseId?: string; destWarehouseId?: string; sourceBranchId?: string; destBranchId?: string; purchaseOrderId?: string; sourceSupplierId?: string; branchId?: string; warehouseId?: string; productId?: string; createdBy?: string; approvedBy?: string }) => {
-    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null)) as Record<string, string>;
-    const q = new URLSearchParams(filtered).toString();
-    return request<StockTransfer[]>(`/api/stock-transfers${q ? `?${q}` : ""}`);
-  },
+  getStockTransfers: (params?: { transferType?: string; status?: string[]; sourceWarehouseId?: string; destWarehouseId?: string; sourceBranchId?: string; destBranchId?: string; purchaseOrderId?: string; sourceSupplierId?: string; branchId?: string[]; warehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[] }) =>
+    request<StockTransfer[]>(`/api/stock-transfers${toQuery(params)}`),
   getStockTransfer: (id: string) => request<StockTransfer>(`/api/stock-transfers/${id}`),
   getStockTransferByNumber: (number: string) =>
     request<StockTransfer>(`/api/stock-transfers/by-number/${encodeURIComponent(number)}`),
@@ -536,10 +514,8 @@ export const api = {
     request<void>(`/api/products/${productId}/variants/${variantId}`, { method: "DELETE" }),
 
   // Returns
-  getReturns: (params?: { branchId?: string; status?: string }) => {
-    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
-    return request<CustomerReturn[]>(`/api/returns${q ? `?${q}` : ""}`);
-  },
+  getReturns: (params?: { branchId?: string[]; status?: string[] }) =>
+    request<CustomerReturn[]>(`/api/returns${toQuery(params)}`),
   createReturn: (data: Partial<CustomerReturn>) =>
     request<CustomerReturn>("/api/returns", { method: "POST", body: JSON.stringify(data) }),
   approveReturn: (id: string, approved: boolean) =>
@@ -946,7 +922,7 @@ export const api = {
     }).then(r => r.text()),
 
   // Employees (HRM)
-  getEmployees: (params?: { branchId?: string; departmentId?: string; designationId?: string; roleId?: string; status?: string; search?: string }) =>
+  getEmployees: (params?: { branchId?: string[]; departmentId?: string[]; designationId?: string[]; roleId?: string[]; status?: string[]; search?: string }) =>
     request<Employee[]>(`/api/employees${toQuery(params)}`),
   getEmployee: (id: string) => request<Employee>(`/api/employees/${id}`),
   getLinkableUsers: (currentEmployeeId?: string) =>
@@ -1003,7 +979,7 @@ export const api = {
     request<{ id: string; employeeId: string; shiftId: string; effectiveFrom: string; effectiveTo?: string; status: string }[]>(`/api/work-shifts/assignments${toQuery(params)}`),
 
   // HRM Attendance
-  getHrAttendance: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; dateFrom?: string; dateTo?: string; correctionStatus?: string }) =>
+  getHrAttendance: (params?: { branchId?: string[]; departmentId?: string[]; employeeId?: string[]; shiftId?: string[]; status?: string[]; dateFrom?: string; dateTo?: string; correctionStatus?: string }) =>
     request<StaffAttendance[]>(`/api/hrm/attendance${toQuery(params)}`),
   markAttendance: (data: { employeeId: string; date: string; shiftId?: string; checkInTime?: string; checkOutTime?: string; status: string; remarks?: string }) =>
     request<StaffAttendance>("/api/hrm/attendance", { method: "POST", body: JSON.stringify(data) }),

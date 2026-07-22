@@ -62,16 +62,22 @@ public class ReturnsController(
         userId.HasValue ? (await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()) : null;
 
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
+    public async Task<IActionResult> GetAll([FromQuery] Guid[]? branchId, [FromQuery] string[]? status)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
-            branchId = callerBranchId;
+            branchId = [callerBranchId.Value];
 
         var query = db.CustomerReturns.Include(r => r.Customer).Include(r => r.Order).Include(r => r.Items).ThenInclude(i => i.Product).AsQueryable();
-        if (branchId.HasValue) query = query.Where(r => r.BranchId == branchId);
-        if (!string.IsNullOrEmpty(status)) query = query.Where(r => r.Status == status);
-        return Ok(await query.OrderByDescending(r => r.CreatedAt).ToListAsync());
+        // branchId/status are arrays — never `.Contains()` a Guid[]/string[] directly against a
+        // DbSet-backed IQueryable on this repo's MySQL provider (ef-mysql-inlist-gotcha memory:
+        // throws at execution time on 2+ values despite compiling and passing a single-value
+        // smoke test). Materialize first, then filter in-memory.
+        var all = await query.OrderByDescending(r => r.CreatedAt).ToListAsync();
+        IEnumerable<CustomerReturn> scoped = all;
+        if (branchId is { Length: > 0 }) scoped = scoped.Where(r => branchId.Contains(r.BranchId));
+        if (status is { Length: > 0 }) scoped = scoped.Where(r => status.Contains(r.Status));
+        return Ok(scoped.ToList());
     }
 
     [HttpGet("{id:guid}")]

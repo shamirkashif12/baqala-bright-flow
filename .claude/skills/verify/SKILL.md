@@ -7,7 +7,7 @@ description: Build, run, and drive Mimony Mart POS (Vite frontend + .NET API + l
 
 ## Stack & handles
 
-- **API**: `cd api && dotnet build`, then `dotnet run --launch-profile http --no-build` → `http://localhost:5008`. Needs local MySQL (`localhost:3306`, db `mart_ecr`, root, empty password — see `api/appsettings.Development.json`). Boot takes ~10-20s.
+- **API**: `cd api && dotnet build`, then `dotnet run --launch-profile http --no-build` → `http://localhost:5008`. Needs local MySQL (`localhost:3306`, db `ecr`, root, empty password — see `api/appsettings.Development.json`). Boot takes ~10-20s.
 - **Frontend**: `npm run dev` (Vite). Port 8080 is often taken by the user's own dev server — Vite falls back to 8081. `.env` already sets `VITE_API_URL=http://localhost:5008`.
 - **Auth**: `POST /api/auth/login` with `{"email", "password"}` → `{token, user}`. JWT carries `role`, `roleId`, `branchId`; backend permission checks resolve `roleId` against RolePermissions in the DB.
 

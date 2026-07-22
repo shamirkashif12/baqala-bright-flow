@@ -56,7 +56,7 @@ function Shift() {
 
   const refetch = useCallback(() => {
     setLoading(true);
-    api.getShifts({ branchId: effectiveBranchId, cashierId: effectiveCashierId })
+    api.getShifts({ branchId: effectiveBranchId ? [effectiveBranchId] : undefined, cashierId: effectiveCashierId })
       .then(s => { setShifts(s); setLoadError(false); })
       // Keep the previously loaded shifts on failure — an unhandled rejection here used to
       // leave the queue rendered as zero/empty as if loaded (86eyag3ny).
@@ -287,7 +287,7 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
     if (!open) return;
     if (isCashierUser) {
       // Cashier only needs terminals for their own branch
-      api.getTerminals({ branchId: currentUser?.branchId ?? undefined })
+      api.getTerminals({ branchId: currentUser?.branchId ? [currentUser.branchId] : undefined })
         .then(t => setTerminals(t))
         .catch(() => {});
     } else {

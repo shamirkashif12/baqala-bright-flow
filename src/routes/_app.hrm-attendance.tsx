@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Pencil, Plus, Download } from "lucide-react";
 import { toast } from "sonner";
@@ -171,11 +172,11 @@ function HrmAttendanceTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [departmentFilter, setDepartmentFilter] = useState("all");
-  const [employeeFilter, setEmployeeFilter] = useState("all");
-  const [shiftFilter, setShiftFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
+  const [employeeFilter, setEmployeeFilter] = useState<string[]>([]);
+  const [shiftFilter, setShiftFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [correctionFilter, setCorrectionFilter] = useState("all");
   const [q, setQ] = useState("");
   const [dateFrom, setDateFrom] = useState(todayStr);
@@ -190,11 +191,11 @@ function HrmAttendanceTab() {
   const load = () => {
     setLoading(true);
     api.getHrAttendance({
-      branchId: branchLocked ? user?.branchId ?? undefined : (branchFilter === "all" ? undefined : branchFilter),
-      departmentId: departmentFilter === "all" ? undefined : departmentFilter,
-      employeeId: employeeFilter === "all" ? undefined : employeeFilter,
-      shiftId: shiftFilter === "all" ? undefined : shiftFilter,
-      status: statusFilter === "all" ? undefined : statusFilter,
+      branchId: branchLocked ? (user?.branchId ? [user.branchId] : undefined) : (branchFilter.length ? branchFilter : undefined),
+      departmentId: departmentFilter.length ? departmentFilter : undefined,
+      employeeId: employeeFilter.length ? employeeFilter : undefined,
+      shiftId: shiftFilter.length ? shiftFilter : undefined,
+      status: statusFilter.length ? statusFilter : undefined,
       correctionStatus: correctionFilter === "all" ? undefined : correctionFilter,
       dateFrom, dateTo,
     })
@@ -221,7 +222,7 @@ function HrmAttendanceTab() {
     );
   };
   useEffect(() => {
-    api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
     api.getDepartments({ status: "active" }).then(setDepartments).catch(() => {});
     api.getWorkShifts({ status: "active" }).then(setShifts).catch(() => {});
   }, []);
@@ -284,51 +285,58 @@ function HrmAttendanceTab() {
         <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
         <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
         {!branchLocked && canViewAll && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
         {canViewAll && (
-          <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Departments"
+              options={departments.map(d => ({ id: d.id, label: d.name }))}
+              selected={departmentFilter}
+              onChange={setDepartmentFilter}
+            />
+          </div>
         )}
         {canViewAll && (
-          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Employees"
+              options={employees.map(e => ({ id: e.id, label: e.fullName }))}
+              selected={employeeFilter}
+              onChange={setEmployeeFilter}
+            />
+          </div>
         )}
-        <Select value={shiftFilter} onValueChange={setShiftFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Shifts</SelectItem>
-            {shifts.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="present">Present</SelectItem>
-            <SelectItem value="late">Late</SelectItem>
-            <SelectItem value="absent">Absent</SelectItem>
-            <SelectItem value="on_leave">On Leave</SelectItem>
-            <SelectItem value="holiday">Holiday</SelectItem>
-            <SelectItem value="checkout_missing">Checkout Missing</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Shifts"
+            options={shifts.map(s => ({ id: s.id, label: s.name }))}
+            selected={shiftFilter}
+            onChange={setShiftFilter}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[
+              { id: "present", label: "Present" },
+              { id: "late", label: "Late" },
+              { id: "absent", label: "Absent" },
+              { id: "on_leave", label: "On Leave" },
+              { id: "holiday", label: "Holiday" },
+              { id: "checkout_missing", label: "Checkout Missing" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <Select value={correctionFilter} onValueChange={setCorrectionFilter}>
           <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
           <SelectContent>

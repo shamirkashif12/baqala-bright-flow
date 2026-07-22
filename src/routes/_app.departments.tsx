@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Download, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -94,8 +95,8 @@ function DepartmentsTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [editDept, setEditDept] = useState<Department | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<DepartmentForm>(emptyForm);
@@ -157,8 +158,8 @@ function DepartmentsTab() {
 
   const filtered = departments.filter(d => {
     const mq = !q || d.name.toLowerCase().includes(q.toLowerCase());
-    const mb = branchFilter === "all" || d.branchId === branchFilter;
-    const ms = statusFilter === "all" || d.status === statusFilter;
+    const mb = branchFilter.length === 0 || branchFilter.includes(d.branchId ?? "");
+    const ms = statusFilter.length === 0 || statusFilter.includes(d.status);
     return mq && mb && ms;
   });
 
@@ -176,22 +177,23 @@ function DepartmentsTab() {
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search department…" className="h-9 w-60" />
         {!branchLocked && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[{ id: "active", label: "Active" }, { id: "inactive", label: "Inactive" }]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export

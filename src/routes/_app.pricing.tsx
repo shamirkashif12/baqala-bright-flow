@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Plus, Loader2, Trash2, Pencil, Power, Tag, Boxes } from "lucide-react";
 import {
@@ -274,7 +275,7 @@ function Pricing() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
   const [unitTypeFilter, setUnitTypeFilter] = useState<"all" | "unit" | "pack">("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ProductPriceList | null>(null);
@@ -284,7 +285,7 @@ function Pricing() {
     setLoading(true);
     try {
       setRules(await api.getPriceLists({
-        branchId: lockedBranchId ?? (branchFilter !== "all" ? branchFilter : undefined),
+        branchId: lockedBranchId ? [lockedBranchId] : (branchFilter.length ? branchFilter : undefined),
         unitType: unitTypeFilter !== "all" ? unitTypeFilter : undefined,
       }));
     } catch { setRules([]); }
@@ -330,13 +331,14 @@ function Pricing() {
         <Input placeholder="Search product / SKU / label…" className="h-9 bg-card flex-1 min-w-[200px] max-w-sm"
           value={search} onChange={e => setSearch(e.target.value)} />
         {!lockedBranchId && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
         <Select value={unitTypeFilter} onValueChange={v => setUnitTypeFilter(v as typeof unitTypeFilter)}>
           <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>

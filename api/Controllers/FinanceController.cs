@@ -24,21 +24,27 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
     [RequirePermission("Accounting & Finance", PermAction.View)]
     [HttpGet("expenses")]
     public async Task<IActionResult> GetExpenses(
-        [FromQuery] Guid? branchId,
+        [FromQuery] Guid[]? branchId,
         [FromQuery] string? status,
         [FromQuery] string? paymentMethod,
         [FromQuery] Guid? expenseTypeId)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
-            branchId = callerBranchId;
+            branchId = new[] { callerBranchId.Value };
 
         var query = db.Expenses.Include(e => e.ExpenseType).Include(e => e.Branch).AsQueryable();
-        if (branchId.HasValue) query = query.Where(e => e.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(e => e.Status == status);
         if (!string.IsNullOrEmpty(paymentMethod)) query = query.Where(e => e.PaymentMethod == paymentMethod);
         if (expenseTypeId.HasValue) query = query.Where(e => e.ExpenseTypeId == expenseTypeId);
-        return Ok(await query.OrderByDescending(e => e.ExpenseDate).ToListAsync());
+        // branchId is a multi-select array — never `.Contains()` a Guid[] directly against a
+        // DbSet-backed IQueryable on this repo's MySQL provider (throws at execution time on 2+
+        // values despite compiling and passing a single-value smoke test). Applied in-memory below.
+        var all = await query.OrderByDescending(e => e.ExpenseDate).ToListAsync();
+        IEnumerable<Expense> scoped = all;
+        if (branchId is { Length: > 0 })
+            scoped = scoped.Where(e => branchId.Contains(e.BranchId));
+        return Ok(scoped.ToList());
     }
 
     [RequirePermission("Accounting & Finance", PermAction.Create)]

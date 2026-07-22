@@ -49,7 +49,7 @@ function AttendanceShift() {
 
   useEffect(() => {
     api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setStaff(u.filter((x) => x.status === "active"))).catch(() => {});
-    api.getTerminals({ branchId: branchId !== "all" ? branchId : undefined }).then(setTerminals).catch(() => {});
+    api.getTerminals({ branchId: branchId !== "all" ? [branchId] : undefined }).then(setTerminals).catch(() => {});
     setStaffId("all");
     setTerminalId("all");
   }, [branchId]);

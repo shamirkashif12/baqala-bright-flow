@@ -19,8 +19,19 @@ public class ProductsController(
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
+    // Mirrors GetCallerContext elsewhere — the Employee Audit Center's "Branch" column for catalog
+    // actions is the branch the acting employee was logged in from, not a property of the product
+    // itself (the catalog is tenant-wide, so a product has no branch of its own).
+    private Guid? CallerBranchId() =>
+        Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
+
+    // FRD 16.1 "POS Actions" — mirrors OrdersController.ResolveEmployeeIdAsync. Without this,
+    // create/update/delete product audit rows carried userId only, so the Employee Audit Center's
+    // employee filter (which matches on EmployeeId) silently dropped every one of them.
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? (await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()) : null;
+
     // The catalog fields a reviewer cares about, in the shape src/lib/audit-changes.ts diffs.
-    // Catalog rows are tenant-wide, so these audit rows carry no branchId.
     internal static object Snapshot(Product p) => new
     {
         name = p.Name,
@@ -41,11 +52,14 @@ public class ProductsController(
     {
         try
         {
+            var callerId = CallerId();
             await audit.LogAsync(
                 action: action,
                 entityType: "Product",
                 entityId: p.Id,
-                userId: CallerId(),
+                userId: callerId,
+                employeeId: await ResolveEmployeeIdAsync(callerId),
+                branchId: CallerBranchId(),
                 details: System.Text.Json.JsonSerializer.Serialize(Snapshot(p)),
                 severity: severity,
                 beforeValue: before is null ? null : System.Text.Json.JsonSerializer.Serialize(before));
@@ -194,6 +208,7 @@ public class ProductsController(
                 EntityType = "Product",
                 EntityId = product.Id,
                 RequestedBy = CallerId() ?? Guid.Empty,
+                BranchId = CallerBranchId(),
             };
             db.ApprovalRequests.Add(pending);
             await db.SaveChangesAsync();
@@ -202,7 +217,7 @@ public class ProductsController(
 
         // "Deleted Items" in the Employee Audit Center. Note this is a soft delete (status flips to
         // discontinued), so the before/after reads as a status change rather than a vanished row.
-        await productDeletion.DeleteProductAsync(id, CallerId());
+        await productDeletion.DeleteProductAsync(id, CallerId(), CallerBranchId());
         return NoContent();
     }
 

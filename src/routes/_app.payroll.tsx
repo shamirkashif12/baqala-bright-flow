@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Eye, Play, Plus, Download, Lock, Ban } from "lucide-react";
 import { toast } from "sonner";
@@ -140,8 +141,8 @@ function PayrollTab() {
   const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [monthFilter, setMonthFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
@@ -216,8 +217,8 @@ function PayrollTab() {
   const years = Array.from(new Set(runs.map(r => r.year))).sort((a, b) => b - a);
 
   const filtered = runs.filter(r => {
-    const mb = branchFilter === "all" || r.branchId === branchFilter;
-    const ms = statusFilter === "all" || r.status === statusFilter;
+    const mb = branchFilter.length === 0 || branchFilter.includes(r.branchId ?? "");
+    const ms = statusFilter.length === 0 || statusFilter.includes(r.status);
     const mm = monthFilter === "all" || r.month === Number(monthFilter);
     const my = yearFilter === "all" || r.year === Number(yearFilter);
     return mb && ms && mm && my;
@@ -238,24 +239,28 @@ function PayrollTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         {!branchLocked && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="Draft">Draft</SelectItem>
-            <SelectItem value="Processed">Processed</SelectItem>
-            <SelectItem value="Locked">Locked</SelectItem>
-            <SelectItem value="Cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[
+              { id: "Draft", label: "Draft" },
+              { id: "Processed", label: "Processed" },
+              { id: "Locked", label: "Locked" },
+              { id: "Cancelled", label: "Cancelled" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <Select value={monthFilter} onValueChange={setMonthFilter}>
           <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
           <SelectContent>

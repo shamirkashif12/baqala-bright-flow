@@ -345,7 +345,7 @@ function Dashboard() {
     Promise.allSettled([
       api.getDashboard({ period: apiPeriod, branchId }),
       canViewShifts ? api.getActiveShifts(branchId) : Promise.resolve([]),
-      canViewWarehouses ? api.getWarehouseRequests({ approvalStatus: "pending" }) : Promise.resolve([]),
+      canViewWarehouses ? api.getWarehouseRequests({ approvalStatus: ["pending"] }) : Promise.resolve([]),
     ])
       .then(([dashR, shiftsR, warehouseR]) => {
         if (dashR.status === "fulfilled") setDashData(dashR.value);
@@ -385,7 +385,7 @@ function Dashboard() {
   useEffect(() => {
     if (activeTab !== "terminals" || terminalTabLoaded || !canViewTerminals) return;
     setTerminalTabLoading(true);
-    api.getTerminals({ branchId: branch !== "all" ? branch : undefined })
+    api.getTerminals({ branchId: branch !== "all" ? [branch] : undefined })
       .then(items => { setTerminalItems(items); setTerminalTabLoaded(true); })
       .catch(() => {})
       .finally(() => setTerminalTabLoading(false));

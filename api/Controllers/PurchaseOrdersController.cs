@@ -35,10 +35,10 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         [FromQuery] Guid? supplierId,
         [FromQuery] Guid? warehouseId,
         [FromQuery] Guid? branchId,
-        [FromQuery] Guid? createdBy,
-        [FromQuery] Guid? approvedBy,
+        [FromQuery] Guid[]? createdBy,
+        [FromQuery] Guid[]? approvedBy,
         [FromQuery] Guid? productId,
-        [FromQuery] string? status,
+        [FromQuery] string[]? status,
         [FromQuery] string? paymentStatus,
         [FromQuery] string? batchId)
     {
@@ -54,10 +54,11 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         if (supplierId.HasValue) query = query.Where(p => p.SupplierId == supplierId);
         if (warehouseId.HasValue) query = query.Where(p => p.WarehouseId == warehouseId);
         if (branchId.HasValue) query = query.Where(p => p.BranchId == branchId);
-        if (createdBy.HasValue) query = query.Where(p => p.CreatedBy == createdBy);
-        if (approvedBy.HasValue) query = query.Where(p => p.ApprovedBy == approvedBy);
+        // createdBy/approvedBy are now multi-select arrays — never `.Contains()` a Guid[] directly
+        // against a DbSet-backed IQueryable on this repo's MySQL provider (see the
+        // ef-mysql-inlist-gotcha memory: it throws at execution time on 2+ values despite compiling
+        // and passing a single-value smoke test). Applied in-memory after ToListAsync below instead.
         if (productId.HasValue) query = query.Where(p => p.Items.Any(i => i.ProductId == productId));
-        if (!string.IsNullOrEmpty(status)) query = query.Where(p => p.Status == status);
         if (!string.IsNullOrEmpty(paymentStatus)) query = query.Where(p => p.PaymentStatus == paymentStatus);
         if (!string.IsNullOrEmpty(batchId)) query = query.Where(p => p.BatchId == batchId);
 
@@ -81,7 +82,12 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                 Payments = p.Payments.Select(pm => new { pm.Id, pm.PoId, pm.SupplierId, pm.Amount, pm.PaymentDate, pm.PaymentMethod, pm.ReferenceNumber, pm.Notes, pm.RecordedBy, pm.Status, pm.CreatedAt }),
             })
             .ToListAsync();
-        return Ok(pos);
+
+        var scoped = pos.AsEnumerable();
+        if (createdBy is { Length: > 0 }) scoped = scoped.Where(p => createdBy.Contains(p.CreatedBy));
+        if (approvedBy is { Length: > 0 }) scoped = scoped.Where(p => p.ApprovedBy.HasValue && approvedBy.Contains(p.ApprovedBy.Value));
+        if (status is { Length: > 0 }) scoped = scoped.Where(p => status.Contains(p.Status));
+        return Ok(scoped.ToList());
     }
 
     // Deliberately NOT gated on "Purchase Orders" View — this is used as a cross-module PO-number

@@ -123,7 +123,7 @@ function CashierWorkspace() {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     Promise.all([
       api.getActiveShifts(),
-      api.getOrders({ from: todayStart.toISOString(), branchId: branchIdFilter }),
+      api.getOrders({ from: todayStart.toISOString(), branchId: branchIdFilter ? [branchIdFilter] : undefined }),
     ])
       .then(([shifts, orders]) => {
         setShift(shifts[0] ?? null);

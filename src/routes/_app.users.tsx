@@ -16,6 +16,7 @@ import { api, type User, type Branch, type Role } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { canManageUser } from "@/lib/role-hierarchy";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 
 export const Route = createFileRoute("/_app/users")({
   component: () => (
@@ -43,8 +44,8 @@ function RegisteredUsers() {
   // Filters
   const [q, setQ] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -65,8 +66,8 @@ function RegisteredUsers() {
   const filtered = useMemo(() => users.filter(u => {
     const matchQ = !q || u.fullName.toLowerCase().includes(q.toLowerCase()) || u.email.toLowerCase().includes(q.toLowerCase()) || (u.username ?? "").toLowerCase().includes(q.toLowerCase());
     const matchRole = roleFilter === "all" || u.roleId === roleFilter;
-    const matchStatus = statusFilter === "all" || u.status === statusFilter;
-    const matchBranch = branchFilter === "all" || (u.branchId ?? "all") === branchFilter;
+    const matchStatus = !(statusFilter.length && !statusFilter.includes(u.status));
+    const matchBranch = !(branchFilter.length && !branchFilter.includes(u.branchId ?? ""));
     const mdf = !dateFrom || (!!u.createdAt && u.createdAt >= dateFrom);
     const mdt = !dateTo || (!!u.createdAt && u.createdAt <= dateTo + "T23:59:59");
     return matchQ && matchRole && matchStatus && matchBranch && mdf && mdt;
@@ -131,22 +132,26 @@ function RegisteredUsers() {
             {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-[130px]"><SelectValue placeholder="All Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-            <SelectItem value="suspended">Suspended</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={branchFilter} onValueChange={setBranchFilter}>
-          <SelectTrigger className="h-9 w-[150px]"><SelectValue placeholder="All Branches" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-[130px]">
+          <SearchableMultiSelect
+            placeholder="All Status"
+            options={[
+              { id: "active", label: "Active" },
+              { id: "inactive", label: "Inactive" },
+              { id: "suspended", label: "Suspended" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
+        <div className="w-[150px]">
+          <SearchableMultiSelect
+            placeholder="All Branches"
+            options={branches.map(b => ({ id: b.id, label: b.name }))}
+            selected={branchFilter}
+            onChange={setBranchFilter}
+          />
+        </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Created:</span>
           <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />

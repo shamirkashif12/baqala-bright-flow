@@ -4,7 +4,7 @@ import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { Wallet, Receipt, Percent, RotateCcw, X } from "lucide-react";
@@ -25,13 +25,13 @@ function Sales() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [payFilter, setPayFilter] = useState("all");
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [payFilter, setPayFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
-    if (lockedBranchId) setBranchId(lockedBranchId);
+    if (lockedBranchId) setBranchIds([lockedBranchId]);
   }, [lockedBranchId]);
 
   useEffect(() => {
@@ -41,15 +41,15 @@ function Sales() {
   const load = useCallback(() => {
     setLoading(true);
     api.getOrders({
-      branchId: branchId !== "all" ? branchId : undefined,
-      paymentStatus: payFilter !== "all" ? payFilter : undefined,
+      branchId: branchIds.length ? branchIds : undefined,
+      paymentStatus: payFilter.length ? payFilter : undefined,
       from: dateFrom || undefined,
       to: dateTo || undefined,
     })
       .then(setOrders)
       .catch(e => { console.error(e); toast.error("Failed to load sales data."); })
       .finally(() => setLoading(false));
-  }, [branchId, payFilter, dateFrom, dateTo]);
+  }, [branchIds, payFilter, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -91,24 +91,28 @@ function Sales() {
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, branch, cashier…" className="h-9 w-56 flex-shrink-0" />
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+          </div>
         )}
-        <Select value={payFilter} onValueChange={setPayFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Payment Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="paid">Paid</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="refunded">Refunded</SelectItem>
-            <SelectItem value="partial">Partial</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="Payment Status"
+            options={[
+              { id: "paid", label: "Paid" },
+              { id: "pending", label: "Pending" },
+              { id: "refunded", label: "Refunded" },
+              { id: "partial", label: "Partial" },
+            ]}
+            selected={payFilter}
+            onChange={setPayFilter}
+          />
+        </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
           <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />

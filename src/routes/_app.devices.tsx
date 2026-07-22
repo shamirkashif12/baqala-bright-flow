@@ -15,6 +15,7 @@ import { HardDrive, Activity, Power, Wifi, Plus, Eye, Pencil, Battery, Thermomet
 import { toast } from "sonner";
 import { api, type DeviceRecord, type Branch, type Terminal } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 
 export const Route = createFileRoute("/_app/devices")({ component: Devices });
 
@@ -99,8 +100,8 @@ function Devices() {
   const [form, setForm] = useState<DeviceForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
-  const [br, setBr] = useState("All");
-  const [st, setSt] = useState("All");
+  const [br, setBr] = useState<string[]>([]);
+  const [st, setSt] = useState<string[]>([]);
 
   const load = async () => {
     setLoading(true);
@@ -117,15 +118,15 @@ function Devices() {
 
   const filtered = useMemo(() => devices.filter(d =>
     (!q || `${d.deviceName} ${d.deviceType} ${d.serialNumber ?? ""}`.toLowerCase().includes(q.toLowerCase())) &&
-    (br === "All" || d.branch?.name === br) &&
-    (st === "All" || d.status === st)
+    !(br.length && !br.includes(d.branch?.name ?? "")) &&
+    !(st.length && !st.includes(d.status))
   ), [devices, q, br, st]);
 
   const total = devices.length;
   const healthy = devices.filter(d => d.status === "active").length;
   const maintenance = devices.filter(d => d.status === "maintenance" || d.status === "offline").length;
   const synced = devices.filter(d => d.syncStatus === "synced").length;
-  const branchList = ["All", ...Array.from(new Set(devices.map(d => d.branch?.name).filter((n): n is string => !!n)))];
+  const branchList = Array.from(new Set(devices.map(d => d.branch?.name).filter((n): n is string => !!n)));
 
   const openEdit = (d: DeviceRecord) => {
     setEdit(d);
@@ -176,14 +177,26 @@ function Devices() {
       <Card className="p-3 border-border/60 shadow-card">
         <div className="flex flex-wrap items-center gap-2">
           <Input placeholder="Search by name, type, serial…" value={q} onChange={e => setQ(e.target.value)} className="h-9 flex-1 min-w-[180px]" />
-          <Select value={br} onValueChange={setBr}>
-            <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>{branchList.map(o => <SelectItem key={o} value={o}>{o === "All" ? "All Branches" : o}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={st} onValueChange={setSt}>
-            <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>{["All", "active", "maintenance", "offline"].map(o => <SelectItem key={o} value={o}>{o === "All" ? "All Status" : o}</SelectItem>)}</SelectContent>
-          </Select>
+          <div className="w-[140px]">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branchList.map(o => ({ id: o, label: o }))}
+              selected={br}
+              onChange={setBr}
+            />
+          </div>
+          <div className="w-[140px]">
+            <SearchableMultiSelect
+              placeholder="All Status"
+              options={[
+                { id: "active", label: "active" },
+                { id: "maintenance", label: "maintenance" },
+                { id: "offline", label: "offline" },
+              ]}
+              selected={st}
+              onChange={setSt}
+            />
+          </div>
           {canCreate && (
             <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
               <Plus className="h-4 w-4" /> Register Device

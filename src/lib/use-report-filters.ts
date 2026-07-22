@@ -36,7 +36,7 @@ export function useReportFilterOptions(branchId?: string, categoryId?: string) {
   }, [scopedBranchId]);
 
   useEffect(() => {
-    api.getTerminals({ branchId: scopedBranchId }).then(setTerminals).catch(() => {});
+    api.getTerminals({ branchId: scopedBranchId ? [scopedBranchId] : undefined }).then(setTerminals).catch(() => {});
   }, [scopedBranchId]);
 
   // Narrow the product picker to the selected category so it can't offer a product that the

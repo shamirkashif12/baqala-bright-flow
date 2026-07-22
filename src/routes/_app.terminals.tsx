@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut, KeyRound, Copy, Lock } from "lucide-react";
 import { toast } from "sonner";
@@ -221,17 +222,17 @@ function Terminals() {
   const [logsLoading, setLogsLoading] = useState(false);
   const [syncLogFilter, setSyncLogFilter] = useState("all");
   const [mainTab, setMainTab] = useState("terminals");
-  const [slTerminal, setSlTerminal] = useState("all");
-  const [slStatus, setSlStatus] = useState("all");
+  const [slTerminal, setSlTerminal] = useState<string[]>([]);
+  const [slStatus, setSlStatus] = useState<string[]>([]);
   const [slDateFrom, setSlDateFrom] = useState("");
   const [slDateTo, setSlDateTo] = useState("");
   const [q, setQ] = useState("");
-  const [br, setBr] = useState(lockedBranchId ?? "all");
-  const [st, setSt] = useState("all");
+  const [br, setBr] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [st, setSt] = useState<string[]>([]);
 
   // Sync if user loads after mount
   useEffect(() => {
-    if (lockedBranchId) setBr(lockedBranchId);
+    if (lockedBranchId) setBr([lockedBranchId]);
   }, [lockedBranchId]);
   const [syncFrom, setSyncFrom] = useState("");
   const [syncTo, setSyncTo] = useState("");
@@ -259,8 +260,8 @@ function Terminals() {
     // "No terminals found" whenever a sibling call (e.g. /api/users) failed.
     Promise.all([
       api.getTerminals({
-        branchId: br !== "all" ? br : undefined,
-        status: st !== "all" ? st : undefined,
+        branchId: br.length ? br : undefined,
+        status: st.length ? st : undefined,
       }).catch(() => []),
       api.getBranches().catch(() => []),
       api.getUsers().catch(() => []),
@@ -276,8 +277,8 @@ function Terminals() {
     setLogsLoading(true);
     api.getShifts({
       cashierId:  user?.role === "cashier" ? user.id : undefined,
-      terminalId: slTerminal !== "all" ? slTerminal : undefined,
-      status:     slStatus   !== "all" ? slStatus   : undefined,
+      terminalId: slTerminal.length ? slTerminal : undefined,
+      status:     slStatus.length   ? slStatus   : undefined,
       dateFrom:   slDateFrom || undefined,
       dateTo:     slDateTo   || undefined,
     })
@@ -388,24 +389,28 @@ function Terminals() {
           <div className="flex flex-wrap items-center gap-2">
             <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search code or name…" className="h-9 w-48 flex-shrink-0" />
             {!lockedBranchId && (
-              <Select value={br} onValueChange={setBr}>
-                <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <div className="w-40">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map(b => ({ id: b.id, label: b.name }))}
+                  selected={br}
+                  onChange={setBr}
+                />
+              </div>
             )}
-            <Select value={st} onValueChange={setSt}>
-              <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-                <SelectItem value="maintenance">Maintenance</SelectItem>
-                <SelectItem value="syncing">Syncing</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="w-36">
+              <SearchableMultiSelect
+                placeholder="All Statuses"
+                options={[
+                  { id: "active", label: "Active" },
+                  { id: "inactive", label: "Inactive" },
+                  { id: "maintenance", label: "Maintenance" },
+                  { id: "syncing", label: "Syncing" },
+                ]}
+                selected={st}
+                onChange={setSt}
+              />
+            </div>
             <div className="flex items-center gap-1">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Sync Date:</span>
               <Input type="date" className="h-9 w-36" value={syncFrom} onChange={e => setSyncFrom(e.target.value)} />
@@ -518,21 +523,25 @@ function Terminals() {
         {/* ── SESSION LOGS TAB ── */}
         <TabsContent value="session-logs" className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={slTerminal} onValueChange={setSlTerminal}>
-              <SelectTrigger className="h-9 w-52"><SelectValue placeholder="All Terminals" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Terminals</SelectItem>
-                {allTerminals.map(t => <SelectItem key={t.id} value={t.id}>{t.terminalCode} — {t.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={slStatus} onValueChange={setSlStatus}>
-              <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Sessions</SelectItem>
-                <SelectItem value="open">Open</SelectItem>
-                <SelectItem value="closed">Closed</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="w-52">
+              <SearchableMultiSelect
+                placeholder="All Terminals"
+                options={allTerminals.map(t => ({ id: t.id, label: `${t.terminalCode} — ${t.name}` }))}
+                selected={slTerminal}
+                onChange={setSlTerminal}
+              />
+            </div>
+            <div className="w-36">
+              <SearchableMultiSelect
+                placeholder="All Sessions"
+                options={[
+                  { id: "open", label: "Open" },
+                  { id: "closed", label: "Closed" },
+                ]}
+                selected={slStatus}
+                onChange={setSlStatus}
+              />
+            </div>
             <div className="flex items-center gap-1">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
               <Input type="date" className="h-9 w-36" value={slDateFrom} onChange={e => setSlDateFrom(e.target.value)} />

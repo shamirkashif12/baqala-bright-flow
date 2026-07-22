@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Truck, Eye, Pencil, Plus, Trash2, Package, CheckCircle, Clock, ShoppingCart } from "lucide-react";
 import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
@@ -596,7 +597,7 @@ function SuppliersTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [viewSupplier, setViewSupplier] = useState<Supplier | null>(null);
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -659,7 +660,7 @@ function SuppliersTab() {
 
   const filtered = suppliers.filter(s => {
     const mq = !q || s.name.toLowerCase().includes(q.toLowerCase()) || s.supplierCode.toLowerCase().includes(q.toLowerCase()) || (s.city?.toLowerCase().includes(q.toLowerCase()) ?? false);
-    const ms = statusFilter === "all" || s.status === statusFilter;
+    const ms = !(statusFilter.length && !statusFilter.includes(s.status));
     return mq && ms;
   });
 
@@ -677,14 +678,17 @@ function SuppliersTab() {
       {/* Filters + Actions */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code, city…" className="h-9 w-60" />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[
+              { id: "active", label: "Active" },
+              { id: "inactive", label: "Inactive" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex-1" />
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>

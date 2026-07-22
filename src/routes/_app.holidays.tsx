@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Pencil, Plus, Trash2, Download } from "lucide-react";
 import { toast } from "sonner";
@@ -93,9 +94,9 @@ function HolidaysTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [yearFilter, setYearFilter] = useState("all");
   const [editHoliday, setEditHoliday] = useState<Holiday | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -161,9 +162,9 @@ function HolidaysTab() {
 
   const filtered = holidays.filter(h => {
     const mq = !q || h.name.toLowerCase().includes(q.toLowerCase());
-    const mb = branchFilter === "all" || h.branchId === branchFilter;
+    const mb = branchFilter.length === 0 || branchFilter.includes(h.branchId ?? "");
     const mt = typeFilter === "all" || h.holidayType === typeFilter;
-    const ms = statusFilter === "all" || h.status === statusFilter;
+    const ms = statusFilter.length === 0 || statusFilter.includes(h.status);
     const my = yearFilter === "all" || String(new Date(h.date).getFullYear()) === yearFilter;
     return mq && mb && mt && ms && my;
   });
@@ -184,13 +185,14 @@ function HolidaysTab() {
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search holiday…" className="h-9 w-56" />
         {!branchLocked && (
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchFilter}
+              onChange={setBranchFilter}
+            />
+          </div>
         )}
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
@@ -200,14 +202,14 @@ function HolidaysTab() {
             <SelectItem value="Optional Holiday">Optional Holiday</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[{ id: "active", label: "Active" }, { id: "inactive", label: "Inactive" }]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <Select value={yearFilter} onValueChange={setYearFilter}>
           <SelectTrigger className="h-9 w-28"><SelectValue /></SelectTrigger>
           <SelectContent>

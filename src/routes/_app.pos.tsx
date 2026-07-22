@@ -693,7 +693,7 @@ function POS() {
     // Status was set once at receiving time and never updated as the real ExpiryDate passed — the
     // backend catches those anyway and only rejects at checkout, so the product looked selectable
     // here until payment was confirmed. Fetching all batches and computing live avoids that gap.
-    api.getBatches({ branchId: branch.id })
+    api.getBatches({ branchId: [branch.id] })
       .then((batches) => {
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const byProduct = new Map<string, InventoryBatch[]>();

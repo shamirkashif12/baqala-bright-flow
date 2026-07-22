@@ -239,7 +239,7 @@ function ReceiveStockDialog({ open, onClose, warehouses, branches, destBranchId,
     const [type, id] = sourceKey.split(":");
     setLoading(true);
     api.getStockTransfers({
-      status: "in_transit",
+      status: ["in_transit"],
       ...(type === "warehouse" ? { sourceWarehouseId: id } : { sourceBranchId: id }),
     })
       .then(all => setTransfers(all.filter(t => t.destBranchId === destBranchId)))
@@ -1345,7 +1345,7 @@ function Inventory() {
 
   const loadIncomingTransfers = () => {
     if (!effectiveBranchId) { setIncomingTransfers([]); return; }
-    api.getStockTransfers({ status: "in_transit" })
+    api.getStockTransfers({ status: ["in_transit"] })
       .then(all => setIncomingTransfers(all.filter(t => t.destBranchId === effectiveBranchId)))
       .catch(() => {});
   };

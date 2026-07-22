@@ -21,14 +21,12 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] string? status)
+    public async Task<IActionResult> GetAll([FromQuery] Guid[]? branchId, [FromQuery] string[]? status)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
-        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = [callerBranchId.Value];
 
         var query = db.Terminals.Include(t => t.Branch).Include(t => t.AssignedCashier).Include(t => t.Devices).AsQueryable();
-        if (branchId.HasValue) query = query.Where(t => t.BranchId == branchId);
-        if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);
 
         // AssignedCashier was serialized whole (email, username, phone, status, last login) with
         // no permission gate at all; the frontend Terminal type (src/lib/api.ts) only ever reads
@@ -40,7 +38,15 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
             Branch = t.Branch == null ? null : new { t.Branch.Id, t.Branch.Name },
             AssignedCashier = t.AssignedCashier == null ? null : new { t.AssignedCashier.Id, t.AssignedCashier.FullName },
         }).ToListAsync();
-        return Ok(terminals);
+
+        // branchId/status are arrays (multi-select filters) — never `.Contains()` a Guid[]/string[]
+        // directly against a DbSet-backed IQueryable on this repo's MySQL provider (see the
+        // ef-mysql-inlist-gotcha memory: throws at execution time on 2+ values despite compiling
+        // and passing a single-value smoke test). Applied in-memory below, after materializing.
+        var scoped = terminals.AsEnumerable();
+        if (branchId is { Length: > 0 }) scoped = scoped.Where(t => branchId.Contains(t.BranchId));
+        if (status is { Length: > 0 }) scoped = scoped.Where(t => status.Contains(t.Status));
+        return Ok(scoped.ToList());
     }
 
     [HttpGet("{id:guid}")]

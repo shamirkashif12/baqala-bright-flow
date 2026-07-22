@@ -72,7 +72,7 @@ function EmployeeActivityReport() {
   }, [branchId, module, employeeId, performedBy, search, referenceId, ipOrDevice, dateFrom, dateTo]);
   useEffect(load, [load]);
   useEffect(() => {
-    api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
     api.getUsers().then(setUsers).catch(() => {});
   }, []);
 

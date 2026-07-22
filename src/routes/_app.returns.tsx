@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, ScanLine, Loader2 } from "lucide-react";
 import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type OrderItem } from "@/lib/api";
@@ -221,8 +222,8 @@ function Returns() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -244,8 +245,8 @@ function Returns() {
     // .catch() at all, so a failed fetch left `returns` in whatever state it was in with no
     // signal to the cashier that the tiles/table might be stale (86eyag3ny).
     api.getReturns({
-      branchId: branchFilter !== "all" ? branchFilter : undefined,
-      status: statusFilter !== "all" ? statusFilter : undefined,
+      branchId: branchFilter.length ? branchFilter : undefined,
+      status: statusFilter.length ? statusFilter : undefined,
     }).then(r => { setReturns(r); setLoadError(false); })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
@@ -436,23 +437,27 @@ function Returns() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search return#, customer, order…" className="h-9 w-56 flex-shrink-0" />
-        <Select value={branchFilter} onValueChange={setBranchFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {allBranches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending {pendingCount > 0 ? `(${pendingCount})` : ""}</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Branches"
+            options={allBranches.map(b => ({ id: b.id, label: b.name }))}
+            selected={branchFilter}
+            onChange={setBranchFilter}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[
+              { id: "pending", label: `Pending${pendingCount > 0 ? ` (${pendingCount})` : ""}` },
+              { id: "approved", label: "Approved" },
+              { id: "completed", label: "Completed" },
+              { id: "rejected", label: "Rejected" },
+            ]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Return Date:</span>
           <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />

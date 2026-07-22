@@ -70,7 +70,7 @@ function EmployeeAuditCenter() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (isManagerTier) api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    if (isManagerTier) api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
   }, [isManagerTier]);
 
   const filterParams = {

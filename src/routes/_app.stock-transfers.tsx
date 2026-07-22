@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
@@ -738,7 +739,7 @@ function CreateTransferSheet({
       // No status filter — near_expiry batches still have real remainingQuantity and are exactly
       // the stock you'd want to prioritize moving; itemBatches below already filters on
       // remainingQuantity > 0, which excludes expired/consumed since those are always zeroed.
-      api.getBatches({ warehouseId: whId }).then(setSourceBatches).catch(() => {});
+      api.getBatches({ warehouseId: [whId] }).then(setSourceBatches).catch(() => {});
     } else if (brId) {
       api.getStock({ branchId: brId })
         .then(stocks => setSourceStock(
@@ -752,7 +753,7 @@ function CreateTransferSheet({
             }))
         ))
         .catch(() => setSourceStock([]));
-      api.getBatches({ branchId: brId }).then(setSourceBatches).catch(() => {});
+      api.getBatches({ branchId: [brId] }).then(setSourceBatches).catch(() => {});
     }
   }, [form.sourceWarehouseId, form.sourceBranchId, transferType]);
 
@@ -1670,7 +1671,7 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
   const [supplierTransfers, setSupplierTransfers] = useState<StockTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
 
   useEffect(() => {
     setLoading(true);
@@ -1690,7 +1691,7 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
     const s = q.toLowerCase();
     return purchaseOrders.filter(po => {
       if (s && !po.poNumber.toLowerCase().includes(s) && !(po.supplier?.name.toLowerCase().includes(s)) && !(po.warehouse?.name.toLowerCase().includes(s))) return false;
-      if (statusFilter !== "all" && po.status !== statusFilter) return false;
+      if (statusFilter.length && !statusFilter.includes(po.status)) return false;
       return true;
     });
   }, [purchaseOrders, q, statusFilter]);
@@ -1699,12 +1700,12 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
     const s = q.toLowerCase();
     return supplierTransfers.filter(t => {
       if (s && !t.transferNumber.toLowerCase().includes(s) && !(t.sourceSupplier?.name.toLowerCase().includes(s)) && !(t.destWarehouse?.name.toLowerCase().includes(s))) return false;
-      if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      if (statusFilter.length && !statusFilter.includes(t.status)) return false;
       return true;
     });
   }, [supplierTransfers, q, statusFilter]);
 
-  const PO_STATUSES = ["all", "draft", "approved", "ordered", "partial_received", "fully_received", "cancelled", "in_transit", "completed"];
+  const PO_STATUSES = ["draft", "approved", "ordered", "partial_received", "fully_received", "cancelled", "in_transit", "completed"];
 
   return (
     <div className="space-y-4">
@@ -1718,16 +1719,14 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
             onChange={e => setQ(e.target.value)}
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-48 h-9">
-            <SelectValue placeholder="All Statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            {PO_STATUSES.map(s => (
-              <SelectItem key={s} value={s}>{s === "all" ? "All Statuses" : s.replace(/_/g, " ")}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={PO_STATUSES.map(s => ({ id: s, label: s.replace(/_/g, " ") }))}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
       </div>
       <Card className="border-border/60 shadow-card">
         <div className="overflow-x-auto">
@@ -1839,18 +1838,18 @@ function StockTransfers() {
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   // FRD §2.4. Branch/warehouse match a transfer at EITHER end, and product matches inside items —
   // none of which can be done client-side here, because a transfer's items only arrive on the row
   // and matching "either end" against six nullable location FKs is exactly what the server query
   // now expresses. So these are pushed to the API rather than filtered off `transfers`.
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [warehouseFilter, setWarehouseFilter] = useState("all");
-  const [productFilter, setProductFilter] = useState("all");
-  const [createdByFilter, setCreatedByFilter] = useState("all");
-  const [approvedByFilter, setApprovedByFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [warehouseFilter, setWarehouseFilter] = useState<string[]>([]);
+  const [productFilter, setProductFilter] = useState<string[]>([]);
+  const [createdByFilter, setCreatedByFilter] = useState<string[]>([]);
+  const [approvedByFilter, setApprovedByFilter] = useState<string[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [loadError, setLoadError] = useState(false);
 
@@ -1861,11 +1860,11 @@ function StockTransfers() {
   const [receiveGroup, setReceiveGroup] = useState<StockTransfer[]>([]);
 
   const serverFilters = useMemo(() => ({
-    branchId: branchFilter !== "all" ? branchFilter : undefined,
-    warehouseId: warehouseFilter !== "all" ? warehouseFilter : undefined,
-    productId: productFilter !== "all" ? productFilter : undefined,
-    createdBy: createdByFilter !== "all" ? createdByFilter : undefined,
-    approvedBy: approvedByFilter !== "all" ? approvedByFilter : undefined,
+    branchId: branchFilter.length ? branchFilter : undefined,
+    warehouseId: warehouseFilter.length ? warehouseFilter : undefined,
+    productId: productFilter.length ? productFilter : undefined,
+    createdBy: createdByFilter.length ? createdByFilter : undefined,
+    approvedBy: approvedByFilter.length ? approvedByFilter : undefined,
   }), [branchFilter, warehouseFilter, productFilter, createdByFilter, approvedByFilter]);
 
   const load = useCallback(() => {
@@ -1910,7 +1909,7 @@ function StockTransfers() {
     return transfers.filter(t => {
       if (s && !t.transferNumber.toLowerCase().includes(s) && !getSourceLabel(t).toLowerCase().includes(s) && !getDestLabel(t).toLowerCase().includes(s)) return false;
       if (typeFilter !== "all" && t.transferType !== typeFilter) return false;
-      if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      if (statusFilter.length && !statusFilter.includes(t.status)) return false;
       if (dateFrom && t.createdAt < dateFrom) return false;
       if (dateTo && t.createdAt > dateTo + "T23:59:59") return false;
       return true;
@@ -2008,53 +2007,56 @@ function StockTransfers() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-44 h-9">
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map(s => (
-                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Statuses"
+                options={STATUS_OPTIONS.filter(s => s.value !== "all").map(s => ({ id: s.value, label: s.label }))}
+                selected={statusFilter}
+                onChange={setStatusFilter}
+              />
+            </div>
             {/* Branch and Warehouse match a transfer at either end (source OR destination) —
                 they are not the directional Sending/Receiving Warehouse pickers. */}
-            <Select value={branchFilter} onValueChange={setBranchFilter}>
-              <SelectTrigger className="w-40 h-9"><SelectValue placeholder="All Branches" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
-              <SelectTrigger className="w-44 h-9"><SelectValue placeholder="All Warehouses" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Warehouses</SelectItem>
-                {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={productFilter} onValueChange={setProductFilter}>
-              <SelectTrigger className="w-44 h-9"><SelectValue placeholder="All Products" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Products</SelectItem>
-                {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={createdByFilter} onValueChange={setCreatedByFilter}>
-              <SelectTrigger className="w-40 h-9"><SelectValue placeholder="Created By" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Created By: Any</SelectItem>
-                {employees.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={approvedByFilter} onValueChange={setApprovedByFilter}>
-              <SelectTrigger className="w-40 h-9"><SelectValue placeholder="Approved By" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Approved By: Any</SelectItem>
-                {employees.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map(b => ({ id: b.id, label: b.name }))}
+                selected={branchFilter}
+                onChange={setBranchFilter}
+              />
+            </div>
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Warehouses"
+                options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                selected={warehouseFilter}
+                onChange={setWarehouseFilter}
+              />
+            </div>
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Products"
+                options={products.map(p => ({ id: p.id, label: p.name }))}
+                selected={productFilter}
+                onChange={setProductFilter}
+              />
+            </div>
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Created By: Any"
+                options={employees.map(u => ({ id: u.id, label: u.fullName }))}
+                selected={createdByFilter}
+                onChange={setCreatedByFilter}
+              />
+            </div>
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Approved By: Any"
+                options={employees.map(u => ({ id: u.id, label: u.fullName }))}
+                selected={approvedByFilter}
+                onChange={setApprovedByFilter}
+              />
+            </div>
             <div className="flex items-center gap-1">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
               <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />

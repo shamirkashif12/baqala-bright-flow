@@ -25,8 +25,8 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
     [HttpGet("requests")]
     public async Task<IActionResult> GetRequests(
         [FromQuery] Guid? branchId,
-        [FromQuery] string? approvalStatus,
-        [FromQuery] string? deliveryStatus)
+        [FromQuery] string[]? approvalStatus,
+        [FromQuery] string[]? deliveryStatus)
     {
         var query = db.WarehouseRequests
             .Include(w => w.SourceBranch)
@@ -35,14 +35,19 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
             .AsQueryable();
         if (branchId.HasValue)
             query = query.Where(w => w.DestinationBranchId == branchId || w.SourceBranchId == branchId);
-        if (!string.IsNullOrEmpty(approvalStatus)) query = query.Where(w => w.ApprovalStatus == approvalStatus);
-        if (!string.IsNullOrEmpty(deliveryStatus)) query = query.Where(w => w.DeliveryStatus == deliveryStatus);
 
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
             query = query.Where(w => w.DestinationBranchId == callerBranchId || w.SourceBranchId == callerBranchId);
 
-        return Ok(await query.OrderByDescending(w => w.CreatedAt).ToListAsync());
+        // approvalStatus/deliveryStatus are arrays — never `.Contains()` a string[] directly
+        // against a DbSet-backed IQueryable on this repo's MySQL provider (ef-mysql-inlist-gotcha
+        // memory: throws at execution time on 2+ values). Materialize first, filter in-memory.
+        var all = await query.OrderByDescending(w => w.CreatedAt).ToListAsync();
+        IEnumerable<WarehouseRequest> scoped = all;
+        if (approvalStatus is { Length: > 0 }) scoped = scoped.Where(w => approvalStatus.Contains(w.ApprovalStatus));
+        if (deliveryStatus is { Length: > 0 }) scoped = scoped.Where(w => deliveryStatus.Contains(w.DeliveryStatus));
+        return Ok(scoped.ToList());
     }
 
     [RequirePermission("Stock Transfers", PermAction.View)]

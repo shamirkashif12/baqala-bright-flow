@@ -97,9 +97,9 @@ function ControlTower() {
     // not blank out branches/terminals/users/shifts that DID load moments earlier (86eyag3ny).
     Promise.allSettled([
       api.getBranches(),
-      api.getTerminals({ branchId: lockedBranchId ?? undefined }),
+      api.getTerminals({ branchId: lockedBranchId ? [lockedBranchId] : undefined }),
       api.getUsers(),
-      api.getShifts({ branchId: lockedBranchId ?? undefined }),
+      api.getShifts({ branchId: lockedBranchId ? [lockedBranchId] : undefined }),
     ])
       .then(([b, t, u, s]) => {
         if (b.status === "fulfilled") setBranches(b.value);

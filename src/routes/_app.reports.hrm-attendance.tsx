@@ -117,7 +117,7 @@ function HrmAttendanceReport() {
   useEffect(() => {
     api.getDepartments({ status: "active" }).then(setDepartments).catch(() => {});
     api.getWorkShifts({ status: "active" }).then(setShifts).catch(() => {});
-    api.getEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+    api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
   }, []);
 
   const handleExport = async (format: ReportExportFormat) => {

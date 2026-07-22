@@ -148,25 +148,20 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
 
     [HttpGet]
     public async Task<IActionResult> GetAll(
-        [FromQuery] Guid? branchId,
-        [FromQuery] Guid? departmentId,
-        [FromQuery] Guid? designationId,
-        [FromQuery] Guid? roleId,
-        [FromQuery] string? status,
+        [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? departmentId,
+        [FromQuery] Guid[]? designationId,
+        [FromQuery] Guid[]? roleId,
+        [FromQuery] string[]? status,
         [FromQuery] string? search,
         [FromQuery] int? page,
         [FromQuery] int? pageSize)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
-            branchId = callerBranchId;
+            branchId = [callerBranchId.Value];
 
         var query = WithIncludes(db.Employees.AsQueryable());
-        if (branchId.HasValue) query = query.Where(e => e.BranchId == branchId);
-        if (departmentId.HasValue) query = query.Where(e => e.DepartmentId == departmentId);
-        if (designationId.HasValue) query = query.Where(e => e.DesignationId == designationId);
-        if (roleId.HasValue) query = query.Where(e => e.RoleId == roleId);
-        if (!string.IsNullOrEmpty(status)) query = query.Where(e => e.EmploymentStatus == status);
         if (!string.IsNullOrEmpty(search))
             query = query.Where(e =>
                 e.FullName.Contains(search) ||
@@ -175,14 +170,28 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
                 (e.Email != null && e.Email.Contains(search)));
 
         query = query.OrderBy(e => e.FullName);
-        var totalCount = await query.CountAsync();
+        // branchId/departmentId/designationId/roleId/status are arrays (multi-select filters) —
+        // never `.Contains()` an array directly against a DbSet-backed IQueryable on this repo's
+        // MySQL provider (see the ef-mysql-inlist-gotcha memory: throws at execution time on 2+
+        // values despite compiling and passing a single-value smoke test). Only `search` above
+        // runs in SQL; the array filters below are applied in-memory after materializing.
+        var all = await query.ToListAsync();
+        IEnumerable<Employee> scoped = all;
+        if (branchId is { Length: > 0 }) scoped = scoped.Where(e => branchId.Contains(e.BranchId));
+        if (departmentId is { Length: > 0 }) scoped = scoped.Where(e => e.DepartmentId.HasValue && departmentId.Contains(e.DepartmentId.Value));
+        if (designationId is { Length: > 0 }) scoped = scoped.Where(e => e.DesignationId.HasValue && designationId.Contains(e.DesignationId.Value));
+        if (roleId is { Length: > 0 }) scoped = scoped.Where(e => e.RoleId.HasValue && roleId.Contains(e.RoleId.Value));
+        if (status is { Length: > 0 }) scoped = scoped.Where(e => status.Contains(e.EmploymentStatus));
+        var filtered = scoped.ToList();
+
+        var totalCount = filtered.Count;
         var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
         var effectivePage = page is > 0 ? page.Value : 1;
         // page/pageSize are optional — omitting them keeps the old "return everything" behavior
         // for internal cross-module pickers (Shifts/Leave/Departments) that don't paginate.
         var employees = page.HasValue || pageSize.HasValue
-            ? await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync()
-            : await query.ToListAsync();
+            ? filtered.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToList()
+            : filtered;
         await AttachCurrentShiftsAsync(employees);
         await AttachHasDocumentsAsync(employees);
         await AttachOnLeaveTodayAsync(employees);

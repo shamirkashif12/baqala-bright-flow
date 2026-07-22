@@ -318,7 +318,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? transferType,
-        [FromQuery] string? status,
+        [FromQuery] string[]? status,
         [FromQuery] Guid? sourceWarehouseId,
         [FromQuery] Guid? destWarehouseId,
         [FromQuery] Guid? sourceBranchId,
@@ -330,11 +330,11 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         // can't be expressed by the directional sourceBranchId/destBranchId pair above: it means
         // either end. These match on either side; the directional params stay for callers that
         // genuinely mean one direction (the Sending/Receiving Warehouse filters).
-        [FromQuery] Guid? branchId,
-        [FromQuery] Guid? warehouseId,
-        [FromQuery] Guid? productId,
-        [FromQuery] Guid? createdBy,
-        [FromQuery] Guid? approvedBy)
+        [FromQuery] Guid[]? branchId,
+        [FromQuery] Guid[]? warehouseId,
+        [FromQuery] Guid[]? productId,
+        [FromQuery] Guid[]? createdBy,
+        [FromQuery] Guid[]? approvedBy)
     {
         var query = db.StockTransfers
             .Include(t => t.SourceBranch).Include(t => t.SourceWarehouse).Include(t => t.SourceSupplier)
@@ -346,16 +346,15 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             .Include(t => t.Items).ThenInclude(i => i.Batch)
             .AsQueryable();
         if (!string.IsNullOrEmpty(transferType)) query = query.Where(t => t.TransferType == transferType);
-        if (!string.IsNullOrEmpty(status)) query = query.Where(t => t.Status == status);
         if (sourceWarehouseId.HasValue) query = query.Where(t => t.SourceWarehouseId == sourceWarehouseId);
         if (destWarehouseId.HasValue) query = query.Where(t => t.DestWarehouseId == destWarehouseId);
         if (sourceBranchId.HasValue) query = query.Where(t => t.SourceBranchId == sourceBranchId);
         if (destBranchId.HasValue) query = query.Where(t => t.DestBranchId == destBranchId);
-        if (branchId.HasValue) query = query.Where(t => t.SourceBranchId == branchId || t.DestBranchId == branchId);
-        if (warehouseId.HasValue) query = query.Where(t => t.SourceWarehouseId == warehouseId || t.DestWarehouseId == warehouseId);
-        if (productId.HasValue) query = query.Where(t => t.Items.Any(i => i.ProductId == productId));
-        if (createdBy.HasValue) query = query.Where(t => t.CreatedBy == createdBy);
-        if (approvedBy.HasValue) query = query.Where(t => t.ApprovedBy == approvedBy);
+        // branchId/warehouseId/productId/createdBy/approvedBy are arrays now (multi-select filters)
+        // — never `.Contains()` a Guid[] directly against a DbSet-backed IQueryable on this repo's
+        // MySQL provider (see the ef-mysql-inlist-gotcha memory: throws at execution time on 2+
+        // values despite compiling and passing a single-value smoke test). Applied in-memory below,
+        // after the single-value/string-equality filters that ARE safe to run in SQL.
         if (!string.IsNullOrEmpty(batchId)) query = query.Where(t => t.BatchId == batchId);
         if (purchaseOrderId.HasValue) query = query.Where(t => t.PurchaseOrderId == purchaseOrderId);
         if (sourceSupplierId.HasValue) query = query.Where(t => t.SourceSupplierId == sourceSupplierId);
@@ -376,7 +375,21 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         if (role is not null && role != "tenant_admin" && callerBranchId.HasValue)
             query = query.Where(t => t.SourceBranchId == callerBranchId || t.DestBranchId == callerBranchId);
 
-        return Ok(await query.OrderByDescending(t => t.CreatedAt).ToListAsync());
+        var all = await query.OrderByDescending(t => t.CreatedAt).ToListAsync();
+        IEnumerable<StockTransfer> scoped = all;
+        if (branchId is { Length: > 0 })
+            scoped = scoped.Where(t => (t.SourceBranchId.HasValue && branchId.Contains(t.SourceBranchId.Value)) || (t.DestBranchId.HasValue && branchId.Contains(t.DestBranchId.Value)));
+        if (warehouseId is { Length: > 0 })
+            scoped = scoped.Where(t => (t.SourceWarehouseId.HasValue && warehouseId.Contains(t.SourceWarehouseId.Value)) || (t.DestWarehouseId.HasValue && warehouseId.Contains(t.DestWarehouseId.Value)));
+        if (productId is { Length: > 0 })
+            scoped = scoped.Where(t => t.Items.Any(i => productId.Contains(i.ProductId)));
+        if (createdBy is { Length: > 0 })
+            scoped = scoped.Where(t => createdBy.Contains(t.CreatedBy));
+        if (approvedBy is { Length: > 0 })
+            scoped = scoped.Where(t => t.ApprovedBy.HasValue && approvedBy.Contains(t.ApprovedBy.Value));
+        if (status is { Length: > 0 })
+            scoped = scoped.Where(t => status.Contains(t.Status));
+        return Ok(scoped.ToList());
     }
 
     [HttpGet("batch/{batchId}")]

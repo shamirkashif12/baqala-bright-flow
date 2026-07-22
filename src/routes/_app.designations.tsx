@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Download, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -77,8 +78,8 @@ function DesignationsTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [departmentFilter, setDepartmentFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [editDesignation, setEditDesignation] = useState<Designation | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<DesignationForm>(emptyForm);
@@ -130,8 +131,8 @@ function DesignationsTab() {
 
   const filtered = designations.filter(d => {
     const mq = !q || d.name.toLowerCase().includes(q.toLowerCase());
-    const mdep = departmentFilter === "all" || d.departmentId === departmentFilter;
-    const ms = statusFilter === "all" || d.status === statusFilter;
+    const mdep = departmentFilter.length === 0 || departmentFilter.includes(d.departmentId);
+    const ms = statusFilter.length === 0 || statusFilter.includes(d.status);
     return mq && mdep && ms;
   });
 
@@ -148,21 +149,22 @@ function DesignationsTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search designation…" className="h-9 w-60" />
-        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-          <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Departments</SelectItem>
-            {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Departments"
+            options={departments.map(d => ({ id: d.id, label: d.name }))}
+            selected={departmentFilter}
+            onChange={setDepartmentFilter}
+          />
+        </div>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Statuses"
+            options={[{ id: "active", label: "Active" }, { id: "inactive", label: "Inactive" }]}
+            selected={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export

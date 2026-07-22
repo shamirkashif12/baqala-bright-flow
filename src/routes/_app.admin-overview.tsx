@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import {
   Warehouse, Building2, Package, AlertTriangle, CalendarClock,
   Boxes, TrendingDown, CheckCircle2,
@@ -76,8 +76,8 @@ function AdminOverview() {
   const [stock, setStock] = useState<StockItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -107,8 +107,8 @@ function AdminOverview() {
 
   // ── Filtered stock ────────────────────────────────────────────────────────
   const filteredStock = useMemo(() => stock.filter(s => {
-    const mb = branchFilter === "all" || s.branchId === branchFilter;
-    const mc = categoryFilter === "all" || s.product?.category?.name === categoryFilter;
+    const mb = !(branchFilter.length && !branchFilter.includes(s.branchId));
+    const mc = !(categoryFilter.length && !categoryFilter.includes(s.product?.category?.name ?? ""));
     return mb && mc;
   }), [stock, branchFilter, categoryFilter]);
 
@@ -121,9 +121,9 @@ function AdminOverview() {
 
   // ── Per-branch summary ────────────────────────────────────────────────────
   const branchSummaries = useMemo(() => {
-    const displayBranches = branchFilter === "all" ? branches : branches.filter(b => b.id === branchFilter);
+    const displayBranches = branchFilter.length === 0 ? branches : branches.filter(b => branchFilter.includes(b.id));
     return displayBranches.map(branch => {
-      const items = stock.filter(s => s.branchId === branch.id && (categoryFilter === "all" || s.product?.category?.name === categoryFilter));
+      const items = stock.filter(s => s.branchId === branch.id && !(categoryFilter.length && !categoryFilter.includes(s.product?.category?.name ?? "")));
       const value = items.reduce((sum, s) => sum + s.quantity * (s.product?.costPrice ?? 0), 0);
       const skus = items.length;
       const oos = items.filter(s => s.quantity === 0).length;
@@ -143,20 +143,22 @@ function AdminOverview() {
     >
       {/* ── Filters ── */}
       <div className="flex flex-wrap gap-2">
-        <Select value={branchFilter} onValueChange={setBranchFilter}>
-          <SelectTrigger className="h-9 w-48"><SelectValue placeholder="All Branches" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="h-9 w-48"><SelectValue placeholder="All Categories" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Branches"
+            options={branches.map(b => ({ id: b.id, label: b.name }))}
+            selected={branchFilter}
+            onChange={setBranchFilter}
+          />
+        </div>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={categories.map(c => ({ id: c.name, label: c.name }))}
+            selected={categoryFilter}
+            onChange={setCategoryFilter}
+          />
+        </div>
       </div>
 
       {loading ? (

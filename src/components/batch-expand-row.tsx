@@ -42,7 +42,7 @@ export function BatchExpandRow({
   useEffect(() => {
     if (batches !== undefined) return;
     setLoading(true);
-    api.getBatches(locationType === "branch" ? { productId, branchId: locationId } : { productId, warehouseId: locationId })
+    api.getBatches(locationType === "branch" ? { productId, branchId: [locationId] } : { productId, warehouseId: [locationId] })
       .then(setLazyBatches)
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -43,8 +43,8 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
         [FromQuery] Guid? cashierId,
-        [FromQuery] Guid? terminalId,
-        [FromQuery] string? status,
+        [FromQuery] Guid[]? terminalId,
+        [FromQuery] string[]? status,
         [FromQuery] DateTime? dateFrom,
         [FromQuery] DateTime? dateTo)
     {
@@ -55,11 +55,22 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         var query = db.CashierShifts.Include(s => s.Cashier).Include(s => s.Terminal).AsQueryable();
         if (branchId.HasValue)   query = query.Where(s => s.BranchId == branchId);
         if (cashierId.HasValue)  query = query.Where(s => s.CashierId == cashierId);
-        if (terminalId.HasValue) query = query.Where(s => s.TerminalId == terminalId);
-        if (!string.IsNullOrEmpty(status)) query = query.Where(s => s.Status == status);
         if (dateFrom.HasValue) query = query.Where(s => s.OpenedAt >= dateFrom.Value);
         if (dateTo.HasValue)   query = query.Where(s => s.OpenedAt <= dateTo.Value.AddDays(1).AddTicks(-1));
-        return Ok(await query.OrderByDescending(s => s.OpenedAt).Select(ShiftProjection).ToListAsync());
+
+        // terminalId/status are arrays (multi-select filters) — never `.Contains()` a Guid[]/
+        // string[] directly against a DbSet-backed IQueryable on this repo's MySQL provider (see
+        // the ef-mysql-inlist-gotcha memory: throws at execution time on 2+ values despite
+        // compiling and passing a single-value smoke test). Materialize the entities first (the
+        // single-value/date-range filters above run fine in SQL), filter the arrays in-memory,
+        // then apply the shared projection via LINQ-to-Objects.
+        var all = await query.OrderByDescending(s => s.OpenedAt).ToListAsync();
+        IEnumerable<CashierShift> scoped = all;
+        if (terminalId is { Length: > 0 })
+            scoped = scoped.Where(s => s.TerminalId.HasValue && terminalId.Contains(s.TerminalId.Value));
+        if (status is { Length: > 0 })
+            scoped = scoped.Where(s => status.Contains(s.Status));
+        return Ok(scoped.Select(ShiftProjection.Compile()).ToList());
     }
 
     [HttpGet("active")]

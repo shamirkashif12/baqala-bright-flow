@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import {
   LogIn, LogOut, ShieldAlert, Undo2, Edit3, Trash2, ScanBarcode,
@@ -158,8 +159,8 @@ function AuditLogs() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
-  const [sevFilter, setSevFilter] = useState<"all" | Severity>("all");
-  const [userId, setUserId] = useState("all");
+  const [sevFilter, setSevFilter] = useState<string[]>([]);
+  const [userId, setUserId] = useState<string[]>([]);
   const [activity, setActivity] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -173,7 +174,10 @@ function AuditLogs() {
     const group = ACTIVITY_GROUPS.find((g) => g.value === activity);
     Promise.all([
       api.getAuditLogs({
-        userId: userId !== "all" ? userId : undefined,
+        // Backend only accepts a single userId — the server-side "whole trail" search only
+        // narrows when exactly one employee is picked; with multiple selected we fall back to
+        // the default (unfiltered) load and rely on the client-side membership check below.
+        userId: userId.length === 1 ? userId[0] : undefined,
         action: group ? group.actions.join(",") : undefined,
         from: from || undefined,
         // `to` is a date, but CreatedAt is a timestamp — without widening to end-of-day, picking
@@ -205,7 +209,8 @@ function AuditLogs() {
   }, [logs, productName]);
 
   const filtered = useMemo(() => logs.filter((l) => {
-    if (sevFilter !== "all" && getSeverity(l.action) !== sevFilter) return false;
+    if (sevFilter.length && !sevFilter.includes(getSeverity(l.action))) return false;
+    if (userId.length && !userId.includes(l.userId ?? "")) return false;
     const q = query.toLowerCase().trim();
     if (!q) return true;
     const user = l.userId ? userMap.get(l.userId) : undefined;
@@ -218,12 +223,12 @@ function AuditLogs() {
       (user?.fullName ?? "").toLowerCase().includes(q) ||
       (user?.branchName ?? "").toLowerCase().includes(q)
     );
-  }), [logs, query, sevFilter, userMap]);
+  }), [logs, query, sevFilter, userId, userMap]);
 
   const critical = logs.filter((l) => getSeverity(l.action) === "critical").length;
   const warnings = logs.filter((l) => getSeverity(l.action) === "warning").length;
 
-  const selectedUser = userId !== "all" ? userMap.get(userId) : undefined;
+  const selectedUser = userId.length === 1 ? userMap.get(userId[0]) : undefined;
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -246,13 +251,14 @@ function AuditLogs() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Select value={userId} onValueChange={setUserId}>
-          <SelectTrigger className="h-9 w-52"><SelectValue placeholder="Employee" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Employees</SelectItem>
-            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="w-52">
+          <SearchableMultiSelect
+            placeholder="All Employees"
+            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+            selected={userId}
+            onChange={setUserId}
+          />
+        </div>
         <Select value={activity} onValueChange={setActivity}>
           <SelectTrigger className="h-9 w-56"><SelectValue placeholder="Activity" /></SelectTrigger>
           <SelectContent>
@@ -271,15 +277,18 @@ function AuditLogs() {
           placeholder="Search action, user, reference…"
           className="h-9 w-56 flex-shrink-0"
         />
-        <Select value={sevFilter} onValueChange={(v) => setSevFilter(v as typeof sevFilter)}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Severity</SelectItem>
-            <SelectItem value="info">Info</SelectItem>
-            <SelectItem value="warning">Warning</SelectItem>
-            <SelectItem value="critical">Critical</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Severity"
+            options={[
+              { id: "info", label: "Info" },
+              { id: "warning", label: "Warning" },
+              { id: "critical", label: "Critical" },
+            ]}
+            selected={sevFilter}
+            onChange={setSevFilter}
+          />
+        </div>
         <span className="text-xs text-muted-foreground self-center ml-auto">{filtered.length} event{filtered.length !== 1 ? "s" : ""}</span>
         <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => load(true)} disabled={refreshing}>
           <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
