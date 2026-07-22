@@ -41,6 +41,7 @@ const ALL_MODULES = [
   "Accounting & Finance", "Tax & Fees",
   "Sales", "Control Tower", "Reports",
   "Branches", "Terminals", "Devices",
+  "Employees", "HR Attendance", "HR Shifts", "Leave Management", "Payroll", "HR Master Data",
   "Users", "Roles",
   "Compliance", "Audit Logs", "Rules Engine", "Settings",
 ];
