@@ -175,6 +175,14 @@ public class TaxFeeRule
     [Column("excise_percentage")]
     public decimal ExcisePercentage { get; set; } = 0;
 
+    // KSA tobacco excise floor — the tobacco_excise rule charges max(this, unitPrice *
+    // ExcisePercentage / 100), matching the regulation's "min 25 SAR or 100% of base price,
+    // whichever is higher". Previously hardcoded as a literal 25 in three independent places
+    // (OrdersController.CalcTobaccoFee, _app.pos.tsx's calcTobaccoFee, tax-fees.tsx's preview) —
+    // now a single configurable value read from the one active tobacco_excise rule.
+    [Column("minimum_excise_amount")]
+    public decimal MinimumExciseAmount { get; set; } = 25m;
+
     [Column("zatca_enabled")]
     public bool ZatcaEnabled { get; set; } = false;
 

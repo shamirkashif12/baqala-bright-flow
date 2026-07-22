@@ -561,6 +561,10 @@ function POS() {
   const [activeDiscounts, setActiveDiscounts] = useState<Discount[]>([]);
   const [customFees, setCustomFees] = useState<TaxFeeRule[]>([]);
   const [tobaccoFeeEnabled, setTobaccoFeeEnabled] = useState(true);
+  // KSA tobacco excise config — was hardcoded (25 SAR min, 100%); now read from the
+  // tobacco_excise TaxFeeRule row (Tax & Fees settings) so it's admin-configurable.
+  const [tobaccoExciseMinimum, setTobaccoExciseMinimum] = useState(25);
+  const [tobaccoExcisePercentage, setTobaccoExcisePercentage] = useState(100);
 
   // ─── Holds ────────────────────────────────────────────────────────────────────
   const [holds, setHolds] = useState<{ id: string; items: CartItem[]; total: number; at: string }[]>([]);
@@ -598,6 +602,10 @@ function POS() {
 
           const tobaccoRule = taxRules.find((r) => r.ruleType === "tobacco_excise");
           setTobaccoFeeEnabled(tobaccoRule ? tobaccoRule.status === "active" : true);
+          if (tobaccoRule) {
+            setTobaccoExciseMinimum(tobaccoRule.minimumExciseAmount);
+            setTobaccoExcisePercentage(tobaccoRule.excisePercentage);
+          }
         }
 
         if (shiftsR.status === "fulfilled") {
@@ -1083,9 +1091,10 @@ function POS() {
   const subtotal = displayCart.reduce((s, i) => s + i.qty * i.price, 0);
   const cartUnitCount = displayCart.reduce((s, i) => s + i.qty, 0);
 
-  // KSA tobacco excise: min 25 SAR OR 100% of base price, whichever is higher
+  // KSA tobacco excise: min <tobaccoExciseMinimum> SAR OR <tobaccoExcisePercentage>% of base
+  // price, whichever is higher — both configurable via the tobacco_excise TaxFeeRule row.
   function calcTobaccoFee(base: number): number {
-    return base <= 25 ? 25 : base;
+    return Math.max(tobaccoExciseMinimum, base * tobaccoExcisePercentage / 100);
   }
   const tobaccoExcise = displayCart.reduce((sum, ci) => {
     const prod = products.find(p => p.id === ci.productId);
@@ -1237,12 +1246,17 @@ function POS() {
   const allOrderFees = customFees.filter(f =>
     f.applicableTo === "all_products" || f.applicableTo === "all_orders"
   );
-  const customFeeTotal = cart.length > 0 ? allOrderFees.reduce((sum, f) => {
-    if (f.customFeeAmount > 0) return sum + f.customFeeAmount;
-    if (f.excisePercentage > 0) return sum + (subtotal * f.excisePercentage / 100);
-    if (f.vatPercentage > 0) return sum + (subtotal * f.vatPercentage / 100);
-    return sum;
-  }, 0) : 0;
+  // Named breakdown (one entry per configured charge) — sent to the server as-is so the Service
+  // Charges report can show which charge(s) made up the order's customFeeAmount instead of just
+  // an anonymous total.
+  const serviceChargeRows = cart.length > 0 ? allOrderFees.map((f) => {
+    const amount = f.customFeeAmount > 0 ? f.customFeeAmount
+      : f.excisePercentage > 0 ? subtotal * f.excisePercentage / 100
+      : f.vatPercentage > 0 ? subtotal * f.vatPercentage / 100
+      : 0;
+    return { taxFeeRuleId: f.id, name: f.ruleName, amount };
+  }).filter((r) => r.amount > 0) : [];
+  const customFeeTotal = serviceChargeRows.reduce((sum, r) => sum + r.amount, 0);
 
   const taxable = subtotal - couponDiscount - totalAutoDiscount - productDiscountTotal - loyaltyDiscount + tobaccoExcise;
   const vatAmount = Math.max(0, taxable) * taxRate;
@@ -1528,6 +1542,9 @@ function POS() {
       // Named breakdown of the manually-applied Discounts (see appliedDiscounts) — so Order
       // Details/receipts can show "Senior Citizen 5%" etc. by name instead of one anonymous total.
       discounts: appliedDiscounts.map((d) => ({ discountId: d.id, name: d.name, amount: computeDiscountSaving(d) })),
+      // Named breakdown of customFeeAmount — which configured charge(s) made it up, so the
+      // Service Charges report can show "Delivery Service Fee" etc. instead of one anonymous total.
+      serviceCharges: serviceChargeRows.map((r) => ({ taxFeeRuleId: r.taxFeeRuleId, name: r.name, amount: r.amount })),
       // Kept distinct (previously lumped together as taxAmount) so the Tax and Fee reports,
       // which read these as two separate figures, don't see fees miscounted as VAT.
       taxAmount: vatAmount,

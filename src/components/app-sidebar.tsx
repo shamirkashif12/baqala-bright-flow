@@ -128,6 +128,7 @@ const navGroups: NavGroup[] = [
       { title: "Loyalty Program",             url: "/loyalty-program", icon: Gift,           module: "Loyalty Program" },
       { title: "Customer Returns",            url: "/returns",         icon: ReturnIcon,   module: "Returns" },
       { title: "Tax, Fees & Tobacco",         url: "/tax-fees",        icon: Cigarette,    module: "Tax & Fees" },
+      { title: "Service Charges",             url: "/service-charges", icon: Truck,        module: "Tax & Fees" },
     ],
   },
   {

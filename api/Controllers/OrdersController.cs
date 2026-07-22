@@ -87,9 +87,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 Cashier = o.Cashier == null || (!isAdmin && callerBranchId.HasValue && o.Cashier.BranchId != callerBranchId)
                     ? null
                     : new { o.Cashier.Id, o.Cashier.FullName },
-                Items = o.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount }),
+                Items = o.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.TobaccoFeeAmount }),
                 Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
                 Discounts = o.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
+                ServiceCharges = o.ServiceCharges.Select(s => new { s.Id, s.TaxFeeRuleId, s.Name, s.Amount }),
             })
             .ToListAsync();
         return Ok(orders);
@@ -117,11 +118,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 Customer = o.Customer == null ? null : new { o.Customer.Id, o.Customer.FullName, o.Customer.Phone, o.Customer.Email },
                 Items = o.Items.Select(i => new
                 {
-                    i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount,
+                    i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.TobaccoFeeAmount,
                     Product = i.Product == null ? null : new { i.Product.Id, i.Product.Name, i.Product.Sku }
                 }),
                 Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
                 Discounts = o.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
+                ServiceCharges = o.ServiceCharges.Select(s => new { s.Id, s.TaxFeeRuleId, s.Name, s.Amount }),
             })
             .FirstOrDefaultAsync();
         if (order is null) return NotFound();
@@ -158,11 +160,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 Customer = o.Customer == null ? null : new { o.Customer.Id, o.Customer.FullName, o.Customer.Phone, o.Customer.Email },
                 Items = o.Items.Select(i => new
                 {
-                    i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount,
+                    i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.TobaccoFeeAmount,
                     Product = i.Product == null ? null : new { i.Product.Id, i.Product.Name, i.Product.Sku }
                 }),
                 Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
                 Discounts = o.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
+                ServiceCharges = o.ServiceCharges.Select(s => new { s.Id, s.TaxFeeRuleId, s.Name, s.Amount }),
             })
             .FirstOrDefaultAsync();
         if (order is null) return NotFound();
@@ -186,7 +189,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (order.ClientRequestId.HasValue)
         {
             var existing = await db.Orders
-                .Include(o => o.Items).Include(o => o.Payments).Include(o => o.Discounts)
+                .Include(o => o.Items).Include(o => o.Payments).Include(o => o.Discounts).Include(o => o.ServiceCharges)
                 .FirstOrDefaultAsync(o => o.ClientRequestId == order.ClientRequestId);
             if (existing is not null) return Ok(existing);
         }
@@ -357,6 +360,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         }
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
         foreach (var d in order.Discounts) { d.Id = Guid.NewGuid(); d.OrderId = order.Id; d.CreatedAt = DateTime.UtcNow; }
+        foreach (var s in order.ServiceCharges) { s.Id = Guid.NewGuid(); s.OrderId = order.Id; s.CreatedAt = DateTime.UtcNow; }
         db.Orders.Add(order);
 
         // Keep the till's running totals live so "expected cash"/variance at close-out
@@ -772,9 +776,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             order.Subtotal, order.DiscountAmount, order.LoyaltyPointsRedeemed, order.LoyaltyDiscountAmount, order.TaxAmount, order.CustomFeeAmount, order.TobaccoFeeAmount, order.TotalAmount,
             order.PaymentStatus, order.OrderStatus, order.Notes, order.ClientRequestId, order.VoidReason, order.CreatedAt, order.UpdatedAt,
             order.ZatcaQrCode, order.ZatcaInvoiceStatus,
-            Items = order.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.CustomFeeAmount, i.TobaccoFeeAmount }),
+            Items = order.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.TobaccoFeeAmount }),
             Payments = order.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
             Discounts = order.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
+            ServiceCharges = order.ServiceCharges.Select(s => new { s.Id, s.TaxFeeRuleId, s.Name, s.Amount }),
         });
     }
 
@@ -857,10 +862,26 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
-    // KSA tobacco excise: min 25 SAR OR 100% of base price per unit — mirrors calcTobaccoFee in
-    // src/routes/_app.pos.tsx. Recomputed here (rather than carried over) whenever items are
-    // edited, since quantities/lines/prices can all change including brand-new lines.
-    private static decimal CalcTobaccoFee(decimal unitPrice) => unitPrice <= 25 ? 25 : unitPrice;
+    // KSA tobacco excise: min <MinimumExciseAmount> SAR OR <ExcisePercentage>% of base price per
+    // unit, whichever is higher — configurable via the tobacco_excise TaxFeeRule row (Tax & Fees
+    // settings) rather than a hardcoded literal, mirroring calcTobaccoFee in src/routes/_app.pos.tsx.
+    // Recomputed here (rather than carried over) whenever items are edited, since quantities/
+    // lines/prices can all change including brand-new lines.
+    private static decimal CalcTobaccoFee(decimal unitPrice, decimal minimumExciseAmount, decimal excisePercentage) =>
+        Math.Max(minimumExciseAmount, unitPrice * excisePercentage / 100m);
+
+    // Falls back to the historical hardcoded values (25 SAR / 100%) only if no tobacco_excise
+    // rule row exists at all — every seeded/live environment has exactly one, so this is a safety
+    // net, not the expected path. Deliberately ignores the rule's Status: tobacco excise is a
+    // mandatory KSA tax on tobacco items, not an optional toggle, so an inactive rule still
+    // supplies its configured rate/minimum here (this mirrors EditOrder's pre-existing behavior
+    // of always charging excise on tobacco items regardless of rule status — unchanged by this).
+    private async Task<(decimal MinimumExciseAmount, decimal ExcisePercentage)> ResolveTobaccoExciseConfigAsync()
+    {
+        var rule = await db.TaxFeeRules.Where(r => r.RuleType == "tobacco_excise")
+            .OrderByDescending(r => r.Status == "active").FirstOrDefaultAsync();
+        return rule is null ? (25m, 100m) : (rule.MinimumExciseAmount, rule.ExcisePercentage);
+    }
 
     // Order Editing (FR: "Edit orders from dashboard" — manager corrects mistakes, editable order
     // with audit log). Permission-gated only — a cashier without Orders:Edit simply cannot edit.
@@ -941,6 +962,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var tobaccoFlags = new Dictionary<Guid, bool>();
         foreach (var pid in productIds)
             tobaccoFlags[pid] = await db.Products.Where(p => p.Id == pid).Select(p => p.IsTobacco).FirstOrDefaultAsync();
+        var (minimumExciseAmount, excisePercentage) = await ResolveTobaccoExciseConfigAsync();
 
         db.OrderItems.RemoveRange(order.Items);
         var newItems = req.Items.Select(it =>
@@ -955,7 +977,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 Quantity = it.Quantity,
                 UnitPrice = it.UnitPrice,
                 TotalPrice = totalPrice,
-                TobaccoFeeAmount = isTobacco ? it.Quantity * CalcTobaccoFee(it.UnitPrice) : 0,
+                TobaccoFeeAmount = isTobacco ? it.Quantity * CalcTobaccoFee(it.UnitPrice, minimumExciseAmount, excisePercentage) : 0,
                 CreatedAt = DateTime.UtcNow,
             };
         }).ToList();
@@ -1150,6 +1172,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             .Include(o => o.Payments)
             .Include(o => o.Customer)
             .Include(o => o.Discounts)
+            .Include(o => o.ServiceCharges)
             .FirstOrDefaultAsync(o => o.Id == id);
         return Ok(updated);
     }
@@ -1160,7 +1183,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> VoidOrder(Guid id, [FromBody] OrderVoidRequest req)
     {
-        var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).Include(o => o.Discounts).FirstOrDefaultAsync(o => o.Id == id);
+        var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).Include(o => o.Discounts).Include(o => o.ServiceCharges).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound();
         if (order.OrderStatus == "cancelled") return BadRequest(new { message = "This order is already cancelled." });
 

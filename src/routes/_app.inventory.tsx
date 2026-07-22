@@ -406,7 +406,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     itemsPerPack: "",
     purchasePrice: "", sellingPrice: "",
     quantity: "100", expiryDate: "",
-    vatPct: "15", customFee: "0.00", isTobacco: false,
+    vatPct: "15", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
     discount: "", imageUrl: "",
   });
@@ -448,7 +448,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     setBranchPrices({});
     setTierPrice({ tier: "", price: "" });
     setPriceSchedule({ from: "", to: "" });
-    setForm({ name: "", sku: "", barcode: "", categoryId: "", saleUnitType: "single", itemsPerPack: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", customFee: "0.00", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
+    setForm({ name: "", sku: "", barcode: "", categoryId: "", saleUnitType: "single", itemsPerPack: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
   };
 
   const missingFields = [
@@ -509,7 +509,6 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
         basePrice: Number(form.sellingPrice),
         costPrice: Number(form.purchasePrice) || undefined,
         taxPercentage: Number(form.vatPct) || 15,
-        customFee: Number(form.customFee) || 0,
         reorderLevel: 10,
         status: "active",
         weightBased: false,
@@ -802,12 +801,9 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             )}
           </div>
 
-          <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Optional tax / fee fields</p>
+          <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Optional tax fields</p>
           <FieldRow label="VAT %">
             <Input type="number" min={0} max={100} className="h-9" placeholder="15" value={form.vatPct} onChange={e => set("vatPct")(e.target.value)} />
-          </FieldRow>
-          <FieldRow label="Custom fee (SAR)">
-            <Input type="number" step="0.01" min={0} className="h-9" placeholder="0.00" value={form.customFee} onChange={e => set("customFee")(e.target.value)} />
           </FieldRow>
           <div className="col-span-2 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-3 py-2.5">
             <input
@@ -844,7 +840,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     name: "", sku: "", barcode: "", categoryId: "",
     saleUnitType: "single" as "single" | "pack", itemsPerPack: "",
     sellingPrice: "", purchasePrice: "",
-    vatPct: "15", customFee: "0.00", isTobacco: false,
+    vatPct: "15", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
     discount: "", imageUrl: "",
     status: "active", weightBased: false,
@@ -874,7 +870,6 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
       sellingPrice: String(p.basePrice ?? ""),
       purchasePrice: p.costPrice != null ? String(p.costPrice) : "",
       vatPct: String(p.taxPercentage ?? 15),
-      customFee: String(p.customFee ?? 0),
       isTobacco: p.isTobacco ?? false,
       discountType: (p.discountType as "percentage" | "fixed") ?? "percentage",
       discount: p.discount != null ? String(p.discount) : "",
@@ -906,7 +901,6 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         basePrice: Number(form.sellingPrice),
         costPrice: Number(form.purchasePrice) || undefined,
         taxPercentage: Number(form.vatPct) || 15,
-        customFee: Number(form.customFee) || 0,
         isTobacco: form.isTobacco,
         discount: form.discount ? Number(form.discount) : undefined,
         discountType: form.discount ? form.discountType : undefined,
@@ -1091,12 +1085,9 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
             </div>
           </div>
 
-          <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tax / fee fields</p>
+          <p className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tax fields</p>
           <FieldRow label="VAT %">
             <Input type="number" className="h-9" value={form.vatPct} onChange={set("vatPct")} />
-          </FieldRow>
-          <FieldRow label="Custom fee (SAR)">
-            <Input type="number" step="0.01" className="h-9" value={form.customFee} onChange={set("customFee")} />
           </FieldRow>
           <div className="col-span-2 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-3 py-2.5">
             <input
@@ -1136,7 +1127,6 @@ function ViewSheet({ item, suppliers, onClose }: { item: StockItem | null; suppl
     ["Purchase price", item.product?.costPrice == null ? "—" : <><SARIcon />{fmtPrice(item.product.costPrice)}</>],
     ["Selling price",  item.product?.basePrice == null ? "—" : <><SARIcon />{fmtPrice(item.product.basePrice)}</>],
     ["VAT",            `${item.product?.taxPercentage ?? 15}%`],
-    ["Custom fee",     item.product?.customFee == null ? "—" : <><SARIcon />{fmtPrice(item.product.customFee)}</>],
     ["Tobacco/Excise", item.product?.isTobacco ? "Yes — excise applies" : "No"],
   ];
   return (
@@ -1312,7 +1302,7 @@ type StockItem = InventoryStock & {
 
 function exportCSV(data: StockItem[]) {
   const rows: string[][] = [
-    ["Product", "SKU", "Barcode", "Category", "Branch", "Qty", "Reorder Level", "Stock Status", "Expiry Date", "Cost Price (SAR)", "Selling Price (SAR)", "VAT %", "Custom Fee (SAR)"],
+    ["Product", "SKU", "Barcode", "Category", "Branch", "Qty", "Reorder Level", "Stock Status", "Expiry Date", "Cost Price (SAR)", "Selling Price (SAR)", "VAT %"],
     ...data.map(s => [
       s.product?.name ?? "",
       s.product?.sku ?? "",
@@ -1326,7 +1316,6 @@ function exportCSV(data: StockItem[]) {
       s.product?.costPrice != null ? s.product.costPrice.toFixed(2) : "",
       s.product?.basePrice != null ? s.product.basePrice.toFixed(2) : "",
       String(s.product?.taxPercentage ?? 15),
-      String(s.product?.customFee ?? 0),
     ]),
   ];
   const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -1535,7 +1524,7 @@ function Inventory() {
   return (
     <PageShell
       title="Inventory"
-      subtitle="Catalog · stock · VAT · custom fees"
+      subtitle="Catalog · stock · VAT · tobacco excise"
       actions={
         <div className="flex gap-2">
           {canCreate && (
@@ -1695,7 +1684,7 @@ function Inventory() {
                   <th className="px-3 py-3 font-semibold">Stock</th>
                   <th className="px-3 py-3 font-semibold">Expiry</th>
                   <th className="px-3 py-3 font-semibold">Cost / Price</th>
-                  <th className="px-3 py-3 font-semibold">VAT / Fee</th>
+                  <th className="px-3 py-3 font-semibold">VAT</th>
                   <th className="px-3 py-3 font-semibold">Actions</th>
                 </tr>
               </thead>
@@ -1748,7 +1737,6 @@ function Inventory() {
                         </td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">
                           <p>VAT {s.product?.taxPercentage ?? 15}%</p>
-                          <p>Fee: {s.product?.customFee == null ? "—" : <><SARIcon />{fmtPrice(s.product.customFee ?? 0)}</>}</p>
                         </td>
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1">

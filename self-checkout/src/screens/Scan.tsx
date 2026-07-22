@@ -178,6 +178,7 @@ export default function ScanScreen() {
       discountAmount: cart.totalDiscount,
       taxAmount: cart.taxAmount,
       customFeeAmount: cart.customFeeTotal,
+      tobaccoFeeAmount: cart.tobaccoExcise,
       totalAmount: cart.totalAmount,
       paymentStatus: "paid",
       orderStatus: "completed",
@@ -187,7 +188,9 @@ export default function ScanScreen() {
         quantity: l.quantity,
         unitPrice: l.product.basePrice,
         totalPrice: l.product.basePrice * l.quantity,
+        tobaccoFeeAmount: l.tobaccoFeeAmount,
       })),
+      serviceCharges: cart.feeRows.map((r) => ({ taxFeeRuleId: r.key, name: r.label, amount: r.amount })),
       payments: [{ paymentMethod: "card", amount: cart.totalAmount, status: "completed" }],
     });
 

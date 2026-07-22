@@ -2834,7 +2834,17 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
     // 19. Fee Report (RPT-FINANCE-FEES)
     // ───────────────────────────────────────────────────────────────────────
 
-    [HttpGet("fees")]
+    // Service Charges (formerly "Fee Report" / briefly "Tobacco Fee Report"). This is NOT a tax
+    // report — KSA only recognizes VAT and tobacco excise as real taxes (see the Tobacco Excise
+    // report above for that). This one covers Order.CustomFeeAmount only: business-configured
+    // surcharges like a delivery fee or card-payment surcharge, entirely separate from tobacco.
+    // A prior version of this endpoint merged CustomFeeAmount with TobaccoFeeAmount on the theory
+    // they were always the same charge — that was wrong: the seeded "Delivery Service Fee" is a
+    // real, active, non-tobacco charge, so an order with just that fee (no tobacco item at all)
+    // was being mislabeled "Tobacco Fee". Un-merged here; see BuildTobaccoExciseAsync for the
+    // genuinely tobacco-only report, which now carries the company-identity/subtotal treatment
+    // this report doesn't need (it isn't reporting a tax).
+    [HttpGet("service-charges")]
     [RequirePermission("Reports", PermAction.View)]
     public async Task<IActionResult> GetFeeReport([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? cashierId)
     {
@@ -2843,7 +2853,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         return Ok(await BuildFeeReportAsync(rangeFrom, rangeTo, branchId, cashierId));
     }
 
-    [HttpGet("fees/export")]
+    [HttpGet("service-charges/export")]
     [RequirePermission("Reports", PermAction.Export)]
     public async Task<IActionResult> ExportFeeReport(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? cashierId,
@@ -2852,67 +2862,117 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
         var result = await BuildFeeReportAsync(rangeFrom, rangeTo, branchId, cashierId);
-        var headers = new[] { "Fee ID", "Fee Type", "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Fee Amount", "Net Fee" };
-        var rows = result.Rows.Select(r => new object?[]
+        var headers = new[] { "Transaction ID", "Invoice No.", "Date/Time", "Branch", "Cashier", "Customer Type", "Charge Name", "Service Charge Amount" };
+
+        var rows = new List<object?[]>();
+        foreach (var branchGroup in result.Rows.GroupBy(r => r.Branch))
         {
-            r.FeeId, r.FeeType, r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.FeeAmount, r.NetFee,
-        }).ToList();
+            foreach (var r in branchGroup)
+                rows.Add(new object?[] { r.TransactionId, r.InvoiceNo, r.DateTime, r.Branch, r.Cashier, r.CustomerType, r.ChargeName, r.ServiceChargeAmount });
+            rows.Add(new object?[] { "", "", "", $"Subtotal — {branchGroup.Key}", "", "", "", branchGroup.Sum(r => r.ServiceChargeAmount) });
+        }
+        if (result.Rows.Count > 0)
+            rows.Add(new object?[] { "", "", "", "GRAND TOTAL", "", "", "", result.Rows.Sum(r => r.ServiceChargeAmount) });
+
         await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
-            $"{{\"report\":\"fees\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
+            $"{{\"report\":\"service_charges\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
         var kpis = new (string, string)[]
         {
-            ("Total Fees Collected", result.Kpis.TotalFeesCollected.ToString("0.##")), ("Transactions with Fees", result.Kpis.TransactionsWithFees.ToString()),
-            ("Average Fee per Transaction", result.Kpis.AverageFeePerTransaction.ToString("0.##")), ("Total Tobacco Fees", result.Kpis.TotalTobaccoFees.ToString("0.##")),
+            ("Total Service Charges", result.Kpis.TotalServiceCharges.ToString("0.##")), ("Transactions with Charge", result.Kpis.TransactionsWithFees.ToString()),
+            ("Average Charge per Transaction", result.Kpis.AverageFeePerTransaction.ToString("0.##")),
         };
-        return BuildExportFile(format, "Fee Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
-            kpis, headers, rows, $"fees-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+        return BuildExportFile(format, "Service Charges Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            kpis, headers, rows, $"service-charges-{rangeFrom:yyyy-MM-dd}-to-{rangeTo.AddDays(-1):yyyy-MM-dd}");
     }
 
     private async Task<FeeReportResult> BuildFeeReportAsync(DateTime rangeFrom, DateTime rangeToExclusive, Guid? branchId, Guid? cashierId)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
         if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
-        var ordersQ = db.Orders.Include(o => o.Branch).Include(o => o.Cashier)
-            .Where(o => (o.CustomFeeAmount > 0 || o.TobaccoFeeAmount > 0) && o.CreatedAt >= rangeFrom && o.CreatedAt < rangeToExclusive && o.PaymentStatus == "paid");
+
+        // Order.CustomFeeAmount is the business-configured surcharge/delivery-fee total (TaxFeeRule
+        // rows with RuleType == "custom_fee"), not tobacco excise. Which named charge(s) made up
+        // that total lives in OrderServiceCharge (added alongside OrderDiscount) — orders from
+        // before that existed (or from a caller not yet updated to send it) have no rows there, so
+        // they fall back to one generic "Service Charge" row for the full amount.
+        var ordersQ = db.Orders.Include(o => o.Branch).Include(o => o.Cashier).Include(o => o.ServiceCharges)
+            .Where(o => o.CustomFeeAmount > 0 && o.CreatedAt >= rangeFrom && o.CreatedAt < rangeToExclusive && o.PaymentStatus == "paid");
         if (branchId.HasValue) ordersQ = ordersQ.Where(o => o.BranchId == branchId);
         if (cashierId.HasValue) ordersQ = ordersQ.Where(o => o.CashierId == cashierId);
-        var orders = await ordersQ.OrderByDescending(o => o.CreatedAt).ToListAsync();
+        var orders = await ordersQ.OrderBy(o => o.Branch!.Name).ThenByDescending(o => o.CreatedAt).ToListAsync();
 
-        // The schema tracks a single custom_fee_amount per order — there is no per-fee-type breakdown,
-        // refunded-fee tracking or fee-specific VAT split to source "Fee Type"/"Refunded Fee"/"VAT on Fee" from.
-        // Tobacco fee is its own persisted column (OrderItem/Order.TobaccoFeeAmount) so it gets its own
-        // row per order rather than being lumped into "Custom Fee".
-        var rows = orders.SelectMany(o =>
+        var rows = new List<FeeRow>();
+        foreach (var o in orders)
         {
-            var r = new List<FeeRow>();
-            if (o.CustomFeeAmount > 0)
-                r.Add(new FeeRow
+            var transactionId = o.Id.ToString()[..8];
+            var invoiceNo = o.OrderNumber;
+            var branch = o.Branch?.Name ?? "—";
+            var cashier = o.Cashier?.FullName ?? "—";
+            var customerType = o.CustomerId.HasValue ? "Registered" : "Walk-in";
+
+            if (o.ServiceCharges.Count == 0)
+            {
+                rows.Add(new FeeRow
                 {
-                    FeeId = o.Id.ToString()[..8], FeeType = "Custom Fee", TransactionId = o.Id.ToString()[..8], InvoiceNo = o.OrderNumber,
-                    DateTime = o.CreatedAt, Branch = o.Branch?.Name ?? "—", Cashier = o.Cashier?.FullName ?? "—",
-                    CustomerType = o.CustomerId.HasValue ? "Registered" : "Walk-in", FeeAmount = o.CustomFeeAmount, NetFee = o.CustomFeeAmount,
+                    TransactionId = transactionId, InvoiceNo = invoiceNo, DateTime = o.CreatedAt,
+                    Branch = branch, Cashier = cashier, CustomerType = customerType,
+                    ChargeName = "Service Charge", ServiceChargeAmount = o.CustomFeeAmount,
                 });
-            if (o.TobaccoFeeAmount > 0)
-                r.Add(new FeeRow
+                continue;
+            }
+
+            foreach (var sc in o.ServiceCharges)
+            {
+                rows.Add(new FeeRow
                 {
-                    FeeId = o.Id.ToString()[..8], FeeType = "Tobacco Fee", TransactionId = o.Id.ToString()[..8], InvoiceNo = o.OrderNumber,
-                    DateTime = o.CreatedAt, Branch = o.Branch?.Name ?? "—", Cashier = o.Cashier?.FullName ?? "—",
-                    CustomerType = o.CustomerId.HasValue ? "Registered" : "Walk-in", FeeAmount = o.TobaccoFeeAmount, NetFee = o.TobaccoFeeAmount,
+                    TransactionId = transactionId, InvoiceNo = invoiceNo, DateTime = o.CreatedAt,
+                    Branch = branch, Cashier = cashier, CustomerType = customerType,
+                    ChargeName = sc.Name, ServiceChargeAmount = sc.Amount,
                 });
-            return r;
-        }).ToList();
+            }
+
+            // Guards against partial/rounding drift between the named breakdown and the
+            // order-level total — the total is what was actually charged, so any unaccounted
+            // remainder still needs to show up rather than silently vanish from the report.
+            var unaccounted = o.CustomFeeAmount - o.ServiceCharges.Sum(sc => sc.Amount);
+            if (unaccounted > 0.005m)
+            {
+                rows.Add(new FeeRow
+                {
+                    TransactionId = transactionId, InvoiceNo = invoiceNo, DateTime = o.CreatedAt,
+                    Branch = branch, Cashier = cashier, CustomerType = customerType,
+                    ChargeName = "Other Charges", ServiceChargeAmount = unaccounted,
+                });
+            }
+        }
 
         return new FeeReportResult
         {
             Kpis = new FeeReportKpis
             {
-                TotalFeesCollected = rows.Sum(r => r.FeeAmount),
+                TotalServiceCharges = rows.Sum(r => r.ServiceChargeAmount),
                 TransactionsWithFees = orders.Count,
-                AverageFeePerTransaction = orders.Count > 0 ? Math.Round(rows.Sum(r => r.FeeAmount) / orders.Count, 2) : 0m,
-                TotalTobaccoFees = rows.Where(r => r.FeeType == "Tobacco Fee").Sum(r => r.FeeAmount),
+                AverageFeePerTransaction = orders.Count > 0 ? Math.Round(rows.Sum(r => r.ServiceChargeAmount) / orders.Count, 2) : 0m,
             },
             Rows = rows,
         };
+    }
+
+    // Shared by tax-compliance reports (Tobacco Excise) that need the legal entity's name/CR/VAT
+    // on export/print — NOT used by the Service Charges report, which isn't reporting a tax.
+    // When a specific branch is in scope, use that branch's own ZATCA identity (same SellerName
+    // ?? Branch.Name / VatRegistrationNumber ?? CommercialRegistration fallback ZatcaService uses
+    // for invoices). For "All Branches", there's no single legal entity to pick correctly, so
+    // fall back to the branch with the earliest CreatedAt as a representative default rather
+    // than leaving the field blank.
+    private async Task<(string LegalName, string Cr, string Vat)> ResolveCompanyInfoAsync(Guid? branchId)
+    {
+        var branchQ = db.Branches.AsQueryable();
+        branchQ = branchId.HasValue ? branchQ.Where(b => b.Id == branchId) : branchQ.OrderBy(b => b.CreatedAt);
+        var branch = await branchQ.FirstOrDefaultAsync();
+        if (branch is null) return ("—", "—", "—");
+        var settings = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == branch.Id);
+        return (settings?.SellerName ?? branch.Name, branch.CommercialRegistration ?? "—", settings?.VatRegistrationNumber ?? "—");
     }
 
     // ───────────────────────────────────────────────────────────────────────
@@ -2937,11 +2997,30 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         if (error != null) return BadRequest(new { message = error });
         var result = await BuildTobaccoExciseAsync(rangeFrom, rangeTo, branchId, cashierId);
         var headers = new[] { "SKU", "Barcode", "Product Name", "Brand", "Category", "Branch", "Employee", "Units Sold", "Taxable Price", "Excise Rate", "Excise Amount", "VAT Amount", "Returns Qty", "Excise Reversal", "Net Excise", "Compliance Status" };
-        var rows = result.Rows.Select(r => new object?[]
+
+        var rows = new List<object?[]>
         {
-            r.Sku, r.Barcode, r.ProductName, r.Brand, r.Category, r.Branch, r.Employee, r.UnitsSold, r.TaxablePrice, r.ExciseRate, r.ExciseAmount,
-            r.VatAmount, r.ReturnsQty, r.ExciseReversal, r.NetExcise, r.ComplianceStatus,
-        }).ToList();
+            new object?[] { "Legal Company Name", result.LegalCompanyName, "", "", "", "", "", "", "", "", "", "", "", "", "", "" },
+            new object?[] { "Commercial Registration (CR)", result.CommercialRegistrationNumber, "", "", "", "", "", "", "", "", "", "", "", "", "", "" },
+            new object?[] { "VAT Registration Number", result.VatRegistrationNumber, "", "", "", "", "", "", "", "", "", "", "", "", "", "" },
+            new object?[] { "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "" },
+        };
+        // Subtotal per branch, then a grand total — same "clear subtotal and grand total
+        // calculations" requirement REP-002 asked for, applied to the report that's actually
+        // tobacco-only (BuildFeeReportAsync's generic Service Charges report doesn't need this
+        // company-identity treatment since it isn't reporting a tax).
+        foreach (var branchGroup in result.Rows.GroupBy(r => r.Branch))
+        {
+            foreach (var r in branchGroup)
+                rows.Add(new object?[]
+                {
+                    r.Sku, r.Barcode, r.ProductName, r.Brand, r.Category, r.Branch, r.Employee, r.UnitsSold, r.TaxablePrice, r.ExciseRate, r.ExciseAmount,
+                    r.VatAmount, r.ReturnsQty, r.ExciseReversal, r.NetExcise, r.ComplianceStatus,
+                });
+            rows.Add(new object?[] { "", "", "", "", "", $"Subtotal — {branchGroup.Key}", "", "", "", "", branchGroup.Sum(r => r.ExciseAmount), "", "", "", branchGroup.Sum(r => r.NetExcise), "" });
+        }
+        rows.Add(new object?[] { "", "", "", "", "", "GRAND TOTAL", "", "", "", "", result.Rows.Sum(r => r.ExciseAmount), "", "", "", result.Rows.Sum(r => r.NetExcise), "" });
+
         await audit.LogAsync("export_report", "Report", null, exportedBy, branchId,
             $"{{\"report\":\"tobacco-excise\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{result.Rows.Count}}}");
         var kpis = new (string, string)[]
@@ -2950,7 +3029,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ("Tobacco Units Sold", result.Kpis.TobaccoUnitsSold.ToString("0.##")), ("Excise Refunds", result.Kpis.ExciseRefunds.ToString("0.##")),
             ("Top Tobacco SKU", result.Kpis.TopTobaccoSku ?? "—"), ("Compliance Exceptions", result.Kpis.ComplianceExceptions.ToString()),
         };
-        return BuildExportFile(format, "Tobacco Excise Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+        return BuildExportFile(format, "Tobacco Excise Report",
+            $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}\n{result.LegalCompanyName} · CR: {result.CommercialRegistrationNumber} · VAT: {result.VatRegistrationNumber}",
             kpis, headers, rows, $"tobacco-excise-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
     }
 
@@ -3012,6 +3092,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         .OrderByDescending(r => r.ExciseAmount)
         .ToList();
 
+        var (legalName, cr, vat) = await ResolveCompanyInfoAsync(branchId);
+
         return new TobaccoExciseResult
         {
             Kpis = new TobaccoExciseKpis
@@ -3021,6 +3103,9 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 TopTobaccoSku = rows.FirstOrDefault()?.Sku, ComplianceExceptions = rows.Count(r => r.ComplianceStatus != "ok"),
             },
             Rows = rows,
+            LegalCompanyName = legalName,
+            CommercialRegistrationNumber = cr,
+            VatRegistrationNumber = vat,
         };
     }
 
@@ -4163,26 +4248,30 @@ public sealed class TaxReportResult
     public List<TaxReportRow> Rows { get; init; } = [];
 }
 
+// Business-configured surcharges (delivery fee, card-payment surcharge) — Order.CustomFeeAmount.
+// Deliberately NOT tobacco: KSA only recognizes VAT and tobacco excise as real taxes, so this
+// report doesn't carry the legal-entity/CR/VAT treatment the Tobacco Excise report does — a
+// service charge isn't a tax and shouldn't be presented like one on a compliance export.
 public sealed class FeeRow
 {
-    public string FeeId { get; init; } = "";
-    public string FeeType { get; init; } = "";
     public string TransactionId { get; init; } = "";
     public string InvoiceNo { get; init; } = "";
     public DateTime DateTime { get; init; }
     public string Branch { get; init; } = "";
     public string Cashier { get; init; } = "";
     public string CustomerType { get; init; } = "";
-    public decimal FeeAmount { get; init; }
-    public decimal NetFee { get; init; }
+    // Which configured charge this row is (e.g. "Delivery Service Fee (SAR 5)"). Orders that
+    // predate the named breakdown (OrderServiceCharge) fall back to "Service Charge" so the
+    // amount still appears somewhere rather than being silently dropped.
+    public string ChargeName { get; init; } = "";
+    public decimal ServiceChargeAmount { get; init; }
 }
 
 public sealed class FeeReportKpis
 {
-    public decimal TotalFeesCollected { get; init; }
+    public decimal TotalServiceCharges { get; init; }
     public int TransactionsWithFees { get; init; }
     public decimal AverageFeePerTransaction { get; init; }
-    public decimal TotalTobaccoFees { get; init; }
 }
 
 public sealed class FeeReportResult
@@ -4225,6 +4314,11 @@ public sealed class TobaccoExciseResult
 {
     public TobaccoExciseKpis Kpis { get; init; } = new();
     public List<TobaccoExciseRow> Rows { get; init; } = [];
+    // REP-002: legal entity identity for export/print — this is a real KSA tax (tobacco excise),
+    // unlike the generic Service Charges report, which doesn't carry this since it isn't a tax.
+    public string LegalCompanyName { get; init; } = "";
+    public string CommercialRegistrationNumber { get; init; } = "";
+    public string VatRegistrationNumber { get; init; } = "";
 }
 
 public sealed class ProfitMarginRow

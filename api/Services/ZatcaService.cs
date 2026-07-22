@@ -237,13 +237,31 @@ public class ZatcaService(
         // (only the order-level aggregates are), so deriving the rate per-line always produced
         // 0%. This system applies one uniform VAT rate to the whole cart, so a single rate
         // derived from the real totals and applied to every line is both correct and simpler.
+        //
+        // The taxable base MUST include tobacco excise, matching _app.pos.tsx's own formula
+        // (taxable = subtotal - discount + tobaccoExcise; vatAmount = taxable * rate) — omitting
+        // it here previously back-derived a distorted VAT% (e.g. 18.75% instead of the real 15%)
+        // whenever an order had any tobacco excise, since invoice.TaxAmount already includes the
+        // VAT charged on that excise but the old taxableAmount denominator didn't. Order.CustomFeeAmount
+        // (service charge) is deliberately NOT included: it's charged post-VAT, not part of the
+        // VAT base (see the same pos.tsx formula) — and isn't represented elsewhere in this XML at
+        // all yet (the template has no document-level "charge" AllowanceCharge, only the one
+        // discount/allowance node), which is a separate, still-open gap.
         var subtotalAmount = invoice.Order.Items.Sum(i => i.UnitPrice * i.Quantity);
-        var taxableAmount = subtotalAmount - invoice.DiscountAmount;
+        var taxableAmount = subtotalAmount - invoice.DiscountAmount + invoice.Order.TobaccoFeeAmount;
         var vatPercent = taxableAmount != 0 ? Math.Round(invoice.TaxAmount / taxableAmount * 100, 2) : 15m;
 
+        // Tobacco excise is charged per-unit and stacks with VAT on the same base, but this XML
+        // builder has no separate "excise" tax scheme — only a single VatPercent per line. Folding
+        // each tobacco line's excise into its reported unit price is what makes the line's
+        // declared LineExtensionAmount (and therefore the invoice's signed PayableAmount) actually
+        // include the excise money charged, instead of silently dropping it from the government
+        // e-invoice while still charging the customer for it.
         var items = invoice.Order.Items.Select(i =>
-            new ZatcaInvoiceLineItem(i.Product?.Name ?? "Item", i.Quantity, i.UnitPrice, vatPercent)
-        ).ToList();
+        {
+            var exciseUnitPrice = i.Quantity > 0 ? i.TobaccoFeeAmount / i.Quantity : 0m;
+            return new ZatcaInvoiceLineItem(i.Product?.Name ?? "Item", i.Quantity, i.UnitPrice + exciseUnitPrice, vatPercent);
+        }).ToList();
 
         var data = new ZatcaInvoiceData(
             Id: invoice.InvoiceNumber ?? invoice.Order.OrderNumber,

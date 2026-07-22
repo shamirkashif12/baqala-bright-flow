@@ -28,7 +28,6 @@ public class ProductsController(
         basePrice = p.BasePrice,
         costPrice = p.CostPrice,
         taxPercentage = p.TaxPercentage,
-        customFee = p.CustomFee,
         reorderLevel = p.ReorderLevel,
         status = p.Status,
         isTobacco = p.IsTobacco,
@@ -137,7 +136,6 @@ public class ProductsController(
         product.BasePrice = updated.BasePrice;
         product.CostPrice = updated.CostPrice;
         product.TaxPercentage = updated.TaxPercentage;
-        product.CustomFee = updated.CustomFee;
         product.ReorderLevel = updated.ReorderLevel;
         product.Status = updated.Status;
         product.WeightBased = updated.WeightBased;

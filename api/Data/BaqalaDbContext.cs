@@ -45,6 +45,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<OrderItem> OrderItems { get; set; }
     public DbSet<OrderPayment> OrderPayments { get; set; }
     public DbSet<OrderDiscount> OrderDiscounts { get; set; }
+    public DbSet<OrderServiceCharge> OrderServiceCharges { get; set; }
     public DbSet<CustomerReturn> CustomerReturns { get; set; }
     public DbSet<CustomerReturnItem> CustomerReturnItems { get; set; }
 

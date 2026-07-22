@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260722080357_AddConfigurableTobaccoExciseMinimum")]
+    partial class AddConfigurableTobaccoExciseMinimum
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2395,44 +2398,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("OrderId");
 
                     b.ToTable("order_payments");
-                });
-
-            modelBuilder.Entity("BaqalaPOS.Api.Models.OrderServiceCharge", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,4)")
-                        .HasColumnName("amount");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
-                        .HasColumnName("name");
-
-                    b.Property<Guid>("OrderId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("order_id");
-
-                    b.Property<Guid?>("TaxFeeRuleId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("tax_fee_rule_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OrderId");
-
-                    b.HasIndex("TaxFeeRuleId");
-
-                    b.ToTable("order_service_charges");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRun", b =>
@@ -6087,23 +6052,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Order");
                 });
 
-            modelBuilder.Entity("BaqalaPOS.Api.Models.OrderServiceCharge", b =>
-                {
-                    b.HasOne("BaqalaPOS.Api.Models.Order", "Order")
-                        .WithMany("ServiceCharges")
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("BaqalaPOS.Api.Models.TaxFeeRule", "TaxFeeRule")
-                        .WithMany()
-                        .HasForeignKey("TaxFeeRuleId");
-
-                    b.Navigation("Order");
-
-                    b.Navigation("TaxFeeRule");
-                });
-
             modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRun", b =>
                 {
                     b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
@@ -6905,8 +6853,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Payments");
 
                     b.Navigation("Returns");
-
-                    b.Navigation("ServiceCharges");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Product", b =>

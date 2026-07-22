@@ -744,9 +744,9 @@ export const api = {
     requestBlob(`/api/reports/tax/export${toQuery(params)}`),
 
   getFeeReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string }) =>
-    request<FeeReport>(`/api/reports/fees${toQuery(params)}`),
+    request<FeeReport>(`/api/reports/service-charges${toQuery(params)}`),
   exportFeeReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
-    requestBlob(`/api/reports/fees/export${toQuery(params)}`),
+    requestBlob(`/api/reports/service-charges/export${toQuery(params)}`),
 
   getTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string }) =>
     request<TobaccoExciseReport>(`/api/reports/tobacco-excise${toQuery(params)}`),
@@ -1167,7 +1167,7 @@ export interface Category {
 export interface Product {
   id: string; sku: string; barcode?: string; name: string; nameAr?: string;
   categoryId?: string; brand?: string; basePrice: number; costPrice?: number;
-  taxPercentage: number; customFee: number; reorderLevel: number;
+  taxPercentage: number; reorderLevel: number;
   status: string; weightBased: boolean; isTobacco: boolean;
   discount?: number; discountType?: "percentage" | "fixed";
   imageUrl?: string;
@@ -1324,6 +1324,9 @@ export interface Order {
   // much each contributed (coupon's own share is separately identified via couponId, loyalty's
   // via loyaltyDiscountAmount above).
   discounts?: Array<{ id?: string; discountId?: string; name: string; amount: number }>;
+  // Named breakdown of customFeeAmount — which configured service charge(s) (Delivery Service
+  // Fee, Card Payment Surcharge, etc.) contributed and how much each contributed.
+  serviceCharges?: Array<{ id?: string; taxFeeRuleId?: string; name: string; amount: number }>;
   branch?: { id: string; name: string };
   cashier?: { id: string; fullName: string };
   customer?: { id: string; fullName: string; phone: string; email?: string };
@@ -1499,7 +1502,7 @@ export interface Offer {
 
 export interface TaxFeeRule {
   id: string; ruleName: string; ruleType: string; vatPercentage: number;
-  customFeeAmount: number; excisePercentage: number; isTobacco: boolean;
+  customFeeAmount: number; excisePercentage: number; minimumExciseAmount: number; isTobacco: boolean;
   applicableTo: string; status: string; effectiveDate: string;
 }
 
@@ -2104,12 +2107,14 @@ export interface TaxReport {
   rows: TaxReportRow[];
 }
 
+// Business-configured surcharges (delivery fee, card surcharge) — NOT a tax. KSA only recognizes
+// VAT and tobacco excise as real taxes; see TobaccoExciseReport for that.
 export interface FeeRow {
-  feeId: string; feeType: string; transactionId: string; invoiceNo: string; dateTime: string; branch: string;
-  cashier: string; customerType: string; feeAmount: number; netFee: number;
+  transactionId: string; invoiceNo: string; dateTime: string; branch: string;
+  cashier: string; customerType: string; chargeName: string; serviceChargeAmount: number;
 }
 export interface FeeReport {
-  kpis: { totalFeesCollected: number; transactionsWithFees: number; averageFeePerTransaction: number; totalTobaccoFees: number };
+  kpis: { totalServiceCharges: number; transactionsWithFees: number; averageFeePerTransaction: number };
   rows: FeeRow[];
 }
 
@@ -2121,6 +2126,9 @@ export interface TobaccoExciseRow {
 export interface TobaccoExciseReport {
   kpis: { exciseSalesValue: number; exciseTaxAmount: number; tobaccoUnitsSold: number; exciseRefunds: number; topTobaccoSku?: string; complianceExceptions: number };
   rows: TobaccoExciseRow[];
+  legalCompanyName: string;
+  commercialRegistrationNumber: string;
+  vatRegistrationNumber: string;
 }
 
 export interface ProfitMarginRow {

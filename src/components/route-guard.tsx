@@ -65,6 +65,7 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/returns",             module: "Returns" },
   { url: "/refunds",             module: "Returns" },
   { url: "/tax-fees",            module: "Tax & Fees" },
+  { url: "/service-charges",     module: "Tax & Fees" },
   { url: "/tax-reports",         module: "Tax & Fees" },
   // Suppliers
   { url: "/suppliers",           module: "Suppliers" },

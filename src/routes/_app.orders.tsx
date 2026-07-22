@@ -192,6 +192,8 @@ function printReceipt(order: Order) {
       })()}
       ${order.loyaltyPointsRedeemed ? `<tr><td>Loyalty Redeemed (${order.loyaltyPointsRedeemed} pts)</td><td>-SAR ${(order.loyaltyDiscountAmount ?? 0).toFixed(2)}</td></tr>` : ""}
       <tr><td>VAT (15%)</td><td>SAR ${order.taxAmount.toFixed(2)}</td></tr>
+      ${order.tobaccoFeeAmount && order.tobaccoFeeAmount > 0 ? `<tr><td>Tobacco Excise</td><td>SAR ${order.tobaccoFeeAmount.toFixed(2)}</td></tr>` : ""}
+      ${order.customFeeAmount && order.customFeeAmount > 0 ? `<tr><td>Service Charge</td><td>SAR ${order.customFeeAmount.toFixed(2)}</td></tr>` : ""}
       <tr class="total-row"><td>TOTAL</td><td>SAR ${order.totalAmount.toFixed(2)}</td></tr>
     </table>
     <div class="divider"></div>
@@ -930,6 +932,18 @@ function OrderDetail({ orderId, onStatusChanged }: {
         <div className="flex justify-between text-muted-foreground">
           <span>VAT</span><span><SARIcon />{order.taxAmount.toFixed(2)}</span>
         </div>
+        {/* Both fold into totalAmount but previously had no line here at all, so the total
+            didn't visibly reconcile against subtotal/discount/VAT for any order that had one. */}
+        {!!order.tobaccoFeeAmount && order.tobaccoFeeAmount > 0 && (
+          <div className="flex justify-between text-muted-foreground">
+            <span>Tobacco Excise</span><span><SARIcon />{order.tobaccoFeeAmount.toFixed(2)}</span>
+          </div>
+        )}
+        {!!order.customFeeAmount && order.customFeeAmount > 0 && (
+          <div className="flex justify-between text-muted-foreground">
+            <span>Service Charge</span><span><SARIcon />{order.customFeeAmount.toFixed(2)}</span>
+          </div>
+        )}
         <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
           <span>Total</span><span className="text-primary"><SARIcon />{order.totalAmount.toFixed(2)}</span>
         </div>

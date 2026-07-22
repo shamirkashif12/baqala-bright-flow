@@ -248,6 +248,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         rule.VatPercentage = updated.VatPercentage;
         rule.CustomFeeAmount = updated.CustomFeeAmount;
         rule.ExcisePercentage = updated.ExcisePercentage;
+        rule.MinimumExciseAmount = updated.MinimumExciseAmount;
         rule.IsTobacco = updated.IsTobacco;
         rule.ApplicableTo = updated.ApplicableTo;
         rule.Status = updated.Status;

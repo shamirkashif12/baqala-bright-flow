@@ -215,7 +215,6 @@ export interface Product {
   categoryId?: string;
   basePrice: number;
   taxPercentage: number;
-  customFee: number;
   isTobacco: boolean;
   allowSelfCheckout: boolean;
   status: string;
@@ -335,6 +334,7 @@ export interface TaxFeeRule {
   vatPercentage: number;
   customFeeAmount: number;
   excisePercentage: number;
+  minimumExciseAmount: number;
   status: "active" | "inactive";
 }
 
@@ -367,6 +367,13 @@ export interface OrderItemInput {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  tobaccoFeeAmount: number;
+}
+
+export interface ServiceChargeInput {
+  taxFeeRuleId?: string;
+  name: string;
+  amount: number;
 }
 
 export interface OrderPaymentInput {
@@ -382,11 +389,13 @@ export interface CreateOrderInput {
   discountAmount: number;
   taxAmount: number;
   customFeeAmount: number;
+  tobaccoFeeAmount: number;
   totalAmount: number;
   paymentStatus: "paid";
   orderStatus: "completed";
   couponId?: string;
   items: OrderItemInput[];
+  serviceCharges?: ServiceChargeInput[];
   payments: OrderPaymentInput[];
 }
 
