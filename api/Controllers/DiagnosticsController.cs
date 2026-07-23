@@ -68,4 +68,18 @@ public class DiagnosticsController(BaqalaDbContext db) : ControllerBase
 
         return Ok(new { message = "HRM seed patches completed." });
     }
+
+    // Same rationale as SeedHrm above: PatchApprovalCenterPermissionsAsync only ever ran under
+    // IsDevelopment(), so live never got the Delete-permission fix that makes the Approval
+    // Center's order-cancellation/item-deletion queue actually reachable by anyone but Tenant
+    // Administrator. Idempotent — safe to call more than once.
+    [HttpPost("seed-approval-permissions")]
+    public async Task<IActionResult> SeedApprovalPermissions([FromServices] BaqalaDbContext dbContext)
+    {
+        if (User.FindFirst("role")?.Value != "tenant_admin") return Forbid();
+
+        await DataSeeder.PatchApprovalCenterPermissionsAsync(dbContext);
+
+        return Ok(new { message = "Approval Center permission patches completed." });
+    }
 }

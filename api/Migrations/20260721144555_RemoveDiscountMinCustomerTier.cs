@@ -10,9 +10,12 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "min_customer_tier",
-                table: "discounts");
+            // Guarded per this project's standard pattern (MigrationIdempotencyHelper) — this
+            // migration is sequenced directly behind AddSupplierProfileAuditDeviceAndPoReceivedBy,
+            // which partially applied on live before being fixed for safe re-run. A plain DropColumn
+            // here would blow up on "unknown column" if this migration's Up() ever gets replayed
+            // after already having applied successfully once.
+            migrationBuilder.DropColumnIfExists("discounts", "min_customer_tier");
         }
 
         /// <inheritdoc />

@@ -11,6 +11,9 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class SettingsController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
     [HttpGet("pos/{branchId:guid}")]
     public async Task<IActionResult> GetPosSettings(Guid branchId)
     {
@@ -119,6 +122,7 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
             action: "POS settings updated",
             entityType: "PosSettings",
             entityId: settings.Id,
+            userId: CallerId(),
             branchId: branchId,
             details: $"RequireShiftOpen:{settings.RequireShiftOpen} AutoPrint:{settings.AutoPrintReceipt} Offline:{settings.OfflineModeEnabled} BlockExpired:{settings.BlockExpiredItems}",
             severity: "warning");
@@ -172,6 +176,7 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
         await audit.LogAsync(
             action: "Tenant settings updated",
             entityType: "TenantSettings",
+            userId: CallerId(),
             branchId: branchId,
             details: $"{settings.Count} key(s) updated",
             severity: "warning");

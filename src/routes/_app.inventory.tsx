@@ -522,10 +522,20 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
       );
       reset(); onDone(); onClose();
     } catch (e) {
-      // The product (and possibly some branch batches) were already committed; discontinue it so no
-      // phantom half-stocked item is left behind.
-      if (createdProductId) await api.deleteProduct(createdProductId).catch(() => {});
-      setError(e instanceof Error ? e.message : "Failed.");
+      // Product deletion is approval-gated now (queues a request, doesn't actually remove the
+      // row — see ProductsController.Delete), so calling it here to "roll back" a partially
+      // failed save used to silently no-op: the product stayed, half-stocked or unpriced, with
+      // no indication anything was wrong beyond a generic error. Since the product genuinely
+      // was created, say so plainly and point at Edit Product instead of pretending it didn't
+      // happen — retrying Add Product with the same name/SKU would just hit a conflict against
+      // the very row this failure left behind.
+      const message = e instanceof Error ? e.message : "Failed.";
+      setError(
+        createdProductId
+          ? `"${form.name}" was created, but adding stock/pricing failed: ${message}. Open Edit Product for "${form.name}" to finish setting it up.`
+          : message,
+      );
+      if (createdProductId) onDone();
     }
     finally { setSaving(false); }
   };
@@ -804,6 +814,9 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deletingProduct, setDeletingProduct] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
   const [form, setForm] = useState({
     name: "", sku: "", barcode: "", categoryId: "",
     saleUnitType: "single" as "single" | "pack", itemsPerPack: "",
@@ -882,6 +895,24 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
       onDone(); onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to save."); }
     finally { setSaving(false); }
+  };
+
+  const handleDeleteProduct = async () => {
+    if (!item?.product?.id) return;
+    setDeletingProduct(true);
+    try {
+      await api.deleteProduct(item.product.id, deleteReason.trim() || undefined);
+      // Every deletion queues in the Approval Center and always needs a second person's decision,
+      // even from a manager — no self-approve bypass (unlike Discounts/Refunds/Void).
+      toast.success("Deletion request sent for manager approval.");
+      setConfirmDelete(false);
+      setDeleteReason("");
+      onDone(); onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete this product.");
+    } finally {
+      setDeletingProduct(false);
+    }
   };
 
   const addRule = async () => {
@@ -1075,7 +1106,37 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow mt-2" onClick={handleSave} disabled={saving}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Save Changes
         </Button>
+        <Button variant="outline" className="w-full text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive mt-2"
+          onClick={() => setConfirmDelete(true)}>
+          <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete Product
+        </Button>
       </DialogContent>
+
+      <Dialog open={confirmDelete} onOpenChange={v => { if (!v) { setConfirmDelete(false); setDeleteReason(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Delete Product</DialogTitle></DialogHeader>
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+            <p>
+              Delete <span className="font-medium">{item?.product?.name ?? "this product"}</span>?
+              This discontinues it everywhere — across every branch, not just this one — and it will
+              no longer be sellable. This always goes to a manager for approval first — even you
+              can't action your own request — and only takes effect once approved.
+            </p>
+          </div>
+          <div className="mt-1">
+            <label className="text-xs text-muted-foreground">Reason (optional)</label>
+            <Textarea className="resize-none text-sm h-16 mt-1" placeholder="e.g. Discontinued by supplier, duplicate SKU…"
+              value={deleteReason} onChange={e => setDeleteReason(e.target.value)} />
+          </div>
+          <div className="flex justify-end gap-2 mt-1">
+            <Button variant="outline" onClick={() => { setConfirmDelete(false); setDeleteReason(""); }} disabled={deletingProduct}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteProduct} disabled={deletingProduct}>
+              {deletingProduct ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete Product
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

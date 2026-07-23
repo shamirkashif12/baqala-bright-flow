@@ -3597,6 +3597,14 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var (scopeRole, scopeBranchId) = GetCallerContext();
         if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
 
+        // Category/product grouping can legitimately span multiple branches, so there's no single
+        // branch name to attribute a row to UNLESS the caller has filtered to one specific branch
+        // (via the branch selector, or branch-scoped role above) — in that case every row IS that
+        // branch, so show its name instead of the placeholder "—".
+        string? filterBranchName = branchId.HasValue
+            ? await db.Branches.Where(b => b.Id == branchId).Select(b => b.Name).FirstOrDefaultAsync()
+            : null;
+
         var itemsQ = db.OrderItems.Include(i => i.Order).ThenInclude(o => o!.Branch).Include(i => i.Product).ThenInclude(p => p!.Category)
             .Where(i => i.Order != null && i.Order.CreatedAt >= rangeFrom && i.Order.CreatedAt < rangeToExclusive && i.Order.PaymentStatus == "paid");
         if (branchId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.BranchId == branchId);
@@ -3628,7 +3636,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 var netProfit = grossProfit - returnImpact;
                 return new ProfitMarginRow
                 {
-                    GroupKey = g.Key.CategoryId?.ToString() ?? "—", GroupName = g.Key.CategoryName, Branch = "—",
+                    GroupKey = g.Key.CategoryId?.ToString() ?? "—", GroupName = g.Key.CategoryName, Branch = filterBranchName ?? "—",
                     UnitsSold = g.Sum(x => x.Qty), NetSales = netSales, Cogs = cogs, GrossProfit = grossProfit,
                     MarginPct = netSales > 0 ? Math.Round(grossProfit / netSales * 100, 1) : null,
                     DiscountValue = g.Sum(x => x.DiscountAmount), ReturnImpact = returnImpact, NetProfit = netProfit,
@@ -3668,7 +3676,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 var netProfit = grossProfit - returnImpact;
                 return new ProfitMarginRow
                 {
-                    GroupKey = g.Key.ProductId.ToString()[..8], GroupName = g.Key.ProductName, Branch = "—",
+                    GroupKey = g.Key.ProductId.ToString()[..8], GroupName = g.Key.ProductName, Branch = filterBranchName ?? "—",
                     UnitsSold = g.Sum(x => x.Qty), NetSales = netSales, Cogs = cogs, GrossProfit = grossProfit,
                     MarginPct = netSales > 0 ? Math.Round(grossProfit / netSales * 100, 1) : null,
                     DiscountValue = g.Sum(x => x.DiscountAmount), ReturnImpact = returnImpact, NetProfit = netProfit,

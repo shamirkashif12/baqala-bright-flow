@@ -11,11 +11,12 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Guarded per this project's standard pattern (see MigrationCollationHelper /
-            // MigrationIdempotencyHelper): the inline FKs below reference tables (branches, users)
-            // created in earlier migrations, which hits the same incompatible-collation bug guarded
-            // in AddOrderDiscounts/AddOrderServiceCharges/AddLoyaltyProgram — the FKs are created
-            // separately below instead of inline in CreateTable.
+            // Guarded like AddOrderDiscounts/AddHrmShiftsAndAttendance: approval_requests' FKs
+            // point at branches/users, both created in earlier migrations, so their collation may
+            // not match today's ambient default — the same bug MigrationCollationHelper exists to
+            // fix. This project's startup runner also executes each migration's SQL directly
+            // without a wrapping transaction (see Program.cs), so every statement here is guarded
+            // to stay safe against a partial-failure retry. See MigrationIdempotencyHelper.
             migrationBuilder.Sql(@"
                 CREATE TABLE IF NOT EXISTS `approval_requests` (
                     `id` char(36) NOT NULL,
@@ -49,9 +50,13 @@ namespace BaqalaPOS.Api.Migrations
                 );
             ");
 
+            // Fixed seed id, so a plain INSERT would fail on 'Duplicate entry' if a prior partial
+            // run already got this far — IGNORE makes it a no-op instead.
             migrationBuilder.Sql(@"
-                INSERT IGNORE INTO `company_profile` (`id`, `cr_number`, `created_at`, `legal_name`, `updated_at`, `updated_by`, `vat_number`)
-                VALUES ('00000000-0000-0000-0000-000000000002', NULL, '2026-01-01 00:00:00', NULL, '2026-01-01 00:00:00', NULL, NULL);
+                INSERT IGNORE INTO `company_profile`
+                    (`id`, `legal_name`, `cr_number`, `vat_number`, `updated_by`, `created_at`, `updated_at`)
+                VALUES
+                    ('00000000-0000-0000-0000-000000000002', NULL, NULL, NULL, NULL, '2026-01-01 00:00:00.000000', '2026-01-01 00:00:00.000000');
             ");
 
             migrationBuilder.CreateIndexIfNotExists("IX_approval_requests_approved_by", "approval_requests", "`approved_by`");

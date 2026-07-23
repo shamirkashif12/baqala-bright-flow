@@ -56,6 +56,24 @@ internal static class MigrationIdempotencyHelper
         ");
     }
 
+    public static void DropForeignKeyIfExists(
+        this MigrationBuilder migrationBuilder,
+        string table,
+        string name)
+    {
+        migrationBuilder.Sql($@"
+            SET @fk_exists = (
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' AND CONSTRAINT_NAME = '{name}'
+            );
+            SET @ddl = IF(@fk_exists = 0, 'SELECT 1',
+                'ALTER TABLE `{table}` DROP FOREIGN KEY `{name}`');
+            PREPARE stmt FROM @ddl;
+            EXECUTE stmt;
+            DEALLOCATE PREPARE stmt;
+        ");
+    }
+
     public static void CreateIndexIfNotExists(
         this MigrationBuilder migrationBuilder,
         string name,

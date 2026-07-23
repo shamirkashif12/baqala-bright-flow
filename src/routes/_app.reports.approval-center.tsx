@@ -241,21 +241,23 @@ function ApprovalCenter() {
             {
               key: "actions", label: "Actions",
               render: (r: ApprovalRow) => {
-                const isOwn = !!r.requestedBy && r.requestedBy === user?.id;
+                // No "you raised this, someone else must review it" restriction — same as
+                // Customer Returns, where a cashier can self-approve their own return under
+                // the refund threshold. Whoever holds Approve on the module can decide any
+                // request, including their own; the module permission check below (canActOn)
+                // is the real gate, not who happens to be logged in.
                 return isPending(r.status) && canActOn(r) ? (
                   <div className="flex items-center gap-1">
                     <Button
                       size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0"
-                      disabled={submitting || isOwn}
-                      title={isOwn ? "You raised this request — someone else must review it" : undefined}
+                      disabled={submitting}
                       onClick={() => approveInline(r)}
                     >
                       Approve
                     </Button>
                     <Button
                       size="sm" variant="outline" className="h-7 text-xs px-2 border-destructive/50 text-destructive"
-                      disabled={submitting || isOwn}
-                      title={isOwn ? "You raised this request — someone else must review it" : undefined}
+                      disabled={submitting}
                       onClick={() => { setReview(r); setRejectReason(""); }}
                     >
                       Reject

@@ -175,9 +175,30 @@ public class ApprovalsController(
     {
         "discount" => "New discount request",
         "order_cancellation" => "Order cancellation",
-        "item_deletion" => $"{a.EntityType} deletion",
+        // DetailsJson carries a {name, sku?} snapshot taken at request time (see
+        // ProductsController.Delete/DeleteCategory) — falls back to the generic label for any
+        // request raised before that snapshot existed.
+        "item_deletion" => ItemDeletionLabel(a),
         _ => a.RequestType,
     };
+
+    private static readonly System.Text.Json.JsonSerializerOptions CaseInsensitiveJson = new() { PropertyNameCaseInsensitive = true };
+
+    private static string ItemDeletionLabel(ApprovalRequest a)
+    {
+        if (string.IsNullOrEmpty(a.DetailsJson)) return $"{a.EntityType} deletion";
+        try
+        {
+            var details = System.Text.Json.JsonSerializer.Deserialize<ItemDeletionDetails>(a.DetailsJson, CaseInsensitiveJson);
+            return string.IsNullOrEmpty(details?.Name) ? $"{a.EntityType} deletion" : $"Delete {a.EntityType}: {details.Name}";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return $"{a.EntityType} deletion";
+        }
+    }
+
+    private record ItemDeletionDetails(string? Name, string? Sku);
 
     // Only valid for the three NEW request types backed by ApprovalRequest — the four pre-existing
     // flows keep using their own approve/reject endpoints (ReturnsController, StockCountsController,

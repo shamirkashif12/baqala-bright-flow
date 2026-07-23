@@ -11,11 +11,16 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Guarded per this project's standard pattern (see MigrationIdempotencyHelper): this
-            // migration was already found partially applied (bank_account_holder present, the rest
-            // missing) on a database that had its schema restored/copied independently of
-            // __EFMigrationsHistory — a plain re-run blew up on "Duplicate column name
-            // 'bank_account_holder'" before ever reaching the columns that were still missing.
+            // This migration failed partway through on at least one environment: the AddColumn
+            // calls below committed (this project's startup runner executes each migration's SQL
+            // directly without a wrapping transaction — see Program.cs), but the migration was
+            // never recorded as applied, so retrying replayed the whole Up() from scratch and blew
+            // up on "Duplicate column name 'bank_account_holder'". The most likely original failure
+            // point is one of the FK additions further down: purchase_orders/audit_logs were both
+            // created in earlier migrations, so received_by/terminal_id may not match those tables'
+            // actual collation — the same incompatible-collation bug MigrationCollationHelper
+            // exists to fix. Every statement here is now guarded so re-running is safe regardless
+            // of how far a previous attempt got. See MigrationIdempotencyHelper.
             migrationBuilder.AddColumnIfNotExists("suppliers", "bank_account_holder", "varchar(255) NULL");
             migrationBuilder.AddColumnIfNotExists("suppliers", "bank_account_number", "varchar(100) NULL");
             migrationBuilder.AddColumnIfNotExists("suppliers", "bank_iban", "varchar(50) NULL");
@@ -50,24 +55,9 @@ namespace BaqalaPOS.Api.Migrations
             migrationBuilder.CreateIndexIfNotExists("IX_supplier_documents_supplier_id", "supplier_documents", "`supplier_id`");
             migrationBuilder.CreateIndexIfNotExists("IX_supplier_documents_uploaded_by", "supplier_documents", "`uploaded_by`");
 
-            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
-                name: "FK_audit_logs_terminals_terminal_id",
-                table: "audit_logs",
-                column: "terminal_id",
-                principalTable: "terminals",
-                principalColumn: "id",
-                onDeleteSql: "RESTRICT",
-                nullable: true);
-
-            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
-                name: "FK_purchase_orders_users_received_by",
-                table: "purchase_orders",
-                column: "received_by",
-                principalTable: "users",
-                principalColumn: "id",
-                onDeleteSql: "RESTRICT",
-                nullable: true);
-
+            // suppliers/users/audit_logs/purchase_orders/terminals were all created in earlier
+            // migrations, so their actual collation may not match whatever these new FK columns
+            // get from the server's ambient default. See MigrationCollationHelper.
             migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
                 name: "FK_supplier_documents_suppliers_supplier_id",
                 table: "supplier_documents",
@@ -81,6 +71,24 @@ namespace BaqalaPOS.Api.Migrations
                 name: "FK_supplier_documents_users_uploaded_by",
                 table: "supplier_documents",
                 column: "uploaded_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT",
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_audit_logs_terminals_terminal_id",
+                table: "audit_logs",
+                column: "terminal_id",
+                principalTable: "terminals",
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT",
+                nullable: true);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_purchase_orders_users_received_by",
+                table: "purchase_orders",
+                column: "received_by",
                 principalTable: "users",
                 principalColumn: "id",
                 onDeleteSql: "RESTRICT",

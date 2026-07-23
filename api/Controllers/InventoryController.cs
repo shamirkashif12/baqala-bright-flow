@@ -405,13 +405,28 @@ public class InventoryController(
                 return BadRequest(new { message = $"Cannot adjust {req.Quantity} unit(s) — only {batch.RemainingQuantity} remaining in batch {batch.BatchNumber}." });
         }
 
-        // Recording wastage/damage (or any adjustment) against a product that has no stock row in
-        // the chosen branch used to 404 with "Stock record not found", surfacing to the user as the
-        // reported "Failed to record wastage". A write-off is a legitimate event to log even when
-        // the system shows nothing on hand, so create a zero row and let the removal clamp at zero
-        // rather than rejecting the whole action. Mirrors the upsert the PO-receive path already does.
         var stock = await db.InventoryStocks
             .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
+
+        // A write-off (waste/damage/expired/theft/other) can't remove more than is actually on
+        // hand — previously nothing checked this unless a specific batch was picked (the
+        // batch-specific check above only fires with BatchId set), so e.g. writing off any
+        // quantity against a product sitting at 0 on-hand was silently accepted and the removal
+        // just clamped to zero. Mirrors ECR-09's warehouse-request fix: reject instead of
+        // silently clamping. Scoped to the held-for-approval write-off types only — a plain
+        // stock-count "correction" isn't bounded by the same on-hand check.
+        if (!isIncrease && !req.BatchId.HasValue && RequiresApproval(req.AdjustmentType))
+        {
+            var onHand = stock?.Quantity ?? 0;
+            if (req.Quantity > onHand)
+                return BadRequest(new { message = $"Cannot record {req.Quantity} unit(s) — only {onHand} available on hand." });
+        }
+
+        // Recording wastage/damage (or any adjustment) against a product that has no stock row in
+        // the chosen branch used to 404 with "Stock record not found", surfacing to the user as the
+        // reported "Failed to record wastage". Once the on-hand check above passes, still create a
+        // zero row here so the rest of the flow (ApplyAdjustmentToStock etc.) has a row to write to.
+        // Mirrors the upsert the PO-receive path already does.
         if (stock is null)
         {
             stock = new InventoryStock

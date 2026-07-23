@@ -213,6 +213,7 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.EnsurePermissionsAsync(db);
     await DataSeeder.PatchPermissionsAsync(db);
     await DataSeeder.PatchMarketingPermissionsAsync(db);
+    await DataSeeder.PatchApprovalCenterPermissionsAsync(db);
     await DataSeeder.PatchDiscountEligibilityAsync(db);
     await DataSeeder.PatchWarehouseRegionsAsync(db);
     await DataSeeder.PatchRemoveTestBranchesAsync(db);

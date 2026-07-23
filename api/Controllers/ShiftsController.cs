@@ -132,10 +132,15 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
             return Forbid();
 
         // Cashier and Branch Manager accounts can hold a shift (FR-CHK-06: the Manager App
-        // requires the same mandatory check-in + opening-cash flow as the Cashier POS).
+        // requires the same mandatory check-in + opening-cash flow as the Cashier POS). Tenant
+        // Administrator is included too — Superadmin accounts need to be able to check in/out
+        // for testing and branch coverage, not just delegate to a Cashier/Manager account.
+        // Normalized via RoleNormalizer instead of matching on raw Role.Name so this doesn't
+        // silently drift from the "Admin"/"Tenant Administrator" aliasing used everywhere else.
         var cashierUser = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == req.CashierId);
-        if (cashierUser is null || cashierUser.Role?.Name is not ("Cashier" or "Branch Manager" or "Manager"))
-            return BadRequest("Only users with the Cashier or Branch Manager role can be checked in for a shift.");
+        var cashierAppRole = cashierUser?.Role?.Name is { } roleName ? RoleNormalizer.ToAppRole(roleName) : null;
+        if (cashierUser is null || cashierAppRole is not ("cashier" or "branch_manager" or "tenant_admin"))
+            return BadRequest("Only Cashier, Branch Manager, or Tenant Administrator accounts can be checked in for a shift.");
 
         var existing = await db.CashierShifts
             .AnyAsync(s => s.CashierId == req.CashierId && s.Status == "open");

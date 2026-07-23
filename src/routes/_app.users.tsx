@@ -81,13 +81,29 @@ function RegisteredUsers() {
   };
 
   const handleSave = async () => {
+    // Catch the obvious missing-field cases here with a specific message instead of letting an
+    // empty roleId (or blank required field) reach the server as a confusing generic failure.
+    if (!form.fullName.trim() || !form.email.trim() || !form.username.trim()) {
+      toast.error("Full name, email, and username are required.");
+      return;
+    }
+    if (!editUser && !form.password.trim()) {
+      toast.error("Password is required.");
+      return;
+    }
+    if (!form.roleId) {
+      toast.error("Please select a role.");
+      return;
+    }
     setSaving(true);
     try {
       const branchId = form.branchId || undefined;
       if (editUser) {
         await api.updateUser(editUser.id, { fullName: form.fullName, email: form.email, username: form.username, roleId: form.roleId, branchId, status: form.status });
+        toast.success("User updated.");
       } else {
         await api.createUser({ fullName: form.fullName, email: form.email, username: form.username, password: form.password, roleId: form.roleId, branchId });
+        toast.success("User created.");
       }
       setDlgOpen(false);
       load();

@@ -89,6 +89,26 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
         if (!await db.Branches.AnyAsync(b => b.Id == request.DestinationBranchId))
             return BadRequest(new { message = "Destination branch not found." });
 
+        // Reject a request for more than the source branch actually has on hand — previously
+        // nothing compared RequestedQuantity to real stock (AvailableStock existed on the model
+        // but was never populated or checked), so e.g. requesting 501 of 500 available was
+        // silently accepted. Only applies when the request draws from a branch's own stock;
+        // supplier-sourced requests (no SourceBranchId) have nothing local to check against.
+        if (request.SourceBranchId.HasValue)
+        {
+            foreach (var item in request.Items)
+            {
+                if (item.RequestedQuantity <= 0)
+                    return BadRequest(new { message = "Requested quantity must be greater than zero." });
+
+                var available = (await db.InventoryStocks.FirstOrDefaultAsync(
+                    s => s.BranchId == request.SourceBranchId && s.ProductId == item.ProductId))?.Quantity ?? 0;
+                item.AvailableStock = available;
+                if (item.RequestedQuantity > available)
+                    return BadRequest(new { message = $"Cannot request {item.RequestedQuantity} unit(s) — only {available} available at the source branch." });
+            }
+        }
+
         request.Id = Guid.NewGuid();
         request.RequestNumber = $"WH-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
         request.RequestedBy = callerId ?? request.RequestedBy;

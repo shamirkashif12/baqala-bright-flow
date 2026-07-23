@@ -155,39 +155,57 @@ public class ReturnsController(
         ret.Id = Guid.NewGuid();
         ret.ReturnNumber = $"RET-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
         ret.Status = "pending";
+        // Neither of this endpoint's two frontend callers (Orders' quick-refund dialog, the
+        // dedicated Returns page) ever sent ProcessedBy, so the Approval Center's "Requested By"
+        // column was always blank for every refund — derive it from the authenticated caller
+        // instead of trusting the client to remember to send it.
+        ret.ProcessedBy = CallerId();
         ret.CreatedAt = ret.UpdatedAt = DateTime.UtcNow;
         foreach (var item in ret.Items) { item.Id = Guid.NewGuid(); item.ReturnId = ret.Id; }
         db.CustomerReturns.Add(ret);
         await db.SaveChangesAsync();
 
-        if (ret.ProcessedBy.HasValue)
+        // The return is already committed at this point — a notification/audit hiccup below must
+        // never surface as "the return couldn't be processed" (matches OrdersController.Create's
+        // own convention for its post-commit notify/audit calls, which this endpoint previously
+        // didn't follow: an uncaught exception here 500'd the request even though ret had already
+        // saved successfully).
+        try
         {
-            await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
-                "Returns", "Return Started", "Return Started",
-                $"Return started for Invoice {ret.ReturnNumber}",
-                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
-        }
-
-        await notifications.NotifyRoleAsync(["Manager", "Admin"], ret.BranchId,
-            "Returns", "Return Approval Required", "Return Approval Required",
-            $"Return {ret.ReturnNumber} requires approval (SAR {ret.RefundAmount:F2})",
-            severity: "warning", entityType: "CustomerReturn", entityId: ret.Id);
-
-        // Employee Audit Center — a refund is one of the listed employee actions and is attributed
-        // to the cashier who raised it (ProcessedBy), which is who a manager reviews the trail for.
-        await audit.LogAsync(
-            action: "create_refund",
-            entityType: "CustomerReturn",
-            entityId: ret.Id,
-            userId: ret.ProcessedBy ?? CallerId(),
-            branchId: ret.BranchId,
-            details: System.Text.Json.JsonSerializer.Serialize(new
+            if (ret.ProcessedBy.HasValue)
             {
-                ret.ReturnNumber, ret.OrderId, ret.ReturnType, ret.RefundMethod, ret.RefundAmount, ret.Reason, ret.Status,
-                Items = ret.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.RefundAmount, i.Condition }),
-            }),
-            severity: "warning",
-            module: "Returns", employeeId: await ResolveEmployeeIdAsync(ret.ProcessedBy ?? CallerId()), terminalId: order.TerminalId);
+                await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
+                    "Returns", "Return Started", "Return Started",
+                    $"Return started for Invoice {ret.ReturnNumber}",
+                    entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+            }
+
+            await notifications.NotifyRoleAsync(["Manager", "Admin"], ret.BranchId,
+                "Returns", "Return Approval Required", "Return Approval Required",
+                $"Return {ret.ReturnNumber} requires approval (SAR {ret.RefundAmount:F2})",
+                severity: "warning", entityType: "CustomerReturn", entityId: ret.Id);
+        }
+        catch (Exception ex) { logger.LogError(ex, "Notification failed for return {ReturnId}", ret.Id); }
+
+        try
+        {
+            // Employee Audit Center — a refund is one of the listed employee actions and is attributed
+            // to the cashier who raised it (ProcessedBy), which is who a manager reviews the trail for.
+            await audit.LogAsync(
+                action: "create_refund",
+                entityType: "CustomerReturn",
+                entityId: ret.Id,
+                userId: ret.ProcessedBy ?? CallerId(),
+                branchId: ret.BranchId,
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    ret.ReturnNumber, ret.OrderId, ret.ReturnType, ret.RefundMethod, ret.RefundAmount, ret.Reason, ret.Status,
+                    Items = ret.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.RefundAmount, i.Condition }),
+                }),
+                severity: "warning",
+                module: "Returns", employeeId: await ResolveEmployeeIdAsync(ret.ProcessedBy ?? CallerId()), terminalId: order.TerminalId);
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for return {ReturnId}", ret.Id); }
 
         return CreatedAtAction(nameof(GetById), new { id = ret.Id }, ret);
     }

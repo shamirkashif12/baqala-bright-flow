@@ -8,12 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Pencil, Trash2, Loader2, Tag, CheckCircle2, Search,
   ToggleLeft, ToggleRight,
 } from "lucide-react";
 import { api, type Category } from "@/lib/api";
 import { RoleGate } from "@/components/role-gate";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/categories")({
   component: () => (
@@ -123,30 +125,40 @@ function DeleteDialog({ category, onClose, onDone }: {
 }) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
+  const [reason, setReason] = useState("");
 
   const handleDelete = async () => {
     if (!category) return;
     setDeleting(true); setError("");
     try {
-      await api.deleteCategory(category.id);
+      await api.deleteCategory(category.id, reason.trim() || undefined);
+      // Always queues in the Approval Center — no self-approve bypass, even for a manager.
+      toast.success("Deletion request sent for manager approval.");
+      setReason("");
       onDone(); onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to delete."); }
     finally { setDeleting(false); }
   };
 
   return (
-    <Dialog open={!!category} onOpenChange={v => !v && onClose()}>
+    <Dialog open={!!category} onOpenChange={v => { if (!v) { setReason(""); onClose(); } }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Delete Category</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground mt-1">
-          Are you sure you want to delete <span className="font-semibold text-foreground">{category?.name}</span>?
-          Products assigned to this category will become uncategorised.
+          Delete <span className="font-semibold text-foreground">{category?.name}</span>? Products
+          assigned to this category will become uncategorised. This always goes to a manager for
+          approval first — even you can't action your own request — and only takes effect once approved.
         </p>
+        <div className="mt-2">
+          <Label className="text-xs">Reason (optional)</Label>
+          <Textarea className="resize-none text-sm h-16 mt-1" placeholder="e.g. Merged into another category…"
+            value={reason} onChange={e => setReason(e.target.value)} />
+        </div>
         {error && <p className="text-xs text-destructive mt-1">{error}</p>}
         <div className="flex gap-2 mt-4">
-          <Button variant="outline" className="flex-1" onClick={onClose} disabled={deleting}>Cancel</Button>
+          <Button variant="outline" className="flex-1" onClick={() => { setReason(""); onClose(); }} disabled={deleting}>Cancel</Button>
           <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={deleting}>
             {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
             Delete
