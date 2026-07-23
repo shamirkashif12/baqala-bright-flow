@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mimony Mart — Mobile App: Role Feature Matrix</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #24222b;
+    font-size: 11.5px;
+    line-height: 1.5;
+    margin: 0;
+  }
+  .cover {
+    height: 253mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    background: linear-gradient(135deg, #4A0098 0%, #621CBB 55%, #9362F4 100%);
+    color: white;
+    padding: 40mm 20mm;
+    page-break-after: always;
+  }
+  .cover .eyebrow { font-size: 13px; letter-spacing: 3px; opacity: .8; text-transform: uppercase; margin-bottom: 14px; }
+  .cover h1 { font-size: 34px; margin: 0 0 10px; font-weight: 800; line-height: 1.15; }
+  .cover .sub { font-size: 15px; opacity: .9; max-width: 420px; }
+  .cover .meta { margin-top: 60px; font-size: 12px; opacity: .75; }
+  h2.role-title {
+    font-size: 19px;
+    margin: 0 0 2px;
+    color: #4A0098;
+    font-weight: 800;
+  }
+  .role-meta { color: #666; font-size: 11.5px; margin-bottom: 14px; }
+  .role-block { page-break-inside: avoid; margin-bottom: 26px; padding-bottom: 18px; border-bottom: 1px solid #e3e4eb; }
+  .role-block:last-child { border-bottom: none; }
+  .badge-row { margin-bottom: 10px; }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: #F1E5FF;
+    color: #621CBB;
+    margin-right: 6px;
+  }
+  table.feat { width: 100%; border-collapse: collapse; margin: 8px 0 14px; }
+  table.feat th, table.feat td { text-align: left; padding: 5px 8px; vertical-align: top; border-bottom: 1px solid #eee; }
+  table.feat th { background: #F4F5F8; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #626975; font-weight: 700; }
+  table.feat td.section-label { font-weight: 700; color: #24222b; white-space: nowrap; width: 120px; }
+  ul.tight { margin: 4px 0; padding-left: 18px; }
+  ul.tight li { margin-bottom: 2px; }
+  .not-shown { color: #888; font-size: 11px; margin-top: 6px; }
+  .not-shown b { color: #555; }
+  .toc { padding: 20px 4px; }
+  .toc h2 { font-size: 16px; color: #4A0098; }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin-bottom: 6px; font-size: 12.5px; }
+  .footnote { font-size: 10.5px; color: #777; border-top: 1px solid #e3e4eb; margin-top: 30px; padding-top: 10px; }
+  .universal { background: #FCFBFF; border: 1px solid #e3e4eb; border-radius: 10px; padding: 12px 16px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="eyebrow">Mimony Mart · Mobile App</div>
+  <h1>Role-Wise Feature Matrix</h1>
+  <div class="sub">A complete breakdown of what each of the 9 mobile login roles can see and do — bottom navigation, dashboard, quick actions, and the More menu — derived directly from the app's role-gating logic and the backend's real permission model.</div>
+  <div class="meta">Generated 2026-07-20 &nbsp;·&nbsp; final_mobile_pos (Flutter)</div>
+</div>
+
+<div class="toc">
+  <h2>Roles covered</h2>
+  <ol>
+    <li>Tenant Administrator (Admin)</li>
+    <li>Branch Manager (Manager)</li>
+    <li>Cashier</li>
+    <li>Supervisor</li>
+    <li>Inventory Staff (Storekeeper)</li>
+    <li>Warehouse Manager</li>
+    <li>Warehouse Staff</li>
+    <li>Auditor</li>
+    <li>Accountant (Finance User)</li>
+  </ol>
+  <p style="font-size:11.5px;color:#555;max-width:480px">Every role also gets four universal items — <b>Policies &amp; Conditions</b>, <b>Settings</b>, <b>Profile</b>, and <b>Sign Out</b> — listed once at the end rather than repeated per role.</p>
+</div>
+
+<!-- 1. TENANT ADMIN -->
+<div class="role-block">
+  <h2 class="role-title">1. Tenant Administrator (Admin)</h2>
+  <div class="role-meta">Full system access — every module, every permission flag (View/Create/Edit/Delete/Approve/Export) across all 30 real backend modules. Only role with the 3 ACL screens.</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · Orders · POS (center scan button) · Inventory · More</td></tr>
+    <tr><td class="section-label">Dashboard</td><td>
+      <ul class="tight">
+        <li>Today's Orders / Pending Orders / Low Stock Items / Close-to-Expiry stat cards</li>
+        <li>My Shift card (opening cash, sales, orders) if a shift is open</li>
+        <li>Reports preview: My Shift, Check-In/Out, Opening Cash, Closing Cash (4 tiles, "View all" → Other Reports)</li>
+        <li>Cashier KPI table (today's sales per cashier, mart-wide)</li>
+        <li>Branch Performance table (today's sales per branch)</li>
+      </ul>
+    </td></tr>
+    <tr><td class="section-label">POS / Orders / Inventory tabs</td><td>
+      Scan/search products, Cart, Checkout (Cash/Card/Wallet/Split/Transfer), Invoice &amp; receipt printing, Held Orders · Full Orders list with filters · Inventory: view/add/adjust stock, Receive Stock, Wastage &amp; Spoilage entry
+    </td></tr>
+    <tr><td class="section-label">More menu</td><td>
+      <ul class="tight">
+        <li>Returns — process/approve customer refunds</li>
+        <li>Check-In / Out Report, Opening Cash Report (staff attendance oversight)</li>
+        <li>Other Reports — full 24-report grid (Sales &amp; Performance, Cash &amp; Shifts, Inventory, Terminals &amp; Compliance)</li>
+        <li>Manager Approvals — cash-variance &amp; refund approval center</li>
+        <li>Terminal Bird-Eye — live status of every POS terminal mart-wide</li>
+        <li>Warehouse — stock across every warehouse</li>
+        <li>Pending Transfers — approve/reject stock-transfer requests</li>
+        <li>Audit Logs — personal activity trail</li>
+        <li><b>Roles &amp; Permissions (ACL)</b> — create/edit roles, 6-flag permission matrix per module</li>
+        <li><b>User Role Assignment</b> — reassign roles, enable/disable accounts</li>
+        <li><b>Approval Rules</b> — configure threshold-based approval routing</li>
+      </ul>
+    </td></tr>
+  </table>
+</div>
+
+<!-- 2. BRANCH MANAGER -->
+<div class="role-block">
+  <h2 class="role-title">2. Branch Manager (Manager)</h2>
+  <div class="role-meta">Same operational scope as Tenant Admin, scoped to their own branch server-side; no access to the 3 mart-wide ACL screens.</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · Orders · POS (center scan button) · Inventory · More</td></tr>
+    <tr><td class="section-label">Dashboard</td><td>Identical to Tenant Admin's dashboard — order/stock stats, reports preview, Cashier KPI table, Branch Performance table.</td></tr>
+    <tr><td class="section-label">POS / Orders / Inventory tabs</td><td>Same as Tenant Admin — full POS checkout, order management, inventory receive/adjust.</td></tr>
+    <tr><td class="section-label">More menu</td><td>
+      <ul class="tight">
+        <li>Returns, Check-In/Out Report, Opening Cash Report</li>
+        <li>Other Reports (full 24-report grid)</li>
+        <li>Manager Approvals, Terminal Bird-Eye</li>
+        <li>Warehouse, Pending Transfers</li>
+        <li>Audit Logs (personal activity)</li>
+      </ul>
+    </td></tr>
+  </table>
+  <div class="not-shown">Not shown: <b>Roles &amp; Permissions</b>, <b>User Role Assignment</b>, <b>Approval Rules</b> (Tenant Admin only) · No personal shift check-in/out items (Manager isn't a Cashier — see note below).</div>
+</div>
+
+<!-- 3. CASHIER -->
+<div class="role-block">
+  <h2 class="role-title">3. Cashier</h2>
+  <div class="role-meta">The only role built entirely around running a personal register shift, start to finish.</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · Orders · POS (center scan button) · Inventory (view stock only) · More</td></tr>
+    <tr><td class="section-label">Dashboard</td><td>
+      <ul class="tight">
+        <li>Today's Orders / Pending Orders / Low Stock / Close-to-Expiry stat cards</li>
+        <li>My Shift card — opening float, my sales, my order count</li>
+        <li>Reports preview (My Shift, Check-In/Out, Opening Cash, Closing Cash)</li>
+      </ul>
+      <span style="color:#888;font-size:11px">No Cashier-KPI table or Branch-Performance table — manager-only view.</span>
+    </td></tr>
+    <tr><td class="section-label">POS tab</td><td>Quick Scan (Scan for POS Billing / Scan to Add Inventory / Scan Receipt-Order) · Cart · Checkout — Cash, Card, Wallet, Split, Transfer · Invoice/receipt printing · Held Orders</td></tr>
+    <tr><td class="section-label">More menu</td><td>
+      <ul class="tight">
+        <li><b>Employee Check-In</b>, <b>Opening Cash</b>, <b>My Shift</b>, <b>Held Orders</b> — cashier-only shift lifecycle</li>
+        <li><b>Closing Report</b> — close own shift, count cash, submit variance</li>
+        <li><b>Employee Check-Out</b></li>
+        <li>Returns — create refunds; over-threshold refunds route to a manager</li>
+      </ul>
+    </td></tr>
+  </table>
+  <div class="not-shown">Not shown: Check-In/Out Report, Opening Cash Report, Other Reports, Manager Approvals, Terminal Bird-Eye, Warehouse, Pending Transfers, Audit Logs, all 3 ACL screens.</div>
+</div>
+
+<!-- 4. SUPERVISOR -->
+<div class="role-block">
+  <h2 class="role-title">4. Supervisor</h2>
+  <div class="role-meta">Manager-tier oversight authority without a POS register — real "POS" module permission is false for this role.</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · Orders · Inventory · More <i>(no POS/scan button)</i></td></tr>
+    <tr><td class="section-label">Dashboard</td><td>
+      <ul class="tight">
+        <li>Pending Approvals, Today's Sales, Low Stock Items, Branch-name stat cards</li>
+        <li>Quick actions: Manager Approvals, Terminal Bird-Eye, Returns, Cashier Performance Report</li>
+      </ul>
+    </td></tr>
+    <tr><td class="section-label">More menu</td><td>
+      <ul class="tight">
+        <li>Returns, Check-In/Out Report, Opening Cash Report</li>
+        <li>Manager Approvals, Terminal Bird-Eye</li>
+        <li>Warehouse, Pending Transfers</li>
+      </ul>
+    </td></tr>
+  </table>
+  <div class="not-shown">Not shown: Other Reports grid, Audit Logs, POS/Orders-creation, all 3 ACL screens.</div>
+</div>
+
+<!-- 5. INVENTORY STAFF -->
+<div class="role-block">
+  <h2 class="role-title">5. Inventory Staff (Storekeeper)</h2>
+  <div class="role-meta">Branch-level stock ownership — receiving, adjusting, and returning stock to a warehouse (with approval).</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · Inventory · More <i>(no Orders, no POS)</i></td></tr>
+    <tr><td class="section-label">Dashboard</td><td>
+      <ul class="tight">
+        <li>Low Stock, Expiring Soon, Pending Returns stat cards</li>
+        <li>Quick actions: Branch Inventory, Receive Stock, Report Waste/Damage, <b>Return to Warehouse</b> (needs Manager/Admin/Warehouse Manager approval), Wastage &amp; Spoilage Report</li>
+        <li>Expiring-batches list (product, batch #, days left)</li>
+      </ul>
+    </td></tr>
+  </table>
+  <div class="not-shown">More menu: no Returns/Reports/Warehouse/Approvals/Audit items — real permissions exclude all of them; everything Inventory Staff needs lives on the dashboard itself.</div>
+</div>
+
+<!-- 6. WAREHOUSE MANAGER -->
+<div class="role-block">
+  <h2 class="role-title">6. Warehouse Manager <span style="font-weight:400;font-size:12px;color:#888">(new role)</span></h2>
+  <div class="role-meta">Full warehouse-operations authority — created this cycle to own supply-to-branch and transfer approvals.</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · Warehouse · More</td></tr>
+    <tr><td class="section-label">Dashboard</td><td>
+      <ul class="tight">
+        <li>Warehouses count, Low Stock, Pending Approvals, Stock Value stat cards</li>
+        <li>Quick actions: Warehouses, <b>Supply to Branch</b> (create warehouse→branch transfer), Pending Transfers</li>
+        <li>Recent Transfers list (source → destination, status, item count)</li>
+      </ul>
+    </td></tr>
+    <tr><td class="section-label">More menu</td><td>Pending Transfers</td></tr>
+  </table>
+  <div class="not-shown">Warehouse item omitted from More menu — already the dedicated bottom-nav tab. No Returns/Other-Reports/Audit access.</div>
+</div>
+
+<!-- 7. WAREHOUSE STAFF -->
+<div class="role-block">
+  <h2 class="role-title">7. Warehouse Staff</h2>
+  <div class="role-meta">Day-to-day warehouse floor work — view-only on transfers; approving/receiving is a Warehouse Manager action.</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · Warehouse · More</td></tr>
+    <tr><td class="section-label">Dashboard</td><td>
+      <ul class="tight">
+        <li>Warehouses, Items in Stock, Low Stock, Incoming Shipments stat cards</li>
+        <li>Quick action: Warehouse Stock (view levels + item detail)</li>
+        <li>Incoming Shipments list — read only, no receive/approve button (real permission has no Approve flag on Stock Transfers for this role)</li>
+      </ul>
+    </td></tr>
+    <tr><td class="section-label">More menu</td><td>— (universal items only)</td></tr>
+  </table>
+</div>
+
+<!-- 8. AUDITOR -->
+<div class="role-block">
+  <h2 class="role-title">8. Auditor</h2>
+  <div class="role-meta">Pure read-only oversight — no Create/Edit/Approve flags on any module in the real permission matrix.</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · More <i>(no Orders, POS, Inventory, or Warehouse tab)</i></td></tr>
+    <tr><td class="section-label">Dashboard</td><td>
+      <ul class="tight">
+        <li>Critical Events, Failed Logins, Overrides, Configuration Changes stat cards (rolling 7-day Audit Trail KPIs)</li>
+        <li>Quick actions: Audit Trail, VAT/ZATCA Report, Discounts Report, My Activity (personal sign-in/action log)</li>
+        <li>Recent Events list (action, user, module, severity)</li>
+      </ul>
+    </td></tr>
+    <tr><td class="section-label">More menu</td><td>— (universal items only)</td></tr>
+  </table>
+  <div class="not-shown">Deliberately excluded everywhere: Returns, Warehouse, Other-Reports grid, Manager Approvals, Pending Transfers — an Auditor's oversight tools are all on the dashboard, and none of them are edit-capable.</div>
+</div>
+
+<!-- 9. ACCOUNTANT -->
+<div class="role-block">
+  <h2 class="role-title">9. Accountant (Finance User)</h2>
+  <div class="role-meta">Finance/tax oversight plus the one real approval action this role owns: expense sign-off.</div>
+  <table class="feat">
+    <tr><th>Area</th><th>Features</th></tr>
+    <tr><td class="section-label">Bottom Nav</td><td>Dashboard · More</td></tr>
+    <tr><td class="section-label">Dashboard</td><td>
+      <ul class="tight">
+        <li>Pending Expenses, VAT Collected, Gross Margin, Gross Profit stat cards</li>
+        <li>Quick actions: VAT/ZATCA Report, Tax Report, Fees Report, Profit Margin Report</li>
+        <li>Pending Expenses list with real Approve/Reject buttons</li>
+      </ul>
+    </td></tr>
+    <tr><td class="section-label">More menu</td><td>Returns (view/approve), Warehouse (view)</td></tr>
+  </table>
+  <div class="not-shown">Not shown: Check-In/Out or Opening Cash reports, Other Reports grid, Manager Approvals, Terminal Bird-Eye, Audit Logs, Pending Transfers, ACL screens.</div>
+</div>
+
+<div class="footnote">
+  <div class="universal">
+    <b>Universal, every role:</b> Policies &amp; Conditions · Settings · Profile · Sign Out.
+  </div>
+  <p>
+    <b>Not covered:</b> <i>Self-Checkout Kiosk</i> exists as a real backend role but drives the separate self-checkout web kiosk product, not a staff mobile login, so it's excluded here.
+  </p>
+  <p>
+    Source of truth: <code>lib/features/home/home_shell.dart</code> (bottom-nav gating), <code>lib/features/more/more_screen.dart</code> (More-menu gating), <code>lib/features/dashboard/role/*.dart</code> (per-role dashboard bodies), cross-checked against the live backend's <code>RolePermission</code> rows (View/Create/Edit/Delete/Approve/Export per module) via <code>GET /api/roles</code>.
+  </p>
+</div>
+
+</body>
+</html>

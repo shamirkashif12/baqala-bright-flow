@@ -342,6 +342,46 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         return Ok(shift);
     }
 
+    // Manager sign-off flagging a cash-variance as disputed rather than
+    // cleanly cleared — there's nothing to "undo" (the drawer was already
+    // counted and the shift already closed), so this isn't a reversal like a
+    // return/refund reject. It still resolves the pending-approval queue
+    // item (ApprovedBy/ApprovedAt record who reviewed it either way) but
+    // keeps a clear, searchable trail — via Notes and a "warning"→"critical"
+    // audit severity bump — that this one was NOT a clean approval, for
+    // follow-up (e.g. an investigation or a talk with the cashier).
+    [RequirePermission("Cashier Shifts", PermAction.Approve)]
+    [HttpPost("{id:guid}/reject-variance")]
+    public async Task<IActionResult> RejectVariance(Guid id, [FromBody] RejectVarianceRequest req)
+    {
+        var shift = await db.CashierShifts.FindAsync(id);
+        if (shift is null) return NotFound();
+        if (!shift.RequiresApproval) return BadRequest("This shift is not pending variance approval.");
+
+        shift.RequiresApproval = false;
+        shift.ApprovedBy = CallerId();
+        shift.ApprovedAt = DateTime.UtcNow;
+        var rejectionNote = $"[DISPUTED] {req.Reason}";
+        shift.Notes = string.IsNullOrWhiteSpace(shift.Notes) ? rejectionNote : $"{shift.Notes}\n{rejectionNote}";
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "Cash variance disputed",
+            entityType: "CashierShift",
+            entityId: shift.Id,
+            userId: shift.ApprovedBy,
+            branchId: shift.BranchId,
+            details: $"Variance SAR {shift.Variance:F2} disputed: {req.Reason}",
+            severity: "critical");
+
+        await notifications.NotifyUserAsync(shift.CashierId,
+            "Cashier Shift", "Cash Variance Disputed", "Cash Variance Disputed",
+            $"Your cash variance of SAR {shift.Variance:F2} was disputed: {req.Reason}",
+            severity: "critical", entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId);
+
+        return Ok(shift);
+    }
+
     [HttpPost("{id:guid}/cash-movements")]
     public async Task<IActionResult> AddCashMovement(Guid id, [FromBody] ShiftCashMovement movement)
     {
@@ -375,3 +415,4 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
 
 public record OpenShiftRequest(Guid CashierId, Guid BranchId, Guid? TerminalId, decimal OpeningAmount);
 public record CloseShiftRequest(decimal ClosingAmount, string? Notes, string? Reason);
+public record RejectVarianceRequest(string Reason);
