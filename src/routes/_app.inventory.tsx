@@ -49,6 +49,7 @@ function fmtPrice(n?: number | null) {
 // Plain tier names — matched exactly by PriceResolutionService (never "and above"), so picking
 // several here creates one price rule per tier, all at the same price.
 const TIER_OPTIONS: { value: CustomerTier; label: string }[] = [
+  { value: "standard", label: "Standard" },
   { value: "silver", label: "Silver" },
   { value: "gold", label: "Gold" },
   { value: "platinum", label: "Platinum" },
