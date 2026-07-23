@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ZATCA Phase 2 Integration Guide</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #24222b;
+    font-size: 11.3px;
+    line-height: 1.55;
+    margin: 0;
+  }
+  .cover {
+    height: 253mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    background: linear-gradient(135deg, #063d33 0%, #0c6e59 55%, #16a085 100%);
+    color: white;
+    padding: 40mm 20mm;
+    page-break-after: always;
+  }
+  .cover .eyebrow { font-size: 13px; letter-spacing: 3px; opacity: .85; text-transform: uppercase; margin-bottom: 14px; }
+  .cover h1 { font-size: 32px; margin: 0 0 10px; font-weight: 800; line-height: 1.18; }
+  .cover .sub { font-size: 14.5px; opacity: .92; max-width: 440px; }
+  .cover .meta { margin-top: 60px; font-size: 12px; opacity: .8; }
+
+  .toc { padding: 10px 4px 20px; page-break-after: always; }
+  .toc h2 { font-size: 17px; color: #0c6e59; }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin-bottom: 7px; font-size: 12.5px; }
+
+  section { page-break-before: always; padding-top: 4px; }
+  section:first-of-type { page-break-before: avoid; }
+  h2.sec-title {
+    font-size: 19px;
+    margin: 0 0 4px;
+    color: #0c6e59;
+    font-weight: 800;
+    border-bottom: 2px solid #16a085;
+    padding-bottom: 6px;
+  }
+  .sec-num { color: #16a085; font-weight: 800; margin-right: 6px; }
+  h3 { font-size: 13.5px; color: #24222b; margin: 18px 0 6px; font-weight: 700; }
+  p { margin: 6px 0 10px; }
+  .lede { color: #555; font-size: 11.8px; margin-bottom: 14px; }
+
+  table.ref { width: 100%; border-collapse: collapse; margin: 8px 0 16px; }
+  table.ref th, table.ref td { text-align: left; padding: 6px 9px; vertical-align: top; border-bottom: 1px solid #eee; font-size: 10.6px; }
+  table.ref th { background: #F0F9F6; font-size: 9.5px; text-transform: uppercase; letter-spacing: .4px; color: #0c6e59; font-weight: 700; }
+  table.ref td code, td code { background: #F4F5F8; padding: 1px 4px; border-radius: 4px; font-size: 10px; }
+
+  .step {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+    page-break-inside: avoid;
+  }
+  .step .num {
+    flex: 0 0 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #0c6e59;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 12px;
+  }
+  .step .body { flex: 1; }
+  .step .body h4 { margin: 2px 0 3px; font-size: 12.3px; color: #24222b; }
+  .step .body .endpoint { font-size: 10.5px; color: #0c6e59; font-weight: 700; margin-bottom: 3px; }
+
+  pre {
+    background: #1e2430;
+    color: #d8e3df;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 9.8px;
+    overflow-x: auto;
+    line-height: 1.45;
+    margin: 8px 0 14px;
+    page-break-inside: avoid;
+  }
+  code { font-family: "SF Mono", Consolas, monospace; }
+
+  .callout {
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 10px 0 16px;
+    font-size: 10.8px;
+    page-break-inside: avoid;
+  }
+  .callout.warn { background: #FFF6E6; border: 1px solid #F3D48A; color: #6b4e00; }
+  .callout.good { background: #EAF7F1; border: 1px solid #9ED7BE; color: #0f5b40; }
+  .callout.info { background: #EEF3FC; border: 1px solid #B9CDF2; color: #1c3f7a; }
+  .callout b { display: block; margin-bottom: 3px; }
+
+  ul.tight, ol.tight { margin: 4px 0 12px; padding-left: 18px; }
+  ul.tight li, ol.tight li { margin-bottom: 4px; }
+
+  .arch-compare { display: flex; gap: 14px; margin: 10px 0 16px; }
+  .arch-col { flex: 1; border-radius: 10px; padding: 12px 14px; }
+  .arch-col.bad { background: #FDF2F1; border: 1px solid #F0B8B3; }
+  .arch-col.good2 { background: #EAF7F1; border: 1px solid #9ED7BE; }
+  .arch-col h4 { margin: 0 0 6px; font-size: 12px; }
+  .arch-col.bad h4 { color: #a3342c; }
+  .arch-col.good2 h4 { color: #0f5b40; }
+  .arch-col ul { margin: 4px 0; padding-left: 16px; font-size: 10.5px; }
+  .arch-col li { margin-bottom: 3px; }
+
+  .footnote { font-size: 10px; color: #777; border-top: 1px solid #e3e4eb; margin-top: 24px; padding-top: 8px; }
+  .file-ref { font-family: "SF Mono", Consolas, monospace; font-size: 10px; color: #0c6e59; background: #F0F9F6; padding: 1px 5px; border-radius: 4px; }
+  .checklist { list-style: none; padding-left: 0; margin: 8px 0 16px; }
+  .checklist li { padding-left: 22px; position: relative; margin-bottom: 6px; font-size: 11px; }
+  .checklist li:before { content: "☐"; position: absolute; left: 0; color: #16a085; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="eyebrow">Fatoora &middot; Saudi E-Invoicing</div>
+  <h1>ZATCA Phase 2 Integration Guide</h1>
+  <div class="sub">A complete, end-to-end reference for integrating ZATCA (Fatoora) Phase 2 e-invoicing into a POS/retail system &mdash; onboarding, invoice signing, QR codes, checkout, and how a single VAT-registered legal entity with multiple branches should be modeled.</div>
+  <div class="meta">Prepared 2026-07-22 &nbsp;&middot;&nbsp; Reference implementation: Mimony Mart / baqala-bright-flow (.NET API)</div>
+</div>
+
+<div class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li>What ZATCA Phase 2 actually requires</li>
+    <li>Prerequisites &amp; environments (sandbox / simulation / production)</li>
+    <li>Onboarding flow: CSR &rarr; OTP &rarr; Compliance CSID &rarr; Compliance Tests &rarr; Production CSID</li>
+    <li>Multi-branch architecture: one VAT/CR number, many branches</li>
+    <li>Data model recommendation</li>
+    <li>Invoice generation &amp; signing pipeline</li>
+    <li>QR code generation (TLV tags)</li>
+    <li>Checkout integration &amp; the reporting/clearance split</li>
+    <li>API endpoint reference</li>
+    <li>Gotchas &amp; lessons learned (the expensive ones)</li>
+    <li>Frontend integration notes</li>
+    <li>Build checklist for the new project</li>
+  </ol>
+</div>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">1</span>What ZATCA Phase 2 actually requires</h2>
+<p class="lede">ZATCA ("Zakat, Tax and Customs Authority") Phase 2 &mdash; also called "Integration Phase" &mdash; requires every VAT-registered business in Saudi Arabia to generate invoices as structured XML (UBL 2.1), cryptographically sign them, embed a QR code, and transmit them to ZATCA's government gateway in near-real-time. This replaces Phase 1, which only required a QR code with no signing or transmission.</p>
+
+<table class="ref">
+  <tr><th>Concept</th><th>Meaning</th></tr>
+  <tr><td><b>EGS</b></td><td>Electronic Generation Solution &mdash; the software unit ZATCA registers. Each EGS gets its own cryptographic identity (CSR/certificate/CSID).</td></tr>
+  <tr><td><b>CSID</b></td><td>Cryptographic Stamp Identifier &mdash; the X.509 certificate + secret ZATCA issues after validating a CSR. There are two: <b>Compliance CSID</b> (sandbox testing only) and <b>Production CSID</b> (real invoices).</td></tr>
+  <tr><td><b>Simplified invoice (B2C)</b></td><td>No buyer VAT number captured (retail/POS sale to a consumer). Must be signed, QR'd, and <b>reported</b> to ZATCA within 24 hours &mdash; reporting happens after the invoice is delivered to the customer.</td></tr>
+  <tr><td><b>Standard invoice (B2B)</b></td><td>Buyer VAT number known. Must be <b>cleared</b> by ZATCA <i>before</i> it can be delivered to the buyer &mdash; a real-time, blocking round trip.</td></tr>
+  <tr><td><b>ICV / PIH</b></td><td>Invoice Counter Value (a strictly incrementing integer) and Previous Invoice Hash &mdash; every invoice under one CSID chains to the previous one's hash, forming a tamper-evident sequence. Break the chain and every subsequent invoice fails validation.</td></tr>
+</table>
+
+<div class="callout info">
+<b>Reference implementation used in this guide</b>
+Everything below is grounded in a real, working native .NET port (no PHP/Node sidecar) that has been verified against ZATCA's live sandbox gateway with genuine <code>200 ISSUED</code> responses. File paths referenced throughout (e.g. <span class="file-ref">api/Services/ZatcaService.cs</span>) point at that implementation so you can read the actual code, not just this description of it.
+</div>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">2</span>Prerequisites &amp; environments</h2>
+<ul class="tight">
+  <li>A valid <b>15-digit VAT registration number</b> and <b>Commercial Registration (CR) number</b> for the legal entity.</li>
+  <li>Access to the business's <b>Fatoora portal</b> account (ZATCA's onboarding UI) &mdash; this is where a human operator pastes the CSR to receive an OTP. This step cannot be automated; ZATCA requires a human in the loop for OTP issuance.</li>
+  <li>A decision on <b>industry category</b> and <b>invoice type support</b> (standard only, simplified only, or both &mdash; encoded as a 4-digit bitmask, e.g. <code>1100</code> = supports both).</li>
+</ul>
+
+<table class="ref">
+  <tr><th>Environment</th><th>Gateway path segment</th><th>Purpose</th></tr>
+  <tr><td>Sandbox (<code>NonProduction</code>)</td><td><code>developer-portal</code></td><td>Free-form testing; certificate template name <code>TSTZATCA-Code-Signing</code>.</td></tr>
+  <tr><td>Simulation</td><td><code>simulation</code></td><td>Pre-production dress rehearsal with realistic data; template <code>PREZATCA-Code-Signing</code>.</td></tr>
+  <tr><td>Production</td><td><code>production</code></td><td>Live invoices, real legal effect; template <code>ZATCA-Code-Signing</code>.</td></tr>
+</table>
+<p>All three share the same host: <code>https://gw-fatoora.zatca.gov.sa/e-invoicing</code>. Every request needs headers <code>Accept-Version: V2</code>, <code>Accept-Language: en</code>, and a bare <code>Content-Type: application/json</code> (ZATCA's gateway rejects a charset parameter on this header &mdash; a small but real footgun).</p>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">3</span>Onboarding flow</h2>
+<p class="lede">Onboarding is a strict five-step sequence. Steps 1 and 5 are pure local cryptography or storage; steps 2&ndash;4 are round trips to ZATCA's gateway. Nothing in step 3 onward can succeed if step 1's CSR fields are wrong &mdash; and ZATCA's rejections at that stage are frustratingly generic (see &sect;10).</p>
+
+<div class="step">
+  <div class="num">1</div>
+  <div class="body">
+    <h4>Generate a keypair &amp; CSR (local, no network call)</h4>
+    <p>Generate an EC keypair (ZATCA requires <b>secp256k1</b>). Build a CSR whose Subject and SAN carry ZATCA-specific fields &mdash; this is the part every implementation gets subtly wrong on the first try. See the exact field table below.</p>
+  </div>
+</div>
+
+<table class="ref">
+  <tr><th>CSR field</th><th>Value</th><th>Notes</th></tr>
+  <tr><td>Subject DN order</td><td><code>C, OU, O, CN</code></td><td>Must match this order &mdash; ZATCA's own sample <code>openssl.cnf</code> is order-sensitive.</td></tr>
+  <tr><td><code>C</code> (Country)</td><td><code>SA</code></td><td>Hardcoded.</td></tr>
+  <tr><td><code>OU</code> (Organizational Unit)</td><td>Branch / site name</td><td>This is where the <b>branch identity</b> belongs &mdash; see &sect;4.</td></tr>
+  <tr><td><code>O</code> (Organization)</td><td>Legal company name</td><td>Same across all branches.</td></tr>
+  <tr><td><code>CN</code> (Common Name)</td><td>EGS serial number</td><td>Format <code>1-{'{'}SolutionName{'}'}|2-{'{'}Model{'}'}|3-{'{'}UUID{'}'}</code>, e.g. <code>1-MySolution|2-EGS|3-&lt;uuid&gt;</code>.</td></tr>
+  <tr><td>SAN <code>SN</code></td><td>Same EGS serial as CN</td><td><b>Must use OID 2.5.4.4</b> (the OpenSSL short-name "SN" actually means <i>surname</i>). Using OID 2.5.4.5 (the real <code>serialNumber</code> OID) produces a byte-length-identical CSR that ZATCA silently rejects. See &sect;10.</td></tr>
+  <tr><td>SAN <code>UID</code></td><td>VAT registration number</td><td>OID <code>0.9.2342.19200300.100.1.1</code> &mdash; <b>not</b> <code>...100.1.25</code> (that OID is <code>domainComponent</code>, a different field entirely).</td></tr>
+  <tr><td>SAN <code>T</code> (title)</td><td>Invoice-type bitmask</td><td>e.g. <code>1100</code>.</td></tr>
+  <tr><td>SAN <code>registeredAddress</code></td><td>Branch city/address</td><td>OID <code>2.5.4.26</code>.</td></tr>
+  <tr><td>SAN <code>businessCategory</code></td><td>Industry, e.g. "Retail Trade"</td><td>Free text, must be non-empty.</td></tr>
+  <tr><td>Private extension</td><td><code>certificateTemplateName</code></td><td>OID <code>1.3.6.1.4.1.311.20.2</code>; value depends on environment (sandbox/simulation/production template names above).</td></tr>
+  <tr><td>Signature algorithm</td><td><code>SHA256withECDSA</code></td><td>&nbsp;</td></tr>
+</table>
+
+<div class="callout warn">
+<b>Why this table is this detailed</b>
+Every field above is a place a "structurally valid" CSR can still be rejected. .NET's built-in <code>CertificateRequest</code> cannot express the required <code>directoryName</code> SAN at all &mdash; you need a library that lets you hand-construct ASN.1 (BouncyCastle in the .NET reference; equivalent low-level ASN.1 control in whatever stack the new project uses).
+</div>
+
+<div class="step">
+  <div class="num">2</div>
+  <div class="body">
+    <h4>Human operator submits the CSR to the Fatoora portal, receives an OTP</h4>
+    <p>This step is manual and out-of-band &mdash; there is no API to request the OTP. The CSR (base64) is copied into ZATCA's Fatoora onboarding UI by whoever administers the account; ZATCA sends back a one-time password.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">3</div>
+  <div class="body">
+    <h4>Redeem the OTP for a Compliance CSID</h4>
+    <div class="endpoint"><code>POST /{env}/compliance</code> &middot; header <code>OTP: &lt;otp&gt;</code> &middot; body <code>{'{'} "csr": "&lt;base64 CSR&gt;" {'}'}</code></div>
+    <p>Response contains <code>requestID</code>, <code>binarySecurityToken</code> (the compliance certificate) and <code>secret</code>. Store all three &mdash; they're the Basic Auth credentials for every subsequent sandbox call.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">4</div>
+  <div class="body">
+    <h4>Run the six mandatory compliance test documents</h4>
+    <div class="endpoint"><code>POST /{env}/compliance/invoices</code> &middot; Basic Auth = <code>binarySecurityToken:secret</code></div>
+    <p>ZATCA requires exactly six signed sample documents to be submitted and accepted before it will issue a Production CSID:</p>
+    <table class="ref">
+      <tr><th>#</th><th>Type code</th><th>Subtype</th><th>Meaning</th></tr>
+      <tr><td>1</td><td>388</td><td>0100000</td><td>Standard Invoice</td></tr>
+      <tr><td>2</td><td>381</td><td>0100000</td><td>Standard Credit Note</td></tr>
+      <tr><td>3</td><td>383</td><td>0100000</td><td>Standard Debit Note</td></tr>
+      <tr><td>4</td><td>388</td><td>0200000</td><td>Simplified Invoice</td></tr>
+      <tr><td>5</td><td>381</td><td>0200000</td><td>Simplified Credit Note</td></tr>
+      <tr><td>6</td><td>383</td><td>0200000</td><td>Simplified Debit Note</td></tr>
+    </table>
+    <p>Each is signed and chained via ICV (1&ndash;6, seeded from the well-known empty-invoice hash <code>NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==</code>). Pass/fail is read from <code>reportingStatus</code>/<code>clearanceStatus</code> in the response (values <code>REPORTED</code> / <code>CLEARED</code>), or a "compliance check already completed" message treated as an already-passed shortcut on retry. All six must pass before proceeding.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">5</div>
+  <div class="body">
+    <h4>Request the Production CSID</h4>
+    <div class="endpoint"><code>POST /{env}/production/csids</code> &middot; body <code>{'{'} "compliance_request_id": &lt;step 3's requestID&gt; {'}'}</code> &middot; Basic Auth = compliance CSID/secret</div>
+    <p>Store the returned <code>requestID</code>/<code>binarySecurityToken</code>/<code>secret</code> as the <b>production</b> credentials. Because this is a new certificate/device, <b>reset the ICV to 0 and the invoice hash back to the seed value</b> &mdash; the production CSID starts its own fresh hash chain, independent of the six compliance-test documents.</p>
+  </div>
+</div>
+
+<div class="callout good">
+<b>Track onboarding status explicitly</b>
+Persist a simple state field &mdash; <code>not_started &rarr; csr_generated &rarr; compliance_csid_obtained &rarr; production_ready</code> &mdash; and gate every downstream feature (real invoice submission) on <code>production_ready</code>. This makes retries idempotent: if step 4 partially fails, you can re-run from wherever it stopped instead of starting over.
+</div>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">4</span>Multi-branch architecture: one VAT/CR number, many branches</h2>
+<p class="lede">This is the question that most needs a deliberate decision, because ZATCA's own model and the "simplest to build" model pull in different directions. A single legal entity (one CR/VAT number, one Fatoora account, one owner/admin) commonly operates several physical branches. ZATCA's intended model treats <b>each branch as its own EGS "device"</b> with its own CSR/CSID and its own invoice hash chain &mdash; while all of them share the same VAT number and legal identity in the CSR's <code>UID</code>/<code>O</code> fields.</p>
+
+<div class="arch-compare">
+  <div class="arch-col bad">
+    <h4>Model A &mdash; Shared Singleton Identity <span style="font-weight:400;">(what the reference implementation actually does)</span></h4>
+    <ul>
+      <li>One CSR/CSID/keypair/hash-chain for the <i>entire</i> company, stored in a single singleton row.</li>
+      <li>Every branch's checkout submits invoices under the same certificate, incrementing the same ICV/PIH chain.</li>
+      <li>Concurrent submissions from different branches must be serialized (row-lock the singleton, wrap the ZATCA call in a DB transaction) to avoid forking the hash chain.</li>
+      <li><b>Simple to build</b>, but not what ZATCA's Developer Portal Manual actually models &mdash; and a single point of failure: one certificate revocation or hash-chain corruption takes down invoicing for every branch at once.</li>
+      <li>Branch-level onboarding UI (a wizard per branch) is <b>misleading</b> under this model &mdash; the second branch's "CSR generation" silently overwrites the first branch's CSR/keypair on the same shared row.</li>
+    </ul>
+  </div>
+  <div class="arch-col good2">
+    <h4>Model B &mdash; Per-Branch CSID <span style="font-weight:400;">(recommended for a new build)</span></h4>
+    <ul>
+      <li>Each branch generates its <b>own</b> CSR (its own EC keypair, its own EGS serial), with the <b>same VAT number</b> in the SAN <code>UID</code> field and the branch name in <code>OU</code>.</li>
+      <li>Each branch redeems its own OTP, gets its own Compliance CSID, runs its own six compliance-test documents, and gets its own Production CSID.</li>
+      <li>Each branch maintains its <b>own independent ICV/PIH hash chain</b> &mdash; no cross-branch locking needed, no shared row, no serialization bottleneck.</li>
+      <li>Matches ZATCA's actual intended "one CR/VAT, N EGS units" design, and scales cleanly: adding branch #6 never touches branches #1&ndash;5's certificates or chains.</li>
+      <li>Slightly more onboarding work per branch (each needs its own Fatoora OTP round trip), but this is a one-time cost per branch, not a per-invoice cost.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout warn">
+<b>Recommendation</b>
+Build the new project on <b>Model B</b>. Key the identity/credential table by <code>BranchId</code> from day one (not a singleton with a hard-coded fixed PK) &mdash; retrofitting per-branch identity onto a shared-singleton design later is a real migration (the reference implementation had to do exactly this split once, moving from "per-branch crypto columns" to "shared singleton" and would need to reverse that decision to reach Model B). Every place that reads "the ZATCA identity" (invoice submission, hash-chain increment, gating checks) must take a <code>branchId</code> parameter and never assume a single global identity.
+</div>
+
+<h3>What stays shared across branches vs. what's per-branch</h3>
+<table class="ref">
+  <tr><th>Field</th><th>Shared across branches?</th><th>Notes</th></tr>
+  <tr><td>VAT registration number</td><td>Yes</td><td>One legal entity, one VAT number, embedded in every branch's CSR.</td></tr>
+  <tr><td>CR / Commercial Registration</td><td>Yes</td><td>Used as <code>PartyIdentificationId</code> (scheme <code>CRN</code>) on every invoice.</td></tr>
+  <tr><td>Fatoora portal account</td><td>Yes</td><td>One admin/owner login used to onboard every branch's CSR.</td></tr>
+  <tr><td>CSR / keypair / EGS serial</td><td><b>No</b> &mdash; per branch</td><td>Each branch is its own EGS device.</td></tr>
+  <tr><td>Compliance &amp; Production CSID</td><td><b>No</b> &mdash; per branch</td><td>Each branch's certificate is independently issued.</td></tr>
+  <tr><td>ICV / PIH hash chain</td><td><b>No</b> &mdash; per branch</td><td>Independent tamper-evident sequences.</td></tr>
+  <tr><td>Seller/branch display address</td><td><b>No</b> &mdash; per branch</td><td>Street/building/postal fields feed the invoice UBL and the CSR's <code>registeredAddress</code>.</td></tr>
+  <tr><td>Phase2Enabled toggle / environment</td><td>Recommend per-branch, default inherited</td><td>Lets you roll production out branch-by-branch instead of flipping the whole company on at once.</td></tr>
+</table>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">5</span>Data model recommendation</h2>
+<p class="lede">Two entities, cleanly separated by concern &mdash; both keyed by branch under the recommended Model B:</p>
+
+<pre><code>ZatcaBranchIdentity (one row PER branch)
+  BranchId            FK -> Branches
+  Environment         sandbox | simulation | production
+  Phase2Enabled       bool
+  EgsSerial           string
+  Csr                 base64, nullable until step 1
+  PrivateKey          encrypted at rest (data-protection API / KMS)
+  CcsidRequestId / CcsidBinarySecurityToken / CcsidSecret (secret encrypted)
+  PcsidRequestId / PcsidBinarySecurityToken / PcsidSecret (secret encrypted)
+  LastIcv             int, this branch's own counter
+  LastInvoiceHash     base64, this branch's own chain tip
+  OnboardingStatus    not_started | csr_generated | compliance_csid_obtained | production_ready
+  CreatedAt / UpdatedAt
+
+ZatcaBranchSettings (display/UBL fields, one row per branch)
+  BranchId            FK -> Branches
+  VatRegistrationNumber
+  SellerName
+  StreetName / BuildingNumber / CitySubdivisionName / PostalZone
+</code></pre>
+
+<div class="callout info">
+<b>Why split identity from display settings</b>
+Display fields (seller name, address) get edited by store staff through a settings screen. Cryptographic identity must never be editable through a generic "edit settings" form and should be encrypted at rest with a dedicated key/protector, separate from ordinary application data. Keeping them as two tables (joined 1:1 by <code>BranchId</code>) makes it trivial to expose a secrets-scrubbed DTO to the frontend &mdash; return booleans (<code>HasCsr</code>, <code>HasComplianceCsid</code>, <code>HasProductionCsid</code>) instead of the raw key material.
+</div>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">6</span>Invoice generation &amp; signing pipeline</h2>
+<h3>6.1 Building the UBL 2.1 XML</h3>
+<p>Start from ZATCA's UBL 2.1 invoice template and fill it via XPath/DOM mutation (namespaces <code>cbc</code>=CommonBasicComponents-2, <code>cac</code>=CommonAggregateComponents-2):</p>
+<ul class="tight">
+  <li><code>cbc:InvoiceTypeCode</code> inner text = <code>388</code>/<code>381</code>/<code>383</code> (invoice/credit-note/debit-note); its <code>name</code> attribute = <code>0100000</code> (standard) or <code>0200000</code> (simplified) &mdash; <b>this attribute is the real B2B/B2C discriminator</b> used everywhere downstream, not a separate flag.</li>
+  <li><code>AdditionalDocumentReference[ID=ICV]</code> and <code>[ID=PIH]</code> carry the invoice counter and previous-invoice-hash.</li>
+  <li>Credit/debit notes add an <code>InstructionNote</code> (KSA-10) and a <code>BillingReference</code> pointing at the original invoice (KSA-16); plain invoices must not carry a <code>BillingReference</code> node at all.</li>
+  <li><b>Customer/buyer party is only populated for standard (B2B) invoices.</b> A simplified/B2C invoice has no buyer VAT captured &mdash; that absence is exactly what should decide simplified vs. standard (see below), not a separate manually-set flag.</li>
+  <li>Line items: quantity, line extension amount, per-line tax amount + rounding, item name, tax category percent, unit price. Apply any document-level discount once via <code>AllowanceCharge</code>/<code>LegalMonetaryTotal</code> &mdash; do not allocate it per line.</li>
+</ul>
+
+<div class="callout warn">
+<b>Decide simplified vs. standard from data, not from a flag</b>
+The cleanest signal: <code>isSimplified = string.IsNullOrEmpty(BuyerVatNumber)</code>. A POS/retail checkout that never captures a buyer VAT number should always produce simplified/B2C invoices; a manual invoice-creation path that captures a buyer VAT should produce standard/B2B ones.
+</div>
+
+<h3>6.2 Canonicalization &amp; hashing</h3>
+<ol class="tight">
+  <li>Apply ZATCA's documented XSLT transform to strip/normalize the invoice XML for hashing purposes.</li>
+  <li>Apply standard XML-DSig Canonicalization (C14N, exclusive=false, no comments) to the transformed XML.</li>
+  <li><code>SHA-256(UTF8 bytes of the canonical XML)</code> &rarr; base64 = the <b>invoice hash</b>. This value feeds both the QR code (tag 6) and becomes the PIH seed for the <i>next</i> invoice in that branch's chain.</li>
+</ol>
+
+<h3>6.3 Signing (simplified invoices)</h3>
+<p>Simplified invoices get a full XAdES signature block plus QR. The two most easily-missed details:</p>
+<ul class="tight">
+  <li><b>Certificate digest</b> for XAdES <code>CertDigest</code> is SHA-256 over the <b>UTF-8 bytes of the base64 <i>text</i></b> of the certificate &mdash; not the decoded DER bytes. This is a genuine ZATCA-spec deviation from how X.509 cert digests normally work, and it is easy to get "structurally plausible but wrong" here.</li>
+  <li><b>The digital signature</b> is <code>ECDSA-SHA256</code> computed <b>over the already-computed invoice-hash bytes</b> &mdash; effectively signing a hash-of-a-hash, matching how ZATCA's reference tooling calls <code>openssl_sign</code>, not a fresh signature over the raw canonical XML.</li>
+  <li>Embed <code>SigningTime</code>, <code>CertDigest</code>, <code>IssuerSerial</code> (parsed straight out of the certificate's ASN.1 DER) into a hand-built <code>SignedProperties</code> block &mdash; exact whitespace matters because it gets hashed as literal text, not re-serialized.</li>
+</ul>
+
+<div class="callout warn">
+<b>Standard (B2B/clearance) invoices: don't skip signing</b>
+The reference implementation currently sends standard invoices through clearance <i>without</i> the XAdES signature/QR wrapping applied to simplified invoices &mdash; a known gap flagged in its own code comments, not a spec-compliant shortcut. ZATCA's clearance flow for standard invoices generally expects the same cryptographic signing as simplified ones. <b>Do not copy that particular shortcut into a new build</b> if real B2B clearance is in scope &mdash; sign standard invoices the same way as simplified ones before submitting to the clearance endpoint.
+</div>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">7</span>QR code generation</h2>
+<p class="lede">The QR payload is a Base64-encoded TLV (Tag-Length-Value) byte buffer, built only for simplified/B2C invoices (standard invoices don't get a QR in the flow described in &sect;6, though per spec they generally should once fully compliant).</p>
+
+<table class="ref">
+  <tr><th>Tag</th><th>Field</th><th>Source</th><th>Encoding</th></tr>
+  <tr><td>1</td><td>Seller name</td><td>Supplier legal registration name</td><td>UTF-8 text</td></tr>
+  <tr><td>2</td><td>VAT registration number</td><td>Supplier tax scheme company ID</td><td>UTF-8 text</td></tr>
+  <tr><td>3</td><td>Timestamp</td><td><code>{'{'}IssueDate{'}'}T{'{'}IssueTime{'}'}</code></td><td>UTF-8 text</td></tr>
+  <tr><td>4</td><td>Invoice total (incl. VAT)</td><td>Legal monetary total &mdash; payable amount</td><td>UTF-8 text</td></tr>
+  <tr><td>5</td><td>VAT total</td><td>Tax total amount</td><td>UTF-8 text</td></tr>
+  <tr><td>6</td><td>Invoice hash</td><td>The base64 SHA-256 invoice hash from &sect;6.2</td><td>UTF-8 text of the base64 <i>string</i>, not decoded bytes</td></tr>
+  <tr><td>7</td><td>Digital signature</td><td>The ECDSA signature from &sect;6.3</td><td>UTF-8 text of the base64 <i>string</i>, not decoded bytes</td></tr>
+  <tr><td>8</td><td>Public key</td><td><code>SubjectPublicKeyInfo</code> from the certificate DER</td><td>Raw DER bytes</td></tr>
+  <tr><td>9</td><td>Certificate signature</td><td>The issuing CA's signature over the certificate</td><td>Raw DER bytes</td></tr>
+</table>
+
+<div class="callout good">
+<b>Rendering</b>
+The backend only needs to produce the base64 TLV string &mdash; it does <b>not</b> need to rasterize a QR image. Render the QR client-side (e.g. a React <code>&lt;QRCodeSVG value={'{'}zatcaQr{'}'} /&gt;</code> component, or the equivalent for the receiving platform) at the point of display: the staff POS screen, the self-checkout kiosk, and the printed receipt (thermal printers accept raw ESC/POS QR-code commands, so no image asset is needed there either).
+</div>
+
+<div class="callout info">
+<b>Phase-1 fallback</b>
+If a branch isn't yet Phase-2 onboarded (or a ZATCA submission fails), fall back to a simpler 5-tag TLV (tags 1&ndash;5 only, no hash/signature/keys) built entirely client-side from data already on the receipt. This keeps receipts printable and QR-scannable even before/during an outage, while making clear (via invoice status) that the full Phase-2 signature hasn't been obtained yet.
+</div>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">8</span>Checkout integration &amp; the reporting/clearance split</h2>
+<h3>8.1 When to submit</h3>
+<p>Trigger ZATCA submission immediately after a sale is finalized/committed at checkout, gated on that <b>branch's</b> onboarding status:</p>
+<pre><code>if (branchIdentity.Phase2Enabled &amp;&amp; branchIdentity.OnboardingStatus == "production_ready")
+{
+    // build + sign + submit
+}</code></pre>
+
+<h3>8.2 Synchronous vs. background submission</h3>
+<p>Submit <b>synchronously, inline in the checkout request</b> &mdash; not fire-and-forget via a background queue &mdash; so that the checkout response (and the printed receipt) can carry the real ZATCA-signed QR code rather than a client-side approximation. Wrap the DB write + external HTTP call in a transaction that row-locks the branch's identity row, so two concurrent checkouts on the same branch can't fork its ICV/PIH chain.</p>
+
+<div class="callout warn">
+<b>Never let a ZATCA failure block the sale</b>
+If the ZATCA API call fails (network error, gateway down, rejection), the invoice row should be left in a <code>pending</code>/<code>error</code> state and an admin notified &mdash; but <b>the checkout itself must still succeed</b>. A cashier ringing up a customer cannot be made to wait on, or fail because of, a government API's availability. Provide a manual "resubmit" action on an admin dashboard for anything left pending, since ZATCA still expects simplified invoices reported within 24 hours even if the original checkout-time submission failed.
+</div>
+
+<h3>8.3 Reporting vs. clearance</h3>
+<table class="ref">
+  <tr><th></th><th>Simplified (B2C)</th><th>Standard (B2B)</th></tr>
+  <tr><td>Endpoint</td><td><code>POST /{'{'}env{'}'}/invoices/reporting/single</code></td><td><code>POST /{'{'}env{'}'}/invoices/clearance/single</code></td></tr>
+  <tr><td>Timing</td><td>Post-hoc; must occur within 24 hours of the sale (submit immediately at checkout regardless &mdash; don't rely on a queue that could exceed the SLA)</td><td>Real-time, blocking &mdash; must complete <i>before</i> the invoice is delivered to the buyer</td></tr>
+  <tr><td>Success signal</td><td><code>reportingStatus</code> contains <code>REPORTED</code></td><td><code>clearanceStatus</code> contains <code>CLEARED</code></td></tr>
+  <tr><td>Auth</td><td colspan="2">Basic Auth using the <b>Production</b> CSID token/secret; header <code>Clearance-Status: 1</code></td></tr>
+</table>
+<p>On acceptance, advance that branch's <code>LastIcv</code>/<code>LastInvoiceHash</code> to chain into the next invoice. On rejection, do <b>not</b> advance them &mdash; a rejected invoice must not break the hash chain for the next successful one.</p>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">9</span>API endpoint reference</h2>
+<table class="ref">
+  <tr><th>Route</th><th>Purpose</th></tr>
+  <tr><td><code>GET /zatca/settings/{'{'}branchId{'}'}</code></td><td>Merged branch display settings + onboarding-status booleans, secrets scrubbed.</td></tr>
+  <tr><td><code>PUT /zatca/settings/{'{'}branchId{'}'}</code></td><td>Update branch display fields + Phase2Enabled/environment.</td></tr>
+  <tr><td><code>POST /zatca/onboarding/{'{'}branchId{'}'}/csr</code></td><td>Step 1 &mdash; generate CSR/keypair for this branch.</td></tr>
+  <tr><td><code>POST /zatca/onboarding/{'{'}branchId{'}'}/compliance-csid</code></td><td>Step 3 &mdash; redeem OTP for this branch's Compliance CSID.</td></tr>
+  <tr><td><code>POST /zatca/onboarding/{'{'}branchId{'}'}/production-csid</code></td><td>Step 4&ndash;5 &mdash; run the six compliance tests, then request this branch's Production CSID.</td></tr>
+  <tr><td><code>GET /zatca/invoices?branchId=&amp;status=</code></td><td>List invoices, branch-scoped, newest first.</td></tr>
+  <tr><td><code>POST /zatca/invoices</code></td><td>Create an invoice row (used by non-POS flows, e.g. manual B2B invoicing).</td></tr>
+  <tr><td><code>POST /zatca/invoices/{'{'}id{'}'}/submit</code></td><td>Manually (re)submit a pending/failed invoice &mdash; the retry path.</td></tr>
+  <tr><td><code>PATCH /zatca/invoices/{'{'}id{'}'}/status</code></td><td>Manual override of invoice status (admin correction tooling).</td></tr>
+</table>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">10</span>Gotchas &amp; lessons learned (the expensive ones)</h2>
+<div class="callout warn">
+<b>1. CSR "SN" field OID confusion &mdash; cost an entire debugging session</b>
+ZATCA's reference <code>openssl.cnf</code> uses the OpenSSL short name <code>SN</code> for the EGS-serial SAN attribute. In OpenSSL, <code>SN</code> is short for <b>surname</b> (OID <code>2.5.4.4</code>), not <code>serialNumber</code> (OID <code>2.5.4.5</code>) &mdash; a deeply counter-intuitive abbreviation. A CSR built with a library's "SerialNumber" helper (OID <code>2.5.4.5</code>) is byte-length-identical to a correct one and is silently rejected by the live gateway with a bare <code>400 "Invalid Request"</code> and no field-level detail. The only way this surfaced was a byte-level diff against a known-good CSR from a reference implementation, isolating a single-digit OID difference inside the SAN's OCTET STRING payload. <b>If a CSR/onboarding rejection ever comes back as a generic "Invalid Request," suspect an OpenSSL short-name-vs-OID mismatch before anything else</b> &mdash; verify every custom OID against an actual accepted CSR, byte for byte, not against a library's named constant.
+</div>
+<div class="callout warn">
+<b>2. Certificate digest hashes the base64 TEXT, not the decoded DER</b>
+The XAdES <code>CertDigest</code> is SHA-256 of the UTF-8 bytes of the certificate's base64 <i>text</i> representation &mdash; not the decoded binary certificate. This is a real ZATCA spec deviation from how X.509 digests normally work elsewhere, and "looks correct" code review will not catch it.
+</div>
+<div class="callout warn">
+<b>3. EC domain parameters need named-curve encoding</b>
+When constructing the EC key material, use named domain parameters (e.g. BouncyCastle's <code>ECNamedDomainParameters</code>), not plain domain parameters &mdash; otherwise the public key serializes with an explicit-curve OID instead of the named secp256k1 curve OID, which ZATCA's gateway also rejects.
+</div>
+<div class="callout warn">
+<b>4. QR tags 6 &amp; 7 carry base64 text bytes, not decoded bytes</b>
+Unlike tags 8 and 9 (raw DER), the invoice-hash and signature TLV tags encode the <i>text</i> of their base64 representation as UTF-8 bytes &mdash; not the bytes you'd get from decoding that base64 string. Mixing these two conventions up produces a QR that scans fine structurally but fails ZATCA's own QR-verification tooling.
+</div>
+<div class="callout warn">
+<b>5. Only a live round trip counts as verification</b>
+None of the above bugs were visible from structural ASN.1 parsing, type-level checks, or "does this look like a valid X.509/XAdES document." Every one only surfaced by comparing byte-for-byte against a known-accepted reference, or by hitting ZATCA's actual sandbox gateway and reading the real response. Budget time for an actual sandbox round trip before considering onboarding "done" &mdash; visual code review of crypto code is not a reliable signal here.
+</div>
+<div class="callout info">
+<b>6. Content-Type header must be bare</b>
+ZATCA's gateway wants <code>Content-Type: application/json</code> with no <code>charset</code> parameter appended &mdash; many HTTP client libraries add one by default and need to be told not to.
+</div>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">11</span>Frontend integration notes</h2>
+<ul class="tight">
+  <li><b>Onboarding wizard</b> (admin/settings screen, per branch under Model B): Generate CSR &rarr; show the operator the base64 CSR to paste into the Fatoora portal &rarr; input for the OTP received back &rarr; "Get Compliance CSID" action &rarr; "Run Compliance Tests &amp; Get Production CSID" action with a live pass/fail table for the six test documents.</li>
+  <li><b>Invoice dashboard</b>: list of submitted invoices with status (pending/reported or cleared/rejected/error), filterable by branch, with a manual retry action for anything not yet accepted.</li>
+  <li><b>Checkout / receipt QR</b>: render the server-provided TLV via a client-side QR component; fall back to the local Phase-1 5-tag TLV if the server didn't return one (branch not onboarded yet, or submission failed).</li>
+  <li><b>Compliance/VAT report</b>: a simple KPI view (taxable sales, VAT collected, count of reported/cleared vs. pending vs. errored invoices) is enough for day-to-day operational visibility into whether ZATCA submission is keeping up.</li>
+</ul>
+</section>
+
+<section>
+<h2 class="sec-title"><span class="sec-num">12</span>Build checklist for the new project</h2>
+<ul class="checklist">
+  <li>Confirm VAT number, CR number, and Fatoora portal access are available before starting.</li>
+  <li>Decide up front: Model B (per-branch CSID, recommended) vs. Model A (shared identity) &mdash; and key the identity table accordingly from the very first migration.</li>
+  <li>Implement CSR generation with every SAN field from the &sect;3 table, verified byte-for-byte against a known-accepted CSR before attempting a real OTP redemption.</li>
+  <li>Encrypt private keys and CSID secrets at rest; never expose them through a settings API &mdash; return booleans only.</li>
+  <li>Build the UBL invoice XML with the simplified/standard split driven by presence of a buyer VAT number.</li>
+  <li>Implement canonicalization + hashing exactly per &sect;6.2, and sign <b>both</b> simplified and standard invoices (don't replicate the reference implementation's standard-invoice signing gap).</li>
+  <li>Build the 9-tag QR TLV per &sect;7, with a Phase-1 5-tag fallback for un-onboarded branches.</li>
+  <li>Wire checkout to submit synchronously, gated on that branch's <code>production_ready</code> status, with the sale never blocked by a ZATCA failure.</li>
+  <li>Route simplified invoices to <code>reporting/single</code> and standard invoices to <code>clearance/single</code>; advance the branch's ICV/hash chain only on acceptance.</li>
+  <li>Add a manual resubmit path and admin alerting for anything left pending/errored &mdash; there's no free automated retry queue in ZATCA's model, you must build one or handle it manually.</li>
+  <li>Run a real sandbox round trip (CSR &rarr; OTP &rarr; compliance CSID &rarr; six compliance tests &rarr; production CSID &rarr; one real reported invoice) before calling onboarding done.</li>
+</ul>
+</section>
+
+<div class="footnote">
+Prepared from a working reference implementation (Mimony Mart POS, .NET/C#) verified end-to-end against ZATCA's live sandbox gateway. Field names, OIDs, and endpoint paths reflect the ZATCA Developer Portal specification as implemented and tested as of July 2026 &mdash; confirm against ZATCA's current published documentation before production go-live, as government specifications are occasionally revised.
+</div>
+
+</body>
+</html>

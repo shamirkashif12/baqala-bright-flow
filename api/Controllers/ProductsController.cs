@@ -140,6 +140,7 @@ public class ProductsController(
             return Conflict(new { message = $"Barcode {updated.Barcode} is already assigned to \"{existing.Name}\". Edit that product instead." });
         }
         var previousPrice = product.BasePrice;
+        var previousCost = product.CostPrice;
         // Snapshot before any field is overwritten — this is the "before" half of the audit row.
         var before = Snapshot(product);
         product.Name = updated.Name;
@@ -183,6 +184,14 @@ public class ProductsController(
             await notifications.NotifyRoleAsync(["Manager", "Admin"], null,
                 "Sales / Checkout", "Price Updated", "Price Updated",
                 $"Price updated for {product.Name}: SAR {previousPrice:F2} → SAR {product.BasePrice:F2}",
+                entityType: "Product", entityId: product.Id);
+        }
+
+        if (previousCost != product.CostPrice)
+        {
+            await notifications.NotifyRoleAsync(["Manager", "Admin"], null,
+                "Inventory", "Cost Price Updated", "Cost Price Updated",
+                $"Cost price updated for {product.Name}: SAR {previousCost:F2} → SAR {product.CostPrice:F2}",
                 entityType: "Product", entityId: product.Id);
         }
 
