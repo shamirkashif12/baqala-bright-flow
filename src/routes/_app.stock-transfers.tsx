@@ -538,6 +538,7 @@ function ItemsStep({
           const qtyInvalid = item.requestedQuantity < 1;
           const product = products.find(p => p.id === item.productId);
           const qtyWholeUnitError = wholeUnitQuantityError(product, item.requestedQuantity);
+          const expiryInvalid = !selectedBatch && !!item.expiryDate && item.expiryDate < todayStr();
           return (
             <Card key={i} className="border-border/60">
               <CardContent className="p-3 space-y-2">
@@ -617,12 +618,18 @@ function ItemsStep({
                       <Input className="h-8 text-xs" disabled
                         value={selectedBatch.expiryDate ? new Date(selectedBatch.expiryDate).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" }) : "No expiry"} />
                     ) : (
-                      <Input
-                        type="date"
-                        className="h-8 text-xs"
-                        value={item.expiryDate}
-                        onChange={e => updateItem(i, { expiryDate: e.target.value })}
-                      />
+                      <>
+                        <Input
+                          type="date"
+                          min={todayStr()}
+                          className={cn("h-8 text-xs", expiryInvalid && "border-destructive ring-1 ring-destructive")}
+                          value={item.expiryDate}
+                          onChange={e => updateItem(i, { expiryDate: e.target.value })}
+                        />
+                        {expiryInvalid && (
+                          <p className="text-[10px] text-destructive leading-tight">Cannot be in the past</p>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -1051,6 +1058,9 @@ function CreateTransferSheet({
     if (item.requestedQuantity < 1) return true;
     return wholeUnitQuantityError(products.find(p => p.id === item.productId), item.requestedQuantity) !== null;
   });
+  // A freshly received batch can't already be expired — batch-linked items carry their own
+  // (possibly past) expiry forward, so only user-entered dates for new batches are checked.
+  const hasInvalidExpiry = items.some(item => !item.batchId && !!item.expiryDate && item.expiryDate < todayStr());
 
   const stepTitle = step === 1 ? "Step 1: Transfer Type" : step === 2 ? "Step 2: Source & Destination" : "Step 3: Items & Details";
 
@@ -1210,7 +1220,7 @@ function CreateTransferSheet({
             {step === 3 && (
               <Button
                 className="flex-1 gradient-primary text-primary-foreground border-0 shadow-glow"
-                disabled={saving || items.filter(i => i.productId).length === 0 || hasQtyError || hasInvalidQty}
+                disabled={saving || items.filter(i => i.productId).length === 0 || hasQtyError || hasInvalidQty || hasInvalidExpiry}
                 onClick={handleCreate}
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}

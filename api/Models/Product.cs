@@ -174,10 +174,10 @@ public class ProductPriceList
     public DateTime? EffectiveTo { get; set; }
 
     // Customer-group pricing. null = applies to everyone including anonymous walk-ins. Otherwise
-    // the customer's Customer.Tier must rank >= this tier. Deliberately reuses the existing flat
-    // Customer.Tier (standard|silver|gold|platinum) and the same TIER_RANK ladder that
-    // Discount.MinCustomerTier already uses in both pricing engines, rather than introducing a
-    // parallel CustomerGroup entity that would need its own assignment UI and migration path.
+    // the customer's Customer.Tier must match this exact value — a "silver" row never serves gold
+    // or platinum. Selecting several tiers for one special price in the UI produces one row per
+    // tier (same price/schedule), which is what lets an operator pick any combination (e.g. silver
+    // + platinum but not gold) rather than a single cascading "and above" threshold.
     [MaxLength(20), Column("min_customer_tier")]
     public string? MinCustomerTier { get; set; }
 

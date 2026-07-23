@@ -2012,7 +2012,25 @@ public static class DataSeeder
     {
         var branches = await db.Branches.Where(b => b.Status == "active").ToListAsync();
         foreach (var branch in branches)
-            await EnsureFreshDemoDataForBranchAsync(db, branch);
+        {
+            try
+            {
+                await EnsureFreshDemoDataForBranchAsync(db, branch);
+            }
+            catch (Exception ex)
+            {
+                // This runs on every dev boot and seeds a few deterministically-numbered demo
+                // orders per branch — non-critical, disposable data. If an earlier boot's shift
+                // row landed but its orders didn't (or two overlapping API instances raced on the
+                // same day's order numbers), the guard above can't tell and this collides on the
+                // orders' unique OrderNumber index. That must never crash the whole app on every
+                // subsequent restart (it did — Program.cs previously had no try/catch here at
+                // all). Clear the tracker so this branch's half-added entities don't also break
+                // the next branch's SaveChangesAsync, and just skip — it'll retry next boot.
+                db.ChangeTracker.Clear();
+                Console.Error.WriteLine($"PatchEnsureFreshDemoDataAsync: skipping branch {branch.Id} ({branch.Name}) after seeding error: {ex.Message}");
+            }
+        }
     }
 
     private static async Task EnsureFreshDemoDataForBranchAsync(BaqalaDbContext db, Branch branch)

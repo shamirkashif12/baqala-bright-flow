@@ -19,7 +19,7 @@ import { api, excludeDisabledBranches, type PurchaseOrder, type PurchaseOrderIte
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
-import { localDateStr, uuid } from "@/lib/utils";
+import { cn, localDateStr, uuid } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/purchase-orders")({ component: PurchaseOrders });
 
@@ -593,6 +593,8 @@ function ReceiveSheet({ open, onClose, po, onReceived }: {
   const [error, setError] = useState("");
 
   const items = useMemo(() => (po?.items ?? []).filter(it => it.receivedQuantity < it.orderedQuantity), [po]);
+  const today = localDateStr();
+  const hasInvalidExpiry = items.some(it => !!expiries[it.productId] && expiries[it.productId] < today);
 
   useEffect(() => {
     if (open && po) {
@@ -617,6 +619,7 @@ function ReceiveSheet({ open, onClose, po, onReceived }: {
       batchNumber: batches[it.productId] || undefined,
     }));
     if (!payload.length) return setError("Enter at least one quantity.");
+    if (hasInvalidExpiry) return setError("Expiry date cannot be in the past.");
     setSaving(true); setError("");
     try { await api.receivePurchaseOrder(po.id, payload); onReceived(); onClose(); }
     catch (e) { setError(e instanceof Error ? e.message : "Failed to receive goods."); }
@@ -656,7 +659,7 @@ function ReceiveSheet({ open, onClose, po, onReceived }: {
                     </div>
                     <div className="space-y-1">
                       <Label className="text-[11px] font-medium">Expiry Date</Label>
-                      <Input type="date" className="h-7 text-xs"
+                      <Input type="date" min={today} className={cn("h-7 text-xs", !!expiries[it.productId] && expiries[it.productId] < today && "border-destructive ring-1 ring-destructive")}
                         value={expiries[it.productId] ?? ""} onChange={e => setExpiries(p => ({ ...p, [it.productId]: e.target.value }))} />
                     </div>
                   </div>
@@ -665,7 +668,7 @@ function ReceiveSheet({ open, onClose, po, onReceived }: {
             </div>
           )}
           {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleConfirm} disabled={saving || items.length === 0}>
+          <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleConfirm} disabled={saving || items.length === 0 || hasInvalidExpiry}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Confirm Receipt
           </Button>
         </div>

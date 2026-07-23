@@ -61,23 +61,6 @@ public interface IPriceResolutionService
 
 public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionService
 {
-    // Same ladder Discount.MinCustomerTier already uses in both client engines
-    // (_app.pos.tsx and self-checkout/src/lib/pricing.ts). Anonymous walk-ins rank -1, so a rule
-    // gated at "standard" (rank 0) excludes them — deliberately identical to how an existing
-    // Discount with minCustomerTier="standard" behaves today.
-    private static readonly Dictionary<string, int> TierRank = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["standard"] = 0,
-        ["silver"] = 1,
-        ["gold"] = 2,
-        ["platinum"] = 3,
-    };
-
-    public const int AnonymousTierRank = -1;
-
-    public static int RankOf(string? tier) =>
-        tier is not null && TierRank.TryGetValue(tier, out var r) ? r : AnonymousTierRank;
-
     public async Task<ResolvedPrice> ResolveAsync(
         Guid productId, Guid? branchId, string? customerTier,
         string priceType = "standard", DateTime? at = null, CancellationToken ct = default)
@@ -98,14 +81,21 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
         var ids = productIds.Distinct().ToList();
         if (ids.Count == 0) return new Dictionary<Guid, ResolvedPrice>();
 
-        var basePrices = await db.Products
-            .Where(p => ids.Contains(p.Id))
-            .Select(p => new { p.Id, p.BasePrice })
-            .ToDictionaryAsync(p => p.Id, p => p.BasePrice, ct);
+        // `.Contains()` against a DbSet-backed IQueryable throws on this repo's MySQL provider
+        // ("Expression '@ids' ... does not have a type mapping assigned") — filter in-memory after
+        // fetching instead, same fix as elsewhere in this codebase (ef-mysql-inlist-gotcha).
+        var idSet = ids.ToHashSet();
+        var basePrices = (await db.Products
+                .Select(p => new { p.Id, p.BasePrice })
+                .ToListAsync(ct))
+            .Where(p => idSet.Contains(p.Id))
+            .ToDictionary(p => p.Id, p => p.BasePrice);
 
-        var rules = await db.ProductPriceLists
-            .Where(r => ids.Contains(r.ProductId) && r.IsActive && r.PriceType == priceType)
-            .ToListAsync(ct);
+        var rules = (await db.ProductPriceLists
+                .Where(r => r.IsActive && r.PriceType == priceType)
+                .ToListAsync(ct))
+            .Where(r => idSet.Contains(r.ProductId))
+            .ToList();
 
         return Build(ids, basePrices, rules, branchId, customerTier, at ?? DateTime.UtcNow);
     }
@@ -131,9 +121,8 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
         return Build(ids, basePrices, rules, branchId, customerTier, at ?? DateTime.UtcNow);
     }
 
-    // Pure ranking over already-fetched rows. Tier ranking and specificity ordering are done in
-    // memory rather than SQL: tier is a string ladder the provider can't order by, the candidate
-    // set per product is a handful of rows, and NotificationService already sets the precedent of
+    // Pure matching over already-fetched rows, done in memory rather than SQL: the candidate set
+    // per product is a handful of rows, and NotificationService already sets the precedent of
     // in-memory matching where the MySQL provider can't express the predicate.
     private static Dictionary<Guid, ResolvedPrice> Build(
         List<Guid> ids,
@@ -143,7 +132,6 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
         string? customerTier,
         DateTime now)
     {
-        var customerRank = RankOf(customerTier);
         var byProduct = rules.GroupBy(r => r.ProductId).ToDictionary(g => g.Key, g => g.ToList());
         var result = new Dictionary<Guid, ResolvedPrice>(ids.Count);
 
@@ -161,19 +149,18 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
                 continue;
             }
 
-            var applicable = candidates.Where(r => Applies(r, branchId, customerRank, now)).ToList();
+            var applicable = candidates.Where(r => Applies(r, branchId, customerTier, now)).ToList();
 
             // Precedence — a customer's tier price is a loyalty benefit that must win over an
             // ordinary branch price: a platinum shopper standing in a branch that has its own
             // shelf price should still get the platinum price, not the branch's. So a rule gated on
             // a customer tier outranks one that isn't. (A walk-in never matches a tier rule at all
             // — see Applies — so they still get the branch price.) Only when tier-specificity ties
-            // does branch-specificity, then the most-specific tier, priority, and schedule decide.
+            // does branch-specificity, then priority, and schedule decide.
             var unitRule = applicable
                 .Where(r => !IsPack(r))
                 .OrderByDescending(r => r.MinCustomerTier != null)  // a tier (loyalty) price wins first
                 .ThenByDescending(r => r.BranchId.HasValue)         // then a branch-specific price
-                .ThenByDescending(r => RankOf(r.MinCustomerTier))   // then the most specific tier
                 .ThenByDescending(r => r.Priority)                  // then explicit operator intent
                 .ThenByDescending(r => r.EffectiveFrom)             // then the latest-starting schedule
                 .ThenByDescending(r => r.CreatedAt)                 // deterministic final tiebreak
@@ -206,7 +193,7 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
     private static bool IsPack(ProductPriceList r) =>
         string.Equals(r.UnitType, "pack", StringComparison.OrdinalIgnoreCase);
 
-    private static bool Applies(ProductPriceList r, Guid? branchId, int customerRank, DateTime now)
+    private static bool Applies(ProductPriceList r, Guid? branchId, string? customerTier, DateTime now)
     {
         // A rule scoped to a branch never applies elsewhere. A tenant-wide rule (null) applies
         // everywhere, including when the caller has no branch context at all.
@@ -217,9 +204,13 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
         if (r.EffectiveFrom > now) return false;
         if (r.EffectiveTo.HasValue && r.EffectiveTo.Value <= now) return false;
 
-        // Customer-group gate. A null tier applies to everyone; otherwise the customer must rank at
-        // or above it, so a "silver" rule also serves gold and platinum.
-        if (r.MinCustomerTier is not null && customerRank < RankOf(r.MinCustomerTier)) return false;
+        // Customer-group gate. A null tier applies to everyone; otherwise the customer's tier must
+        // match this rule's tier exactly — a "silver" rule serves silver customers only, never gold
+        // or platinum. An anonymous walk-in (customerTier == null) never matches a gated rule, so
+        // "select any tiers" (e.g. silver + platinum, skipping gold) is one row per selected tier.
+        if (r.MinCustomerTier is not null &&
+            !string.Equals(r.MinCustomerTier, customerTier, StringComparison.OrdinalIgnoreCase))
+            return false;
 
         return true;
     }

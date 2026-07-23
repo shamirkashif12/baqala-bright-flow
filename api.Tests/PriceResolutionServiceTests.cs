@@ -155,8 +155,8 @@ public class PriceResolutionServiceTests
     {
         using var db = NewDb();
         var productId = SeedProduct(db, 10m);
-        // "standard" ranks 0; an anonymous shopper ranks -1 and is therefore excluded — deliberately
-        // identical to how an existing Discount with minCustomerTier="standard" already behaves.
+        // An anonymous shopper has no tier at all, so they never match a gated rule — even one
+        // gated at "standard", the lowest tier.
         db.ProductPriceLists.Add(Rule(productId, 6m, tier: "standard"));
         await db.SaveChangesAsync();
 
@@ -168,10 +168,10 @@ public class PriceResolutionServiceTests
 
     [Theory]
     [InlineData("silver", 6.0)]     // exact match
-    [InlineData("gold", 6.0)]       // ranks above — a "silver+" price also serves gold
-    [InlineData("platinum", 6.0)]
-    [InlineData("standard", 10.0)]  // ranks below — excluded, falls back to base
-    public async Task TierRule_AppliesAtOrAboveTheGatedTier(string tier, double expected)
+    [InlineData("gold", 10.0)]      // a different tier — excluded, falls back to base
+    [InlineData("platinum", 10.0)]  // a different tier — excluded, falls back to base
+    [InlineData("standard", 10.0)]  // a different tier — excluded, falls back to base
+    public async Task TierRule_AppliesOnlyToTheExactGatedTier(string tier, double expected)
     {
         using var db = NewDb();
         var productId = SeedProduct(db, 10m);
@@ -184,21 +184,27 @@ public class PriceResolutionServiceTests
     }
 
     [Fact]
-    public async Task MostSpecificTier_WinsForAQualifyingCustomer()
+    public async Task SelectingSeveralTiers_IsOneIndependentRowPerTier()
     {
+        // "Select any tiers" for one special price (e.g. silver + platinum, skipping gold) is
+        // expressed as one row per selected tier — a gold customer must not match either row.
         using var db = NewDb();
         var productId = SeedProduct(db, 10m);
         db.ProductPriceLists.Add(Rule(productId, 9m));                  // everyone
-        db.ProductPriceLists.Add(Rule(productId, 8m, tier: "silver"));  // silver+
-        db.ProductPriceLists.Add(Rule(productId, 7m, tier: "gold"));    // gold+
+        db.ProductPriceLists.Add(Rule(productId, 7m, tier: "silver"));
+        db.ProductPriceLists.Add(Rule(productId, 7m, tier: "platinum"));
         await db.SaveChangesAsync();
 
-        var gold = await new PriceResolutionService(db).ResolveAsync(productId, BranchA, "gold");
         var silver = await new PriceResolutionService(db).ResolveAsync(productId, BranchA, "silver");
+        var platinum = await new PriceResolutionService(db).ResolveAsync(productId, BranchA, "platinum");
+        var gold = await new PriceResolutionService(db).ResolveAsync(productId, BranchA, "gold");
 
-        Assert.Equal(7m, gold.UnitPrice);    // gold qualifies for all three; the gold rule is most specific
-        Assert.Equal(8m, silver.UnitPrice);  // silver doesn't qualify for the gold rule
-        Assert.Equal("tier", gold.Source);
+        Assert.Equal(7m, silver.UnitPrice);
+        Assert.Equal("tier", silver.Source);
+        Assert.Equal(7m, platinum.UnitPrice);
+        Assert.Equal("tier", platinum.Source);
+        Assert.Equal(9m, gold.UnitPrice);  // not selected — falls back to the tenant-wide price
+        Assert.Equal("list", gold.Source);
     }
 
     [Fact]
@@ -481,13 +487,16 @@ public class PriceResolutionServiceTests
     }
 
     [Fact]
-    public async Task RankOf_TreatsUnknownAndNullTiersAsAnonymous()
+    public async Task TierMatch_IsCaseInsensitive()
     {
-        Assert.Equal(PriceResolutionService.AnonymousTierRank, PriceResolutionService.RankOf(null));
-        Assert.Equal(PriceResolutionService.AnonymousTierRank, PriceResolutionService.RankOf("nonsense"));
-        Assert.Equal(0, PriceResolutionService.RankOf("standard"));
-        Assert.Equal(3, PriceResolutionService.RankOf("platinum"));
         // Tier strings arrive from JWTs and query params — casing must not decide a price.
-        Assert.Equal(2, PriceResolutionService.RankOf("GOLD"));
+        using var db = NewDb();
+        var productId = SeedProduct(db, 10m);
+        db.ProductPriceLists.Add(Rule(productId, 6m, tier: "gold"));
+        await db.SaveChangesAsync();
+
+        var result = await new PriceResolutionService(db).ResolveAsync(productId, BranchA, "GOLD");
+
+        Assert.Equal(6m, result.UnitPrice);
     }
 }

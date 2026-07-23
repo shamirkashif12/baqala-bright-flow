@@ -375,10 +375,20 @@ public class InventoryController(
         return Ok(adjustments);
     }
 
-    [RequirePermission("Stocks", PermAction.Create)]
+    // This single endpoint is reached from three different pages, each gated on its own module
+    // client-side: the Inventory page's Adjust dialog checks Inventory:Edit, the Stocks page's
+    // own adjustment form checks Stocks:Create, and POS's Quick Stock In checks neither. A single
+    // [RequirePermission("Stocks", ...)] attribute only satisfied the Stocks page — a role like
+    // Branch Manager/Supervisor (Inventory:Edit=true, Stocks:Create=false in the seeded matrix)
+    // saw the Inventory page's button, submitted the dialog, and got a 403 with stock never
+    // actually adjusted. Accept either permission instead of picking one module over the other.
     [HttpPost("adjustments")]
     public async Task<IActionResult> Adjust([FromBody] AdjustRequest req)
     {
+        if (!await PermissionCheck.HasPermissionAsync(User, db, "Inventory", PermAction.Edit)
+            && !await PermissionCheck.HasPermissionAsync(User, db, "Stocks", PermAction.Create))
+            return StatusCode(403, new { message = "You do not have permission to adjust stock." });
+
         // Same stock-write guard as ReceiveBatch: this endpoint had no quantity validation at
         // all, so a zero/negative value here was a second, unguarded route to the BUG-C1 class
         // of defect (corrupt on-hand quantity), separate from the Receive Batch form.

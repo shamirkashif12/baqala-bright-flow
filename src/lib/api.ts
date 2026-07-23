@@ -931,6 +931,8 @@ export const api = {
   getEmployee: (id: string) => request<Employee>(`/api/employees/${id}`),
   getLinkableUsers: (currentEmployeeId?: string) =>
     request<{ id: string; fullName: string; email: string }[]>(`/api/employees/linkable-users${toQuery({ currentEmployeeId })}`),
+  getUnlinkedEmployees: () =>
+    request<{ id: string; fullName: string; email?: string; employeeCode: string; branchId: string; roleId?: string }[]>("/api/employees/unlinked"),
   createEmployee: (data: Partial<Employee>) =>
     request<Employee>("/api/employees", { method: "POST", body: JSON.stringify(data) }),
   updateEmployee: (id: string, data: Partial<Employee>) =>
@@ -1205,6 +1207,7 @@ export interface UserPermissionOverride {
 export interface CreateUserPayload {
   email: string; username: string; password: string; pin?: string;
   fullName: string; fullNameAr?: string; roleId: string; branchId?: string;
+  employeeId: string;
 }
 
 export interface Category {

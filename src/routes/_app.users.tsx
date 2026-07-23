@@ -26,8 +26,8 @@ export const Route = createFileRoute("/_app/users")({
   ),
 });
 
-type UserForm = { fullName: string; email: string; username: string; password: string; roleId: string; branchId: string; status: string; };
-const emptyForm: UserForm = { fullName: "", email: "", username: "", password: "", roleId: "", branchId: "", status: "active" };
+type UserForm = { employeeId: string; fullName: string; email: string; username: string; password: string; roleId: string; branchId: string; status: string; };
+const emptyForm: UserForm = { employeeId: "", fullName: "", email: "", username: "", password: "", roleId: "", branchId: "", status: "active" };
 
 function RegisteredUsers() {
   const { canCreate, canEdit } = usePermission("Users");
@@ -35,6 +35,7 @@ function RegisteredUsers() {
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [unlinkedEmployees, setUnlinkedEmployees] = useState<{ id: string; fullName: string; email?: string; employeeCode: string; branchId: string; roleId?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [dlgOpen, setDlgOpen] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
@@ -57,8 +58,9 @@ function RegisteredUsers() {
       api.getUsers().catch(() => []),
       api.getBranches().catch(() => []),
       api.getRoles().catch(() => []),
+      api.getUnlinkedEmployees().catch(() => []),
     ])
-      .then(([u, b, r]) => { setUsers(u); setBranches(excludeDisabledBranches(b)); setRoles(r); })
+      .then(([u, b, r, e]) => { setUsers(u); setBranches(excludeDisabledBranches(b)); setRoles(r); setUnlinkedEmployees(e); })
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -76,15 +78,32 @@ function RegisteredUsers() {
   const openCreate = () => { setEditUser(null); setForm(emptyForm); setDlgOpen(true); };
   const openEdit = (u: User) => {
     setEditUser(u);
-    setForm({ fullName: u.fullName, email: u.email, username: u.username, password: "", roleId: u.roleId, branchId: u.branchId ?? "", status: u.status });
+    setForm({ employeeId: "", fullName: u.fullName, email: u.email, username: u.username, password: "", roleId: u.roleId, branchId: u.branchId ?? "", status: u.status });
     setDlgOpen(true);
   };
 
   const handleSave = async () => {
     // Catch the obvious missing-field cases here with a specific message instead of letting an
     // empty roleId (or blank required field) reach the server as a confusing generic failure.
-    if (!form.fullName.trim() || !form.email.trim() || !form.username.trim()) {
-      toast.error("Full name, email, and username are required.");
+    // Each check names only the field it's actually about — full name/email/branch/role are
+    // auto-filled (and locked) from the selected employee on create, so a blanket "these three
+    // are required" message was misleading when e.g. only username was actually left blank.
+    if (!editUser && !form.employeeId) {
+      toast.error("Please select the employee this login belongs to.");
+      return;
+    }
+    if (!form.fullName.trim()) {
+      toast.error("Full name is required.");
+      return;
+    }
+    if (!form.email.trim()) {
+      toast.error(!editUser
+        ? "This employee has no email on file — add one on the Employee record in HRM first."
+        : "Email is required.");
+      return;
+    }
+    if (!form.username.trim()) {
+      toast.error("Username is required.");
       return;
     }
     if (!editUser && !form.password.trim()) {
@@ -92,7 +111,9 @@ function RegisteredUsers() {
       return;
     }
     if (!form.roleId) {
-      toast.error("Please select a role.");
+      toast.error(!editUser
+        ? "This employee has no ACL Role assigned — assign one on the Employee record in HRM first."
+        : "Please select a role.");
       return;
     }
     setSaving(true);
@@ -102,7 +123,7 @@ function RegisteredUsers() {
         await api.updateUser(editUser.id, { fullName: form.fullName, email: form.email, username: form.username, roleId: form.roleId, branchId, status: form.status });
         toast.success("User updated.");
       } else {
-        await api.createUser({ fullName: form.fullName, email: form.email, username: form.username, password: form.password, roleId: form.roleId, branchId });
+        await api.createUser({ fullName: form.fullName, email: form.email, username: form.username, password: form.password, roleId: form.roleId, branchId, employeeId: form.employeeId });
         toast.success("User created.");
       }
       setDlgOpen(false);
@@ -125,7 +146,33 @@ function RegisteredUsers() {
   const setS = (k: keyof UserForm) => (v: string) =>
     setForm(p => ({ ...p, [k]: v }));
 
+  // Convenience default only (not locked) — Employee has no username-equivalent field, so this
+  // just saves retyping the obvious "firstname.lastname" case and can still be edited freely.
+  const suggestUsername = (name: string) =>
+    name.trim().toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, ".");
+
+  const selectEmployee = (employeeId: string) => {
+    const emp = unlinkedEmployees.find(e => e.id === employeeId);
+    setForm(p => ({
+      ...p,
+      employeeId,
+      fullName: emp?.fullName ?? "",
+      email: emp?.email ?? "",
+      // Branch is a required field on every Employee, so this is always populated; Role is
+      // optional there — if this employee has none yet, roleId comes back empty and the Role
+      // select below stays editable so creating the login isn't blocked on an HRM gap.
+      branchId: emp?.branchId ?? "",
+      roleId: emp?.roleId ?? "",
+      username: p.username || (emp ? suggestUsername(emp.fullName) : p.username),
+    }));
+  };
+
   const isTenantAdminRole = roles.find(r => r.id === form.roleId)?.name === "Admin";
+  // Locked once an employee is selected on create — Branch/Role were already assigned on that
+  // Employee record in HRM, so re-picking them here would just be redundant (and could drift
+  // from the HRM record). Role only locks if the employee actually has one assigned.
+  const branchLockedFromEmployee = !editUser && !!form.employeeId;
+  const roleLockedFromEmployee = !editUser && !!form.employeeId && !!form.roleId;
 
   const initials = (name: string) => name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const avatarColor = (name: string) => {
@@ -243,14 +290,30 @@ function RegisteredUsers() {
             <DialogDescription>Assign role and branch access.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
+            {!editUser && (
+              <div>
+                <Label className="text-xs">Employee</Label>
+                <Select value={form.employeeId} onValueChange={selectEmployee} disabled={unlinkedEmployees.length === 0}>
+                  <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Select employee" /></SelectTrigger>
+                  <SelectContent>
+                    {unlinkedEmployees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}{e.email ? ` (${e.email})` : ""}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  {unlinkedEmployees.length === 0
+                    ? "All employees already have a login, or no employees exist yet. Add an employee in HRM first."
+                    : "Users are now created from existing HRM employees. Select the employee this login belongs to — only employees who don't already have a login account are listed. Full Name, Email, Role and Branch are filled in from that employee's HRM record and can't be changed here. To onboard someone new, add them as an Employee in HRM first."}
+                </p>
+              </div>
+            )}
             <div>
               <Label className="text-xs">Full Name</Label>
-              <Input value={form.fullName} onChange={set("fullName")} className="mt-1 h-9" placeholder="Abdullah Al Faisal" />
+              <Input value={form.fullName} onChange={set("fullName")} className="mt-1 h-9" placeholder="Abdullah Al Faisal" disabled={!editUser} readOnly={!editUser} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Email</Label>
-                <Input value={form.email} onChange={set("email")} className="mt-1 h-9" type="email" placeholder="user@mart.sa" />
+                <Input value={form.email} onChange={set("email")} className="mt-1 h-9" type="email" placeholder="user@mart.sa" disabled={!editUser} readOnly={!editUser} />
               </div>
               <div>
                 <Label className="text-xs">Username</Label>
@@ -266,18 +329,22 @@ function RegisteredUsers() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Role</Label>
-                <Select value={form.roleId} onValueChange={setS("roleId")}>
+                <Select value={form.roleId} onValueChange={setS("roleId")} disabled={roleLockedFromEmployee}>
                   <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Select role" /></SelectTrigger>
                   <SelectContent>
                     {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {!editUser && form.employeeId && !form.roleId && (
+                  <p className="text-xs text-muted-foreground mt-1">No ACL Role assigned to this employee in HRM yet — select one here.</p>
+                )}
               </div>
               <div>
                 <Label className="text-xs">Branch</Label>
                 <Select
                   value={form.branchId || (isTenantAdminRole ? "all_branches" : "")}
                   onValueChange={v => setS("branchId")(v === "all_branches" ? "" : v)}
+                  disabled={branchLockedFromEmployee}
                 >
                   <SelectTrigger className="mt-1 h-9">
                     <SelectValue placeholder={isTenantAdminRole ? "All branches" : "Select branch"} />

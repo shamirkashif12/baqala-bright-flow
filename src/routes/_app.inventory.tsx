@@ -46,6 +46,27 @@ function fmtPrice(n?: number | null) {
   return n.toFixed(2);
 }
 
+// Plain tier names — matched exactly by PriceResolutionService (never "and above"), so picking
+// several here creates one price rule per tier, all at the same price.
+const TIER_OPTIONS: { value: CustomerTier; label: string }[] = [
+  { value: "silver", label: "Silver" },
+  { value: "gold", label: "Gold" },
+  { value: "platinum", label: "Platinum" },
+];
+
+function TierMultiSelect({ selected, onToggle }: { selected: CustomerTier[]; onToggle: (tier: CustomerTier) => void }) {
+  return (
+    <div className="flex rounded-lg border border-border/60 overflow-hidden shrink-0">
+      {TIER_OPTIONS.map(({ value, label }) => (
+        <button key={value} type="button" onClick={() => onToggle(value)}
+          className={`px-3 py-1.5 text-xs transition-colors ${selected.includes(value) ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted/50"}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function StockBadge({ qty, reorder }: { qty: number; reorder: number }) {
@@ -383,10 +404,12 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   // branch+tier rule):
   //   • branchPrices — a per-branch override, only for branches selected above.
   //   • tierPrice    — one optional customer-tier price, applied across the selected branches.
+  //     Selecting several tiers (e.g. Silver + Platinum, skipping Gold) creates one rule per tier,
+  //     all sharing this one price — each tier is matched exactly, never "and above".
   //   • priceSchedule — an optional window applied to the extra prices ("this price until Friday").
   const [pricingOpen, setPricingOpen] = useState(false);
   const [branchPrices, setBranchPrices] = useState<Record<string, string>>({}); // branchId → price
-  const [tierPrice, setTierPrice] = useState<{ tier: "" | CustomerTier; price: string }>({ tier: "", price: "" });
+  const [tierPrice, setTierPrice] = useState<{ tiers: CustomerTier[]; price: string }>({ tiers: [], price: "" });
   const [priceSchedule, setPriceSchedule] = useState({ from: "", to: "" });
 
   const set = (k: keyof typeof form) => (v: string) => { setForm(p => ({ ...p, [k]: v })); setError(""); };
@@ -399,7 +422,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     setPricingOpen(false);
     setBranchIds([]);
     setBranchPrices({});
-    setTierPrice({ tier: "", price: "" });
+    setTierPrice({ tiers: [], price: "" });
     setPriceSchedule({ from: "", to: "" });
     setForm({ name: "", sku: "", barcode: "", categoryId: "", saleUnitType: "single", itemsPerPack: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
   };
@@ -446,8 +469,8 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
       const branchName = branches.find(b => b.id === badBranchPrice[0])?.name ?? "a selected branch";
       return setError(`Enter a valid price for ${branchName}, or clear it.`);
     }
-    if (tierPrice.tier && (tierPrice.price.trim() === "" || Number(tierPrice.price) < 0)) {
-      return setError("Enter a valid price for the selected customer tier, or clear the tier.");
+    if (tierPrice.tiers.length > 0 && (tierPrice.price.trim() === "" || Number(tierPrice.price) < 0)) {
+      return setError("Enter a valid price for the selected customer tier(s), or clear the tiers.");
     }
     if (priceSchedule.from && priceSchedule.to && priceSchedule.to <= priceSchedule.from) {
       return setError("Price schedule: the 'until' date must be after the 'from' date.");
@@ -504,13 +527,16 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
           });
         }
       }
-      if (tierPrice.tier && tierPrice.price.trim() !== "") {
-        // Tenant-wide tier rule (branchId omitted) — independent of the branch rules above.
-        rules.push({
-          productId: product.id, price: Number(tierPrice.price),
-          priceType: "standard", unitType: "unit",
-          minCustomerTier: tierPrice.tier, effectiveFrom: from, effectiveTo: to,
-        });
+      if (tierPrice.tiers.length > 0 && tierPrice.price.trim() !== "") {
+        // Tenant-wide tier rule(s) (branchId omitted) — independent of the branch rules above. One
+        // row per selected tier, all at the same price, since each tier is matched exactly.
+        for (const tier of tierPrice.tiers) {
+          rules.push({
+            productId: product.id, price: Number(tierPrice.price),
+            priceType: "standard", unitType: "unit",
+            minCustomerTier: tier, effectiveFrom: from, effectiveTo: to,
+          });
+        }
       }
       if (rules.length > 0) await api.createPriceListsBulk(rules);
 
@@ -728,21 +754,18 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
                     </p>
                   </div>
 
-                  {/* One independent customer-tier price */}
+                  {/* One independent customer-tier price, for any combination of tiers */}
                   <div>
-                    <Label className="text-[11px] text-muted-foreground">Special price for a customer tier</Label>
-                    <div className="flex gap-2 mt-0.5">
-                      <Select value={tierPrice.tier || "none"}
-                        onValueChange={v => { setTierPrice(p => ({ ...p, tier: v === "none" ? "" : (v as CustomerTier) })); setError(""); }}>
-                        <SelectTrigger className="h-8 text-xs flex-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No tier price</SelectItem>
-                          <SelectItem value="silver">Silver and above</SelectItem>
-                          <SelectItem value="gold">Gold and above</SelectItem>
-                          <SelectItem value="platinum">Platinum only</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {tierPrice.tier && (
+                    <Label className="text-[11px] text-muted-foreground">Special price for customer tier(s)</Label>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <TierMultiSelect selected={tierPrice.tiers} onToggle={tier => {
+                        setTierPrice(p => ({
+                          ...p,
+                          tiers: p.tiers.includes(tier) ? p.tiers.filter(t => t !== tier) : [...p.tiers, tier],
+                        }));
+                        setError("");
+                      }} />
+                      {tierPrice.tiers.length > 0 && (
                         <div className="flex items-center gap-1 shrink-0">
                           <span className="text-[10px] text-muted-foreground">SAR</span>
                           <Input type="number" step="0.01" min={0} className="h-8 w-24 text-xs"
@@ -752,8 +775,8 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
                       )}
                     </div>
                     <p className="text-[10px] text-muted-foreground mt-1">
-                      A separate, independent price for that tier and above. Never applies to a walk-in with
-                      no customer attached.
+                      Pick any combination — e.g. Silver + Platinum but not Gold. One shared price for the
+                      tiers picked. Never applies to a walk-in with no customer attached.
                     </p>
                   </div>
 
@@ -828,15 +851,32 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   });
 
   // Existing extra prices for this product (FRD §12), managed inline here so the edit form shows
-  // the same pricing options as add. Each rule is one independent price for one condition.
+  // the same pricing options as add. Branch rows stay one-independent-row-per-branch (edit/delete
+  // only — branch prices are set when the product is added, not offered here). Tier rows are
+  // unified into one group (tierForm below) matching how Add Product creates them: one shared
+  // price/schedule for however many tiers are picked, never a separate price per tier.
   const [rules, setRules] = useState<ProductPriceList[]>([]);
-  // Editing a product only offers a customer-tier price (+ optional schedule) — branch prices are
-  // set when the product is added, so they aren't offered here.
-  const [newRule, setNewRule] = useState({ tier: "" as "" | CustomerTier, price: "", from: "", to: "" });
   const [ruleBusy, setRuleBusy] = useState(false);
+  // Editing an existing BRANCH rule in place (price/schedule only). Tier rules don't use this —
+  // see tierForm/toggleTier/saveTierGroup instead.
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [editRule, setEditRule] = useState({ price: "", from: "", to: "" });
+  // The one customer-tier price group for this product: whichever tiers already have a saved rule
+  // (all sharing the same price/schedule), re-derived from `rules` every time it (re)loads.
+  const [tierForm, setTierForm] = useState({ tiers: [] as CustomerTier[], price: "", from: "", to: "" });
 
   const loadRules = (productId: string) =>
-    api.getPriceLists({ productId }).then(setRules).catch(() => setRules([]));
+    api.getPriceLists({ productId }).then(list => {
+      setRules(list);
+      const tierRules = list.filter(r => !r.branchId && r.minCustomerTier);
+      const first = tierRules[0];
+      setTierForm({
+        tiers: tierRules.map(r => r.minCustomerTier as CustomerTier),
+        price: first ? String(first.price) : "",
+        from: first?.effectiveFrom ? first.effectiveFrom.slice(0, 10) : "",
+        to: first?.effectiveTo ? first.effectiveTo.slice(0, 10) : "",
+      });
+    }).catch(() => setRules([]));
 
   useEffect(() => {
     if (!item?.product) return;
@@ -861,7 +901,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
       status: p.status ?? "active",
       weightBased: p.weightBased ?? false,
     });
-    setNewRule({ tier: "", price: "", from: "", to: "" });
+    setEditingRuleId(null);
     setError("");
     loadRules(p.id);
   }, [item]);
@@ -915,26 +955,96 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     }
   };
 
-  const addRule = async () => {
+  // Clicking a tier chip adds or removes just that tier's row — a checkbox, not an independent
+  // "add" action, so the same tier can never end up with two rows (the duplicate-price bug this
+  // replaces). Adding uses whatever price/schedule is currently in tierForm, which is exactly the
+  // shared price every other picked tier already has.
+  const toggleTier = async (tier: CustomerTier) => {
     if (!item?.product?.id) return;
-    if (!newRule.tier) return setError("Pick a customer tier for the new price.");
-    if (newRule.price.trim() === "" || Number(newRule.price) < 0) return setError("Enter a valid price.");
-    if (newRule.from && newRule.to && newRule.to <= newRule.from) return setError("Schedule: 'until' must be after 'from'.");
+    const existing = rules.find(r => !r.branchId && r.minCustomerTier === tier);
+    if (!existing && (tierForm.price.trim() === "" || Number(tierForm.price) < 0)) {
+      return setError("Enter a valid price before picking a tier.");
+    }
+    if (!existing && tierForm.from && tierForm.to && tierForm.to <= tierForm.from) {
+      return setError("Schedule: 'until' must be after 'from'.");
+    }
     setRuleBusy(true); setError("");
     try {
-      await api.createPriceList({
-        productId: item.product.id,
-        price: Number(newRule.price),
-        priceType: "standard", unitType: "unit",
-        // Editing only adds a customer-tier price (never a branch one) — branch prices are set on
-        // add. Tenant-wide (branchId omitted), so the tier price applies wherever the product sells.
-        minCustomerTier: newRule.tier,
-        effectiveFrom: newRule.from ? new Date(newRule.from).toISOString() : undefined,
-        effectiveTo: newRule.to ? new Date(newRule.to).toISOString() : undefined,
-      });
-      setNewRule({ tier: "", price: "", from: "", to: "" });
+      if (existing) {
+        await api.deletePriceList(existing.id);
+      } else {
+        await api.createPriceList({
+          productId: item.product.id,
+          price: Number(tierForm.price),
+          priceType: "standard", unitType: "unit",
+          minCustomerTier: tier,
+          effectiveFrom: tierForm.from ? new Date(tierForm.from).toISOString() : undefined,
+          effectiveTo: tierForm.to ? new Date(tierForm.to).toISOString() : undefined,
+        });
+      }
       await loadRules(item.product.id);
-    } catch (e) { setError(e instanceof Error ? e.message : "Failed to add the price."); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to update the tier price."); }
+    finally { setRuleBusy(false); }
+  };
+
+  // Pushes the current shared price/schedule to every tier already picked — "editing the price
+  // applies to all selected tiers," never one at a time.
+  const saveTierGroup = async () => {
+    if (!item?.product?.id || tierForm.tiers.length === 0) return;
+    if (tierForm.price.trim() === "" || Number(tierForm.price) < 0) return setError("Enter a valid price.");
+    if (tierForm.from && tierForm.to && tierForm.to <= tierForm.from) return setError("Schedule: 'until' must be after 'from'.");
+    setRuleBusy(true); setError("");
+    try {
+      const from = tierForm.from ? new Date(tierForm.from).toISOString() : undefined;
+      const to = tierForm.to ? new Date(tierForm.to).toISOString() : undefined;
+      const tierRules = rules.filter(r => !r.branchId && r.minCustomerTier);
+      await Promise.all(tierRules.map(r => api.updatePriceList(r.id, {
+        productId: r.productId, branchId: null, priceType: r.priceType,
+        price: Number(tierForm.price), minCustomerTier: r.minCustomerTier,
+        unitType: r.unitType, packSize: r.packSize, packBarcode: r.packBarcode, label: r.label,
+        effectiveFrom: from, effectiveTo: to,
+      })));
+      await loadRules(item.product.id);
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to update the price."); }
+    finally { setRuleBusy(false); }
+  };
+
+  const startEditRule = (r: ProductPriceList) => {
+    setEditingRuleId(r.id);
+    setEditRule({
+      price: String(r.price),
+      from: r.effectiveFrom ? r.effectiveFrom.slice(0, 10) : "",
+      to: r.effectiveTo ? r.effectiveTo.slice(0, 10) : "",
+    });
+    setError("");
+  };
+
+  const cancelEditRule = () => { setEditingRuleId(null); setError(""); };
+
+  const saveEditRule = async () => {
+    if (!editingRuleId) return;
+    const rule = rules.find(r => r.id === editingRuleId);
+    if (!rule) return;
+    if (editRule.price.trim() === "" || Number(editRule.price) < 0) return setError("Enter a valid price.");
+    if (editRule.from && editRule.to && editRule.to <= editRule.from) return setError("Schedule: 'until' must be after 'from'.");
+    setRuleBusy(true); setError("");
+    try {
+      await api.updatePriceList(editingRuleId, {
+        productId: rule.productId,
+        branchId: rule.branchId,
+        priceType: rule.priceType,
+        price: Number(editRule.price),
+        minCustomerTier: rule.minCustomerTier,
+        unitType: rule.unitType,
+        packSize: rule.packSize,
+        packBarcode: rule.packBarcode,
+        label: rule.label,
+        effectiveFrom: editRule.from ? new Date(editRule.from).toISOString() : undefined,
+        effectiveTo: editRule.to ? new Date(editRule.to).toISOString() : undefined,
+      });
+      setEditingRuleId(null);
+      await loadRules(item!.product!.id);
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to save the price."); }
     finally { setRuleBusy(false); }
   };
 
@@ -948,6 +1058,9 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
+
+  // Branch-scoped rows keep their own per-row edit/delete list — tier rows are unified below.
+  const branchRules = rules.filter(r => r.branchId);
 
   return (
     <Dialog open={!!item} onOpenChange={v => !v && onClose()}>
@@ -1017,31 +1130,62 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
             </FieldRow>
           </div>
 
-          {/* Extra prices (FRD §12). Existing branch/tier rules are listed and can be removed here;
-              adding a new one from the edit form is customer-tier only (branch prices are set when
-              the product is added). Selling Price above is the default everywhere. */}
+          {/* Extra prices (FRD §12). Branch rows are edit/delete only — branch prices are set when
+              the product is added, not offered here. Tier rows are one unified group, matching Add
+              Product: whichever tiers are picked share one price/schedule. */}
           <div className="col-span-2 border-t border-border/60 pt-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mb-2">
               <Tag className="h-3.5 w-3.5" /> Customer-tier &amp; scheduled prices
             </p>
 
-            {rules.length > 0 && (
-              <div className="rounded-lg border border-border/60 divide-y divide-border/40 mb-2">
-                {rules.map(r => {
-                  const scope = r.branchId
-                    ? (branches.find(b => b.id === r.branchId)?.name ?? "Branch")
-                    : r.minCustomerTier
-                      ? `${r.minCustomerTier}+ customers`
-                      : "All customers";
+            {branchRules.length > 0 && (
+              <div className="rounded-lg border border-border/60 divide-y divide-border/40 mb-3">
+                {branchRules.map(r => {
+                  const scope = branches.find(b => b.id === r.branchId)?.name ?? "Branch";
                   const when = r.effectiveTo
                     ? `until ${new Date(r.effectiveTo).toISOString().slice(0, 10)}`
                     : r.effectiveFrom && new Date(r.effectiveFrom) > new Date()
                       ? `from ${new Date(r.effectiveFrom).toISOString().slice(0, 10)}`
                       : "";
+
+                  if (r.id === editingRuleId) {
+                    return (
+                      <div key={r.id} className="px-2.5 py-2 bg-muted/30 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium flex-1 truncate">{scope}</span>
+                          <span className="text-[10px] text-muted-foreground">SAR</span>
+                          <Input type="number" step="0.01" min={0} className="h-7 w-20 text-xs"
+                            value={editRule.price} onChange={e => setEditRule(p => ({ ...p, price: e.target.value }))} />
+                        </div>
+                        <div className="rounded-md border border-border/50 bg-background p-1.5">
+                          <Label className="text-[10px] text-muted-foreground">Schedule (optional)</Label>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Input type="date" className="h-7 text-xs flex-1" value={editRule.from}
+                              onChange={e => setEditRule(p => ({ ...p, from: e.target.value }))} title="Valid from" />
+                            <span className="text-[10px] text-muted-foreground">→</span>
+                            <Input type="date" className="h-7 text-xs flex-1" value={editRule.to}
+                              onChange={e => setEditRule(p => ({ ...p, to: e.target.value }))} title="Until" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 justify-end">
+                          <Button type="button" variant="ghost" size="sm" className="h-7" disabled={ruleBusy} onClick={cancelEditRule}>
+                            Cancel
+                          </Button>
+                          <Button type="button" size="sm" className="h-7" disabled={ruleBusy} onClick={saveEditRule}>
+                            Save
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
                     <div key={r.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
                       <span className="flex-1 truncate">{scope}{when && <span className="text-muted-foreground"> · {when}</span>}</span>
                       <span className="font-semibold tabular-nums">SAR {r.price.toFixed(2)}</span>
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6"
+                        disabled={ruleBusy} onClick={() => startEditRule(r)} title="Edit this price">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
                       <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive"
                         disabled={ruleBusy} onClick={() => deleteRule(r.id)} title="Remove this price">
                         <Trash2 className="h-3.5 w-3.5" />
@@ -1052,35 +1196,40 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
               </div>
             )}
 
-            {/* Add a customer-tier price (+ optional schedule). Branch is intentionally not offered. */}
-            <div className="rounded-lg border border-dashed border-border/60 p-2 space-y-2">
-              <div className="flex gap-2">
-                <Select value={newRule.tier || "none"} onValueChange={v => setNewRule(p => ({ ...p, tier: v === "none" ? "" : (v as CustomerTier) }))}>
-                  <SelectTrigger className="h-8 text-xs flex-1"><SelectValue placeholder="Pick tier" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Pick customer tier…</SelectItem>
-                    <SelectItem value="silver">Silver and above</SelectItem>
-                    <SelectItem value="gold">Gold and above</SelectItem>
-                    <SelectItem value="platinum">Platinum only</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-[10px] text-muted-foreground">SAR</span>
-                  <Input type="number" step="0.01" min={0} className="h-8 w-20 text-xs" placeholder="0.00"
-                    value={newRule.price} onChange={e => setNewRule(p => ({ ...p, price: e.target.value }))} />
+            {/* One unified customer-tier price group. Click a tier to add/remove it (a checkbox, not
+                a separate "add" step) — every picked tier shares this one price and schedule. */}
+            <div className="rounded-lg border border-dashed border-border/60 p-2.5 space-y-2.5">
+              <div>
+                <Label className="text-[11px] text-muted-foreground">Special price for customer tier(s)</Label>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <TierMultiSelect selected={tierForm.tiers} onToggle={toggleTier} />
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-[10px] text-muted-foreground">SAR</span>
+                    <Input type="number" step="0.01" min={0} className="h-8 w-20 text-xs" placeholder="0.00"
+                      value={tierForm.price} onChange={e => { setTierForm(p => ({ ...p, price: e.target.value })); setError(""); }} />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Click a tier to add or remove it. One shared price for every tier picked — change it
+                  (then Save) to update all of them at once.
+                </p>
+              </div>
+
+              <div className="rounded-md border border-border/50 bg-muted/20 p-2">
+                <Label className="text-[11px] text-muted-foreground">Schedule (optional)</Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <Input type="date" className="h-7 text-xs flex-1" value={tierForm.from}
+                    onChange={e => setTierForm(p => ({ ...p, from: e.target.value }))} title="Valid from" />
+                  <span className="text-[10px] text-muted-foreground">→</span>
+                  <Input type="date" className="h-7 text-xs flex-1" value={tierForm.to}
+                    onChange={e => setTierForm(p => ({ ...p, to: e.target.value }))} title="Until" />
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Input type="date" className="h-7 text-xs flex-1" value={newRule.from}
-                  onChange={e => setNewRule(p => ({ ...p, from: e.target.value }))} title="Valid from (optional)" />
-                <span className="text-[10px] text-muted-foreground">→</span>
-                <Input type="date" className="h-7 text-xs flex-1" value={newRule.to}
-                  onChange={e => setNewRule(p => ({ ...p, to: e.target.value }))} title="Until (optional)" />
-                <Button type="button" size="sm" variant="outline" className="h-7 gap-1 shrink-0"
-                  disabled={ruleBusy} onClick={addRule}>
-                  <Plus className="h-3 w-3" /> Add
-                </Button>
-              </div>
+
+              <Button type="button" size="sm" variant="outline" className="w-full gap-1"
+                disabled={ruleBusy || tierForm.tiers.length === 0} onClick={saveTierGroup}>
+                Save price &amp; schedule
+              </Button>
             </div>
           </div>
 

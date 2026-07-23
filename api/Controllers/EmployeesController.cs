@@ -584,6 +584,20 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         return Ok(linkable);
     }
 
+    // Mirror of GetLinkableUsers, for the Add User form's Employee dropdown (Users are now
+    // created FROM an employee, not linked to one after the fact) — active employees who don't
+    // already have a login account.
+    [HttpGet("unlinked")]
+    public async Task<IActionResult> GetUnlinkedEmployees()
+    {
+        var employees = await db.Employees
+            .Where(e => e.UserId == null && e.EmploymentStatus == "active")
+            .OrderBy(e => e.FullName)
+            .Select(e => new { e.Id, e.FullName, e.Email, e.EmployeeCode, e.BranchId, e.RoleId })
+            .ToListAsync();
+        return Ok(employees);
+    }
+
     // Self-service payroll (Mod #3) — any authenticated user with a linked Employee record can
     // see their OWN salary components + payslip history, regardless of "Payroll" module
     // permission (that permission gates seeing OTHER people's amounts, not your own).

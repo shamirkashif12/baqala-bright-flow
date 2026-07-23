@@ -168,6 +168,16 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         if (req.RoleId == Guid.Empty || !await db.Roles.AnyAsync(r => r.Id == req.RoleId))
             return BadRequest(new { message = "A valid role must be selected." });
 
+        // A login must now originate from an existing HRM employee (no more standalone
+        // accounts) — the dropdown on the Add User form already only offers employees with no
+        // UserId, but that's a UX filter, not enforcement; re-check here to close the race where
+        // two admins try to link the same employee at once.
+        var employee = await db.Employees.FirstOrDefaultAsync(e => e.Id == req.EmployeeId);
+        if (employee is null)
+            return BadRequest(new { message = "The selected employee could not be found." });
+        if (employee.UserId is not null)
+            return Conflict(new { message = "This employee already has a linked login account." });
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -184,6 +194,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
             UpdatedAt = DateTime.UtcNow
         };
         db.Users.Add(user);
+        employee.UserId = user.Id;
         await db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = user.Id }, new { user.Id, user.Email, user.FullName });
     }
@@ -269,7 +280,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
 
 public record CreateUserRequest(
     string Email, string Username, string Password, string? Pin,
-    string FullName, string? FullNameAr, Guid RoleId, Guid? BranchId);
+    string FullName, string? FullNameAr, Guid RoleId, Guid? BranchId, Guid EmployeeId);
 
 public record UpdateUserRequest(
     string? FullName, string? FullNameAr, Guid? RoleId,

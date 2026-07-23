@@ -124,7 +124,7 @@ function EmployeeFormFields({
     }
   };
 
-  const missing = !form.fullName || !form.phone || !form.nationalId || !form.branchId || !form.hireDate || !form.currentAddress;
+  const missing = !form.fullName || !form.email || !form.phone || !form.nationalId || !form.branchId || !form.hireDate || !form.currentAddress;
 
   return (
     <div className="mt-4 space-y-5">
@@ -146,7 +146,7 @@ function EmployeeFormFields({
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Basic Information</p>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2"><FieldRow label="Full Name" required><Input value={form.fullName} onChange={set("fullName")} className="h-9" /></FieldRow></div>
-          <FieldRow label="Email"><Input type="email" value={form.email} onChange={set("email")} className="h-9" /></FieldRow>
+          <FieldRow label="Email" required><Input type="email" value={form.email} onChange={set("email")} className="h-9" /></FieldRow>
           <FieldRow label="Phone Number" required><Input value={form.phone} onChange={set("phone")} className="h-9" placeholder="+966 5XX XXX XXX" /></FieldRow>
           <FieldRow label="Emergency Contact"><Input value={form.emergencyContact} onChange={set("emergencyContact")} className="h-9" /></FieldRow>
           <FieldRow label="National ID / Iqama" required><Input value={form.nationalId} onChange={set("nationalId")} className="h-9" /></FieldRow>
@@ -1243,13 +1243,19 @@ function EmployeesTab() {
         contractOpenEnded: form.contractOpenEnded,
       };
       if (activeEmployee) {
-        const updated = await api.updateEmployee(activeEmployee.id, payload);
-        setActiveEmployee(updated);
+        await api.updateEmployee(activeEmployee.id, payload);
         toast.success("Employee updated.");
+        // Editing closes the dialog (matches Add User) — unlike a fresh create below, there's no
+        // newly-unlocked tab this needs to stay open for; everything was already reachable.
+        setDrawerOpen(false);
+        setActiveEmployee(null);
+        setActiveTab("details");
       } else {
         const created = await api.createEmployee(payload);
         setActiveEmployee(created);
         toast.success("Employee created — Documents, Salary, Leaves and Shifts are now available above.");
+        // Stays open on create: Documents/Salary/Leaves/Shifts tabs just unlocked above and are
+        // meant to be filled in immediately (FRD 6.4's tabbed Add Employee flow).
       }
       load();
     } catch (e: any) {
