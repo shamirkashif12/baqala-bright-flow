@@ -11,7 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
 import { Boxes, PackageCheck, CalendarClock, Download, X, Loader2, Eye, Building2, Warehouse as WarehouseIcon, ArrowDownUp, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { api, type InventoryBatch, type Branch, type Warehouse, type StockMovement, type InventoryAdjustment } from "@/lib/api";
+import { api, excludeDisabledBranches, type InventoryBatch, type Branch, type Warehouse, type StockMovement, type InventoryAdjustment } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge } from "@/components/batch-status-badge";
@@ -523,7 +523,7 @@ function BatchTracking() {
   const [detailBatch, setDetailBatch] = useState<InventoryBatch | null>(null);
 
   useEffect(() => {
-    api.getBranches().then(setBranches).catch(() => {});
+    api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
     api.getWarehouses().then(setWarehouses).catch(() => {});
   }, []);
 

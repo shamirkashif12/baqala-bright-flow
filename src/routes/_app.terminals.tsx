@@ -12,7 +12,7 @@ import { SearchableMultiSelect } from "@/components/report-filters/searchable-mu
 import { StatusBadge } from "@/components/module-placeholder";
 import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut, KeyRound, Copy, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Terminal, type Branch, type User, type CashierShift } from "@/lib/api";
+import { api, excludeDisabledBranches, type Terminal, type Branch, type User, type CashierShift } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 
@@ -268,7 +268,7 @@ function Terminals() {
       // Cashiers only ever see their own shifts — feeds view-sheet sync log
       api.getShifts({ cashierId: user?.role === "cashier" ? user.id : undefined }).catch(() => []),
     ])
-      .then(([t, b, u, s]) => { setTerminals(t); setBranches(b); setUsers(u); setAllShifts(s); })
+      .then(([t, b, u, s]) => { setTerminals(t); setBranches(excludeDisabledBranches(b)); setUsers(u); setAllShifts(s); })
       .finally(() => setLoading(false));
   }, [br, st, user]);
   useEffect(() => { load(); }, [load]);

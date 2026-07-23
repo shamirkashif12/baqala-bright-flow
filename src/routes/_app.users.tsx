@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Mail, Phone, Pencil, ShieldCheck, Power, Plus, Search, Calendar, X } from "lucide-react";
 import { toast } from "sonner";
-import { api, type User, type Branch, type Role } from "@/lib/api";
+import { api, excludeDisabledBranches, type User, type Branch, type Role } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { canManageUser } from "@/lib/role-hierarchy";
@@ -58,7 +58,7 @@ function RegisteredUsers() {
       api.getBranches().catch(() => []),
       api.getRoles().catch(() => []),
     ])
-      .then(([u, b, r]) => { setUsers(u); setBranches(b); setRoles(r); })
+      .then(([u, b, r]) => { setUsers(u); setBranches(excludeDisabledBranches(b)); setRoles(r); })
       .finally(() => setLoading(false));
   };
   useEffect(load, []);

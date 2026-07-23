@@ -239,7 +239,7 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
             branchId = callerBranchId;
 
-        var query = db.AuditLogs.Include(a => a.User).Include(a => a.Employee).AsQueryable();
+        var query = db.AuditLogs.Include(a => a.User).Include(a => a.Employee).Include(a => a.Branch).Include(a => a.Terminal).AsQueryable();
         if (branchId.HasValue) query = query.Where(a => a.BranchId == branchId);
         if (!await IsHrManagerTierAsync())
         {
@@ -255,13 +255,81 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         }
         else if (employeeId.HasValue) query = query.Where(a => a.EmployeeId == employeeId);
         if (!string.IsNullOrEmpty(module)) query = query.Where(a => a.Module == module);
-        if (!string.IsNullOrEmpty(activityType)) query = query.Where(a => a.Action.Contains(activityType));
         if (performedBy.HasValue) query = query.Where(a => a.UserId == performedBy);
         if (!string.IsNullOrEmpty(referenceId) && Guid.TryParse(referenceId, out var refGuid)) query = query.Where(a => a.EntityId == refGuid);
         if (dateFrom.HasValue) query = query.Where(a => a.CreatedAt >= dateFrom);
         if (dateTo.HasValue) query = query.Where(a => a.CreatedAt <= dateTo);
 
-        return await query.OrderByDescending(a => a.CreatedAt).Take(1000).ToListAsync();
+        var list = await query.OrderByDescending(a => a.CreatedAt).Take(1000).ToListAsync();
+        // Activity Type is a bucket computed from the free-form Action string (this report logs
+        // every action, unlike the curated Employee Audit Center), so it can't be pushed into SQL —
+        // filter after materializing, same as the ipOrDevice filter below in the callers.
+        if (!string.IsNullOrEmpty(activityType)) list = list.Where(a => ActivityTypeOf(a.Action) == activityType).ToList();
+        return list;
+    }
+
+    // BRD 16.2's fixed Activity Type set (Created/Updated/Deleted/Approved/Rejected/Exported/
+    // Login/Logout/Correction/etc.) — derived from the raw Action string since actions are logged
+    // as free-form verbs ("create_stock_transfer", "Leave approved") rather than pre-categorized.
+    private static string ActivityTypeOf(string action)
+    {
+        var a = action.ToLowerInvariant();
+        if (a.Contains("denied")) return "Access Denied";
+        if (a.Contains("login")) return "Login";
+        if (a.Contains("logout")) return "Logout";
+        if (a.Contains("export")) return "Exported";
+        if (a.Contains("correct")) return "Correction";
+        if (a.Contains("approve")) return "Approved";
+        if (a.Contains("reject")) return "Rejected";
+        if (a.Contains("delete") || a.Contains("void") || a.Contains("cancel")) return "Deleted";
+        if (a.Contains("create") || a.Contains("receive") || a.Contains("add")) return "Created";
+        if (a.Contains("update") || a.Contains("edit")) return "Updated";
+        return "Other";
+    }
+
+    // Turns a JSON snapshot like {"TransferNumber":"TRF-2","Status":"draft"} into a plain-text
+    // summary — "Transfer Number: TRF-2, Status: draft" — instead of the raw JSON the report used
+    // to dump straight into Description/Old Value/New Value. Mirrors
+    // ReportsController.HumanizeJsonSnapshot (kept local rather than shared — a small,
+    // self-contained formatter, and the two controllers have no other dependency on each other).
+    // Falls back to the raw string if it isn't a JSON object (already human text, e.g. "***masked***").
+    private static string? HumanizeJsonSnapshot(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return json;
+            var parts = new List<string>();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Name.Equals("Items", StringComparison.OrdinalIgnoreCase)) continue; // line items — too verbose for a one-line summary
+                var value = prop.Value.ValueKind switch
+                {
+                    System.Text.Json.JsonValueKind.Array => $"{prop.Value.GetArrayLength()} item(s)",
+                    System.Text.Json.JsonValueKind.Null => null,
+                    System.Text.Json.JsonValueKind.Object => null,
+                    System.Text.Json.JsonValueKind.True => "Yes",
+                    System.Text.Json.JsonValueKind.False => "No",
+                    _ => prop.Value.ToString(),
+                };
+                if (value != null) parts.Add($"{HumanizePropertyName(prop.Name)}: {value}");
+            }
+            return parts.Count > 0 ? string.Join(", ", parts) : null;
+        }
+        catch { return json; }
+    }
+
+    // "TransferNumber" -> "Transfer Number", "discountAmount" -> "Discount Amount"
+    private static string HumanizePropertyName(string name)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(name[i]) && !char.IsUpper(name[i - 1])) sb.Append(' ');
+            sb.Append(i == 0 ? char.ToUpperInvariant(name[i]) : name[i]);
+        }
+        return sb.ToString();
     }
 
     // Gated on "Audit Logs" rather than "Reports" like its sibling reports above — FRD 3/16 scope
@@ -276,13 +344,20 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         [FromQuery] string? ipOrDevice, [FromQuery] int? page, [FromQuery] int? pageSize)
     {
         var rows = await BuildActivityReportAsync(branchId, employeeId, module, activityType, performedBy, referenceId, dateFrom, dateTo);
-        if (!string.IsNullOrEmpty(ipOrDevice)) rows = rows.Where(a => a.IpAddress != null && a.IpAddress.Contains(ipOrDevice)).ToList();
+        if (!string.IsNullOrEmpty(ipOrDevice))
+            rows = rows.Where(a =>
+                (a.IpAddress != null && a.IpAddress.Contains(ipOrDevice, StringComparison.OrdinalIgnoreCase)) ||
+                (a.Terminal?.Name != null && a.Terminal.Name.Contains(ipOrDevice, StringComparison.OrdinalIgnoreCase))).ToList();
 
         var projected = rows.Select(a => new
         {
-            a.Id, a.CreatedAt, a.Action, a.EntityType, a.EntityId, a.Module,
+            a.Id, a.CreatedAt, a.Action, ActivityType = ActivityTypeOf(a.Action), a.EntityType, a.EntityId, a.Module,
             Employee = a.Employee == null ? null : new { a.Employee.Id, a.Employee.FullName, a.Employee.EmployeeCode },
             PerformedBy = a.User == null ? null : new { a.User.Id, a.User.FullName },
+            a.BranchId, BranchName = a.Branch?.Name, DeviceName = a.Terminal?.Name,
+            Description = HumanizeJsonSnapshot(a.NewValues) ?? a.Notes ?? a.Action,
+            OldValueSummary = HumanizeJsonSnapshot(a.OldValues),
+            NewValueSummary = HumanizeJsonSnapshot(a.NewValues) ?? a.Notes,
             a.OldValues, a.NewValues, a.Notes, a.IpAddress, a.Severity,
         }).ToList();
 
@@ -300,11 +375,16 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         [FromQuery] Guid? exportedBy, [FromQuery] string? format = "excel")
     {
         var rows = await BuildActivityReportAsync(branchId, employeeId, module, activityType, performedBy, referenceId, dateFrom, dateTo);
-        if (!string.IsNullOrEmpty(ipOrDevice)) rows = rows.Where(a => a.IpAddress != null && a.IpAddress.Contains(ipOrDevice)).ToList();
-        var headers = new[] { "Date & Time", "Employee", "Module", "Activity", "Description", "Old Value", "New Value", "Performed By", "IP Address", "Reference ID" };
+        if (!string.IsNullOrEmpty(ipOrDevice))
+            rows = rows.Where(a =>
+                (a.IpAddress != null && a.IpAddress.Contains(ipOrDevice, StringComparison.OrdinalIgnoreCase)) ||
+                (a.Terminal?.Name != null && a.Terminal.Name.Contains(ipOrDevice, StringComparison.OrdinalIgnoreCase))).ToList();
+        var headers = new[] { "Date & Time", "Employee", "Employee ID", "Branch", "Module", "Activity Type", "Description", "Old Value", "New Value", "Performed By", "Device", "IP Address", "Reference ID" };
         var exportRows = rows.Select(a => new object?[]
         {
-            a.CreatedAt, a.Employee?.FullName, a.Module, a.Action, a.NewValues ?? a.Notes, a.OldValues, a.NewValues, a.User?.FullName, a.IpAddress, a.EntityId,
+            a.CreatedAt, a.Employee?.FullName, a.Employee?.EmployeeCode, a.Branch?.Name, a.Module, ActivityTypeOf(a.Action),
+            HumanizeJsonSnapshot(a.NewValues) ?? a.Notes ?? a.Action, HumanizeJsonSnapshot(a.OldValues), HumanizeJsonSnapshot(a.NewValues) ?? a.Notes,
+            a.User?.FullName, a.Terminal?.Name, a.IpAddress, a.EntityId,
         }).ToList();
 
         await audit.LogAsync(action: "Report exported", entityType: "Report", userId: exportedBy, branchId: branchId,

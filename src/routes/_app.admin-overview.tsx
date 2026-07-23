@@ -10,7 +10,7 @@ import {
   Boxes, TrendingDown, CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Branch, type Warehouse as WarehouseType, type InventoryStock, type Category } from "@/lib/api";
+import { api, excludeDisabledBranches, type Branch, type Warehouse as WarehouseType, type InventoryStock, type Category } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { RoleGate } from "@/components/role-gate";
 
@@ -88,7 +88,7 @@ function AdminOverview() {
       api.getBatches(),
     ])
       .then(([b, w, s, c, batches]) => {
-        setBranches(b);
+        setBranches(excludeDisabledBranches(b));
         setWarehouses(w);
         const expiryMap = new Map<string, string>();
         for (const batch of batches) {

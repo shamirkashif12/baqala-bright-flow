@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetFooter } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Workflow, ShieldCheck, Percent, BadgeDollarSign, Plus, Power, Eye, Pencil, Trash2, Loader2 } from "lucide-react";
-import { api, type ComplianceRule, type Branch } from "@/lib/api";
+import { api, excludeDisabledBranches, type ComplianceRule, type Branch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 
@@ -83,7 +83,7 @@ function Rules() {
       api.getBranches(),
     ]).then(([r, b]) => {
       if (r.status === "fulfilled") setRules(r.value);
-      if (b.status === "fulfilled") setBranches(b.value);
+      if (b.status === "fulfilled") setBranches(excludeDisabledBranches(b.value));
       setLoadError([r, b].some((res) => res.status === "rejected"));
       setLoading(false);
     });

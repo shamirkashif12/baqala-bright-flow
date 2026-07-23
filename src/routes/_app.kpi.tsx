@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
 import { Gauge, ScanBarcode, Timer, ShoppingBag, TrendingUp } from "lucide-react";
-import { api, type CashierShift, type Terminal, type Branch } from "@/lib/api";
+import { api, excludeDisabledBranches, type CashierShift, type Terminal, type Branch } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/kpi")({ component: KPI });
@@ -38,7 +38,7 @@ function KPI() {
     ]).then(([s, t, b]) => {
       if (s.status === "fulfilled") setShifts(s.value);
       if (t.status === "fulfilled") setTerminals(t.value);
-      if (b.status === "fulfilled") setBranches(b.value);
+      if (b.status === "fulfilled") setBranches(excludeDisabledBranches(b.value));
       setLoadError([s, t, b].some((r) => r.status === "rejected"));
       setLoading(false);
     });

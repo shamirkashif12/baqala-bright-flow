@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
@@ -13,7 +15,7 @@ import { api, type StockTransferReportRow, type ReportExportFormat, type Warehou
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { ArrowLeftRight, Boxes, CheckCircle, DollarSign } from "lucide-react";
+import { ArrowLeftRight, Boxes, CheckCircle, DollarSign, Eye } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/stock-transfer")({ component: StockTransferReport });
 
@@ -28,6 +30,81 @@ function todayStr() {
 
 const TRANSFER_TYPES = ["supplier_to_warehouse", "warehouse_to_branch", "branch_to_warehouse", "branch_to_branch", "warehouse_to_warehouse"];
 const STATUSES = ["draft", "pending_approval", "approved", "in_transit", "completed", "rejected", "cancelled"];
+
+// The API returns one row per product line; group by transfer so the main table shows one row
+// per transfer (with ordered/received totals) and the product/SKU/unit-cost breakdown moves into
+// the detail drawer behind the eye icon instead of cluttering the table with a row per SKU.
+interface StockTransferGroup {
+  transferNumber: string; transferType: string; sourceLocation: string; destinationLocation: string; status: string;
+  createdBy: string; approvedBy: string; receivedBy: string; createdAt: string; completedDate?: string;
+  orderedQuantity: number; receivedQuantity: number; totalCost: number;
+  items: StockTransferReportRow[];
+}
+function groupByTransfer(rows: StockTransferReportRow[]): StockTransferGroup[] {
+  const groups = new Map<string, StockTransferGroup>();
+  for (const r of rows) {
+    let g = groups.get(r.transferNumber);
+    if (!g) {
+      g = {
+        transferNumber: r.transferNumber, transferType: r.transferType, sourceLocation: r.sourceLocation,
+        destinationLocation: r.destinationLocation, status: r.status, createdBy: r.createdBy, approvedBy: r.approvedBy,
+        receivedBy: r.receivedBy, createdAt: r.createdAt, completedDate: r.completedDate,
+        orderedQuantity: 0, receivedQuantity: 0, totalCost: 0, items: [],
+      };
+      groups.set(r.transferNumber, g);
+    }
+    g.orderedQuantity += r.orderedQuantity;
+    g.receivedQuantity += r.receivedQuantity;
+    g.totalCost += r.totalCost;
+    g.items.push(r);
+  }
+  return [...groups.values()];
+}
+
+function StockTransferDetailDrawer({ group, onClose }: { group: StockTransferGroup | null; onClose: () => void }) {
+  return (
+    <Sheet open={!!group} onOpenChange={v => !v && onClose()}>
+      <SheetContent className="w-[560px] overflow-y-auto">
+        <SheetHeader className="pb-3">
+          <SheetTitle className="text-base">{group?.transferNumber}</SheetTitle>
+        </SheetHeader>
+        {group && (
+          <div className="mt-2 space-y-4 text-sm">
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div><span className="text-muted-foreground">Source</span><p className="font-medium">{group.sourceLocation}</p></div>
+              <div><span className="text-muted-foreground">Destination</span><p className="font-medium">{group.destinationLocation}</p></div>
+              <div><span className="text-muted-foreground">Created By</span><p className="font-medium">{group.createdBy}</p></div>
+              <div><span className="text-muted-foreground">Approved By</span><p className="font-medium">{group.approvedBy}</p></div>
+              <div><span className="text-muted-foreground">Status</span><p className="font-medium capitalize">{group.status.replace(/_/g, " ")}</p></div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Products ({group.items.length})</p>
+              <div className="space-y-1.5">
+                {group.items.map((it, idx) => (
+                  <div key={idx} className="rounded-xl border border-border/40 px-3 py-2.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{it.productName}</span>
+                      <span className="font-mono text-muted-foreground">{it.sku}</span>
+                    </div>
+                    <div className="flex items-center justify-between mt-1 text-muted-foreground">
+                      <span>Ordered {it.orderedQuantity} · Received {it.receivedQuantity}</span>
+                      <span>Unit <SARIcon />{fmtSAR(it.unitCost)}</span>
+                      <span className="font-semibold text-foreground">Line <SARIcon />{fmtSAR(it.totalCost)}</span>
+                    </div>
+                    {it.notes && <p className="mt-1 text-muted-foreground">{it.notes}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-between border-t border-border/40 pt-2 font-bold text-base">
+              <span>Total</span><span className="flex items-center gap-0.5"><SARIcon />{fmtSAR(group.totalCost)}</span>
+            </div>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
 
 function StockTransferReport() {
   const { user } = useAuth();
@@ -47,6 +124,7 @@ function StockTransferReport() {
   const [users, setUsers] = useState<User[]>([]);
   const [rows, setRows] = useState<StockTransferReportRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewTransfer, setViewTransfer] = useState<StockTransferGroup | null>(null);
 
   useEffect(() => { api.getWarehouses().then(setWarehouses).catch(() => {}); }, []);
   useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
@@ -84,7 +162,8 @@ function StockTransferReport() {
   };
 
   const totalCost = rows.reduce((s, r) => s + r.totalCost, 0);
-  const completedCount = rows.filter(r => r.status === "completed").length;
+  const groups = groupByTransfer(rows);
+  const completedCount = groups.filter(g => g.status === "completed").length;
 
   return (
     <PageShell title="Stock Transfer Report" subtitle="Full history of stock movement between warehouses and branches">
@@ -153,7 +232,7 @@ function StockTransferReport() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Transfer Lines" value={String(rows.length)} icon={ArrowLeftRight} accent="primary" />
+        <MetricCard label="Total Transfers" value={String(groups.length)} icon={ArrowLeftRight} accent="primary" />
         <MetricCard label="Completed" value={String(completedCount)} icon={CheckCircle} accent="success" />
         <MetricCard label="Distinct Products" value={String(new Set(rows.map(r => r.productName)).size)} icon={Boxes} />
         <MetricCard label="Total Cost Moved" value={<><SARIcon />{fmtSAR(totalCost)}</>} icon={DollarSign} accent="warning" />
@@ -165,26 +244,27 @@ function StockTransferReport() {
         <PaginatedDataTable
           columns={[
             { key: "transferNumber", label: "Transfer Number" },
-            { key: "transferType", label: "Type", className: "capitalize", render: (r: StockTransferReportRow) => r.transferType.replace(/_/g, " ") },
+            { key: "transferType", label: "Type", className: "capitalize", render: (g: StockTransferGroup) => g.transferType.replace(/_/g, " ") },
             { key: "sourceLocation", label: "Source" },
             { key: "destinationLocation", label: "Destination" },
-            { key: "status", label: "Status", className: "capitalize", render: (r: StockTransferReportRow) => r.status.replace(/_/g, " ") },
+            { key: "status", label: "Status", className: "capitalize", render: (g: StockTransferGroup) => g.status.replace(/_/g, " ") },
             { key: "createdBy", label: "Created By" },
             { key: "approvedBy", label: "Approved By" },
             { key: "receivedBy", label: "Received By" },
-            { key: "productName", label: "Product" },
-            { key: "sku", label: "SKU" },
-            { key: "quantity", label: "Quantity" },
-            { key: "unitCost", label: "Unit Cost", render: (r: StockTransferReportRow) => <><SARIcon />{fmtSAR(r.unitCost)}</> },
-            { key: "totalCost", label: "Total Cost", render: (r: StockTransferReportRow) => <span className="font-semibold"><SARIcon />{fmtSAR(r.totalCost)}</span> },
-            { key: "createdAt", label: "Created At", render: (r: StockTransferReportRow) => new Date(r.createdAt).toLocaleDateString("en-SA") },
-            { key: "completedDate", label: "Completed At", render: (r: StockTransferReportRow) => r.completedDate ? new Date(r.completedDate).toLocaleDateString("en-SA") : "—" },
-            { key: "notes", label: "Notes", className: "max-w-[200px] truncate", render: (r: StockTransferReportRow) => r.notes ?? "—" },
+            { key: "orderedQuantity", label: "Quantity Ordered" },
+            { key: "receivedQuantity", label: "Quantity Received" },
+            { key: "totalCost", label: "Total Cost", render: (g: StockTransferGroup) => <span className="font-semibold"><SARIcon />{fmtSAR(g.totalCost)}</span> },
+            { key: "createdAt", label: "Created At", render: (g: StockTransferGroup) => new Date(g.createdAt).toLocaleDateString("en-SA") },
+            { key: "completedDate", label: "Completed At", render: (g: StockTransferGroup) => g.completedDate ? new Date(g.completedDate).toLocaleDateString("en-SA") : "—" },
+            { key: "view", label: "", render: (g: StockTransferGroup) => (
+              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTransfer(g)}><Eye className="h-3.5 w-3.5" /></Button>
+            ) },
           ]}
-          rows={rows}
+          rows={groups}
           emptyMessage="No stock transfers match the current filters."
         />
       )}
+      <StockTransferDetailDrawer group={viewTransfer} onClose={() => setViewTransfer(null)} />
     </PageShell>
   );
 }

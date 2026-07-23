@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, type Branch } from "@/lib/api";
+import { api, excludeDisabledBranches, type Branch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 interface BranchContextValue {
@@ -24,11 +24,12 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     api
       .getBranches()
       .then((list) => {
+        const activeList = excludeDisabledBranches(list);
         // Non-admin users with an assigned branch only see their own branch
         const scopedList =
           user?.branchId && !canSwitchBranch
-            ? list.filter((b) => b.id === user.branchId)
-            : list;
+            ? activeList.filter((b) => b.id === user.branchId)
+            : activeList;
 
         setBranches(scopedList);
       })

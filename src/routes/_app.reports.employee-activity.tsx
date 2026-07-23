@@ -25,6 +25,8 @@ function todayStr() {
 }
 
 const MODULES = ["Employees", "HR Master Data", "HR Attendance", "HR Shifts", "Leave Management", "Payroll", "Authentication", "POS", "Returns"];
+// BRD 16.2 fixed Activity Type set — mirrors HrReportsController.ActivityTypeOf's buckets exactly.
+const ACTIVITY_TYPES = ["Created", "Updated", "Deleted", "Approved", "Rejected", "Exported", "Login", "Logout", "Correction", "Access Denied", "Other"];
 
 function severityTone(s: string) {
   if (s === "critical") return "bg-destructive/15 text-destructive";
@@ -49,7 +51,7 @@ function EmployeeActivityReport() {
   const [module, setModule] = useState("all");
   const [employeeId, setEmployeeId] = useState("all");
   const [performedBy, setPerformedBy] = useState("all");
-  const [search, setSearch] = useState("");
+  const [activityType, setActivityType] = useState("all");
   const [referenceId, setReferenceId] = useState("");
   const [ipOrDevice, setIpOrDevice] = useState("");
 
@@ -58,7 +60,7 @@ function EmployeeActivityReport() {
     module: module === "all" ? undefined : module,
     employeeId: employeeId === "all" ? undefined : employeeId,
     performedBy: performedBy === "all" ? undefined : performedBy,
-    activityType: search || undefined,
+    activityType: activityType === "all" ? undefined : activityType,
     referenceId: referenceId || undefined,
     ipOrDevice: ipOrDevice || undefined,
     dateFrom: dateFrom ? `${dateFrom}T00:00:00` : undefined,
@@ -69,7 +71,7 @@ function EmployeeActivityReport() {
     setLoading(true);
     api.getEmployeeActivityReport(filterParams).then(setRows).catch(() => {}).finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, module, employeeId, performedBy, search, referenceId, ipOrDevice, dateFrom, dateTo]);
+  }, [branchId, module, employeeId, performedBy, activityType, referenceId, ipOrDevice, dateFrom, dateTo]);
   useEffect(load, [load]);
   useEffect(() => {
     api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
@@ -88,11 +90,16 @@ function EmployeeActivityReport() {
   const columns: Column[] = [
     { key: "date", label: "Date & Time", render: r => new Date(r.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) },
     { key: "employee", label: "Employee", render: r => r.employee?.fullName ?? "—" },
+    { key: "employeeId", label: "Employee ID", render: r => r.employee?.employeeCode ?? "—" },
+    { key: "branch", label: "Branch", render: r => r.branchName ?? "—" },
     { key: "module", label: "Module", render: r => r.module ?? r.entityType ?? "—" },
-    { key: "action", label: "Activity", render: r => r.action },
-    { key: "description", label: "Description", className: "max-w-[220px] truncate", render: r => r.newValues ?? r.notes ?? "—" },
+    { key: "activityType", label: "Activity Type", render: r => <Badge variant="outline" className="text-[10px] border-0 bg-muted text-muted-foreground whitespace-nowrap">{r.activityType}</Badge> },
+    { key: "description", label: "Description", className: "max-w-[240px] whitespace-normal break-words text-xs", render: r => r.description ?? "—" },
+    { key: "oldValue", label: "Old Value", className: "max-w-[200px] whitespace-normal break-words text-xs", render: r => r.oldValueSummary ?? "—" },
+    { key: "newValue", label: "New Value", className: "max-w-[200px] whitespace-normal break-words text-xs", render: r => r.newValueSummary ?? "—" },
     { key: "performedBy", label: "Performed By", render: r => r.performedBy?.fullName ?? "—" },
-    { key: "ip", label: "IP Address", render: r => r.ipAddress ?? "—" },
+    { key: "device", label: "Device / IP Address", render: r => [r.deviceName, r.ipAddress].filter(Boolean).join(" / ") || "—" },
+    { key: "referenceId", label: "Reference ID", render: r => r.entityId ? `${r.entityId.slice(0, 8)}…` : "—" },
     { key: "severity", label: "Severity", render: r => <Badge variant="outline" className={`text-[10px] border-0 ${severityTone(r.severity)}`}>{r.severity}</Badge> },
   ];
 
@@ -132,7 +139,13 @@ function EmployeeActivityReport() {
               {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search activity…" className="h-9 w-48" />
+          <Select value={activityType} onValueChange={setActivityType}>
+            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Activity Types</SelectItem>
+              {ACTIVITY_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <Input value={referenceId} onChange={e => setReferenceId(e.target.value)} placeholder="Reference ID…" className="h-9 w-40" />
           <Input value={ipOrDevice} onChange={e => setIpOrDevice(e.target.value)} placeholder="IP / Device…" className="h-9 w-36" />
           <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>

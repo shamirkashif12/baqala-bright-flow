@@ -21,7 +21,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn, localDateStr, uuid, wholeUnitQuantityError } from "@/lib/utils";
 import {
-  api,
+  api, excludeDisabledBranches,
   type StockTransfer, type StockTransferItem, type PurchaseOrder,
   type Branch, type Warehouse as WarehouseType, type Supplier, type Product, type InventoryBatch, type User,
 } from "@/lib/api";
@@ -1881,7 +1881,7 @@ function StockTransfers() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    api.getBranches().then(setBranches).catch(() => {});
+    api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
     api.getWarehouses().then(setWarehouses).catch(() => {});
     api.getSuppliers().then(setSuppliers).catch(() => {});
     api.getProducts().then(setProducts).catch(() => {});

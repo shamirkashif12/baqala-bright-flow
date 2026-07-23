@@ -1,6 +1,6 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { Branch } from "@/lib/api";
+import { excludeDisabledBranches, type Branch } from "@/lib/api";
 
 interface BranchFilterProps {
   branches: Branch[];
@@ -21,7 +21,7 @@ export function BranchFilter({ branches, value, onChange, locked, allowAll, clas
       </SelectTrigger>
       <SelectContent>
         {allowAll && <SelectItem value="all">All Branches</SelectItem>}
-        {branches.map((b) => (
+        {excludeDisabledBranches(branches).map((b) => (
           <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
         ))}
       </SelectContent>

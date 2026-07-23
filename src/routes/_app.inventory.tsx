@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
-import { api, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList } from "@/lib/api";
+import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -1432,7 +1432,7 @@ function Inventory() {
       .then((results) => {
         const [s, c, b, w, sup, batches] = results;
         if (c.status === "fulfilled") setCategories(c.value);
-        if (b.status === "fulfilled") setBranches(b.value);
+        if (b.status === "fulfilled") setBranches(excludeDisabledBranches(b.value));
         if (w.status === "fulfilled") setWarehouses(w.value);
         if (sup.status === "fulfilled") setSuppliers(sup.value);
         if (batches.status === "fulfilled") {

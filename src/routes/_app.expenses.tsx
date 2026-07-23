@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/module-placeholder";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Plus, Receipt, Tags, CheckCircle, XCircle, X, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Expense, type ExpenseType, type Branch } from "@/lib/api";
+import { api, excludeDisabledBranches, type Expense, type ExpenseType, type Branch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
@@ -67,7 +67,7 @@ function EntriesTab() {
 
   useEffect(() => {
     api.getExpenseTypes().then(setExpenseTypes).catch(() => {});
-    if (!lockedBranchId) api.getBranches().then(setBranches).catch(() => {});
+    if (!lockedBranchId) api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
   }, [lockedBranchId]);
 
   const load = useCallback(() => {

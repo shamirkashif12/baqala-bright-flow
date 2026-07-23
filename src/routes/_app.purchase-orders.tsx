@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { api, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product, type SupplierCreditNote, type StockTransfer, type User } from "@/lib/api";
+import { api, excludeDisabledBranches, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product, type SupplierCreditNote, type StockTransfer, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
@@ -1033,7 +1033,7 @@ function PurchaseOrders() {
   useEffect(() => {
     api.getSuppliers().then(setSuppliers);
     api.getWarehouses().then(setWarehouses);
-    api.getBranches().then(setBranches);
+    api.getBranches().then((b) => setBranches(excludeDisabledBranches(b)));
     api.getProducts().then(setProducts);
     api.getUsers().then(setUsers).catch(() => {});
   }, []);

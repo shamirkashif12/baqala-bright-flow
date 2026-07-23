@@ -11,7 +11,7 @@ import { SearchableMultiSelect } from "@/components/report-filters/searchable-mu
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Plus, Loader2, Trash2, Pencil, Power, Tag, Boxes } from "lucide-react";
 import {
-  api,
+  api, excludeDisabledBranches,
   type Branch, type Product, type ProductPriceList, type PriceListPayload,
   type PriceType, type CustomerTier,
 } from "@/lib/api";
@@ -294,7 +294,7 @@ function Pricing() {
 
   useEffect(() => {
     api.getProducts({ status: "active" }).then(setProducts).catch(() => {});
-    api.getBranches().then(setBranches).catch(() => {});
+    api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
   }, []);
 
   useEffect(() => { load(); }, [branchFilter, unitTypeFilter, lockedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps

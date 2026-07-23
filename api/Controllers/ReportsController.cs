@@ -3838,11 +3838,11 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
         var rows = await BuildStockTransferReportAsync(rangeFrom, rangeTo, transferType, status ?? [], sourceBranchId ?? [], sourceWarehouseId ?? [], destBranchId ?? [], destWarehouseId ?? [], productId ?? [], createdBy ?? [], approvedBy ?? []);
-        var headers = new[] { "Transfer Number", "Type", "Source", "Destination", "Status", "Created By", "Approved By", "Received By", "Product", "SKU", "Quantity", "Unit Cost", "Total Cost", "Created At", "Completed At", "Notes" };
+        var headers = new[] { "Transfer Number", "Type", "Source", "Destination", "Status", "Created By", "Approved By", "Received By", "Product", "SKU", "Ordered Quantity", "Received Quantity", "Unit Cost", "Total Cost", "Created At", "Completed At", "Notes" };
         var exportRows = rows.Select(r => new object?[]
         {
             r.TransferNumber, r.TransferType, r.SourceLocation, r.DestinationLocation, r.Status, r.CreatedBy, r.ApprovedBy, r.ReceivedBy,
-            r.ProductName, r.Sku, r.Quantity, r.UnitCost, r.TotalCost, r.CreatedAt, r.CompletedDate, r.Notes,
+            r.ProductName, r.Sku, r.OrderedQuantity, r.ReceivedQuantity, r.UnitCost, r.TotalCost, r.CreatedAt, r.CompletedDate, r.Notes,
         }).ToList();
         await audit.LogAsync("export_report", "Report", null, exportedBy, sourceBranchId?.FirstOrDefault() ?? destBranchId?.FirstOrDefault(),
             $"{{\"report\":\"stock-transfer\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{rows.Count}}}");
@@ -3893,7 +3893,8 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ReceivedBy = t.ReceivedByUser?.FullName ?? "—",
             ProductName = i.Product?.Name ?? "—",
             Sku = i.Product?.Sku ?? "—",
-            Quantity = i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity,
+            OrderedQuantity = i.RequestedQuantity,
+            ReceivedQuantity = i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity,
             UnitCost = i.UnitCost ?? 0m,
             TotalCost = (i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity) * (i.UnitCost ?? 0m),
             CreatedAt = t.CreatedAt,
@@ -5422,7 +5423,8 @@ public sealed class StockTransferReportRow
     public string ReceivedBy { get; init; } = "—";
     public string ProductName { get; init; } = "—";
     public string Sku { get; init; } = "—";
-    public decimal Quantity { get; init; }
+    public decimal OrderedQuantity { get; init; }
+    public decimal ReceivedQuantity { get; init; }
     public decimal UnitCost { get; init; }
     public decimal TotalCost { get; init; }
     public DateTime CreatedAt { get; init; }

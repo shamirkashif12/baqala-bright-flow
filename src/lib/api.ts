@@ -1071,6 +1071,11 @@ export interface Branch {
   status: string; createdAt: string;
 }
 
+/** Filters out disabled branches — use for any dropdown/selector; management pages that need to show/re-enable disabled branches should NOT use this. */
+export function excludeDisabledBranches(branches: Branch[]): Branch[] {
+  return branches.filter((b) => b.status !== "disabled");
+}
+
 export interface Role {
   id: string; name: string; nameAr?: string; description?: string;
   isSystem: boolean; createdAt: string;
@@ -1141,9 +1146,11 @@ export interface ShiftClosingRow {
   closingStatus: string; closedBy?: string; closingTime?: string; remarks?: string;
 }
 export interface EmployeeActivityRow {
-  id: string; createdAt: string; action: string; entityType?: string; entityId?: string; module?: string;
+  id: string; createdAt: string; action: string; activityType: string; entityType?: string; entityId?: string; module?: string;
   employee?: { id: string; fullName: string; employeeCode: string };
   performedBy?: { id: string; fullName: string };
+  branchId?: string; branchName?: string; deviceName?: string;
+  description?: string; oldValueSummary?: string; newValueSummary?: string;
   oldValues?: string; newValues?: string; notes?: string; ipAddress?: string; severity: string;
 }
 
@@ -2142,7 +2149,7 @@ export interface SupplierReturnsReportRow {
 export interface StockTransferReportRow {
   transferNumber: string; transferType: string; sourceLocation: string; destinationLocation: string; status: string;
   createdBy: string; approvedBy: string; receivedBy: string; productName: string; sku: string;
-  quantity: number; unitCost: number; totalCost: number; createdAt: string; completedDate?: string; notes?: string;
+  orderedQuantity: number; receivedQuantity: number; unitCost: number; totalCost: number; createdAt: string; completedDate?: string; notes?: string;
 }
 
 export interface PurchaseOrderReportItem {

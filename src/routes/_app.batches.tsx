@@ -14,7 +14,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { CalendarClock, Ban, ShieldAlert, Download, X, Plus, Loader2, PackageX, CheckCircle2 } from "lucide-react";
 import {
-  api,
+  api, excludeDisabledBranches,
   type InventoryBatch, type Branch, type Warehouse, type Product,
   type ProductRecall, type RecallImpact, type RecallSeverity, type RecallType,
 } from "@/lib/api";
@@ -407,7 +407,7 @@ function Batches() {
 
   // Load metadata once on mount
   useEffect(() => {
-    api.getBranches().then(setBranches).catch(() => {});
+    api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
     api.getWarehouses().then(setWarehouses).catch(() => {});
   }, []);
 

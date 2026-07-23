@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Gift, Pencil, Power, Trash2, Plus, Tag, PercentCircle, TicketCheck, Zap, X, ChevronDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { api, type Coupon, type Discount, type Offer, type Product, type Branch, type Category } from "@/lib/api";
+import { api, excludeDisabledBranches, type Coupon, type Discount, type Offer, type Product, type Branch, type Category } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
 import { localDateStr } from "@/lib/utils";
@@ -356,7 +356,7 @@ function DiscountsTab() {
     load();
     api.getProducts().then(setProducts).catch(() => {});
     api.getCategories().then(setCategories).catch(() => {});
-    api.getBranches().then(setBranches).catch(() => {});
+    api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
   }, []);
 
   const openCreate = () => { setEditItem(null); setForm(emptyDiscount); setSheetOpen(true); };
@@ -626,7 +626,7 @@ function OffersTab() {
   useEffect(() => {
     load();
     api.getProducts().then(setProducts).catch(() => {});
-    api.getBranches().then(setBranches).catch(() => {});
+    api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
   }, []);
 
   const openCreate = () => {

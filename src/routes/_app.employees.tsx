@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
@@ -1083,7 +1083,7 @@ function EmployeeActivitySection({ employee }: { employee: Employee }) {
 
 function EmployeeProfileDrawer({ employee, onClose, onEdit, onChanged }: { employee: Employee | null; onClose: () => void; onEdit: (e: Employee) => void; onChanged: () => void }) {
   const { canEdit } = usePermission("Employees");
-  if (!employee) return <Sheet open={false} onOpenChange={() => {}}><SheetContent /></Sheet>;
+  if (!employee) return <Dialog open={false} onOpenChange={() => {}}><DialogContent /></Dialog>;
   const cs = contractStatus(employee);
   const rows: [string, string][] = [
     ["Full Name", employee.fullName],
@@ -1106,21 +1106,21 @@ function EmployeeProfileDrawer({ employee, onClose, onEdit, onChanged }: { emplo
     ["Contract Status", cs.label],
   ];
   return (
-    <Sheet open={!!employee} onOpenChange={v => !v && onClose()}>
-      <SheetContent className="w-[480px] overflow-y-auto">
-        <SheetHeader className="pb-4 border-b border-border/60">
+    <Dialog open={!!employee} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader className="pb-4 border-b border-border/60">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <SheetTitle className="text-base">{employee.fullName}</SheetTitle>
+              <DialogTitle className="text-base">{employee.fullName}</DialogTitle>
               <p className="text-xs text-muted-foreground font-mono mt-0.5">{employee.employeeCode}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 pr-6">
               <StatusBadge status={employee.employmentStatus} />
               {canEdit && <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onEdit(employee)}><Pencil className="h-3.5 w-3.5" /></Button>}
             </div>
           </div>
-        </SheetHeader>
-        <div className="mt-4 space-y-2.5">
+        </DialogHeader>
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2.5">
           {rows.map(([l, v]) => (
             <div key={l} className="flex justify-between gap-3 border-b border-border/40 pb-2 text-sm">
               <span className="text-muted-foreground shrink-0">{l}</span>
@@ -1134,8 +1134,8 @@ function EmployeeProfileDrawer({ employee, onClose, onEdit, onChanged }: { emplo
         <EmployeeDocumentsSection employee={employee} />
         <EmployeeContractsSection employee={employee} />
         <EmployeeActivitySection employee={employee} />
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1456,9 +1456,9 @@ function EmployeesTab() {
 
       <EmployeeProfileDrawer employee={viewEmployee} onClose={() => setViewEmployee(null)} onEdit={openEdit} onChanged={load} />
 
-      <Sheet open={drawerOpen} onOpenChange={v => { setDrawerOpen(v); if (!v) { setActiveEmployee(null); setActiveTab("details"); } }}>
-        <SheetContent className="w-[560px] overflow-y-auto">
-          <SheetHeader><SheetTitle>{activeEmployee ? "Edit Employee" : "Add Employee"}</SheetTitle></SheetHeader>
+      <Dialog open={drawerOpen} onOpenChange={v => { setDrawerOpen(v); if (!v) { setActiveEmployee(null); setActiveTab("details"); } }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{activeEmployee ? "Edit Employee" : "Add Employee"}</DialogTitle></DialogHeader>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2">
             <TabsList className="grid grid-cols-5 h-9">
               <TabsTrigger value="details" className="text-xs">Details</TabsTrigger>
@@ -1486,8 +1486,8 @@ function EmployeesTab() {
               {activeEmployee && <EmployeeShiftsSection employee={activeEmployee} onChanged={load} />}
             </TabsContent>
           </Tabs>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
@@ -63,7 +64,7 @@ function SupplierFormFields({
   const req = mode === "create";
   const label = (text: string, required: boolean) => required ? `${text} *` : text;
   return (
-    <div className="mt-4 space-y-3">
+    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
       <FieldRow label={label("Name", true)}><Input value={form.name} onChange={set("name")} className="h-9" placeholder="Al-Barakah Trading" required={req} /></FieldRow>
       <FieldRow label="Legal Name"><Input value={form.legalName} onChange={set("legalName")} className="h-9" placeholder="Registered legal business name (if different)" /></FieldRow>
       <FieldRow label={label("CR Number", true)}><Input value={form.crNumber} onChange={set("crNumber")} className="h-9" placeholder="Commercial Registration number" required={req} /></FieldRow>
@@ -71,8 +72,10 @@ function SupplierFormFields({
       <FieldRow label={label("Contact Person", true)}><Input value={form.contactPerson} onChange={set("contactPerson")} className="h-9" required={req} /></FieldRow>
       <FieldRow label={label("Phone", true)}><Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" required={req} /></FieldRow>
       <FieldRow label="Email"><Input value={form.email} onChange={set("email")} className="h-9" type="email" /></FieldRow>
-      <FieldRow label={label("Address", true)}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} /></FieldRow>
       <FieldRow label="City"><Input value={form.city} onChange={set("city")} className="h-9" /></FieldRow>
+      <div className="sm:col-span-2">
+        <FieldRow label={label("Address", true)}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} /></FieldRow>
+      </div>
       <FieldRow label={label("Supplier Type / Category", true)}>
         <Select value={form.category} onValueChange={setS("category")}>
           <SelectTrigger className="h-9"><SelectValue placeholder="Select category" /></SelectTrigger>
@@ -97,7 +100,9 @@ function SupplierFormFields({
       <FieldRow label="Bank Account Holder"><Input value={form.bankAccountHolder} onChange={set("bankAccountHolder")} className="h-9" /></FieldRow>
       <FieldRow label="Bank Account Number"><Input value={form.bankAccountNumber} onChange={set("bankAccountNumber")} className="h-9" /></FieldRow>
       <FieldRow label="IBAN"><Input value={form.bankIban} onChange={set("bankIban")} className="h-9" placeholder="SAxx xxxx xxxx xxxx xxxx xxxx" /></FieldRow>
-      <FieldRow label="Notes"><Textarea value={form.notes} onChange={set("notes")} rows={2} placeholder="Any other useful information about this supplier" /></FieldRow>
+      <div className="sm:col-span-2">
+        <FieldRow label="Notes"><Textarea value={form.notes} onChange={set("notes")} rows={2} placeholder="Any other useful information about this supplier" /></FieldRow>
+      </div>
       <FieldRow label="Status">
         <Select value={form.status} onValueChange={setS("status")}>
           <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
@@ -107,9 +112,11 @@ function SupplierFormFields({
           </SelectContent>
         </Select>
       </FieldRow>
-      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving}>
-        {saving ? "Saving…" : "Save"}
-      </Button>
+      <div className="sm:col-span-2">
+        <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -748,21 +755,21 @@ function SuppliersTab() {
         onEdit={s => { setViewSupplier(null); openEdit(s); }}
       />
 
-      {/* Edit sheet */}
-      <Sheet open={!!editSupplier} onOpenChange={v => !v && setEditSupplier(null)}>
-        <SheetContent className="overflow-y-auto">
-          <SheetHeader><SheetTitle>Edit Supplier</SheetTitle></SheetHeader>
+      {/* Edit dialog — centered instead of a side sheet since the form has too many fields to feel cramped in a narrow panel */}
+      <Dialog open={!!editSupplier} onOpenChange={v => !v && setEditSupplier(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Edit Supplier</DialogTitle></DialogHeader>
           <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="edit" />
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
-      {/* Create sheet */}
-      <Sheet open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
-        <SheetContent className="overflow-y-auto">
-          <SheetHeader><SheetTitle>Add Supplier</SheetTitle></SheetHeader>
+      {/* Create dialog */}
+      <Dialog open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Add Supplier</DialogTitle></DialogHeader>
           <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="create" />
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

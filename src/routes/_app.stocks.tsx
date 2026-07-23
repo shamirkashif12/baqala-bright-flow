@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  api, Branch, Product, Supplier, Warehouse, Category,
+  api, excludeDisabledBranches, Branch, Product, Supplier, Warehouse, Category,
   InventoryStock, InventoryBatch, InventoryAdjustment,
   PurchaseOrder, StockTransfer, StockCount, StockCountItem, StockMovement,
 } from "@/lib/api";
@@ -1085,7 +1085,7 @@ function Stocks() {
 
   // Mount: only fetch branches (for filter dropdowns) + expiring count metric
   useEffect(() => {
-    api.getBranches().then(br => setBranches(br ?? [])).catch(() => {});
+    api.getBranches().then(br => setBranches(excludeDisabledBranches(br ?? []))).catch(() => {});
     api.getExpiringBatches(undefined, 30).then(bt => setExpiringSoonCount(bt?.length ?? 0)).catch(() => {});
   }, []);
 

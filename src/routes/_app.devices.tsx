@@ -13,7 +13,7 @@ import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { HardDrive, Activity, Power, Wifi, Plus, Eye, Pencil, Battery, Thermometer, Signal } from "lucide-react";
 import { toast } from "sonner";
-import { api, type DeviceRecord, type Branch, type Terminal } from "@/lib/api";
+import { api, excludeDisabledBranches, type DeviceRecord, type Branch, type Terminal } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 
@@ -107,7 +107,7 @@ function Devices() {
     setLoading(true);
     const [d, b, t] = await Promise.allSettled([api.getDevices(), api.getBranches(), api.getTerminals()]);
     if (d.status === "fulfilled") setDevices(d.value);
-    if (b.status === "fulfilled") setBranches(b.value);
+    if (b.status === "fulfilled") setBranches(excludeDisabledBranches(b.value));
     if (t.status === "fulfilled") setTerminals(t.value);
     const hasError = [d, b, t].some(r => r.status === "rejected");
     setLoadError(hasError);
