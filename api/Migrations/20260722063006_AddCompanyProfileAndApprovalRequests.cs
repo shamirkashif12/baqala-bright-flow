@@ -11,85 +11,79 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.CreateTable(
-                name: "approval_requests",
-                columns: table => new
-                {
-                    id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    request_type = table.Column<string>(type: "varchar(30)", maxLength: 30, nullable: false),
-                    entity_type = table.Column<string>(type: "varchar(30)", maxLength: 30, nullable: false),
-                    entity_id = table.Column<Guid>(type: "char(36)", nullable: true),
-                    branch_id = table.Column<Guid>(type: "char(36)", nullable: true),
-                    requested_by = table.Column<Guid>(type: "char(36)", nullable: false),
-                    requested_at = table.Column<DateTime>(type: "datetime(6)", nullable: false),
-                    status = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: false),
-                    approved_by = table.Column<Guid>(type: "char(36)", nullable: true),
-                    approved_at = table.Column<DateTime>(type: "datetime(6)", nullable: true),
-                    reason = table.Column<string>(type: "varchar(500)", maxLength: 500, nullable: true),
-                    rejection_reason = table.Column<string>(type: "varchar(500)", maxLength: 500, nullable: true),
-                    details_json = table.Column<string>(type: "longtext", nullable: true),
-                    created_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_approval_requests", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_approval_requests_branches_branch_id",
-                        column: x => x.branch_id,
-                        principalTable: "branches",
-                        principalColumn: "id");
-                    table.ForeignKey(
-                        name: "FK_approval_requests_users_approved_by",
-                        column: x => x.approved_by,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_approval_requests_users_requested_by",
-                        column: x => x.requested_by,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                })
-                .Annotation("MySQL:Charset", "utf8mb4");
+            // Guarded per this project's standard pattern (see MigrationCollationHelper /
+            // MigrationIdempotencyHelper): the inline FKs below reference tables (branches, users)
+            // created in earlier migrations, which hits the same incompatible-collation bug guarded
+            // in AddOrderDiscounts/AddOrderServiceCharges/AddLoyaltyProgram — the FKs are created
+            // separately below instead of inline in CreateTable.
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS `approval_requests` (
+                    `id` char(36) NOT NULL,
+                    `request_type` varchar(30) NOT NULL,
+                    `entity_type` varchar(30) NOT NULL,
+                    `entity_id` char(36) NULL,
+                    `branch_id` char(36) NULL,
+                    `requested_by` char(36) NOT NULL,
+                    `requested_at` datetime(6) NOT NULL,
+                    `status` varchar(20) NOT NULL,
+                    `approved_by` char(36) NULL,
+                    `approved_at` datetime(6) NULL,
+                    `reason` varchar(500) NULL,
+                    `rejection_reason` varchar(500) NULL,
+                    `details_json` longtext NULL,
+                    `created_at` datetime(6) NOT NULL,
+                    PRIMARY KEY (`id`)
+                );
+            ");
 
-            migrationBuilder.CreateTable(
-                name: "company_profile",
-                columns: table => new
-                {
-                    id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    legal_name = table.Column<string>(type: "varchar(500)", maxLength: 500, nullable: true),
-                    cr_number = table.Column<string>(type: "varchar(50)", maxLength: 50, nullable: true),
-                    vat_number = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: true),
-                    updated_by = table.Column<Guid>(type: "char(36)", nullable: true),
-                    created_at = table.Column<DateTime>(type: "datetime(6)", nullable: false),
-                    updated_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_company_profile", x => x.id);
-                })
-                .Annotation("MySQL:Charset", "utf8mb4");
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS `company_profile` (
+                    `id` char(36) NOT NULL,
+                    `legal_name` varchar(500) NULL,
+                    `cr_number` varchar(50) NULL,
+                    `vat_number` varchar(20) NULL,
+                    `updated_by` char(36) NULL,
+                    `created_at` datetime(6) NOT NULL,
+                    `updated_at` datetime(6) NOT NULL,
+                    PRIMARY KEY (`id`)
+                );
+            ");
 
-            migrationBuilder.InsertData(
-                table: "company_profile",
-                columns: new[] { "id", "cr_number", "created_at", "legal_name", "updated_at", "updated_by", "vat_number" },
-                values: new object[] { new Guid("00000000-0000-0000-0000-000000000002"), null, new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), null, new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), null, null });
+            migrationBuilder.Sql(@"
+                INSERT IGNORE INTO `company_profile` (`id`, `cr_number`, `created_at`, `legal_name`, `updated_at`, `updated_by`, `vat_number`)
+                VALUES ('00000000-0000-0000-0000-000000000002', NULL, '2026-01-01 00:00:00', NULL, '2026-01-01 00:00:00', NULL, NULL);
+            ");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_approval_requests_approved_by",
+            migrationBuilder.CreateIndexIfNotExists("IX_approval_requests_approved_by", "approval_requests", "`approved_by`");
+            migrationBuilder.CreateIndexIfNotExists("IX_approval_requests_branch_id", "approval_requests", "`branch_id`");
+            migrationBuilder.CreateIndexIfNotExists("IX_approval_requests_requested_by", "approval_requests", "`requested_by`");
+
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_approval_requests_branches_branch_id",
                 table: "approval_requests",
-                column: "approved_by");
+                column: "branch_id",
+                principalTable: "branches",
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT",
+                nullable: true);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_approval_requests_branch_id",
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_approval_requests_users_approved_by",
                 table: "approval_requests",
-                column: "branch_id");
+                column: "approved_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT",
+                nullable: true);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_approval_requests_requested_by",
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_approval_requests_users_requested_by",
                 table: "approval_requests",
-                column: "requested_by");
+                column: "requested_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT",
+                nullable: false);
         }
 
         /// <inheritdoc />
