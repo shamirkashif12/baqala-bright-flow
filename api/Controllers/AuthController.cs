@@ -21,13 +21,21 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password))
             return BadRequest(new { message = "Email and password are required." });
 
-        var emailNorm = req.Email.Trim().ToLower();
+        // The login form's own label promises "Email or phone" — but this only ever matched
+        // Email, so anyone signing in with the phone number it advertises (or their username,
+        // which the Add User form prominently sets right next to the password) got "Invalid
+        // email or password" despite typing the right credentials. Match whichever identifier
+        // was actually typed against Email, Username, or Phone.
+        var identifierNorm = req.Email.Trim().ToLower();
+        var identifierRaw = req.Email.Trim();
         var passwordHash = HashPassword(req.Password);
 
         var user = await db.Users
             .Include(u => u.Role)
             .Include(u => u.Branch)
-            .FirstOrDefaultAsync(u => u.Email.ToLower() == emailNorm
+            .FirstOrDefaultAsync(u => (u.Email.ToLower() == identifierNorm
+                                       || u.Username.ToLower() == identifierNorm
+                                       || (u.Phone != null && u.Phone == identifierRaw))
                                    && u.PasswordHash == passwordHash
                                    && u.Status == "active");
 
@@ -35,7 +43,7 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         {
             // Previously never logged at all, so the Audit Trail's "Failed Logins" KPI (and the
             // FRD's "Auditor reviews failed login attempts" scenario) had nothing to show.
-            await audit.LogAsync("login_failed", "User", null, null, null, $"{{\"email\":\"{emailNorm}\"}}", "warning", module: "Authentication");
+            await audit.LogAsync("login_failed", "User", null, null, null, $"{{\"email\":\"{identifierNorm}\"}}", "warning", module: "Authentication");
             return Unauthorized(new { message = "Invalid email or password." });
         }
 

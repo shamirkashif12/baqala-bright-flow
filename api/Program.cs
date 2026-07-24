@@ -214,6 +214,7 @@ if (app.Environment.IsDevelopment())
     await RenamePermissionModules(db);
     await DataSeeder.EnsurePermissionsAsync(db);
     await DataSeeder.PatchPermissionsAsync(db);
+    await DataSeeder.PatchPickerStockTransfersPermissionsAsync(db);
     await DataSeeder.PatchMarketingPermissionsAsync(db);
     await DataSeeder.PatchApprovalCenterPermissionsAsync(db);
     await DataSeeder.PatchDiscountEligibilityAsync(db);

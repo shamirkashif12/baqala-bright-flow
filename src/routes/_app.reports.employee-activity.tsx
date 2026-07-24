@@ -24,7 +24,7 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-const MODULES = ["Employees", "HR Master Data", "HR Attendance", "HR Shifts", "Leave Management", "Payroll", "Authentication", "POS", "Returns"];
+const MODULES = ["Employees", "HR Master Data", "HR Attendance", "HR Shifts", "Leave Management", "Authentication", "POS", "Returns"];
 // BRD 16.2 fixed Activity Type set — mirrors HrReportsController.ActivityTypeOf's buckets exactly.
 const ACTIVITY_TYPES = ["Created", "Updated", "Deleted", "Approved", "Rejected", "Exported", "Login", "Logout", "Correction", "Access Denied", "Other"];
 

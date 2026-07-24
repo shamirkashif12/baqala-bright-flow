@@ -14,6 +14,9 @@ public class SuppliersController(BaqalaDbContext db, IAuditService audit) : Cont
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] string? supplyType)
     {
@@ -110,6 +113,11 @@ public class SuppliersController(BaqalaDbContext db, IAuditService audit) : Cont
         supplier.Status = "inactive";
         supplier.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Supplier deactivated", entityType: "Supplier", entityId: supplier.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId), beforeValue: supplier.Name, module: "Suppliers");
+
         return NoContent();
     }
 

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,8 @@ import { api, type DashboardMetrics, type CashierShift, type Branch, type Invent
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { MetricCard } from "@/components/metric-card";
 import { useAuth } from "@/lib/auth";
+import { ProductTour, type TourStep } from "@/components/product-tour";
+import { RESTART_DASHBOARD_TOUR_EVENT } from "@/lib/tour-bus";
 import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowRight,
@@ -33,6 +35,19 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const PERIOD_MAP: Record<string, string> = { Daily: "today", Weekly: "week", Monthly: "month" };
 const periods = ["Daily", "Weekly", "Monthly", "Custom"] as const;
 const STORAGE_KEY = "dashboard_visible_cards";
+// Scoped per user id (not a single global flag) so "first login" means first login for THIS
+// account — one tenant admin finishing the tour must not silently skip it for a different
+// account that later signs in on the same browser/machine.
+const tourSeenKey = (userId: string) => `tour_dashboard_seen:${userId}`;
+
+const DASHBOARD_TOUR_STEPS: TourStep[] = [
+  { target: '[data-tour="lang-switcher"]', placement: "bottom", text: "Change the language from here." },
+  { target: '[data-tour="branch-selector"]', placement: "bottom", text: "Select your branch from here." },
+  { target: '[data-tour="sidebar-nav"]', placement: "right", text: "Use the sidebar to navigate." },
+  { target: '[data-tour="customize-dashboard"]', placement: "bottom", text: "Customize your dashboard here." },
+  { target: '[data-tour="alerts-row"]', placement: "bottom", text: "Review urgent operational alerts and information here." },
+  { target: '[data-tour="stat-cards"]', placement: "top", text: "Track orders, sales, cashiers, terminals, and stock health." },
+];
 
 type StatCardDef = {
   id: string;
@@ -313,6 +328,9 @@ function Dashboard() {
   const [terminalTabLoading, setTerminalTabLoading] = useState(false);
   const [terminalTabLoaded, setTerminalTabLoaded] = useState(false);
 
+  const [tourOpen, setTourOpen] = useState(false);
+  const tourAutoStartChecked = useRef(false);
+
   const [visibleCards, setVisibleCards] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -399,6 +417,30 @@ function Dashboard() {
     if (activeTab === "returns" && !canViewReturns) setActiveTab("overview");
   }, [activeTab, canViewTerminals, canViewShifts, canViewReturns]);
 
+  // Auto-launch the guided tour once per account, the first time that account's dashboard
+  // finishes loading (not while skeletons are still up, so the tour's targets actually exist).
+  // Waits on `user` too — with no id yet there's nothing to scope the "seen" flag to.
+  useEffect(() => {
+    if (loading || !user?.id || tourAutoStartChecked.current) return;
+    tourAutoStartChecked.current = true;
+    if (!localStorage.getItem(tourSeenKey(user.id))) {
+      const t = setTimeout(() => setTourOpen(true), 500);
+      return () => clearTimeout(t);
+    }
+  }, [loading, user?.id]);
+
+  // Lets the Help menu (rendered globally, outside this component) relaunch the tour.
+  useEffect(() => {
+    const onRestart = () => setTourOpen(true);
+    window.addEventListener(RESTART_DASHBOARD_TOUR_EVENT, onRestart);
+    return () => window.removeEventListener(RESTART_DASHBOARD_TOUR_EVENT, onRestart);
+  }, []);
+
+  const finishTour = () => {
+    if (user?.id) localStorage.setItem(tourSeenKey(user.id), "1");
+    setTourOpen(false);
+  };
+
   // Cards whose numbers belong to another module's data are dropped entirely for roles
   // without that module — from the grid AND the Customize dialog.
   const cardPermission: Record<string, boolean> = {
@@ -428,23 +470,25 @@ function Dashboard() {
       {/* Filter bar */}
       <Card className="p-3 border-border/60 shadow-card">
         <div className="flex flex-wrap items-center gap-2">
-          {isAdmin ? (
-            <Select value={branch} onValueChange={setBranch}>
-              <SelectTrigger className="h-9 w-[160px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map(b => (
-                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Badge variant="outline" className="h-9 px-3 text-xs font-medium">
-              {user?.branch?.split(" — ").at(-1) ?? "My Branch"}
-            </Badge>
-          )}
+          <div data-tour="branch-selector">
+            {isAdmin ? (
+              <Select value={branch} onValueChange={setBranch}>
+                <SelectTrigger className="h-9 w-[160px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map(b => (
+                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Badge variant="outline" className="h-9 px-3 text-xs font-medium">
+                {user?.branch?.split(" — ").at(-1) ?? "My Branch"}
+              </Badge>
+            )}
+          </div>
 
           <div className="flex flex-wrap gap-1">
             {periods.map((f) => (
@@ -466,7 +510,7 @@ function Dashboard() {
             <Badge variant="outline" className="text-xs hidden sm:inline-flex">
               {new Date().toLocaleDateString("en-SA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
             </Badge>
-            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs" onClick={() => setCustomizeOpen(true)}>
+            <Button data-tour="customize-dashboard" size="sm" variant="outline" className="h-9 gap-1.5 text-xs" onClick={() => setCustomizeOpen(true)}>
               <Settings2 className="h-3.5 w-3.5" /> Customize Dashboard
             </Button>
           </div>
@@ -474,7 +518,7 @@ function Dashboard() {
       </Card>
 
       {/* Alert cards row */}
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="alerts-row" className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[84px] rounded-xl" />)
         ) : (
@@ -495,19 +539,21 @@ function Dashboard() {
       </div>
 
       {/* KPI stat cards */}
-      {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {Array.from({ length: 10 }).map((_, i) => <Skeleton key={i} className="h-36 rounded-2xl" />)}
-        </div>
-      ) : statCards.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {statCards.map((c) => <StatCard key={c.id} c={c} />)}
-        </div>
-      ) : (
-        <Card className="p-8 border-border/60 text-center text-muted-foreground text-sm">
-          No cards selected. <button className="text-primary underline ml-1" onClick={() => setCustomizeOpen(true)}>Customize Dashboard</button>
-        </Card>
-      )}
+      <div data-tour="stat-cards">
+        {loading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {Array.from({ length: 10 }).map((_, i) => <Skeleton key={i} className="h-36 rounded-2xl" />)}
+          </div>
+        ) : statCards.length > 0 ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {statCards.map((c) => <StatCard key={c.id} c={c} />)}
+          </div>
+        ) : (
+          <Card className="p-8 border-border/60 text-center text-muted-foreground text-sm">
+            No cards selected. <button className="text-primary underline ml-1" onClick={() => setCustomizeOpen(true)}>Customize Dashboard</button>
+          </Card>
+        )}
+      </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -820,6 +866,14 @@ function Dashboard() {
         allCards={allCards.length > 0 ? allCards : ALL_CARD_IDS.filter(id => cardPermission[id] ?? true).map(id => ({ id, label: id, desc: "", icon: Package, href: "/", action: "", value: "" }))}
         visible={visibleCards}
         onChange={saveVisible}
+      />
+
+      <ProductTour
+        active={tourOpen}
+        welcomeTitle="Welcome aboard!"
+        welcomeBody="Your Grocery Store POS is ready. Take a quick tour to get started."
+        steps={DASHBOARD_TOUR_STEPS}
+        onFinish={finishTour}
       />
     </PageShell>
   );

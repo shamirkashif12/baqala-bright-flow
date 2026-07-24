@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mail, Phone, Pencil, ShieldCheck, Power, Plus, Search, Calendar, X } from "lucide-react";
+import { Mail, Phone, Pencil, ShieldCheck, Power, Search, Calendar, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, excludeDisabledBranches, type User, type Branch, type Role } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
@@ -26,8 +26,8 @@ export const Route = createFileRoute("/_app/users")({
   ),
 });
 
-type UserForm = { fullName: string; email: string; username: string; password: string; roleId: string; branchId: string; status: string; };
-const emptyForm: UserForm = { fullName: "", email: "", username: "", password: "", roleId: "", branchId: "", status: "active" };
+type UserForm = { fullName: string; email: string; username: string; roleId: string; branchId: string; status: string; };
+const emptyForm: UserForm = { fullName: "", email: "", username: "", roleId: "", branchId: "", status: "active" };
 
 function RegisteredUsers() {
   const { canCreate, canEdit } = usePermission("Users");
@@ -73,22 +73,24 @@ function RegisteredUsers() {
     return matchQ && matchRole && matchStatus && matchBranch && mdf && mdt;
   }), [users, q, roleFilter, statusFilter, branchFilter, dateFrom, dateTo]);
 
-  const openCreate = () => { setEditUser(null); setForm(emptyForm); setDlgOpen(true); };
   const openEdit = (u: User) => {
     setEditUser(u);
-    setForm({ fullName: u.fullName, email: u.email, username: u.username, password: "", roleId: u.roleId, branchId: u.branchId ?? "", status: u.status });
+    setForm({ fullName: u.fullName, email: u.email, username: u.username, roleId: u.roleId, branchId: u.branchId ?? "", status: u.status });
     setDlgOpen(true);
   };
 
   const handleSave = async () => {
-    // Catch the obvious missing-field cases here with a specific message instead of letting an
-    // empty roleId (or blank required field) reach the server as a confusing generic failure.
-    if (!form.fullName.trim() || !form.email.trim() || !form.username.trim()) {
-      toast.error("Full name, email, and username are required.");
+    if (!editUser) return;
+    if (!form.fullName.trim()) {
+      toast.error("Full name is required.");
       return;
     }
-    if (!editUser && !form.password.trim()) {
-      toast.error("Password is required.");
+    if (!form.email.trim()) {
+      toast.error("Email is required.");
+      return;
+    }
+    if (!form.username.trim()) {
+      toast.error("Username is required.");
       return;
     }
     if (!form.roleId) {
@@ -98,13 +100,8 @@ function RegisteredUsers() {
     setSaving(true);
     try {
       const branchId = form.branchId || undefined;
-      if (editUser) {
-        await api.updateUser(editUser.id, { fullName: form.fullName, email: form.email, username: form.username, roleId: form.roleId, branchId, status: form.status });
-        toast.success("User updated.");
-      } else {
-        await api.createUser({ fullName: form.fullName, email: form.email, username: form.username, password: form.password, roleId: form.roleId, branchId });
-        toast.success("User created.");
-      }
+      await api.updateUser(editUser.id, { fullName: form.fullName, email: form.email, username: form.username, roleId: form.roleId, branchId, status: form.status });
+      toast.success("User updated.");
       setDlgOpen(false);
       load();
     } catch (e: any) {
@@ -181,9 +178,9 @@ function RegisteredUsers() {
         </div>
         <div className="flex-1" />
         {canCreate && (
-          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openCreate}>
-            <Plus className="h-4 w-4" /> Add User
-          </Button>
+          <p className="text-xs text-muted-foreground italic max-w-xs text-right">
+            New logins are created from the Employees page — open an employee record and enable "Create login account".
+          </p>
         )}
       </div>
 
@@ -235,12 +232,12 @@ function RegisteredUsers() {
         </div>
       )}
 
-      {/* Add / Edit dialog */}
+      {/* Edit dialog */}
       <Dialog open={dlgOpen} onOpenChange={v => !v && setDlgOpen(false)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editUser ? "Edit User" : "Add User"}</DialogTitle>
-            <DialogDescription>Assign role and branch access.</DialogDescription>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>Manage login, role and branch access. Password changes aren't made here.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <div>
@@ -257,12 +254,6 @@ function RegisteredUsers() {
                 <Input value={form.username} onChange={set("username")} className="mt-1 h-9" placeholder="abdullah.faisal" />
               </div>
             </div>
-            {!editUser && (
-              <div>
-                <Label className="text-xs">Password</Label>
-                <Input value={form.password} onChange={set("password")} className="mt-1 h-9" type="password" placeholder="••••••••" />
-              </div>
-            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Role</Label>
@@ -289,19 +280,17 @@ function RegisteredUsers() {
                 </Select>
               </div>
             </div>
-            {editUser && (
-              <div>
-                <Label className="text-xs">Status</Label>
-                <Select value={form.status} onValueChange={setS("status")}>
-                  <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                    <SelectItem value="suspended">Suspended</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <div>
+              <Label className="text-xs">Status</Label>
+              <Select value={form.status} onValueChange={setS("status")}>
+                <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="suspended">Suspended</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDlgOpen(false)}>Cancel</Button>

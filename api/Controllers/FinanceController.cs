@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class FinanceController(BaqalaDbContext db, ICouponCreationService couponCreation) : ControllerBase
+public class FinanceController(BaqalaDbContext db, ICouponCreationService couponCreation, IAuditService audit) : ControllerBase
 {
     // Mirrors the GetCallerContext pattern used across the other controllers.
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -21,6 +21,9 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
 
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
     // ─── Expenses ─────────────────────────────────────────────────────────────
     // Only used by the dedicated /expenses page — safe to gate on "Accounting & Finance" View
@@ -90,6 +93,13 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
         if (expense is null) return NotFound();
         db.Expenses.Remove(expense);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Expense deleted", entityType: "Expense", entityId: expense.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: expense.BranchId, severity: "warning",
+            beforeValue: $"{expense.Description} · {expense.Amount}", module: "Accounting & Finance");
+
         return NoContent();
     }
 
@@ -149,6 +159,13 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
         expenseType.IsActive = false;
         expenseType.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        var (_, callerBranchId) = GetCallerContext();
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Expense type deactivated", entityType: "ExpenseType", entityId: expenseType.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: callerBranchId, beforeValue: expenseType.Name, module: "Accounting & Finance");
+
         return Ok(expenseType);
     }
 
@@ -240,6 +257,9 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     [HttpPost("coupons")]
     public async Task<IActionResult> CreateCoupon([FromBody] Coupon coupon)
     {
+        var callerId = CallerId();
+        if (callerId is null) return Unauthorized();
+
         var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Coupons", PermAction.Approve);
         if (!canSelfApprove)
         {
@@ -249,7 +269,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
                 EntityType = "Coupon",
                 EntityId = null,
                 BranchId = null,
-                RequestedBy = CallerId() ?? Guid.Empty,
+                RequestedBy = callerId.Value,
                 DetailsJson = System.Text.Json.JsonSerializer.Serialize(coupon),
             };
             db.ApprovalRequests.Add(pending);
@@ -257,7 +277,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
             return Accepted(new { message = "Coupon request sent for manager approval.", approvalRequestId = pending.Id });
         }
 
-        var created = await couponCreation.CreateAsync(coupon, CallerId() ?? Guid.Empty);
+        var created = await couponCreation.CreateAsync(coupon, callerId.Value);
         return Created($"/api/finance/coupons/{created.Id}", created);
     }
 
@@ -288,6 +308,13 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
         if (coupon is null) return NotFound();
         db.Coupons.Remove(coupon);
         await db.SaveChangesAsync();
+
+        var (_, callerBranchId) = GetCallerContext();
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Coupon deleted", entityType: "Coupon", entityId: coupon.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: callerBranchId, severity: "warning", beforeValue: $"{coupon.Code} · {coupon.Name}", module: "Coupons");
+
         return NoContent();
     }
 

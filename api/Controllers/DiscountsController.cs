@@ -9,10 +9,13 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/discounts")]
-public class DiscountsController(BaqalaDbContext db, IDiscountCreationService discountCreation) : ControllerBase
+public class DiscountsController(BaqalaDbContext db, IDiscountCreationService discountCreation, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] bool? isActive)
@@ -107,6 +110,12 @@ public class DiscountsController(BaqalaDbContext db, IDiscountCreationService di
         if (d is null) return NotFound();
         db.Discounts.Remove(d);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Discount deleted", entityType: "Discount", entityId: d.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: d.BranchId, severity: "warning", beforeValue: d.Name, module: "Coupons");
+
         return NoContent();
     }
 }

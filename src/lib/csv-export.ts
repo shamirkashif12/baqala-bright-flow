@@ -22,7 +22,7 @@ function escapeCsvCell(value: unknown): string {
 
 /**
  * Client-side CSV export for module list pages (Employees, Departments, Holidays, etc.) whose
- * data is already fully loaded and — where it matters (e.g. Payroll amounts) — already masked
+ * data is already fully loaded and — where it matters (e.g. sensitive amounts) — already masked
  * server-side. Mirrors the backend CsvWriter's UTF-8-BOM convention so Excel opens Arabic text
  * correctly. Used where a dedicated report/export endpoint (with its own audit logging) isn't
  * warranted — see the HRM Reports pages for that heavier pattern.

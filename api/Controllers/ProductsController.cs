@@ -313,6 +313,12 @@ public class ProductsController(
         if (v is null) return NotFound();
         db.ProductVariants.Remove(v);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Product variant deleted", entityType: "ProductVariant", entityId: v.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: CallerBranchId(), beforeValue: $"productId={id}", module: "Inventory");
+
         return NoContent();
     }
 }

@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,11 +9,14 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class UsersController(BaqalaDbContext db) : ControllerBase
+public class UsersController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                        ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
     private string? CallerRole() => User.FindFirst("role")?.Value;
 
@@ -150,6 +154,11 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         var existing = db.UserPermissions.Where(p => p.UserId == id);
         db.UserPermissions.RemoveRange(existing);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "User permission overrides reset", entityType: "User", entityId: id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId), severity: "warning", module: "Users");
+
         return NoContent();
     }
 
@@ -168,6 +177,16 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         if (req.RoleId == Guid.Empty || !await db.Roles.AnyAsync(r => r.Id == req.RoleId))
             return BadRequest(new { message = "A valid role must be selected." });
 
+        // A login must now originate from an existing HRM employee (no more standalone
+        // accounts) — the dropdown on the Add User form already only offers employees with no
+        // UserId, but that's a UX filter, not enforcement; re-check here to close the race where
+        // two admins try to link the same employee at once.
+        var employee = await db.Employees.FirstOrDefaultAsync(e => e.Id == req.EmployeeId);
+        if (employee is null)
+            return BadRequest(new { message = "The selected employee could not be found." });
+        if (employee.UserId is not null)
+            return Conflict(new { message = "This employee already has a linked login account." });
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -184,6 +203,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
             UpdatedAt = DateTime.UtcNow
         };
         db.Users.Add(user);
+        employee.UserId = user.Id;
         await db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = user.Id }, new { user.Id, user.Email, user.FullName });
     }
@@ -258,6 +278,12 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         user.Status = "inactive";
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "User deactivated", entityType: "User", entityId: user.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: user.BranchId, severity: "warning", beforeValue: user.FullName, module: "Users");
+
         return NoContent();
     }
 
@@ -269,7 +295,7 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
 
 public record CreateUserRequest(
     string Email, string Username, string Password, string? Pin,
-    string FullName, string? FullNameAr, Guid RoleId, Guid? BranchId);
+    string FullName, string? FullNameAr, Guid RoleId, Guid? BranchId, Guid EmployeeId);
 
 public record UpdateUserRequest(
     string? FullName, string? FullNameAr, Guid? RoleId,

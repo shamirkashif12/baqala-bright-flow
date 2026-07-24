@@ -9,10 +9,13 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/offers")]
-public class OffersController(BaqalaDbContext db, IOfferCreationService offerCreation) : ControllerBase
+public class OffersController(BaqalaDbContext db, IOfferCreationService offerCreation, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
     private IQueryable<Offer> WithIncludes() => db.Offers
         .Include(o => o.Branch)
@@ -122,6 +125,12 @@ public class OffersController(BaqalaDbContext db, IOfferCreationService offerCre
         if (o is null) return NotFound();
         db.Offers.Remove(o);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Offer deleted", entityType: "Offer", entityId: o.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: o.BranchId, severity: "warning", beforeValue: o.Name, module: "Coupons");
+
         return NoContent();
     }
 }

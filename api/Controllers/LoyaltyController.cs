@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,8 +10,14 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/loyalty")]
-public class LoyaltyController(BaqalaDbContext db) : ControllerBase
+public class LoyaltyController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
+
     // ── Admin config CRUD ──────────────────────────────────────────────────
 
     [RequirePermission("Loyalty Program", PermAction.View)]
@@ -106,6 +113,12 @@ public class LoyaltyController(BaqalaDbContext db) : ControllerBase
 
         db.LoyaltyPrograms.Remove(program);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Loyalty program deleted", entityType: "LoyaltyProgram", entityId: program.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: program.BranchId, severity: "warning", beforeValue: program.ProgramName, module: "Loyalty Program");
+
         return NoContent();
     }
 

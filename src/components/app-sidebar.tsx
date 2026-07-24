@@ -158,14 +158,10 @@ const navGroups: NavGroup[] = [
   {
     label: "Human Resources",
     items: [
-      // No module/roles — every signed-in user can see their own payroll, regardless of the
-      // "Payroll" module permission (that permission gates OTHER people's amounts, not your own).
-      { title: "My Payroll", url: "/my-payroll", icon: Wallet },
       { title: "Employees",    url: "/employees",    icon: Users,        module: "Employees" },
       { title: "Attendance",   url: "/hrm-attendance", icon: ClipboardCheck, module: "HR Attendance" },
       { title: "Shifts",       url: "/work-shifts",  icon: Clock,        module: "HR Shifts" },
       { title: "Leave Requests", url: "/leaves",     icon: Plane,        module: "Leave Management" },
-      { title: "Payroll",      url: "/payroll",      icon: Wallet,       module: "Payroll" },
       { title: "Departments",  url: "/departments",  icon: Building,     module: "HR Master Data" },
       { title: "Designations", url: "/designations", icon: IdCard,       module: "HR Master Data" },
       { title: "Holidays",     url: "/holidays",      icon: CalendarDays,module: "HR Master Data" },
@@ -229,7 +225,7 @@ export function AppSidebar() {
       <SidebarHeader className="p-4 border-b border-sidebar-border/50">
         {collapsed ? <BaqalaLogo showText={false} /> : <BaqalaLogo />}
       </SidebarHeader>
-      <SidebarContent className="px-2 py-3">
+      <SidebarContent className="px-2 py-3" data-tour="sidebar-nav">
         {navGroups.map((group) => {
           const visibleItems = group.items.filter(canSee);
           if (visibleItems.length === 0) return null;

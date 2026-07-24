@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService, INotificationService notifications) : ControllerBase
+public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService, INotificationService notifications, IAuditService audit) : ControllerBase
 {
     // Mirrors the GetCallerContext pattern used across the other controllers.
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -18,6 +18,12 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
         return (role, branchId);
     }
+
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
     // ─── ZATCA Invoices ───────────────────────────────────────────────────────
     // Invoices are compliance-module data (VAT registration, submission status) — unlike
@@ -307,6 +313,13 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         if (rule is null) return NotFound();
         db.RulesEngine.Remove(rule);
         await db.SaveChangesAsync();
+
+        var (_, callerBranchId) = GetCallerContext();
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Rule deleted", entityType: "RulesEngine", entityId: rule.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: callerBranchId, severity: "warning", beforeValue: rule.RuleName, module: "Rules Engine");
+
         return NoContent();
     }
 }

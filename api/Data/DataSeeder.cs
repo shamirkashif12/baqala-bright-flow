@@ -1197,6 +1197,40 @@ public static class DataSeeder
             await db.SaveChangesAsync();
     }
 
+    // MIMONY-RBAC-CREATEFORMPICKER-001 — Picker's "Stock Transfers" canCreate was true,
+    // which let a Picker create real warehouse stock requests via WarehouseController.CreateRequest
+    // despite the module's canCreate flag being what the ticket expected to gate that action.
+    // Runs on every startup — idempotent, only writes when the flag is wrong.
+    public static async Task PatchPickerStockTransfersPermissionsAsync(BaqalaDbContext db)
+    {
+        // Match both names: RenameRoles (Program.cs) renames a role literally named "Picker" to
+        // "Warehouse Staff" on every dev startup, which runs BEFORE this patch — so by the time
+        // this query runs, the role this ticket is about is no longer named "Picker" in the DB.
+        var pickerRoleIds = await db.Roles
+            .Where(r => r.Name == "Picker" || r.Name == "Warehouse Staff")
+            .Select(r => r.Id)
+            .ToListAsync();
+
+        if (pickerRoleIds.Count == 0) return;
+
+        var changed = false;
+        foreach (var roleId in pickerRoleIds)
+        {
+            var patches = await db.RolePermissions
+                .Where(p => p.RoleId == roleId && p.Module == "Stock Transfers" && p.CanCreate)
+                .ToListAsync();
+
+            foreach (var p in patches)
+            {
+                p.CanCreate = false;
+                changed = true;
+            }
+        }
+
+        if (changed)
+            await db.SaveChangesAsync();
+    }
+
     // Marketing ("Auditor" post-rename) must not retain Rules Engine, Accounting &
     // Finance, or Returns visibility from earlier seeder versions — those modules
     // let a marketing user read/alter approval, discount and tax rules.
@@ -1615,7 +1649,11 @@ public static class DataSeeder
                 P(r, "Stocks",              true,  false, false, false, false, false),
                 P(r, "Batches",             true,  false, false, false, false, false),
                 P(r, "Warehouses",          true,  false, false, false, false, false),
-                P(r, "Stock Transfers",     true,  true,  true,  false, false, false),
+                // MIMONY-RBAC-CREATEFORMPICKER-001: Picker must not be able to create new
+                // stock requests (WarehouseController.CreateRequest is gated on this module) —
+                // previously true here, which let a Picker submit real WH-... requests despite
+                // the ticket's expectation that canCreate:false blocks it.
+                P(r, "Stock Transfers",     true,  false, true,  false, false, false),
                 P(r, "Suppliers",           false, false, false, false, false, false),
                 P(r, "Purchase Orders",     false, false, false, false, false, false),
                 P(r, "Supplier Returns",    false, false, false, false, false, false),
@@ -2012,7 +2050,25 @@ public static class DataSeeder
     {
         var branches = await db.Branches.Where(b => b.Status == "active").ToListAsync();
         foreach (var branch in branches)
-            await EnsureFreshDemoDataForBranchAsync(db, branch);
+        {
+            try
+            {
+                await EnsureFreshDemoDataForBranchAsync(db, branch);
+            }
+            catch (Exception ex)
+            {
+                // This runs on every dev boot and seeds a few deterministically-numbered demo
+                // orders per branch — non-critical, disposable data. If an earlier boot's shift
+                // row landed but its orders didn't (or two overlapping API instances raced on the
+                // same day's order numbers), the guard above can't tell and this collides on the
+                // orders' unique OrderNumber index. That must never crash the whole app on every
+                // subsequent restart (it did — Program.cs previously had no try/catch here at
+                // all). Clear the tracker so this branch's half-added entities don't also break
+                // the next branch's SaveChangesAsync, and just skip — it'll retry next boot.
+                db.ChangeTracker.Clear();
+                Console.Error.WriteLine($"PatchEnsureFreshDemoDataAsync: skipping branch {branch.Id} ({branch.Name}) after seeding error: {ex.Message}");
+            }
+        }
     }
 
     private static async Task EnsureFreshDemoDataForBranchAsync(BaqalaDbContext db, Branch branch)
