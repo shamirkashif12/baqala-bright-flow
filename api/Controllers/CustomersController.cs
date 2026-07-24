@@ -17,10 +17,11 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
     // deliberately open for exactly that lookup).
     [RequirePermission("Customers", PermAction.View)]
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] string? tier, [FromQuery] string? search)
+    public async Task<IActionResult> GetAll([FromQuery] string? tier, [FromQuery] string? search, [FromQuery] Guid? branchId)
     {
         var query = db.Customers.AsQueryable();
         if (!string.IsNullOrEmpty(tier)) query = query.Where(c => c.Tier == tier);
+        if (branchId.HasValue) query = query.Where(c => c.PreferredBranchId == branchId);
         if (!string.IsNullOrEmpty(search))
             query = query.Where(c => c.FullName.Contains(search) || c.Phone.Contains(search) || c.CustomerCode.Contains(search));
         return Ok(await query.OrderByDescending(c => c.TotalSpend).ToListAsync());
