@@ -731,6 +731,19 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         if (req.ApprovedBy.HasValue) transfer.ApprovedBy = req.ApprovedBy;
         transfer.UpdatedAt = DateTime.UtcNow;
 
+        // Approval previously waved through any requested quantity unchecked — nothing stopped an
+        // approver from accepting a request for more than the source actually has, and the mismatch
+        // only ever surfaced later at in_transit/completed, often to a different person entirely
+        // with no clear link back to "this was invalid from the start". Catching it here, at the
+        // point someone is actually deciding whether to accept the request, is the earliest and
+        // clearest place to stop it.
+        if (req.Status == "approved" && prev != "approved")
+        {
+            var lines = transfer.Items.Select(item => (item.ProductId, Quantity: item.RequestedQuantity));
+            var stockError = await ValidateSourceStockAsync(transfer, lines);
+            if (stockError != null) return BadRequest(new { message = stockError });
+        }
+
         // Shipped: the goods physically leave the source right now — deduct immediately rather
         // than leaving them sitting in the source's "available" count until someone eventually
         // confirms receipt (which could be hours/days later for an in-transit shipment).

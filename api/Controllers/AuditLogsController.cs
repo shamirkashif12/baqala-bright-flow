@@ -38,7 +38,10 @@ public class AuditLogsController(BaqalaDbContext db, IAuditService audit) : Cont
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
-        var query = db.AuditLogs.AsQueryable();
+        // Previously not `Include`d — every entry carried only a raw `userId` GUID with no way to
+        // show who actually performed the action, forcing "actor" off the audit trail entirely for
+        // any caller that (correctly, per the fix below) queries beyond their own userId.
+        var query = db.AuditLogs.Include(a => a.User).AsQueryable();
         if (userId.HasValue) query = query.Where(a => a.UserId == userId);
         if (!string.IsNullOrEmpty(entityType)) query = query.Where(a => a.EntityType == entityType);
         if (entityId.HasValue) query = query.Where(a => a.EntityId == entityId);
