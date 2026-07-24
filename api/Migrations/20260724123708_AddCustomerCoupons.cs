@@ -11,6 +11,13 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // No inline table.ForeignKey(...) here — coupons/customers/users all predate this
+            // migration, so their id columns' collation may not match this fresh table's ambient
+            // default (see MigrationCollationHelper.cs / the migration-collation-addcolumn-gotcha
+            // memory: "principal table created in an earlier migration" applies here even though
+            // customer_coupons itself is brand new, because the FK's OTHER side isn't). Confirmed
+            // failing on production with "Referencing column and referenced column are
+            // incompatible" before this fix.
             migrationBuilder.CreateTable(
                 name: "customer_coupons",
                 columns: table => new
@@ -24,24 +31,6 @@ namespace BaqalaPOS.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_customer_coupons", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_customer_coupons_coupons_coupon_id",
-                        column: x => x.coupon_id,
-                        principalTable: "coupons",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_customer_coupons_customers_customer_id",
-                        column: x => x.customer_id,
-                        principalTable: "customers",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_customer_coupons_users_assigned_by",
-                        column: x => x.assigned_by,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
                 })
                 .Annotation("MySQL:Charset", "utf8mb4");
 
@@ -60,6 +49,31 @@ namespace BaqalaPOS.Api.Migrations
                 name: "IX_customer_coupons_customer_id",
                 table: "customer_coupons",
                 column: "customer_id");
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_customer_coupons_coupons_coupon_id",
+                table: "customer_coupons",
+                column: "coupon_id",
+                principalTable: "coupons",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_customer_coupons_customers_customer_id",
+                table: "customer_coupons",
+                column: "customer_id",
+                principalTable: "customers",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKeyWithMatchedCollation(
+                name: "FK_customer_coupons_users_assigned_by",
+                table: "customer_coupons",
+                column: "assigned_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Restrict,
+                nullable: true);
         }
 
         /// <inheritdoc />
