@@ -201,8 +201,12 @@ public class FinanceController(BaqalaDbContext db, IAuditService audit) : Contro
     [HttpPost("coupons")]
     public async Task<IActionResult> CreateCoupon([FromBody] Coupon coupon)
     {
+        var callerId = CallerId();
+        if (callerId is null) return Unauthorized();
+
         coupon.Id = Guid.NewGuid();
         coupon.UsedCount = 0;
+        coupon.CreatedBy = callerId.Value;
         coupon.CreatedAt = coupon.UpdatedAt = DateTime.UtcNow;
         db.Coupons.Add(coupon);
         await db.SaveChangesAsync();
