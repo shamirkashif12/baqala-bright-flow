@@ -77,6 +77,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<ExpenseType> ExpenseTypes { get; set; }
     public DbSet<Expense> Expenses { get; set; }
     public DbSet<Coupon> Coupons { get; set; }
+    public DbSet<CustomerCoupon> CustomerCoupons { get; set; }
     public DbSet<TaxFeeRule> TaxFeeRules { get; set; }
 
     // Promotions
@@ -353,6 +354,32 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .WithMany()
             .HasForeignKey(c => c.CreatedBy)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── CustomerCoupon: Coupon/Customer/AssignedBy FKs ──────────────────
+        // Cascade on Coupon (assignments are meaningless once the coupon itself is gone) but
+        // Restrict on Customer — a customer with real redeemable assignments shouldn't silently
+        // vanish along with them if the customer record is ever deleted.
+        modelBuilder.Entity<CustomerCoupon>()
+            .HasOne(cc => cc.Coupon)
+            .WithMany(c => c.CustomerCoupons)
+            .HasForeignKey(cc => cc.CouponId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CustomerCoupon>()
+            .HasOne(cc => cc.Customer)
+            .WithMany()
+            .HasForeignKey(cc => cc.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<CustomerCoupon>()
+            .HasOne(cc => cc.AssignedByUser)
+            .WithMany()
+            .HasForeignKey(cc => cc.AssignedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<CustomerCoupon>()
+            .HasIndex(cc => new { cc.CouponId, cc.CustomerId })
+            .IsUnique();
 
         modelBuilder.Entity<TaxFeeRule>()
             .HasOne(t => t.CreatedByUser)

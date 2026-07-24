@@ -21,7 +21,9 @@ public class ApprovalsController(
     IAuditService audit,
     IOrderVoidService orderVoidService,
     IProductDeletionService productDeletion,
-    IDiscountCreationService discountCreation) : ControllerBase
+    IDiscountCreationService discountCreation,
+    IOfferCreationService offerCreation,
+    ICouponCreationService couponCreation) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
@@ -37,6 +39,8 @@ public class ApprovalsController(
     private static string ModuleFor(string requestType) => requestType switch
     {
         "discount" => "Coupons",
+        "offer" => "Coupons",
+        "coupon" => "Coupons",
         "order_cancellation" => "Orders",
         "item_deletion" => "Inventory",
         "refund_return" => "Returns",
@@ -173,7 +177,13 @@ public class ApprovalsController(
 
     private static string EntityLabel(ApprovalRequest a) => a.RequestType switch
     {
-        "discount" => "New discount request",
+        // Previously a bare "New discount request" — every row looked identical regardless of
+        // what was actually being asked for. DetailsJson already carries the full request payload
+        // (it has to, to create the row later on approval) — parsing it here to show what it
+        // actually is costs nothing extra and was the whole point of storing it.
+        "discount" => DiscountLabel(a),
+        "offer" => OfferLabel(a),
+        "coupon" => CouponLabel(a),
         "order_cancellation" => "Order cancellation",
         // DetailsJson carries a {name, sku?} snapshot taken at request time (see
         // ProductsController.Delete/DeleteCategory) — falls back to the generic label for any
@@ -199,6 +209,53 @@ public class ApprovalsController(
     }
 
     private record ItemDeletionDetails(string? Name, string? Sku);
+
+    private static string DiscountLabel(ApprovalRequest a)
+    {
+        if (string.IsNullOrEmpty(a.DetailsJson)) return "New discount request";
+        try
+        {
+            var req = System.Text.Json.JsonSerializer.Deserialize<DiscountRequest>(a.DetailsJson, CaseInsensitiveJson);
+            if (req is null) return "New discount request";
+            var amount = req.DiscountType == "fixed" ? $"SAR {req.Value:0.##}" : $"{req.Value:0.##}%";
+            return $"{req.Name} — {amount} off";
+        }
+        catch (System.Text.Json.JsonException) { return "New discount request"; }
+    }
+
+    private static string OfferLabel(ApprovalRequest a)
+    {
+        if (string.IsNullOrEmpty(a.DetailsJson)) return "New offer request";
+        try
+        {
+            var req = System.Text.Json.JsonSerializer.Deserialize<OfferRequest>(a.DetailsJson, CaseInsensitiveJson);
+            if (req is null) return "New offer request";
+            var typeLabel = req.OfferType switch
+            {
+                "bogo" => "Buy One Get One",
+                "combo" => "Combo Deal",
+                "buy_a_get_b" => "Buy A Get B",
+                "product_offer" => "Product Offer",
+                "lucky_draw" => "Lucky Draw",
+                _ => req.OfferType,
+            };
+            return $"{req.Name} ({typeLabel})";
+        }
+        catch (System.Text.Json.JsonException) { return "New offer request"; }
+    }
+
+    private static string CouponLabel(ApprovalRequest a)
+    {
+        if (string.IsNullOrEmpty(a.DetailsJson)) return "New coupon request";
+        try
+        {
+            var req = System.Text.Json.JsonSerializer.Deserialize<Coupon>(a.DetailsJson, CaseInsensitiveJson);
+            if (req is null) return "New coupon request";
+            var amount = req.Type == "fixed" ? $"SAR {req.Value:0.##}" : $"{req.Value:0.##}%";
+            return $"Coupon {req.Code} — {req.Name} ({amount} off)";
+        }
+        catch (System.Text.Json.JsonException) { return "New coupon request"; }
+    }
 
     // Only valid for the three NEW request types backed by ApprovalRequest — the four pre-existing
     // flows keep using their own approve/reject endpoints (ReturnsController, StockCountsController,
@@ -232,6 +289,20 @@ public class ApprovalsController(
                         ?? throw new InvalidOperationException("Approval request has no stored discount payload.");
                     var discount = await discountCreation.CreateAsync(discountReq);
                     pending.EntityId = discount.Id;
+                    break;
+
+                case "offer":
+                    var offerReq = System.Text.Json.JsonSerializer.Deserialize<OfferRequest>(pending.DetailsJson!)
+                        ?? throw new InvalidOperationException("Approval request has no stored offer payload.");
+                    var offer = await offerCreation.CreateAsync(offerReq);
+                    pending.EntityId = offer.Id;
+                    break;
+
+                case "coupon":
+                    var couponReq = System.Text.Json.JsonSerializer.Deserialize<Coupon>(pending.DetailsJson!)
+                        ?? throw new InvalidOperationException("Approval request has no stored coupon payload.");
+                    var coupon = await couponCreation.CreateAsync(couponReq, pending.RequestedBy);
+                    pending.EntityId = coupon.Id;
                     break;
 
                 case "order_cancellation":

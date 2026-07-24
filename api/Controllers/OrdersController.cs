@@ -48,6 +48,19 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
         userId.HasValue ? (await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()) : null;
 
+    // Sum of this order's line items whose product belongs to the given category — used to
+    // recompute a "category"-scoped Discount/Coupon's contribution server-side. Materializes the
+    // category's product ids first and filters in memory rather than a `.Contains()` against a
+    // parameterized Guid list inside the EF query itself — that throws on this MySQL provider
+    // ("Expression '@Select' in the SQL tree does not have a type mapping assigned"), same
+    // workaround already used in StockTransfersController.Create.
+    private async Task<decimal> CategoryDiscountBasisAsync(Guid? categoryId, IEnumerable<OrderItem> items)
+    {
+        if (categoryId is null) return 0;
+        var categoryProductIds = (await db.Products.Where(p => p.CategoryId == categoryId).Select(p => p.Id).ToListAsync()).ToHashSet();
+        return items.Where(i => categoryProductIds.Contains(i.ProductId)).Sum(i => i.TotalPrice);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid[]? branchId,
@@ -369,6 +382,89 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
         foreach (var d in order.Discounts) { d.Id = Guid.NewGuid(); d.OrderId = order.Id; d.CreatedAt = DateTime.UtcNow; }
         foreach (var s in order.ServiceCharges) { s.Id = Guid.NewGuid(); s.OrderId = order.Id; s.CreatedAt = DateTime.UtcNow; }
+
+        // ── Re-validate coupon/discount server-side ─────────────────────────────
+        // Previously the client's DiscountAmount/CouponId were persisted verbatim with zero
+        // re-checking (unlike loyalty-point redemption below, which IS re-validated) —
+        // Coupon.UsedCount was also never incremented anywhere, making its usage limit purely
+        // decorative. Only runs when a real coupon/discount reference is present; a plain manual
+        // discount with neither stays exactly as client-computed, same as before.
+        Coupon? appliedCoupon = null;
+        var nowUtc = DateTime.UtcNow;
+        if (order.CouponId.HasValue)
+        {
+            appliedCoupon = await db.Coupons.FindAsync(order.CouponId.Value);
+            if (appliedCoupon is null || appliedCoupon.Status != "active")
+                return BadRequest(new { message = "This coupon is no longer valid." });
+            if (appliedCoupon.StartDate > nowUtc || appliedCoupon.EndDate < nowUtc)
+                return BadRequest(new { message = "This coupon has expired or isn't active yet." });
+            if (appliedCoupon.UsageLimit.HasValue && appliedCoupon.UsedCount >= appliedCoupon.UsageLimit.Value)
+                return BadRequest(new { message = "This coupon has reached its usage limit." });
+            if (appliedCoupon.MinOrderAmount.HasValue && order.Subtotal < appliedCoupon.MinOrderAmount.Value)
+                return BadRequest(new { message = $"This coupon requires a minimum order of SAR {appliedCoupon.MinOrderAmount:F2}." });
+            var restrictedTo = await db.CustomerCoupons.Where(cc => cc.CouponId == appliedCoupon.Id).Select(cc => cc.CustomerId).ToListAsync();
+            if (restrictedTo.Count > 0 && (order.CustomerId is null || !restrictedTo.Contains(order.CustomerId.Value)))
+                return BadRequest(new { message = "This coupon is restricted to specific customers." });
+        }
+
+        var validatedDiscountTotal = 0m;
+        var anyRuleReference = appliedCoupon != null;
+        foreach (var d in order.Discounts)
+        {
+            // No DiscountId means this line represents an Offer's effect — there's no OfferId
+            // column anywhere on Order/OrderItem to re-verify it against, so (same as before) it
+            // stays client-computed-and-trusted.
+            if (d.DiscountId is null) { validatedDiscountTotal += d.Amount; continue; }
+            anyRuleReference = true;
+            var rule = await db.Discounts.FindAsync(d.DiscountId.Value);
+            if (rule is null || !rule.IsActive)
+                return BadRequest(new { message = $"The discount \"{d.Name}\" is no longer active." });
+            if (rule.StartDate.HasValue && rule.StartDate > nowUtc)
+                return BadRequest(new { message = $"The discount \"{d.Name}\" hasn't started yet." });
+            if (rule.EndDate.HasValue && rule.EndDate < nowUtc)
+                return BadRequest(new { message = $"The discount \"{d.Name}\" has expired." });
+            if (rule.RequiresCustomer && order.CustomerId is null)
+                return BadRequest(new { message = $"The discount \"{d.Name}\" requires a customer to be selected." });
+            if (!string.IsNullOrEmpty(rule.ExcludedProductIdsJson))
+            {
+                var excluded = System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(rule.ExcludedProductIdsJson) ?? [];
+                if (order.Items.Any(i => excluded.Contains(i.ProductId)))
+                    return BadRequest(new { message = $"The discount \"{d.Name}\" doesn't apply to one or more items in this order." });
+            }
+
+            var basis = rule.AppliesTo switch
+            {
+                "product" => order.Items.Where(i => i.ProductId == rule.ProductId).Sum(i => i.TotalPrice),
+                "category" => await CategoryDiscountBasisAsync(rule.CategoryId, order.Items),
+                _ => order.Subtotal, // "all" or "branch" — applies to the whole order
+            };
+            var computed = rule.DiscountType == "fixed" ? Math.Min(rule.Value, basis) : Math.Round(basis * rule.Value / 100m, 2);
+            d.Amount = computed;
+            validatedDiscountTotal += computed;
+        }
+
+        if (appliedCoupon != null)
+        {
+            var couponBasis = appliedCoupon.ApplicableTo switch
+            {
+                "product" => order.Items.Where(i => i.ProductId == appliedCoupon.ApplicableId).Sum(i => i.TotalPrice),
+                "category" => await CategoryDiscountBasisAsync(appliedCoupon.ApplicableId, order.Items),
+                _ => order.Subtotal,
+            };
+            var couponAmount = appliedCoupon.Type == "fixed" ? Math.Min(appliedCoupon.Value, couponBasis) : Math.Round(couponBasis * appliedCoupon.Value / 100m, 2);
+            if (appliedCoupon.MaxDiscountAmount.HasValue) couponAmount = Math.Min(couponAmount, appliedCoupon.MaxDiscountAmount.Value);
+            validatedDiscountTotal += couponAmount;
+            appliedCoupon.UsedCount += 1;
+        }
+
+        if (anyRuleReference)
+        {
+            order.DiscountAmount = Math.Min(validatedDiscountTotal, order.Subtotal);
+            var taxableBase = Math.Max(0, order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount);
+            order.TaxAmount = Math.Round(taxableBase * 0.15m, 2);
+            order.TotalAmount = order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount + order.TaxAmount + order.CustomFeeAmount;
+        }
+
         db.Orders.Add(order);
 
         // Keep the till's running totals live so "expected cash"/variance at close-out

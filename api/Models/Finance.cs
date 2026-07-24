@@ -142,6 +142,32 @@ public class Coupon
 
     public User? CreatedByUser { get; set; }
     public ICollection<Order> Orders { get; set; } = [];
+    public ICollection<CustomerCoupon> CustomerCoupons { get; set; } = [];
+}
+
+// Zero rows for a Coupon = open to every customer (backward compatible with every coupon that
+// existed before this table did). One or more rows = redeemable only by those specific customers.
+[Table("customer_coupons")]
+public class CustomerCoupon
+{
+    [Key, Column("id")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required, Column("coupon_id")]
+    public Guid CouponId { get; set; }
+
+    [Required, Column("customer_id")]
+    public Guid CustomerId { get; set; }
+
+    [Column("assigned_by")]
+    public Guid? AssignedBy { get; set; }
+
+    [Column("assigned_at")]
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+
+    public Coupon? Coupon { get; set; }
+    public Customer? Customer { get; set; }
+    public User? AssignedByUser { get; set; }
 }
 
 [Table("tax_fee_rules")]

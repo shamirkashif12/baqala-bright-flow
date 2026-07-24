@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class FinanceController(BaqalaDbContext db) : ControllerBase
+public class FinanceController(BaqalaDbContext db, ICouponCreationService couponCreation) : ControllerBase
 {
     // Mirrors the GetCallerContext pattern used across the other controllers.
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -17,6 +18,9 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
         var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
         return (role, branchId);
     }
+
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
     // ─── Expenses ─────────────────────────────────────────────────────────────
     // Only used by the dedicated /expenses page — safe to gate on "Accounting & Finance" View
@@ -161,7 +165,7 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
     }
 
     [HttpGet("coupons/validate/{code}")]
-    public async Task<IActionResult> ValidateCoupon(string code)
+    public async Task<IActionResult> ValidateCoupon(string code, [FromQuery] Guid? customerId)
     {
         var now = DateTime.UtcNow;
         // Codes are always stored uppercase (CreateCoupon/UpdateCoupon UI uppercases on save) —
@@ -173,19 +177,88 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
             c.StartDate <= now &&
             c.EndDate >= now &&
             (c.UsageLimit == null || c.UsedCount < c.UsageLimit));
-        return coupon is null ? NotFound("Coupon invalid or expired.") : Ok(coupon);
+        if (coupon is null) return NotFound("Coupon invalid or expired.");
+
+        // A coupon with zero assignment rows stays open to everyone (every coupon that existed
+        // before this table did, plus any new one nobody deliberately restricted). One or more
+        // rows means only those specific customers may redeem it.
+        var assignedCustomerIds = await db.CustomerCoupons.Where(cc => cc.CouponId == coupon.Id).Select(cc => cc.CustomerId).ToListAsync();
+        if (assignedCustomerIds.Count > 0 && (customerId is null || !assignedCustomerIds.Contains(customerId.Value)))
+            return NotFound("This coupon is restricted to specific customers.");
+
+        return Ok(coupon);
     }
 
+    [RequirePermission("Coupons", PermAction.View)]
+    [HttpGet("coupons/{id:guid}/customers")]
+    public async Task<IActionResult> GetCouponCustomers(Guid id)
+    {
+        var assignments = await db.CustomerCoupons
+            .Include(cc => cc.Customer)
+            .Where(cc => cc.CouponId == id)
+            .OrderByDescending(cc => cc.AssignedAt)
+            .ToListAsync();
+        return Ok(assignments.Select(cc => new
+        {
+            customerId = cc.CustomerId,
+            customerName = cc.Customer?.FullName,
+            customerPhone = cc.Customer?.Phone,
+            assignedAt = cc.AssignedAt,
+        }));
+    }
+
+    [RequirePermission("Coupons", PermAction.Edit)]
+    [HttpPost("coupons/{id:guid}/customers")]
+    public async Task<IActionResult> AssignCouponCustomer(Guid id, [FromBody] AssignCouponCustomerRequest req)
+    {
+        if (!await db.Coupons.AnyAsync(c => c.Id == id)) return NotFound(new { message = "Coupon not found." });
+        if (!await db.Customers.AnyAsync(c => c.Id == req.CustomerId)) return NotFound(new { message = "Customer not found." });
+        if (await db.CustomerCoupons.AnyAsync(cc => cc.CouponId == id && cc.CustomerId == req.CustomerId))
+            return Conflict(new { message = "This customer is already assigned to this coupon." });
+
+        db.CustomerCoupons.Add(new CustomerCoupon { CouponId = id, CustomerId = req.CustomerId, AssignedBy = CallerId() });
+        await db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [RequirePermission("Coupons", PermAction.Edit)]
+    [HttpDelete("coupons/{id:guid}/customers/{customerId:guid}")]
+    public async Task<IActionResult> UnassignCouponCustomer(Guid id, Guid customerId)
+    {
+        var assignment = await db.CustomerCoupons.FirstOrDefaultAsync(cc => cc.CouponId == id && cc.CustomerId == customerId);
+        if (assignment is null) return NotFound();
+        db.CustomerCoupons.Remove(assignment);
+        await db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    // Same maker-checker precedent DiscountsController.Create/OffersController.Create already
+    // established: a caller with Coupons:Approve (i.e. already a manager) creates the coupon
+    // immediately (self-approve); anyone else's request is queued in the Approval Center instead
+    // — no Coupon row exists until approved.
     [RequirePermission("Coupons", PermAction.Create)]
     [HttpPost("coupons")]
     public async Task<IActionResult> CreateCoupon([FromBody] Coupon coupon)
     {
-        coupon.Id = Guid.NewGuid();
-        coupon.UsedCount = 0;
-        coupon.CreatedAt = coupon.UpdatedAt = DateTime.UtcNow;
-        db.Coupons.Add(coupon);
-        await db.SaveChangesAsync();
-        return Created($"/api/finance/coupons/{coupon.Id}", coupon);
+        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Coupons", PermAction.Approve);
+        if (!canSelfApprove)
+        {
+            var pending = new ApprovalRequest
+            {
+                RequestType = "coupon",
+                EntityType = "Coupon",
+                EntityId = null,
+                BranchId = null,
+                RequestedBy = CallerId() ?? Guid.Empty,
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(coupon),
+            };
+            db.ApprovalRequests.Add(pending);
+            await db.SaveChangesAsync();
+            return Accepted(new { message = "Coupon request sent for manager approval.", approvalRequestId = pending.Id });
+        }
+
+        var created = await couponCreation.CreateAsync(coupon, CallerId() ?? Guid.Empty);
+        return Created($"/api/finance/coupons/{created.Id}", created);
     }
 
     [RequirePermission("Coupons", PermAction.Edit)]
@@ -265,3 +338,4 @@ public class FinanceController(BaqalaDbContext db) : ControllerBase
 }
 
 public record ApproveExpenseRequest(bool Approved, Guid ApprovedBy);
+public record AssignCouponCustomerRequest(Guid CustomerId);

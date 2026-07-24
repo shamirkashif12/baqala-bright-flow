@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,8 +9,11 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/offers")]
-public class OffersController(BaqalaDbContext db) : ControllerBase
+public class OffersController(BaqalaDbContext db, IOfferCreationService offerCreation) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
     private IQueryable<Offer> WithIncludes() => db.Offers
         .Include(o => o.Branch)
         .Include(o => o.TriggerProduct)
@@ -41,36 +45,32 @@ public class OffersController(BaqalaDbContext db) : ControllerBase
         return o is null ? NotFound() : Ok(o);
     }
 
+    // Same maker-checker precedent DiscountsController.Create already established: a caller with
+    // Coupons:Approve (i.e. already a manager) creates the offer immediately (self-approve);
+    // anyone else's request is queued in the Approval Center instead — no Offer row exists until
+    // approved.
     [RequirePermission("Coupons", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] OfferRequest req)
     {
-        var offer = new Offer
+        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Coupons", PermAction.Approve);
+        if (!canSelfApprove)
         {
-            Id = Guid.NewGuid(),
-            Name = req.Name,
-            OfferType = req.OfferType,
-            BranchId = req.BranchId,
-            TriggerProductId = req.TriggerProductId,
-            TriggerBarcode = string.IsNullOrWhiteSpace(req.TriggerBarcode) ? null : req.TriggerBarcode.Trim(),
-            GetProductId = req.GetProductId,
-            TriggerQuantity = req.TriggerQuantity ?? 1,
-            GetQuantity = req.GetQuantity ?? 1,
-            OfferPrice = req.OfferPrice,
-            DiscountPercentage = req.DiscountPercentage,
-            ItemsDescription = req.ItemsDescription,
-            MinBasketAmount = req.MinBasketAmount,
-            Winners = req.Winners,
-            UsageLimit = req.UsageLimit,
-            UsedCount = 0,
-            StartDate = req.StartDate ?? DateTime.UtcNow,
-            EndDate = req.EndDate ?? DateTime.UtcNow.AddMonths(1),
-            IsActive = req.IsActive ?? true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        };
-        db.Offers.Add(offer);
-        await db.SaveChangesAsync();
+            var pending = new ApprovalRequest
+            {
+                RequestType = "offer",
+                EntityType = "Offer",
+                EntityId = null,
+                BranchId = req.BranchId,
+                RequestedBy = CallerId() ?? Guid.Empty,
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(req),
+            };
+            db.ApprovalRequests.Add(pending);
+            await db.SaveChangesAsync();
+            return Accepted(new { message = "Offer request sent for manager approval.", approvalRequestId = pending.Id });
+        }
+
+        var offer = await offerCreation.CreateAsync(req);
         return CreatedAtAction(nameof(GetById), new { id = offer.Id }, offer);
     }
 

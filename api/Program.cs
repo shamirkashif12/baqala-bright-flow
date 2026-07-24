@@ -57,6 +57,8 @@ builder.Services.AddScoped<IStockMovementService, StockMovementService>();
 builder.Services.AddScoped<IOrderVoidService, OrderVoidService>();
 builder.Services.AddScoped<IProductDeletionService, ProductDeletionService>();
 builder.Services.AddScoped<IDiscountCreationService, DiscountCreationService>();
+builder.Services.AddScoped<IOfferCreationService, OfferCreationService>();
+builder.Services.AddScoped<ICouponCreationService, CouponCreationService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 builder.Services.AddHostedService<UsbPrinterAutoInstallService>();
 builder.Services.AddHostedService<LoyaltyExpiryService>();
