@@ -24,7 +24,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     private static IQueryable<Employee> WithIncludes(IQueryable<Employee> query) =>
-        query.Include(e => e.Branch).Include(e => e.Department).Include(e => e.Designation).Include(e => e.Role).Include(e => e.LeavePolicy);
+        query.Include(e => e.Branch).Include(e => e.Department).Include(e => e.Designation).Include(e => e.Role).Include(e => e.LeavePolicy).Include(e => e.User);
 
     // Attaches each employee's current active shift assignment (if any) as a query-time
     // convenience field — avoids a separate round-trip per employee from the frontend.
@@ -558,44 +558,6 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
             userId: CallerId(), severity: "warning", module: "Employees", employeeId: id);
 
         return Ok(contract);
-    }
-
-    // Users who could be linked as this Employee's login account (FRD's Employee<->User is
-    // intentionally optional — many staff never get a login — but until now there was no UI at
-    // all to set the link, only a one-time startup backfill). Excludes Users already linked to a
-    // DIFFERENT employee; a currentEmployeeId lets the Edit form keep showing its own current link.
-    [HttpGet("linkable-users")]
-    public async Task<IActionResult> GetLinkableUsers([FromQuery] Guid? currentEmployeeId)
-    {
-        // Materialize first, then filter in-memory — this MySQL EF provider fails to type-map a
-        // List<Guid> used inside Contains() in a translated query (see
-        // DataSeeder.PatchRemoveTestBranchesAsync's comment for the same gotcha elsewhere).
-        var linkedElsewhere = (await db.Employees
-                .Where(e => e.UserId != null)
-                .Select(e => new { e.Id, e.UserId })
-                .ToListAsync())
-            .Where(e => currentEmployeeId == null || e.Id != currentEmployeeId)
-            .Select(e => e.UserId!.Value)
-            .ToHashSet();
-
-        var users = await db.Users.Where(u => u.Status == "active").OrderBy(u => u.FullName).ToListAsync();
-        var linkable = users.Where(u => !linkedElsewhere.Contains(u.Id))
-            .Select(u => new { u.Id, u.FullName, u.Email });
-        return Ok(linkable);
-    }
-
-    // Mirror of GetLinkableUsers, for the Add User form's Employee dropdown (Users are now
-    // created FROM an employee, not linked to one after the fact) — active employees who don't
-    // already have a login account.
-    [HttpGet("unlinked")]
-    public async Task<IActionResult> GetUnlinkedEmployees()
-    {
-        var employees = await db.Employees
-            .Where(e => e.UserId == null && e.EmploymentStatus == "active")
-            .OrderBy(e => e.FullName)
-            .Select(e => new { e.Id, e.FullName, e.Email, e.EmployeeCode, e.BranchId, e.RoleId })
-            .ToListAsync();
-        return Ok(employees);
     }
 
     // Self-service payroll (Mod #3) — any authenticated user with a linked Employee record can

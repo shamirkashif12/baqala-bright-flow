@@ -929,10 +929,6 @@ export const api = {
   getEmployees: (params?: { branchId?: string[]; departmentId?: string[]; designationId?: string[]; roleId?: string[]; status?: string[]; search?: string }) =>
     request<Employee[]>(`/api/employees${toQuery(params)}`),
   getEmployee: (id: string) => request<Employee>(`/api/employees/${id}`),
-  getLinkableUsers: (currentEmployeeId?: string) =>
-    request<{ id: string; fullName: string; email: string }[]>(`/api/employees/linkable-users${toQuery({ currentEmployeeId })}`),
-  getUnlinkedEmployees: () =>
-    request<{ id: string; fullName: string; email?: string; employeeCode: string; branchId: string; roleId?: string }[]>("/api/employees/unlinked"),
   createEmployee: (data: Partial<Employee>) =>
     request<Employee>("/api/employees", { method: "POST", body: JSON.stringify(data) }),
   updateEmployee: (id: string, data: Partial<Employee>) =>
@@ -1026,25 +1022,6 @@ export const api = {
   terminateEmployeeContract: (employeeId: string, contractId: string) =>
     request<EmployeeContract>(`/api/employees/${employeeId}/contracts/${contractId}/terminate`, { method: "POST" }),
 
-  // Payroll (HRM)
-  getPayrollRuns: (params?: { branchId?: string; year?: number; month?: number; status?: string }) =>
-    request<PayrollRun[]>(`/api/payroll-runs${toQuery(params)}`),
-  getPayrollRun: (id: string) => request<PayrollRunDetail>(`/api/payroll-runs/${id}`),
-  createPayrollRun: (data: { branchId: string; year: number; month: number; payDate: string }) =>
-    request<PayrollRun>("/api/payroll-runs", { method: "POST", body: JSON.stringify(data) }),
-  processPayrollRun: (id: string) => request<PayrollRun>(`/api/payroll-runs/${id}/process`, { method: "POST" }),
-  lockPayrollRun: (id: string) => request<PayrollRun>(`/api/payroll-runs/${id}/lock`, { method: "POST" }),
-  cancelPayrollRun: (id: string) => request<PayrollRun>(`/api/payroll-runs/${id}/cancel`, { method: "POST" }),
-  getMyPayroll: () => request<MyPayroll>("/api/employees/me/payroll"),
-
-  getEmployeeSalaryComponents: (employeeId: string) => request<SalaryComponent[]>(`/api/employees/${employeeId}/salary-components`),
-  addSalaryComponent: (employeeId: string, data: Partial<SalaryComponent>) =>
-    request<SalaryComponent>(`/api/employees/${employeeId}/salary-components`, { method: "POST", body: JSON.stringify(data) }),
-  updateSalaryComponent: (employeeId: string, componentId: string, data: Partial<SalaryComponent>) =>
-    request<SalaryComponent>(`/api/employees/${employeeId}/salary-components/${componentId}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteSalaryComponent: (employeeId: string, componentId: string) =>
-    request<void>(`/api/employees/${employeeId}/salary-components/${componentId}`, { method: "DELETE" }),
-
   // HRM Reports
   getHrAttendanceReport: (params?: { branchId?: string; departmentId?: string; employeeId?: string; shiftId?: string; status?: string; correctionStatus?: string; dateFrom?: string; dateTo?: string }) =>
     request<StaffAttendance[]>(`/api/hrm/reports/attendance${toQuery(params)}`),
@@ -1096,6 +1073,7 @@ export interface Employee {
   contractType?: string; contractStartDate?: string; contractEndDate?: string; contractOpenEnded: boolean;
   createdAt: string; updatedAt: string;
   branch?: Branch; department?: Department; designation?: Designation; role?: Role;
+  user?: { id: string; username: string; email: string; status: string };
   leavePolicyId?: string; leavePolicy?: LeavePolicy; leavePolicyEffectiveFrom?: string;
   currentShift?: { shiftId: string; shiftName: string; startTime: string; endTime: string; effectiveFrom: string };
   hasDocuments: boolean; documentStatus: string; onLeaveToday: boolean;
@@ -1110,31 +1088,6 @@ export interface LeaveRequest {
   reason: string; attachmentUrl?: string; status: string; approverId?: string; approvedAt?: string; rejectionReason?: string;
   createdAt: string; updatedAt: string;
   employee?: Employee; leaveType?: LeaveType; approver?: { id: string; fullName: string };
-}
-
-// HRM — Payroll
-export interface SalaryComponent {
-  id: string; employeeId: string; componentName: string; componentType: string; amount: number;
-  frequency: string; effectiveFrom: string; effectiveTo?: string; status: string; createdAt: string; updatedAt: string;
-}
-export interface PayrollRun {
-  id: string; branchId: string; year: number; month: number; payDate: string; status: string;
-  employeeCount: number; totalAmount?: number; processedBy?: string; processedAt?: string;
-  branch?: Branch;
-}
-export interface PayrollRunEmployeeRow {
-  id: string; employeeId: string; employee?: { id: string; fullName: string; employeeCode: string };
-  basicSalary?: number; grossEarnings?: number; totalDeductions?: number; netPayable?: number;
-}
-export interface PayrollRunDetail extends PayrollRun { employees: PayrollRunEmployeeRow[] }
-export interface MyPayslip {
-  id: string; year?: number; month?: number; payDate?: string; status?: string;
-  basicSalary: number; grossEarnings: number; totalDeductions: number; netPayable: number;
-}
-export interface MyPayroll {
-  employee: { id: string; fullName: string; employeeCode: string };
-  components: SalaryComponent[];
-  payslips: MyPayslip[];
 }
 
 // HRM — Reports

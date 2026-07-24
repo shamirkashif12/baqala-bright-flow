@@ -1,4 +1,4 @@
-import { Bell, Search, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock } from "lucide-react";
+import { Bell, Search, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,8 +7,9 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { useState, useEffect } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { api, NOTIFICATION_CREATED_EVENT } from "@/lib/api";
+import { restartDashboardTour } from "@/lib/tour-bus";
 import {
   Popover,
   PopoverContent,
@@ -236,6 +237,20 @@ function NotificationsPopover() {
 // ── Help popover ───────────────────────────────────────────────────────────────
 function HelpPopover() {
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // The guided tour's targets only exist on the Dashboard, so hop there first if the
+  // user asks for it from elsewhere in the app.
+  const handleRestartTour = () => {
+    setOpen(false);
+    if (pathname !== "/dashboard") {
+      navigate({ to: "/dashboard" });
+      setTimeout(restartDashboardTour, 300);
+    } else {
+      restartDashboardTour();
+    }
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -252,6 +267,16 @@ function HelpPopover() {
           </button>
         </div>
         <div className="p-2 space-y-0.5">
+          <button
+            onClick={handleRestartTour}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/60 text-sm transition-colors text-left"
+          >
+            <Compass className="h-4 w-4 text-primary shrink-0" />
+            <div>
+              <p className="font-medium text-sm">Take the product tour</p>
+              <p className="text-[11px] text-muted-foreground">Replay the dashboard walkthrough</p>
+            </div>
+          </button>
           <a
             href="#"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/60 text-sm transition-colors"

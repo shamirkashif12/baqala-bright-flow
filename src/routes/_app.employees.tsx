@@ -20,7 +20,7 @@ import { Eye, Pencil, Plus, Trash2, Camera, User as UserIcon, Phone, Building2, 
 import { toast } from "sonner";
 import {
   api, type Employee, type Department, type Designation, type Role, type WorkShift, type EmployeeShiftAssignment,
-  type LeaveRequest, type LeaveType, type LeavePolicy, type EmployeeDocument, type EmployeeContract, type SalaryComponent,
+  type LeaveRequest, type LeaveType, type LeavePolicy, type EmployeeDocument, type EmployeeContract,
   type EmployeeActivityRow, type ReportExportFormat,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -73,25 +73,27 @@ type EmployeeForm = {
   fullName: string; email: string; phone: string; emergencyContact: string;
   nationalId: string; iqamaExpiry: string; dateOfBirth: string; gender: string;
   nationality: string; maritalStatus: string; profileImageUrl: string;
-  branchId: string; departmentId: string; designationId: string; roleId: string; leavePolicyId: string; userId: string;
+  branchId: string; departmentId: string; designationId: string; roleId: string; leavePolicyId: string;
   hireDate: string; employmentStatus: string;
   currentAddress: string; permanentAddress: string; sameAsCurrent: boolean;
   contractType: string; contractStartDate: string; contractEndDate: string; contractOpenEnded: boolean;
+  hasLogin: boolean; username: string; password: string; userStatus: string;
 };
 
 const emptyForm: EmployeeForm = {
   fullName: "", email: "", phone: "", emergencyContact: "",
   nationalId: "", iqamaExpiry: "", dateOfBirth: "", gender: "", nationality: "", maritalStatus: "",
   profileImageUrl: "",
-  branchId: "", departmentId: "none", designationId: "none", roleId: "none", leavePolicyId: "none", userId: "none",
+  branchId: "", departmentId: "none", designationId: "none", roleId: "none", leavePolicyId: "none",
   hireDate: todayStr, employmentStatus: "active",
   currentAddress: "", permanentAddress: "", sameAsCurrent: false,
   contractType: "none", contractStartDate: todayStr, contractEndDate: "", contractOpenEnded: false,
+  hasLogin: false, username: "", password: "", userStatus: "active",
 };
 
 // Module-scope — not nested inside EmployeesTab, so it never remounts on parent re-render.
 function EmployeeFormFields({
-  form, setForm, onSave, saving, branches, departments, designations, roles, leavePolicies, linkableUsers, branchLocked,
+  form, setForm, onSave, saving, branches, departments, designations, roles, leavePolicies, linkedUser, branchLocked,
 }: {
   form: EmployeeForm;
   setForm: React.Dispatch<React.SetStateAction<EmployeeForm>>;
@@ -102,7 +104,7 @@ function EmployeeFormFields({
   designations: Designation[];
   roles: Role[];
   leavePolicies: LeavePolicy[];
-  linkableUsers: { id: string; fullName: string; email: string }[];
+  linkedUser?: { id: string; username: string; status: string };
   branchLocked: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -124,7 +126,8 @@ function EmployeeFormFields({
     }
   };
 
-  const missing = !form.fullName || !form.email || !form.phone || !form.nationalId || !form.branchId || !form.hireDate || !form.currentAddress;
+  const missing = !form.fullName || !form.email || !form.phone || !form.nationalId || !form.branchId || !form.hireDate || !form.currentAddress
+    || (form.hasLogin && !linkedUser && (!form.username.trim() || !form.password.trim() || form.roleId === "none"));
 
   return (
     <div className="mt-4 space-y-5">
@@ -214,15 +217,6 @@ function EmployeeFormFields({
               </SelectContent>
             </Select>
           </FieldRow>
-          <FieldRow label="Link to Login Account">
-            <Select value={form.userId} onValueChange={setS("userId")}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="No login account" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Not linked (no POS/admin login)</SelectItem>
-                {linkableUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName} ({u.email})</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </FieldRow>
           <FieldRow label="Leave Policy">
             <Select value={form.leavePolicyId} onValueChange={setS("leavePolicyId")}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Select leave policy" /></SelectTrigger>
@@ -245,6 +239,41 @@ function EmployeeFormFields({
             </Select>
           </FieldRow>
         </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Login Account</p>
+        {linkedUser ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Registered as a system user (@{linkedUser.username}).</p>
+            <div className="grid grid-cols-2 gap-3">
+              <FieldRow label="Username"><Input value={form.username} onChange={set("username")} className="h-9" /></FieldRow>
+              <FieldRow label="Status">
+                <Select value={form.userStatus} onValueChange={setS("userStatus")}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FieldRow>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Checkbox id="hasLogin" checked={form.hasLogin} onCheckedChange={v => setForm(p => ({ ...p, hasLogin: !!v }))} />
+              <Label htmlFor="hasLogin" className="text-xs font-normal">Create a login account for this employee</Label>
+            </div>
+            {form.hasLogin && (
+              <div className="grid grid-cols-2 gap-3">
+                <FieldRow label="Username" required><Input value={form.username} onChange={set("username")} className="h-9" placeholder="firstname.lastname" /></FieldRow>
+                <FieldRow label="Password" required><Input type="password" value={form.password} onChange={set("password")} className="h-9" placeholder="••••••••" /></FieldRow>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div>
@@ -822,215 +851,6 @@ function EmployeeContractsSection({ employee }: { employee: Employee }) {
   );
 }
 
-const SALARY_FREQUENCIES = ["Monthly", "Weekly", "Bi-Weekly", "One-Time"];
-const CUSTOM_NAME = "__custom__";
-// Canonical names so payroll processing (which matches "Basic Salary" to populate the
-// payslip's Basic Salary column) gets a consistent string instead of relying on free text —
-// picking from this list avoids variants like "basic salary"/"Base Salary" landing here.
-const EARNING_NAME_PRESETS = ["Basic Salary", "Housing Allowance", "Transport Allowance", "Food Allowance", "Overtime", "Bonus"];
-const DEDUCTION_NAME_PRESETS = ["Loan Deduction", "Advance Deduction", "Absence Deduction", "GOSI / Social Insurance", "Tax Deduction"];
-
-function EmployeeSalarySection({ employee }: { employee: Employee }) {
-  const { canCreate, canEdit, canDelete } = usePermission("Payroll");
-  const [components, setComponents] = useState<SalaryComponent[]>([]);
-  const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [nameChoice, setNameChoice] = useState("");
-  const [componentName, setComponentName] = useState("");
-  const [componentType, setComponentType] = useState("Earning");
-  const [amount, setAmount] = useState("");
-  const [frequency, setFrequency] = useState("Monthly");
-  const [effectiveFrom, setEffectiveFrom] = useState(localDateStr());
-  const [effectiveTo, setEffectiveTo] = useState("");
-  const [openEnded, setOpenEnded] = useState(true);
-  const [status, setStatus] = useState("active");
-  const [saving, setSaving] = useState(false);
-
-  const namePresets = componentType === "Deduction" ? DEDUCTION_NAME_PRESETS : EARNING_NAME_PRESETS;
-  const isCustomName = nameChoice === CUSTOM_NAME;
-
-  const reload = () => { api.getEmployeeSalaryComponents(employee.id).then(setComponents).catch(() => {}); };
-  useEffect(reload, [employee.id]);
-
-  const resetForm = () => {
-    setAdding(false); setEditingId(null); setNameChoice(""); setComponentName(""); setComponentType("Earning"); setAmount("");
-    setFrequency("Monthly"); setEffectiveFrom(localDateStr()); setEffectiveTo(""); setOpenEnded(true); setStatus("active");
-  };
-
-  const changeType = (type: string) => {
-    setComponentType(type);
-    const presets = type === "Deduction" ? DEDUCTION_NAME_PRESETS : EARNING_NAME_PRESETS;
-    if (nameChoice !== CUSTOM_NAME && !presets.includes(nameChoice)) {
-      setNameChoice("");
-      setComponentName("");
-    }
-  };
-
-  const changeNameChoice = (choice: string) => {
-    setNameChoice(choice);
-    if (choice !== CUSTOM_NAME) setComponentName(choice);
-    else setComponentName("");
-  };
-
-  const openEdit = (c: SalaryComponent) => {
-    setEditingId(c.id);
-    setAdding(false);
-    const presets = c.componentType === "Deduction" ? DEDUCTION_NAME_PRESETS : EARNING_NAME_PRESETS;
-    const preset = presets.find(p => p.toLowerCase() === c.componentName.toLowerCase());
-    setNameChoice(preset ?? CUSTOM_NAME);
-    setComponentName(c.componentName);
-    setComponentType(c.componentType);
-    setAmount(String(c.amount));
-    setFrequency(c.frequency || "Monthly");
-    setEffectiveFrom(c.effectiveFrom || localDateStr());
-    setEffectiveTo(c.effectiveTo || "");
-    setOpenEnded(!c.effectiveTo);
-    setStatus(c.status || "active");
-  };
-
-  const handleAdd = async () => {
-    if (!componentName.trim() || !amount) return;
-    setSaving(true);
-    try {
-      await api.addSalaryComponent(employee.id, {
-        componentName, componentType, amount: Number(amount), frequency, effectiveFrom,
-        effectiveTo: openEnded ? undefined : (effectiveTo || undefined),
-      });
-      resetForm();
-      reload();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to add salary component.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleUpdate = async () => {
-    if (!editingId || !componentName.trim() || !amount) return;
-    setSaving(true);
-    try {
-      await api.updateSalaryComponent(employee.id, editingId, {
-        componentName, componentType, amount: Number(amount), frequency, effectiveFrom,
-        effectiveTo: openEnded ? undefined : (effectiveTo || undefined), status,
-      });
-      resetForm();
-      reload();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to update salary component.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (componentId: string) => {
-    if (!confirm("Remove this salary component?")) return;
-    try {
-      await api.deleteSalaryComponent(employee.id, componentId);
-      reload();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to remove component.");
-    }
-  };
-
-  if (components.length === 0 && !canCreate) return null; // no visibility and nothing to add
-
-  const gross = components.filter(c => c.componentType === "Earning").reduce((s, c) => s + c.amount, 0);
-  const deductions = components.filter(c => c.componentType === "Deduction").reduce((s, c) => s + c.amount, 0);
-  const formOpen = adding || !!editingId;
-
-  return (
-    <div className="mt-5">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Salary Components</p>
-        {canCreate && !formOpen && (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAdding(true)}>Add Component</Button>
-        )}
-      </div>
-      {formOpen && (
-        <div className="rounded-xl border border-border/60 p-3 space-y-2 mb-3">
-          <div className="grid grid-cols-2 gap-2">
-            <Select value={componentType} onValueChange={changeType}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Earning">Earning</SelectItem>
-                <SelectItem value="Deduction">Deduction</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={nameChoice} onValueChange={changeNameChoice}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select component name" /></SelectTrigger>
-              <SelectContent>
-                {namePresets.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                <SelectItem value={CUSTOM_NAME}>Other (type your own)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {isCustomName && (
-            <Input value={componentName} onChange={e => setComponentName(e.target.value)} placeholder="Component name" className="h-9" />
-          )}
-          <Input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Amount (SAR)" className="h-9" />
-          <div className="grid grid-cols-2 gap-2">
-            <Select value={frequency} onValueChange={setFrequency}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {SALARY_FREQUENCIES.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {editingId && (
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-[11px] text-muted-foreground">Effective From</label>
-              <Input type="date" value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)} className="h-9" />
-            </div>
-            <div>
-              <label className="text-[11px] text-muted-foreground">Effective To</label>
-              <Input type="date" value={effectiveTo} disabled={openEnded} onChange={e => setEffectiveTo(e.target.value)} className="h-9" />
-            </div>
-          </div>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input type="checkbox" checked={openEnded} onChange={e => setOpenEnded(e.target.checked)} />
-            Open-ended (no end date)
-          </label>
-          <div className="flex gap-2">
-            <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!componentName.trim() || !amount || saving} onClick={editingId ? handleUpdate : handleAdd}>
-              {saving ? "Saving…" : editingId ? "Update" : "Save"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={resetForm}>Cancel</Button>
-          </div>
-        </div>
-      )}
-      {components.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No salary components configured yet.</p>
-      ) : (
-        <div className="space-y-1.5">
-          {components.map(c => (
-            <div key={c.id} className="flex items-center justify-between text-xs border-b border-border/40 pb-1.5">
-              <span className={c.componentType === "Deduction" ? "text-destructive" : ""}>{c.componentName}</span>
-              <div className="flex items-center gap-1.5">
-                <span className="font-medium">{c.componentType === "Deduction" ? "-" : ""}SAR {c.amount.toLocaleString()}</span>
-                {canEdit && <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openEdit(c)}><Pencil className="h-3 w-3" /></Button>}
-                {canDelete && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => handleDelete(c.id)}><Trash2 className="h-3 w-3" /></Button>}
-              </div>
-            </div>
-          ))}
-          <div className="flex items-center justify-between text-xs font-semibold pt-1">
-            <span>Net (Gross - Deductions)</span>
-            <span>SAR {(gross - deductions).toLocaleString()}</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function activitySeverityTone(s: string) {
   if (s === "critical") return "bg-destructive/15 text-destructive";
   if (s === "warning") return "bg-warning/20 text-warning-foreground";
@@ -1130,7 +950,6 @@ function EmployeeProfileDrawer({ employee, onClose, onEdit, onChanged }: { emplo
         </div>
         <EmployeeShiftsSection employee={employee} onChanged={onChanged} />
         <EmployeeLeavesSection employee={employee} />
-        <EmployeeSalarySection employee={employee} />
         <EmployeeDocumentsSection employee={employee} />
         <EmployeeContractsSection employee={employee} />
         <EmployeeActivitySection employee={employee} />
@@ -1151,7 +970,6 @@ function EmployeesTab() {
   const [designations, setDesignations] = useState<Designation[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [leavePolicies, setLeavePolicies] = useState<LeavePolicy[]>([]);
-  const [linkableUsers, setLinkableUsers] = useState<{ id: string; fullName: string; email: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -1169,7 +987,7 @@ function EmployeesTab() {
 
   const [viewEmployee, setViewEmployee] = useState<Employee | null>(null);
   // The employee open in the Add/Edit drawer. Null means "creating a brand-new employee, not
-  // saved yet" — the Documents/Salary/Leaves/Shifts tabs stay disabled until Details is saved
+  // saved yet" — the Documents/Leaves/Shifts tabs stay disabled until Details is saved
   // once and this becomes non-null (FRD 6.4's tabbed Add Employee, adapted for the fact that you
   // can't attach a document/shift/leave to an employee that doesn't have an id yet).
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -1197,7 +1015,6 @@ function EmployeesTab() {
     setForm({ ...emptyForm, branchId: branchLocked ? (user?.branchId ?? "") : "" });
     setActiveTab("details");
     setDrawerOpen(true);
-    api.getLinkableUsers().then(setLinkableUsers).catch(() => {});
   };
 
   const openEdit = (e: Employee, tab: string = "details") => {
@@ -1205,18 +1022,18 @@ function EmployeesTab() {
     setActiveEmployee(e);
     setActiveTab(tab);
     setDrawerOpen(true);
-    api.getLinkableUsers(e.id).then(setLinkableUsers).catch(() => {});
     setForm({
       fullName: e.fullName, email: e.email ?? "", phone: e.phone, emergencyContact: e.emergencyContact ?? "",
       nationalId: e.nationalId, iqamaExpiry: e.iqamaExpiry?.slice(0, 10) ?? "", dateOfBirth: e.dateOfBirth?.slice(0, 10) ?? "",
       gender: e.gender ?? "", nationality: e.nationality ?? "", maritalStatus: e.maritalStatus ?? "",
       profileImageUrl: e.profileImageUrl ?? "",
       branchId: e.branchId, departmentId: e.departmentId ?? "none", designationId: e.designationId ?? "none", roleId: e.roleId ?? "none",
-      leavePolicyId: e.leavePolicyId ?? "none", userId: e.userId ?? "none",
+      leavePolicyId: e.leavePolicyId ?? "none",
       hireDate: e.hireDate.slice(0, 10), employmentStatus: e.employmentStatus,
       currentAddress: e.currentAddress ?? "", permanentAddress: e.permanentAddress ?? "", sameAsCurrent: !!e.permanentAddress && e.permanentAddress === e.currentAddress,
       contractType: e.contractType ?? "none", contractStartDate: e.contractStartDate?.slice(0, 10) ?? todayStr,
       contractEndDate: e.contractEndDate?.slice(0, 10) ?? "", contractOpenEnded: e.contractOpenEnded,
+      hasLogin: !!e.user, username: e.user?.username ?? "", password: "", userStatus: e.user?.status ?? "active",
     });
   };
 
@@ -1233,7 +1050,6 @@ function EmployeesTab() {
         departmentId: form.departmentId === "none" ? undefined : form.departmentId,
         designationId: form.designationId === "none" ? undefined : form.designationId,
         roleId: form.roleId === "none" ? undefined : form.roleId,
-        userId: form.userId === "none" ? undefined : form.userId,
         leavePolicyId: form.leavePolicyId === "none" ? undefined : form.leavePolicyId,
         hireDate: form.hireDate, employmentStatus: form.employmentStatus,
         currentAddress: form.currentAddress, permanentAddress: (form.sameAsCurrent ? form.currentAddress : form.permanentAddress) || undefined,
@@ -1244,6 +1060,25 @@ function EmployeesTab() {
       };
       if (activeEmployee) {
         await api.updateEmployee(activeEmployee.id, payload);
+        if (activeEmployee.user) {
+          try {
+            await api.updateUser(activeEmployee.user.id, {
+              fullName: form.fullName, email: form.email, username: form.username,
+              roleId: form.roleId === "none" ? undefined : form.roleId, branchId: form.branchId, status: form.userStatus,
+            });
+          } catch (loginErr: any) {
+            toast.error(loginErr?.message || "Employee updated, but the login account could not be updated.");
+          }
+        } else if (form.hasLogin) {
+          try {
+            await api.createUser({
+              fullName: form.fullName, email: form.email, username: form.username, password: form.password,
+              roleId: form.roleId, branchId: form.branchId, employeeId: activeEmployee.id,
+            });
+          } catch (loginErr: any) {
+            toast.error(loginErr?.message || "Employee updated, but the login account could not be created.");
+          }
+        }
         toast.success("Employee updated.");
         // Editing closes the dialog (matches Add User) — unlike a fresh create below, there's no
         // newly-unlocked tab this needs to stay open for; everything was already reachable.
@@ -1253,8 +1088,20 @@ function EmployeesTab() {
       } else {
         const created = await api.createEmployee(payload);
         setActiveEmployee(created);
-        toast.success("Employee created — Documents, Salary, Leaves and Shifts are now available above.");
-        // Stays open on create: Documents/Salary/Leaves/Shifts tabs just unlocked above and are
+        if (form.hasLogin) {
+          try {
+            await api.createUser({
+              fullName: form.fullName, email: form.email, username: form.username, password: form.password,
+              roleId: form.roleId, branchId: form.branchId, employeeId: created.id,
+            });
+            toast.success("Employee and login account created — Documents, Leaves and Shifts are now available above.");
+          } catch (loginErr: any) {
+            toast.error(loginErr?.message || "Employee created, but the login account could not be created. Fix the details below and save again.");
+          }
+        } else {
+          toast.success("Employee created — Documents, Leaves and Shifts are now available above.");
+        }
+        // Stays open on create: Documents/Leaves/Shifts tabs just unlocked above and are
         // meant to be filled in immediately (FRD 6.4's tabbed Add Employee flow).
       }
       load();
@@ -1466,24 +1313,20 @@ function EmployeesTab() {
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{activeEmployee ? "Edit Employee" : "Add Employee"}</DialogTitle></DialogHeader>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2">
-            <TabsList className="grid grid-cols-5 h-9">
+            <TabsList className="grid grid-cols-4 h-9">
               <TabsTrigger value="details" className="text-xs">Details</TabsTrigger>
               <TabsTrigger value="documents" className="text-xs" disabled={!activeEmployee}>Documents</TabsTrigger>
-              <TabsTrigger value="salary" className="text-xs" disabled={!activeEmployee}>Salary</TabsTrigger>
               <TabsTrigger value="leaves" className="text-xs" disabled={!activeEmployee}>Leaves</TabsTrigger>
               <TabsTrigger value="shifts" className="text-xs" disabled={!activeEmployee}>Shifts</TabsTrigger>
             </TabsList>
             {!activeEmployee && (
-              <p className="text-xs text-muted-foreground mt-2">Save Details first to unlock Documents, Salary, Leaves and Shifts.</p>
+              <p className="text-xs text-muted-foreground mt-2">Save Details first to unlock Documents, Leaves and Shifts.</p>
             )}
             <TabsContent value="details">
-              <EmployeeFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches} departments={departments} designations={designations} roles={roles} leavePolicies={leavePolicies} linkableUsers={linkableUsers} branchLocked={branchLocked} />
+              <EmployeeFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches} departments={departments} designations={designations} roles={roles} leavePolicies={leavePolicies} linkedUser={activeEmployee?.user} branchLocked={branchLocked} />
             </TabsContent>
             <TabsContent value="documents">
               {activeEmployee && <><EmployeeDocumentsSection employee={activeEmployee} /><EmployeeContractsSection employee={activeEmployee} /></>}
-            </TabsContent>
-            <TabsContent value="salary">
-              {activeEmployee && <EmployeeSalarySection employee={activeEmployee} />}
             </TabsContent>
             <TabsContent value="leaves">
               {activeEmployee && <EmployeeLeavesSection employee={activeEmployee} />}

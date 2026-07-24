@@ -80,12 +80,9 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/hrm-attendance",      module: "HR Attendance" },
   { url: "/work-shifts",         module: "HR Shifts" },
   { url: "/leaves",              module: "Leave Management" },
-  { url: "/payroll",              module: "Payroll" },
   { url: "/departments",         module: "HR Master Data" },
   { url: "/designations",        module: "HR Master Data" },
   { url: "/holidays",            module: "HR Master Data" },
-  // Self-service — any authenticated user can view their OWN payroll, no module gate.
-  { url: "/my-payroll" },
   // Network
   { url: "/branches",            module: "Branches" },
   { url: "/terminals",           module: "Terminals" },

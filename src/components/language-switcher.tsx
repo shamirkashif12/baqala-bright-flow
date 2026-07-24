@@ -23,7 +23,7 @@ export function LanguageSwitcher() {
       <DropdownMenuTrigger asChild>
         {/* data-no-i18n: language names must always render in their own script,
             never be translated by the DOM auto-translator. */}
-        <Button variant="outline" size="sm" className="gap-1.5 h-9" data-no-i18n aria-label={t("Language")} title={t("Language")}>
+        <Button variant="outline" size="sm" className="gap-1.5 h-9" data-no-i18n data-tour="lang-switcher" aria-label={t("Language")} title={t("Language")}>
           <Languages className="h-4 w-4" />
           <span className="hidden sm:inline font-semibold">{current?.short ?? "EN"}</span>
           <span className="hidden md:inline text-xs text-muted-foreground">· {current?.nativeLabel}</span>
