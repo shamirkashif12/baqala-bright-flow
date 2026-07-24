@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,8 +9,14 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/leave-types")]
-public class LeaveTypesController(BaqalaDbContext db) : ControllerBase
+public class LeaveTypesController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status)
     {
@@ -51,6 +58,11 @@ public class LeaveTypesController(BaqalaDbContext db) : ControllerBase
         type.Status = "inactive";
         type.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Leave type deactivated", entityType: "LeaveType", entityId: type.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId), beforeValue: type.Name, module: "HR Master Data");
+
         return NoContent();
     }
 }

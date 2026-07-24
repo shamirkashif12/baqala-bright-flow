@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class TerminalsController(BaqalaDbContext db, INotificationService notifications) : ControllerBase
+public class TerminalsController(BaqalaDbContext db, INotificationService notifications, IAuditService audit) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's terminals —
     // same fix as DevicesController/OrdersController: branchId was only an optional query param.
@@ -19,6 +19,12 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
         var branchId = Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null;
         return (role, branchId);
     }
+
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid[]? branchId, [FromQuery] string[]? status)
@@ -169,6 +175,11 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
         terminal.KioskLockdownPinLength = null;
         terminal.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Kiosk lockdown PIN cleared", entityType: "Terminal", entityId: terminal.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: terminal.BranchId, severity: "warning", beforeValue: terminal.Name, module: "Terminals");
 
         return NoContent();
     }

@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,11 +9,14 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class UsersController(BaqalaDbContext db) : ControllerBase
+public class UsersController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                        ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
     private string? CallerRole() => User.FindFirst("role")?.Value;
 
@@ -150,6 +154,11 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         var existing = db.UserPermissions.Where(p => p.UserId == id);
         db.UserPermissions.RemoveRange(existing);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "User permission overrides reset", entityType: "User", entityId: id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId), severity: "warning", module: "Users");
+
         return NoContent();
     }
 
@@ -269,6 +278,12 @@ public class UsersController(BaqalaDbContext db) : ControllerBase
         user.Status = "inactive";
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "User deactivated", entityType: "User", entityId: user.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: user.BranchId, severity: "warning", beforeValue: user.FullName, module: "Users");
+
         return NoContent();
     }
 

@@ -37,6 +37,9 @@ public class InventoryController(
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
+
     [HttpGet("stock")]
     public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock, [FromQuery] Guid? categoryId)
     {
@@ -126,6 +129,13 @@ public class InventoryController(
 
         db.InventoryStocks.Remove(stock);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Inventory stock row deleted", entityType: "InventoryStock", entityId: stock.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
+            branchId: stock.BranchId, severity: "warning",
+            beforeValue: $"productId={stock.ProductId}", module: "Inventory");
+
         return NoContent();
     }
 

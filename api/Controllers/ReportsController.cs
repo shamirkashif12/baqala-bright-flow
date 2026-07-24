@@ -4029,6 +4029,23 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             ["ship_stock_transfer"] = ("Moved Stock", "Shipped Stock Transfer"),
             ["cancel_stock_transfer"] = ("Moved Stock", "Cancelled Stock Transfer"),
             ["receive_batch"] = ("Moved Stock", "Received Stock Batch"),
+            ["Rule deleted"] = ("Deleted Item", "Deleted Rule"),
+            ["Discount deleted"] = ("Deleted Item", "Deleted Discount"),
+            ["Expense deleted"] = ("Deleted Item", "Deleted Expense"),
+            ["Expense type deactivated"] = ("Deleted Item", "Deactivated Expense Type"),
+            ["Coupon deleted"] = ("Deleted Item", "Deleted Coupon"),
+            ["Inventory stock row deleted"] = ("Deleted Item", "Deleted Inventory Stock Row"),
+            ["Leave type deactivated"] = ("Deleted Item", "Deactivated Leave Type"),
+            ["Leave policy deactivated"] = ("Deleted Item", "Deactivated Leave Policy"),
+            ["Loyalty program deleted"] = ("Deleted Item", "Deleted Loyalty Program"),
+            ["Offer deleted"] = ("Deleted Item", "Deleted Offer"),
+            ["Product variant deleted"] = ("Deleted Item", "Deleted Product Variant"),
+            ["Role deleted"] = ("Deleted Item", "Deleted Role"),
+            ["Supplier deactivated"] = ("Deleted Item", "Deactivated Supplier"),
+            ["Kiosk lockdown PIN cleared"] = ("Deleted Item", "Cleared Kiosk Lockdown PIN"),
+            ["User permission overrides reset"] = ("Deleted Item", "Reset User Permission Overrides"),
+            ["User deactivated"] = ("Deleted Item", "Deactivated User"),
+            ["Branch unlinked from warehouse"] = ("Deleted Item", "Unlinked Branch from Warehouse"),
         };
 
     [HttpGet("employee-audit-center")]

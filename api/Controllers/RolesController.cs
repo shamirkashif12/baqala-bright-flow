@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,8 +9,14 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class RolesController(BaqalaDbContext db) : ControllerBase
+public class RolesController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
+    private Guid? CallerId() =>
+        Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
+
+    private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
+        userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
+
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -85,6 +92,11 @@ public class RolesController(BaqalaDbContext db) : ControllerBase
         if (role.IsSystem) return BadRequest(new { message = "System roles cannot be deleted." });
         db.Roles.Remove(role);
         await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Role deleted", entityType: "Role", entityId: role.Id,
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId), severity: "warning", beforeValue: role.Name, module: "Roles");
+
         return Ok(new { deleted = true });
     }
 }
