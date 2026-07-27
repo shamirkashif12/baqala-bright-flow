@@ -213,7 +213,8 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
                 await notifications.NotifyRoleAsync(["Admin"], invoice.BranchId,
                     "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
                     $"ZATCA submission failed for invoice {invoice.InvoiceNumber ?? invoice.Id.ToString()}",
-                    severity: "error", entityType: "ZatcaInvoice", entityId: invoice.Id);
+                    severity: "error", entityType: "ZatcaInvoice", entityId: invoice.Id,
+                    triggeredBy: CallerId());
             }
             return Ok(invoice);
         }

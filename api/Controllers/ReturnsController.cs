@@ -177,13 +177,15 @@ public class ReturnsController(
                 await notifications.NotifyUserAsync(ret.ProcessedBy.Value,
                     "Returns", "Return Started", "Return Started",
                     $"Return started for Invoice {ret.ReturnNumber}",
-                    entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+                    entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId,
+                    terminalId: order.TerminalId, triggeredBy: ret.ProcessedBy);
             }
 
             await notifications.NotifyRoleAsync(["Manager", "Admin"], ret.BranchId,
                 "Returns", "Return Approval Required", "Return Approval Required",
                 $"Return {ret.ReturnNumber} requires approval (SAR {ret.RefundAmount:F2})",
-                severity: "warning", entityType: "CustomerReturn", entityId: ret.Id);
+                severity: "warning", entityType: "CustomerReturn", entityId: ret.Id,
+                terminalId: order.TerminalId, triggeredBy: ret.ProcessedBy);
         }
         catch (Exception ex) { logger.LogError(ex, "Notification failed for return {ReturnId}", ret.Id); }
 
@@ -260,7 +262,8 @@ public class ReturnsController(
                     ? $"Return {ret.ReturnNumber} was approved"
                     : $"Return {ret.ReturnNumber} was rejected",
                 severity: req.Approved ? "info" : "warning",
-                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId,
+                terminalId: terminalId, triggeredBy: CallerId());
         }
 
         return Ok(ret);
@@ -441,11 +444,13 @@ public class ReturnsController(
             await notifications.NotifyUsersAsync(recipients,
                 "Returns", "Return Completed", "Return Completed",
                 $"Return {ret.ReturnNumber} completed successfully",
-                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId,
+                terminalId: order?.TerminalId, triggeredBy: CallerId());
             await notifications.NotifyUsersAsync(recipients,
                 "Payment", "Refund Processed", "Refund Processed",
                 $"Refund completed for Invoice {ret.ReturnNumber}",
-                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId);
+                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId,
+                terminalId: order?.TerminalId, triggeredBy: CallerId());
         }
 
         return Ok(ret);

@@ -17,6 +17,18 @@ public class Notification
     [Column("branch_id")]
     public Guid? BranchId { get; set; }
 
+    // Which physical register the triggering event happened at — null for events with no real
+    // terminal concept (a stock-count discrepancy, a compliance alert, a recall) rather than a
+    // POS/shift/terminal-status event.
+    [Column("terminal_id")]
+    public Guid? TerminalId { get; set; }
+
+    // Who actually did the thing this notification is about — distinct from UserId, which is who
+    // the notification is FOR (the recipient). Null when there's no single acting person (an
+    // automated stock-alert sweep) or the actor genuinely isn't known.
+    [Column("triggered_by_user_id")]
+    public Guid? TriggeredByUserId { get; set; }
+
     [Required, MaxLength(100), Column("category")]
     public string Category { get; set; } = default!;
 
@@ -51,4 +63,6 @@ public class Notification
     // Navigation
     public User? User { get; set; }
     public Branch? Branch { get; set; }
+    public Terminal? Terminal { get; set; }
+    public User? TriggeredByUser { get; set; }
 }

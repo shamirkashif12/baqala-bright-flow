@@ -302,7 +302,8 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
             await notifications.NotifyRoleAsync(["Manager", "Admin"], terminal.BranchId,
                 "Terminal / Branch", "Terminal Offline", "Terminal Offline",
                 $"Terminal {terminal.Name} is offline",
-                severity: "error", entityType: "Terminal", entityId: terminal.Id);
+                severity: "error", entityType: "Terminal", entityId: terminal.Id,
+                terminalId: terminal.Id);
         }
     }
 }

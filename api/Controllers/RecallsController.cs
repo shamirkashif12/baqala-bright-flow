@@ -269,7 +269,8 @@ public class RecallsController(
                 $"Recall {recall.RecallNumber}: {product.Name}",
                 $"{product.Name} ({scope}) is under recall — {recall.Reason}. Remove from sale.",
                 severity: severity is "critical" or "high" ? "error" : "warning",
-                entityType: "ProductRecall", entityId: recall.Id);
+                entityType: "ProductRecall", entityId: recall.Id,
+                triggeredBy: recall.InitiatedBy);
         }
         catch (Exception ex) { logger.LogError(ex, "Recall notification failed for {RecallNumber}", recall.RecallNumber); }
 

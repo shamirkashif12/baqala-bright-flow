@@ -157,7 +157,8 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
                     await notifications.NotifyUserAsync(callerId.Value,
                         "Terminal / Branch", "Terminal Shift Conflict", "Terminal Shift Conflict",
                         "Terminal already assigned to another cashier",
-                        severity: "warning", entityType: "Terminal", entityId: req.TerminalId, branchId: req.BranchId);
+                        severity: "warning", entityType: "Terminal", entityId: req.TerminalId, branchId: req.BranchId,
+                        terminalId: req.TerminalId, triggeredBy: callerId);
                 }
                 return Conflict("This terminal already has an open shift with another cashier.");
             }
@@ -215,11 +216,13 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         await notifications.NotifyUserAsync(req.CashierId,
             "Cashier Shift", "Shift Opened", "Shift Opened",
             $"Shift opened with SAR {req.OpeningAmount:F2} opening cash",
-            entityType: "CashierShift", entityId: shift.Id, branchId: req.BranchId);
+            entityType: "CashierShift", entityId: shift.Id, branchId: req.BranchId,
+            terminalId: req.TerminalId, triggeredBy: callerId);
         await notifications.NotifyRoleAsync(["Manager", "Admin"], req.BranchId,
             "Cashier Shift", "Shift Opened", "Shift Opened",
             $"Shift opened with SAR {req.OpeningAmount:F2} opening cash",
-            entityType: "CashierShift", entityId: shift.Id);
+            entityType: "CashierShift", entityId: shift.Id,
+            terminalId: req.TerminalId, triggeredBy: callerId);
 
         return Created($"/api/shifts/{shift.Id}", shift);
     }
@@ -306,11 +309,13 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
             await notifications.NotifyUserAsync(shift.CashierId,
                 "Cashier Shift", "Cash Variance Alert", "Cash Variance Alert",
                 $"Cash variance detected: SAR {varianceAbs:F2}",
-                severity: "warning", entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId);
+                severity: "warning", entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId,
+                terminalId: shift.TerminalId, triggeredBy: actorId);
             await notifications.NotifyRoleAsync(["Manager", "Admin"], shift.BranchId,
                 "Cashier Shift", "Cash Variance Alert", "Cash Variance Alert",
                 $"Cash variance detected: SAR {varianceAbs:F2} — pending manager approval",
-                severity: "warning", entityType: "CashierShift", entityId: shift.Id);
+                severity: "warning", entityType: "CashierShift", entityId: shift.Id,
+                terminalId: shift.TerminalId, triggeredBy: actorId);
         }
 
         return Ok(shift);
@@ -377,7 +382,8 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         await notifications.NotifyUserAsync(shift.CashierId,
             "Cashier Shift", "Cash Variance Disputed", "Cash Variance Disputed",
             $"Your cash variance of SAR {shift.Variance:F2} was disputed: {req.Reason}",
-            severity: "critical", entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId);
+            severity: "critical", entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId,
+            terminalId: shift.TerminalId, triggeredBy: shift.ApprovedBy);
 
         return Ok(shift);
     }

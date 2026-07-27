@@ -27,7 +27,7 @@ public class NotificationsController(BaqalaDbContext db, INotificationService no
 
         var branchId = req.BranchId ?? (Guid.TryParse(User.FindFirst("branchId")?.Value, out var bid) ? bid : (Guid?)null);
         await notifications.NotifyUserAsync(callerId.Value, req.Category, req.Type, req.Title, req.Message,
-            req.Severity ?? "info", req.EntityType, req.EntityId, branchId);
+            req.Severity ?? "info", req.EntityType, req.EntityId, branchId, req.TerminalId, req.TriggeredByUserId ?? callerId);
 
         return Ok(new { success = true });
     }
@@ -41,14 +41,29 @@ public class NotificationsController(BaqalaDbContext db, INotificationService no
         var callerId = CallerId();
         if (callerId is null) return Unauthorized();
 
-        var query = db.Notifications.Where(n => n.UserId == callerId);
+        var query = db.Notifications
+            .Include(n => n.Branch)
+            .Include(n => n.Terminal)
+            .Include(n => n.TriggeredByUser)
+            .Where(n => n.UserId == callerId);
         if (unreadOnly == true) query = query.Where(n => !n.IsRead);
 
         var total = await query.CountAsync();
+        // Projected, not the raw entity — previously returned bare branchId/no terminal/no actor
+        // at all, so an admin reading a notification had no way to tell which branch/terminal/
+        // cashier it was actually about without separately looking each id up.
         var items = await query
             .OrderByDescending(n => n.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .Select(n => new
+            {
+                n.Id, n.Category, n.Type, n.Title, n.Message, n.Severity, n.EntityType, n.EntityId,
+                n.IsRead, n.ReadAt, n.CreatedAt,
+                n.BranchId, BranchName = n.Branch == null ? null : n.Branch.Name,
+                n.TerminalId, TerminalName = n.Terminal == null ? null : n.Terminal.Name,
+                n.TriggeredByUserId, TriggeredByName = n.TriggeredByUser == null ? null : n.TriggeredByUser.FullName,
+            })
             .ToListAsync();
 
         return Ok(new { total, page, pageSize, items });
@@ -106,5 +121,9 @@ public record CreateNotificationRequest(
     string? Severity,
     string? EntityType,
     Guid? EntityId,
-    Guid? BranchId
+    Guid? BranchId,
+    Guid? TerminalId = null,
+    // Defaults to the caller themselves — this endpoint only ever self-notifies, so the caller IS
+    // the actor, unless a more specific one is explicitly supplied.
+    Guid? TriggeredByUserId = null
 );

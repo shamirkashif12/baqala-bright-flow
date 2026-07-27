@@ -387,6 +387,21 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasForeignKey(t => t.CreatedBy)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Restrict, not Cascade — a deleted Terminal/User shouldn't take a whole notification
+        // history down with it; the row just loses that piece of context (nulled out separately,
+        // not via cascade, since these two are informational, not ownership).
+        modelBuilder.Entity<Notification>()
+            .HasOne(n => n.Terminal)
+            .WithMany()
+            .HasForeignKey(n => n.TerminalId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Notification>()
+            .HasOne(n => n.TriggeredByUser)
+            .WithMany()
+            .HasForeignKey(n => n.TriggeredByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // ─── Expense: two User FKs ────────────────────────────────────────────
         modelBuilder.Entity<Expense>()
             .HasOne(e => e.RecordedByUser)

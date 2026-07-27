@@ -692,7 +692,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
                     "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
                     $"ZATCA invoice creation failed for Invoice {order.OrderNumber}",
-                    severity: "error", entityType: "Order", entityId: order.Id);
+                    severity: "error", entityType: "Order", entityId: order.Id,
+                    terminalId: order.TerminalId, triggeredBy: order.CashierId);
             }
 
             // Submitted synchronously (not fire-and-forget) so the checkout response — and thus
@@ -712,14 +713,16 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
                         "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
                         $"ZATCA submission failed for Invoice {order.OrderNumber}",
-                        severity: "error", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                        severity: "error", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id,
+                        terminalId: order.TerminalId, triggeredBy: order.CashierId);
                 }
                 else
                 {
                     await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
                         "ZATCA", "ZATCA Invoice Generated", "ZATCA Invoice Generated",
                         "ZATCA invoice generated",
-                        entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                        entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id,
+                        terminalId: order.TerminalId, triggeredBy: order.CashierId);
                 }
             }
             catch (Exception ex)
@@ -730,11 +733,13 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
                     "ZATCA", "ZATCA Submission Failed", "ZATCA Submission Failed",
                     $"ZATCA submission failed for Invoice {order.OrderNumber}",
-                    severity: "error", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                    severity: "error", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id,
+                    terminalId: order.TerminalId, triggeredBy: order.CashierId);
                 await notifications.NotifyRoleAsync(["Admin"], order.BranchId,
                     "ZATCA", "ZATCA Pending Queue", "ZATCA Pending Queue",
                     $"Invoice {order.OrderNumber} pending ZATCA sync",
-                    severity: "warning", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id);
+                    severity: "warning", entityType: "ZatcaInvoice", entityId: zatcaInvoice.Id,
+                    terminalId: order.TerminalId, triggeredBy: order.CashierId);
             }
         }
 
@@ -860,7 +865,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     await notifications.NotifyUserAsync(order.CashierId.Value,
                         "Customer / Loyalty", "Loyalty Points Earned", "Loyalty Points Earned",
                         $"Customer earned {earned:F0} loyalty points",
-                        entityType: "Order", entityId: order.Id, branchId: order.BranchId);
+                        entityType: "Order", entityId: order.Id, branchId: order.BranchId,
+                        terminalId: order.TerminalId, triggeredBy: order.CashierId);
                 }
 
                 // ── Send invoice email ─────────────────────────────────────────

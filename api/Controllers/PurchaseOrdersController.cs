@@ -233,7 +233,8 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                 "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
                 $"Purchase Order {po.PoNumber} created",
                 entityType: "PurchaseOrder", entityId: po.Id,
-                alsoUserId: po.OrderedBy != Guid.Empty ? po.OrderedBy : null);
+                alsoUserId: po.OrderedBy != Guid.Empty ? po.OrderedBy : null,
+                triggeredBy: CallerId() ?? (po.OrderedBy != Guid.Empty ? po.OrderedBy : null));
         }
         catch (Exception ex)
         {
@@ -273,7 +274,8 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                         ? $"Purchase Order {po.PoNumber} was approved"
                         : $"Purchase Order {po.PoNumber} was rejected",
                     severity: approved ? "info" : "warning",
-                    entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId);
+                    entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId,
+                    triggeredBy: CallerId());
             }
         }
 
@@ -448,7 +450,7 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             "Suppliers / Purchase Orders", "Supplier Delivery Received", "Supplier Delivery Received",
             $"Supplier delivery received for PO {po.PoNumber}",
             entityType: "PurchaseOrder", entityId: po.Id,
-            alsoUserId: CallerId());
+            alsoUserId: CallerId(), triggeredBy: CallerId());
 
         // FRD §2.4 — purchase receipts belong in the audit trail. Best-effort: the receipt is
         // already committed, so a failed audit write must not fail the caller.

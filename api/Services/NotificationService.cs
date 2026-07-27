@@ -15,7 +15,9 @@ public interface INotificationService
         string severity = "info",
         string? entityType = null,
         Guid? entityId = null,
-        Guid? branchId = null);
+        Guid? branchId = null,
+        Guid? terminalId = null,
+        Guid? triggeredBy = null);
 
     Task NotifyUsersAsync(
         IEnumerable<Guid> userIds,
@@ -26,7 +28,9 @@ public interface INotificationService
         string severity = "info",
         string? entityType = null,
         Guid? entityId = null,
-        Guid? branchId = null);
+        Guid? branchId = null,
+        Guid? terminalId = null,
+        Guid? triggeredBy = null);
 
     // Fans out to every active user whose Role.Name is in roleNames — optionally scoped to a
     // branch (managers/admins of one branch, not the whole tenant). Role.Name here is the actual
@@ -45,7 +49,9 @@ public interface INotificationService
         // Guarantees this user is notified exactly once alongside the role fan-out — used when a
         // personal recipient (the PO orderer, the receiving cashier) also happens to hold the
         // Manager/Admin role, which would otherwise produce two identical rows for the same event.
-        Guid? alsoUserId = null);
+        Guid? alsoUserId = null,
+        Guid? terminalId = null,
+        Guid? triggeredBy = null);
 }
 
 public class NotificationService(BaqalaDbContext db) : INotificationService
@@ -74,14 +80,16 @@ public class NotificationService(BaqalaDbContext db) : INotificationService
 
     public async Task NotifyUserAsync(
         Guid userId, string category, string type, string title, string message,
-        string severity = "info", string? entityType = null, Guid? entityId = null, Guid? branchId = null)
+        string severity = "info", string? entityType = null, Guid? entityId = null, Guid? branchId = null,
+        Guid? terminalId = null, Guid? triggeredBy = null)
     {
-        await NotifyUsersAsync([userId], category, type, title, message, severity, entityType, entityId, branchId);
+        await NotifyUsersAsync([userId], category, type, title, message, severity, entityType, entityId, branchId, terminalId, triggeredBy);
     }
 
     public async Task NotifyUsersAsync(
         IEnumerable<Guid> userIds, string category, string type, string title, string message,
-        string severity = "info", string? entityType = null, Guid? entityId = null, Guid? branchId = null)
+        string severity = "info", string? entityType = null, Guid? entityId = null, Guid? branchId = null,
+        Guid? terminalId = null, Guid? triggeredBy = null)
     {
         var now = DateTime.UtcNow;
         foreach (var userId in userIds.Distinct())
@@ -91,6 +99,8 @@ public class NotificationService(BaqalaDbContext db) : INotificationService
                 Id = Guid.NewGuid(),
                 UserId = userId,
                 BranchId = branchId,
+                TerminalId = terminalId,
+                TriggeredByUserId = triggeredBy,
                 Category = category,
                 Type = type,
                 Title = title,
@@ -106,7 +116,8 @@ public class NotificationService(BaqalaDbContext db) : INotificationService
 
     public async Task NotifyRoleAsync(
         IEnumerable<string> roleNames, Guid? branchId, string category, string type, string title, string message,
-        string severity = "info", string? entityType = null, Guid? entityId = null, Guid? alsoUserId = null)
+        string severity = "info", string? entityType = null, Guid? entityId = null, Guid? alsoUserId = null,
+        Guid? terminalId = null, Guid? triggeredBy = null)
     {
         // Any list.Contains(...) translated into a parameterized SQL IN-list throws on this MySQL
         // EF Core provider ("Expression '@names' in the SQL tree does not have a type mapping
@@ -130,6 +141,6 @@ public class NotificationService(BaqalaDbContext db) : INotificationService
         if (alsoUserId is { } extra && extra != Guid.Empty) userIds.Add(extra);
         if (userIds.Count == 0) return;
 
-        await NotifyUsersAsync(userIds, category, type, title, message, severity, entityType, entityId, branchId);
+        await NotifyUsersAsync(userIds, category, type, title, message, severity, entityType, entityId, branchId, terminalId, triggeredBy);
     }
 }

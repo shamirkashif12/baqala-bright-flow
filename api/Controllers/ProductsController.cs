@@ -184,7 +184,7 @@ public class ProductsController(
             await notifications.NotifyRoleAsync(["Manager", "Admin"], null,
                 "Sales / Checkout", "Price Updated", "Price Updated",
                 $"Price updated for {product.Name}: SAR {previousPrice:F2} → SAR {product.BasePrice:F2}",
-                entityType: "Product", entityId: product.Id);
+                entityType: "Product", entityId: product.Id, triggeredBy: CallerId());
         }
 
         if (previousCost != product.CostPrice)
@@ -192,7 +192,7 @@ public class ProductsController(
             await notifications.NotifyRoleAsync(["Manager", "Admin"], null,
                 "Inventory", "Cost Price Updated", "Cost Price Updated",
                 $"Cost price updated for {product.Name}: SAR {previousCost:F2} → SAR {product.CostPrice:F2}",
-                entityType: "Product", entityId: product.Id);
+                entityType: "Product", entityId: product.Id, triggeredBy: CallerId());
         }
 
         return Ok(product);

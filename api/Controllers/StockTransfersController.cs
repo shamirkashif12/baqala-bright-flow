@@ -546,7 +546,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 await notifications.NotifyRoleAsync(["Manager", "Admin"], transfer.DestBranchId,
                     "Inventory", "Stock Transfer Pending Acceptance", "Stock Transfer Pending Acceptance",
                     $"Transfer {transfer.TransferNumber} pending acceptance",
-                    entityType: "StockTransfer", entityId: transfer.Id);
+                    entityType: "StockTransfer", entityId: transfer.Id,
+                    triggeredBy: transfer.CreatedBy == Guid.Empty ? CallerId() : transfer.CreatedBy);
             }
 
             // Return-to-supplier transfer — confirm to whoever created it, since there's no branch
@@ -556,7 +557,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 await notifications.NotifyUserAsync(transfer.CreatedBy,
                     "Suppliers / Purchase Orders", "Supplier Return Created", "Supplier Return Created",
                     $"Supplier return created: {transfer.TransferNumber}",
-                    entityType: "StockTransfer", entityId: transfer.Id);
+                    entityType: "StockTransfer", entityId: transfer.Id,
+                    triggeredBy: transfer.CreatedBy);
             }
         }
         catch (Exception ex)
@@ -712,7 +714,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 "Inventory", "Stock Transfer Received", "Stock Transfer Received",
                 $"Stock transfer {transfer.TransferNumber} received",
                 entityType: "StockTransfer", entityId: transfer.Id,
-                branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
+                branchId: transfer.DestBranchId ?? transfer.SourceBranchId,
+                triggeredBy: transfer.ReceivedBy);
         }
 
         await LogTransferAsync("receive_stock_transfer", transfer, transfer.ReceivedBy);
@@ -833,7 +836,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 "Inventory", "Stock Transfer Received", "Stock Transfer Received",
                 $"Stock transfer {transfer.TransferNumber} received",
                 entityType: "StockTransfer", entityId: transfer.Id,
-                branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
+                branchId: transfer.DestBranchId ?? transfer.SourceBranchId,
+                triggeredBy: transfer.ReceivedBy);
         }
 
         if ((req.Status == "approved" || req.Status == "rejected") && prev != req.Status)
@@ -853,7 +857,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                         ? $"Transfer {transfer.TransferNumber} was approved"
                         : $"Transfer {transfer.TransferNumber} was rejected",
                     severity: approved ? "info" : "warning",
-                    entityType: "StockTransfer", entityId: transfer.Id, branchId: transfer.DestBranchId ?? transfer.SourceBranchId);
+                    entityType: "StockTransfer", entityId: transfer.Id, branchId: transfer.DestBranchId ?? transfer.SourceBranchId,
+                    triggeredBy: CallerId());
             }
         }
 
