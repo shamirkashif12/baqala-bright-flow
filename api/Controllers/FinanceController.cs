@@ -58,8 +58,10 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     [HttpPost("expenses")]
     public async Task<IActionResult> CreateExpense([FromBody] Expense expense)
     {
+        if (expense.Amount <= 0) return BadRequest(new { message = "Expense amount must be greater than zero." });
         expense.Id = Guid.NewGuid();
         expense.Status = "pending";
+        expense.RecordedBy = CallerId() ?? expense.RecordedBy;
         expense.CreatedAt = expense.UpdatedAt = DateTime.UtcNow;
         db.Expenses.Add(expense);
         await db.SaveChangesAsync();
@@ -70,6 +72,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     [HttpPut("expenses/{id:guid}")]
     public async Task<IActionResult> UpdateExpense(Guid id, [FromBody] Expense updated)
     {
+        if (updated.Amount <= 0) return BadRequest(new { message = "Expense amount must be greater than zero." });
         var expense = await db.Expenses.FindAsync(id);
         if (expense is null) return NotFound();
         expense.ExpenseTypeId = updated.ExpenseTypeId;

@@ -1244,7 +1244,16 @@ function PurchaseOrders() {
                         <td className="px-3 py-3 text-xs">{dest}</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{formatDate(po.createdAt)}</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{formatDate(po.expectedDeliveryDate)}</td>
-                        <td className="px-3 py-3 text-xs text-muted-foreground">{(po.items ?? []).length}</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            {(po.items ?? []).length}
+                            {(po.items ?? []).length === 0 && totalAmt > 0 && (
+                              <span title="Data inconsistency: this order has no line items on record despite a nonzero total.">
+                                <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                              </span>
+                            )}
+                          </span>
+                        </td>
                         <td className="px-3 py-3 font-semibold tabular-nums">
                           <SARIcon />{fmt(totalAmt)}
                           {isBatch && <span className="text-[10px] text-muted-foreground ml-1">(×{group.length})</span>}

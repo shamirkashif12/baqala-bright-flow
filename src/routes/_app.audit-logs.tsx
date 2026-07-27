@@ -53,8 +53,14 @@ const ACTIVITY_GROUPS: { value: string; label: string; actions: string[] }[] = [
   { value: "exports", label: "Report Exports", actions: ["export_report"] },
 ];
 
-function getSeverity(action: string): Severity {
-  const a = action.toLowerCase();
+// Prefer the severity the backend actually stored for this event — re-deriving it from the
+// action string here duplicated (and could disagree with) the server's classification, which is
+// exactly how "Access denied" ended up "info" here but "warning" in the Employee Activity Report
+// for the same underlying event. Only falls back to the heuristic for older rows written before
+// severity was persisted.
+function getSeverity(log: AuditLog): Severity {
+  if (log.severity) return log.severity;
+  const a = log.action.toLowerCase();
   if (a.includes("delete") || a.includes("void") || a.includes("role") || a.includes("permission") || a.includes("unauthorized")) return "critical";
   if (a.includes("refund") || a.includes("discount") || a.includes("return") || a.includes("override") || a.includes("price") || a.includes("adjust") || a === "edit_order") return "warning";
   return "info";
@@ -209,7 +215,7 @@ function AuditLogs() {
   }, [logs, productName]);
 
   const filtered = useMemo(() => logs.filter((l) => {
-    if (sevFilter.length && !sevFilter.includes(getSeverity(l.action))) return false;
+    if (sevFilter.length && !sevFilter.includes(getSeverity(l))) return false;
     if (userId.length && !userId.includes(l.userId ?? "")) return false;
     const q = query.toLowerCase().trim();
     if (!q) return true;
@@ -225,8 +231,8 @@ function AuditLogs() {
     );
   }), [logs, query, sevFilter, userId, userMap]);
 
-  const critical = logs.filter((l) => getSeverity(l.action) === "critical").length;
-  const warnings = logs.filter((l) => getSeverity(l.action) === "warning").length;
+  const critical = logs.filter((l) => getSeverity(l) === "critical").length;
+  const warnings = logs.filter((l) => getSeverity(l) === "warning").length;
 
   const selectedUser = userId.length === 1 ? userMap.get(userId[0]) : undefined;
   const toggle = (id: string) =>
@@ -302,7 +308,7 @@ function AuditLogs() {
         <Card className="p-0 border-border/60 shadow-card overflow-hidden">
           <ul className="divide-y divide-border/40">
             {filtered.map((l) => {
-              const severity = getSeverity(l.action);
+              const severity = getSeverity(l);
               const Icon = getIcon(l.action);
               const user = l.userId ? userMap.get(l.userId) : undefined;
               const changes = changesByLog.get(l.id) ?? [];

@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Check, Plus, X, Ban, Download } from "lucide-react";
+import { Check, Plus, X, Ban, Download, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { api, type LeaveRequest, type LeaveType, type Employee, type Department } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -321,7 +321,16 @@ function LeavesTab() {
                     <td className="px-3 py-3 text-xs">{l.toDate}</td>
                     <td className="px-3 py-3 text-xs">{l.totalDays}</td>
                     <td className="px-3 py-3 text-xs max-w-[180px] truncate" title={l.reason}>{l.reason}</td>
-                    <td className="px-3 py-3"><StatusBadge status={l.status} /></td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <StatusBadge status={l.status} />
+                        {l.isOverdue && (
+                          <span title="Start date has already passed and this request is still Pending — needs a decision.">
+                            <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-3 text-xs">{l.approver?.fullName ?? "—"}</td>
                     <td className="px-3 py-3">
                       {l.status === "pending" && (

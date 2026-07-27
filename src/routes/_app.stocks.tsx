@@ -95,9 +95,11 @@ function StBadge({ status }: { status: string }) {
 
 function BarcodeStockInDialog({
   branches,
+  products,
   onDone,
 }: {
   branches: Branch[];
+  products: Product[];
   onDone: () => void;
 }) {
   const { user } = useAuth();
@@ -216,6 +218,23 @@ function BarcodeStockInDialog({
       >
         <ScanLine className="h-4 w-4" /> {scanActive ? "Scanning…" : "Scan Item"}
       </Button>
+      {/* Manual fallback for cashiers/staff without a working camera/scanner — opens the same
+          Stock-In form but with a searchable product picker instead of requiring a barcode. */}
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-1.5"
+        onClick={() => {
+          setScanActive(false);
+          setProduct(null);
+          setBranchId(lockedBranchId ?? "");
+          setQuantity("1");
+          setPurchaseCost("");
+          setOpen(true);
+        }}
+      >
+        <Plus className="h-4 w-4" /> Manual Stock-In
+      </Button>
 
       <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
         <DialogContent className="max-w-sm">
@@ -224,6 +243,29 @@ function BarcodeStockInDialog({
               <ScanLine className="h-5 w-5 text-primary" /> Quick Stock-In
             </DialogTitle>
           </DialogHeader>
+
+          {!product && (
+            <div className="py-1">
+              <Label>Product *</Label>
+              <Select
+                value=""
+                onValueChange={v => {
+                  const p = products.find(pr => pr.id === v);
+                  if (!p) return;
+                  setProduct(p);
+                  setBranchId(lockedBranchId ?? branches[0]?.id ?? "");
+                  setQuantity("1");
+                  setPurchaseCost(p.costPrice != null ? String(p.costPrice) : "");
+                }}
+              >
+                <SelectTrigger className="h-9"><SelectValue placeholder="Search and select a product…" /></SelectTrigger>
+                <SelectContent>
+                  {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} · {p.sku}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">No scanner handy? Pick the product from the list instead.</p>
+            </div>
+          )}
 
           {product && (
             <div className="space-y-3 py-1">
@@ -516,6 +558,95 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
           </div>
           <p className="text-xs text-muted-foreground -mt-1">
             This write-off is recorded as <span className="font-medium">Pending Approval</span> and does not reduce stock until an approver signs it off.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving || !!qtyWholeUnitError}>{saving ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Manual Stock-Out dialog ──────────────────────────────────────────────────
+// A plain, non-wastage on-hand reduction (e.g. a manual count correction) — a form-based
+// counterpart to Quick Stock-In, for the same "no working scanner" reason. Unlike Wastage
+// (which is held for approval), a "reduction" adjustment applies immediately — see
+// InventoryController.RequiresApproval.
+function ManualStockOutDialog({ branches, products, onDone }: { branches: Branch[]; products: Product[]; onDone: () => void }) {
+  const { user } = useAuth();
+  const { canCreate } = usePermission("Stocks");
+  const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ productId: "", branchId: lockedBranchId ?? "", quantity: "", reason: "" });
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  const selectedProduct = products.find(p => p.id === form.productId);
+  const qtyWholeUnitError = form.quantity ? wholeUnitQuantityError(selectedProduct, Number(form.quantity)) : null;
+
+  async function handleSave() {
+    if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
+    if (qtyWholeUnitError) { toast.error(qtyWholeUnitError); return; }
+    setSaving(true);
+    try {
+      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "reduction", reason: form.reason || undefined, adjustedBy: user?.id });
+      toast.success(`Stock-out recorded — ${selectedProduct?.name ?? "item"} -${form.quantity} units`);
+      setOpen(false);
+      setForm({ productId: "", branchId: lockedBranchId ?? "", quantity: "", reason: "" });
+      onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to record stock-out"); }
+    finally { setSaving(false); }
+  }
+
+  if (!canCreate) return null;
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" /> Manual Stock-Out
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Manual Stock-Out</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="col-span-2">
+              <Label>Product *</Label>
+              <Select value={form.productId} onValueChange={v => set("productId", v)}>
+                <SelectTrigger><SelectValue placeholder="Search and select a product…" /></SelectTrigger>
+                <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} · {p.sku}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            {!lockedBranchId && (
+              <div className="col-span-2">
+                <Label>Branch *</Label>
+                <Select value={form.branchId} onValueChange={v => set("branchId", v)}>
+                  <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                  <SelectContent>{branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="col-span-2">
+              <Label>Quantity to Remove *</Label>
+              <Input
+                type="number"
+                min="1"
+                step={selectedProduct?.weightBased ? "0.001" : "1"}
+                className={qtyWholeUnitError ? "border-destructive ring-1 ring-destructive" : ""}
+                value={form.quantity}
+                onChange={e => set("quantity", e.target.value)}
+                placeholder="0"
+              />
+              {qtyWholeUnitError && <p className="text-[10px] text-destructive leading-tight mt-0.5">Must be a whole number</p>}
+            </div>
+            <div className="col-span-2">
+              <Label>Reason / Notes</Label>
+              <Textarea rows={2} value={form.reason} onChange={e => set("reason", e.target.value)} placeholder="e.g. cycle-count correction…" />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-1">
+            This reduces on-hand stock immediately. For damage, spoilage, expiry or theft, use <span className="font-medium">Record Wastage</span> instead — it goes through approval.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -1159,7 +1290,7 @@ function Stocks() {
       title="Stocks"
       subtitle="Stock-In · Stock-Out · GRN · Transfers · Wastage · Movement"
       actions={
-        <BarcodeStockInDialog branches={branches} onDone={refreshCurrentTab} />
+        <div onClick={ensureDialogMetadata}><BarcodeStockInDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
       }
     >
       {loadError && <LoadErrorBanner onRetry={() => { setLoadError(false); refreshCurrentTab(); }} />}
@@ -1335,6 +1466,7 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between">
               <CardTitle className="text-base">Stock-Out Records</CardTitle>
+              <div onClick={ensureDialogMetadata}><ManualStockOutDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
             </CardHeader>
             <CardContent className="p-0">
               <AdjustmentTable rows={reductions} branches={branches} loading={tabLoading} />

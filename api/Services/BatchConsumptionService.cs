@@ -94,9 +94,15 @@ public class BatchConsumptionService(BaqalaDbContext db) : IBatchConsumptionServ
     {
         if (quantity <= 0 || (!branchId.HasValue && !warehouseId.HasValue)) return [];
 
+        // Status flips to "expired" only via a background scan that runs every 15 minutes (see
+        // OperationalAlertsService.ScanExpiringBatchesAsync) — checking the live ExpiryDate here
+        // too closes the window where a lot is already past its date but not yet flagged, which
+        // would otherwise still sort first under FEFO and get sold.
+        var today = DateTime.UtcNow.Date;
         var batches = await PickOrdered(
             db.InventoryBatches.Where(b =>
-                b.ProductId == productId && b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0),
+                b.ProductId == productId && b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0
+                && (b.ExpiryDate == null || b.ExpiryDate.Value.Date >= today)),
             branchId, warehouseId,
             strategy is null ? await GetStrategyAsync(branchId, ct) : Normalize(strategy))
             .ToListAsync(ct);

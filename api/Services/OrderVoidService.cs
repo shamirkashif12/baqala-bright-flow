@@ -111,6 +111,12 @@ public class OrderVoidService(BaqalaDbContext db, IBatchConsumptionService batch
             }
         }
 
+        // Money was actually collected for this order (paid/partially_paid) — voiding it doesn't
+        // return that money on its own, so the payment status has to say so explicitly rather than
+        // keep reading "paid" forever. An order that was still "pending" never took a payment, so
+        // there's nothing to reconcile and its payment status is left alone.
+        if (order.PaymentStatus is "paid" or "partially_paid") order.PaymentStatus = "cancelled";
+
         order.OrderStatus = "cancelled";
         order.VoidReason = reason;
         order.UpdatedAt = DateTime.UtcNow;

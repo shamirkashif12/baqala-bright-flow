@@ -4,28 +4,19 @@ import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
-import { Gauge, ScanBarcode, Timer, ShoppingBag, TrendingUp } from "lucide-react";
-import { api, excludeDisabledBranches, type CashierShift, type Terminal, type Branch } from "@/lib/api";
-import { SARIcon } from "@/lib/currency";
+import { ScanBarcode, ShoppingBag } from "lucide-react";
+import { api, excludeDisabledBranches, type CashierShift, type Terminal, type Branch, type KpiSummary } from "@/lib/api";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/kpi")({ component: KPI });
-
-function ScoreBar({ v }: { v: number }) {
-  return (
-    <div className="flex items-center gap-2 w-32">
-      <Progress value={v} className="h-1.5 flex-1" />
-      <Badge variant="outline" className={v >= 85 ? "bg-success/10 text-success border-success/30" : v >= 75 ? "bg-warning/15 text-warning-foreground border-warning/40" : "bg-destructive/10 text-destructive border-destructive/30"}>{v}</Badge>
-    </div>
-  );
-}
 
 function KPI() {
   const [shifts, setShifts] = useState<CashierShift[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [kpi, setKpi] = useState<KpiSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -35,11 +26,13 @@ function KPI() {
       api.getShifts(),
       api.getTerminals(),
       api.getBranches(),
-    ]).then(([s, t, b]) => {
+      api.getKpiSummary(),
+    ]).then(([s, t, b, k]) => {
       if (s.status === "fulfilled") setShifts(s.value);
       if (t.status === "fulfilled") setTerminals(t.value);
       if (b.status === "fulfilled") setBranches(excludeDisabledBranches(b.value));
-      setLoadError([s, t, b].some((r) => r.status === "rejected"));
+      if (k.status === "fulfilled") setKpi(k.value);
+      setLoadError([s, t, b, k].some((r) => r.status === "rejected"));
       setLoading(false);
     });
   };
@@ -49,11 +42,13 @@ function KPI() {
   return (
     <PageShell title="KPI Evaluation" subtitle="Per-cashier, per-terminal, per-branch and per-scan performance">
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Scans (today)" value="—" icon={ScanBarcode} accent="primary" />
-        <MetricCard label="Avg Scan Time" value="—" icon={Timer} accent="success" />
-        <MetricCard label="Orders Completed" value="—" icon={ShoppingBag} />
-        <MetricCard label="Overall KPI Score" value="—" icon={Gauge} accent="primary" />
+      {/* "Avg Scan Time" / "Overall KPI Score" tiles were removed rather than left showing "—" —
+          nothing in this system instruments individual scan events or defines a scoring formula,
+          so there was no real number to show. What's below (scan volume, completed orders) is
+          computed from real Orders/OrderItems data. */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <MetricCard label="Total Scans (today)" value={String(kpi?.totalScansToday ?? 0)} icon={ScanBarcode} accent="primary" />
+        <MetricCard label="Orders Completed (today)" value={String(kpi?.ordersCompletedToday ?? 0)} icon={ShoppingBag} />
       </div>
 
       <Tabs defaultValue="cashier">
@@ -90,8 +85,8 @@ function KPI() {
                         <tr key={shift.id} className="border-b last:border-0">
                           <td className="px-3 py-3 font-medium">{shift.cashier?.fullName ?? "Unknown"}</td>
                           <td className="px-3 py-3 text-xs">{shift.terminal?.terminalCode ?? "—"}</td>
-                          <td className="px-3 py-3 tabular-nums">—</td>
-                          <td className="px-3 py-3 font-semibold"><SARIcon />{shift.totalSales.toLocaleString("en-SA", { minimumFractionDigits: 2 })}</td>
+                          <td className="px-3 py-3 tabular-nums">{shift.ordersCount ?? 0}</td>
+                          <td className="px-3 py-3 font-semibold"><SARIcon />{fmtSAR(shift.totalSales)}</td>
                           <td className="px-3 py-3">
                             <Badge variant="outline" className={shift.status === "open" ? "bg-success/10 text-success border-success/30" : "bg-muted/40 text-muted-foreground border-border/60"}>
                               {shift.status}
@@ -152,20 +147,24 @@ function KPI() {
 
         <TabsContent value="scan" className="mt-4 space-y-4">
           <div className="grid gap-3 md:grid-cols-3">
+            {/* Avg Scan Time / Misscan Rate genuinely have no source data — this system doesn't
+                instrument individual scan events (timing, mis-scans) anywhere. Left as an honest
+                "not tracked" state rather than a fabricated number. Items / Order below IS real —
+                derived from today's actual order line items. */}
             <Card className="p-5 border-border/60 shadow-card">
               <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Avg Scan Time</p>
               <p className="text-3xl font-bold mt-1">—</p>
-              <p className="text-xs text-muted-foreground mt-1">No scan data available</p>
+              <p className="text-xs text-muted-foreground mt-1">Not tracked — no scan-level timing is captured</p>
             </Card>
             <Card className="p-5 border-border/60 shadow-card">
               <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Misscan Rate</p>
               <p className="text-3xl font-bold mt-1">—</p>
-              <p className="text-xs text-muted-foreground mt-1">No scan data available</p>
+              <p className="text-xs text-muted-foreground mt-1">Not tracked — no mis-scan events are captured</p>
             </Card>
             <Card className="p-5 border-border/60 shadow-card">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Items / Order</p>
-              <p className="text-3xl font-bold mt-1">—</p>
-              <p className="text-xs text-muted-foreground mt-1">No scan data available</p>
+              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Items / Order (today)</p>
+              <p className="text-3xl font-bold mt-1">{kpi?.itemsPerOrderToday ?? 0}</p>
+              <p className="text-xs text-muted-foreground mt-1">{kpi?.transactionsToday ?? 0} orders today</p>
             </Card>
           </div>
         </TabsContent>
@@ -182,25 +181,34 @@ function KPI() {
                       <th className="px-3 py-3 font-semibold">Branch</th>
                       <th className="px-3 py-3 font-semibold">City</th>
                       <th className="px-3 py-3 font-semibold">Status</th>
+                      <th className="px-3 py-3 font-semibold">Orders (today)</th>
+                      <th className="px-3 py-3 font-semibold">Sales (today)</th>
+                      <th className="px-3 py-3 font-semibold">Avg Basket (today)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {branches.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="px-3 py-6 text-center text-muted-foreground">No branch data available</td>
+                        <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">No branch data available</td>
                       </tr>
                     ) : (
-                      branches.map((branch) => (
-                        <tr key={branch.id} className="border-b last:border-0">
-                          <td className="px-3 py-3 font-medium">{branch.name}</td>
-                          <td className="px-3 py-3">{branch.city ?? "—"}</td>
-                          <td className="px-3 py-3">
-                            <Badge variant="outline" className={branch.status === "active" ? "bg-success/10 text-success border-success/30" : "bg-muted/40 text-muted-foreground border-border/60"}>
-                              {branch.status}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))
+                      branches.map((branch) => {
+                        const bk = kpi?.branchKpi.find((k) => k.branchId === branch.id);
+                        return (
+                          <tr key={branch.id} className="border-b last:border-0">
+                            <td className="px-3 py-3 font-medium">{branch.name}</td>
+                            <td className="px-3 py-3">{branch.city ?? "—"}</td>
+                            <td className="px-3 py-3">
+                              <Badge variant="outline" className={branch.status === "active" ? "bg-success/10 text-success border-success/30" : "bg-muted/40 text-muted-foreground border-border/60"}>
+                                {branch.status}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-3 tabular-nums">{bk?.ordersToday ?? 0}</td>
+                            <td className="px-3 py-3 font-semibold tabular-nums"><SARIcon />{fmtSAR(bk?.salesToday ?? 0)}</td>
+                            <td className="px-3 py-3 tabular-nums"><SARIcon />{fmtSAR(bk?.avgBasketToday ?? 0)}</td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

@@ -47,6 +47,10 @@ export interface AuthUser {
   branch: string;
   initials: string;
   permissions: Record<string, RolePermFlags>;
+  // True when the last permissions fetch failed to even reach the server (network/connectivity
+  // failure, e.g. ERR_NETWORK_IO_SUSPENDED) rather than getting a real answer back. RouteGuard
+  // uses this to show a retry/offline state instead of treating "no data" as "access denied".
+  permissionsUnknown?: boolean;
 }
 
 export interface AuthState {
@@ -137,14 +141,28 @@ function buildUser(claims: JwtClaims): AuthUser {
 }
 
 // Fetches role permissions then overlays any user-specific overrides from the server.
-async function fetchPermissions(roleId: string, userId?: string): Promise<Record<string, RolePermFlags>> {
+// Returns null (instead of {}) when the request never reached the server at all, or reached it
+// but got no real answer — a network/connectivity failure (ERR_NETWORK_IO_SUSPENDED,
+// ERR_ADDRESS_UNREACHABLE, offline, etc.) throws here before any response exists, and a
+// transient non-2xx response (backend mid-restart, a 502/503 from a proxy) is just as much "we
+// don't actually know" as a thrown fetch — only 401/403 are a real, authoritative "no access"
+// answer from the server. Callers must not treat any of the connectivity cases the same as the
+// server actually answering "you have no permissions" (see RouteGuard's permissionsUnknown
+// handling — treating "unknown" as "denied" is exactly what produced false Access Denied audit
+// log entries during a backend blip).
+async function fetchPermissions(roleId: string, userId?: string): Promise<Record<string, RolePermFlags> | null> {
   if (!roleId) return {};
+  let res: Response;
   try {
     const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-    const res = await fetch(`${API_BASE}/api/roles/${roleId}`, {
+    res = await fetch(`${API_BASE}/api/roles/${roleId}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
-    if (!res.ok) return {};
+  } catch {
+    return null; // fetch threw — request never got a response, this is connectivity, not auth
+  }
+  if (!res.ok) return res.status === 401 || res.status === 403 ? {} : null;
+  try {
     const role = await res.json() as {
       permissions?: Array<{ module: string } & RolePermFlags>;
     };
@@ -171,6 +189,14 @@ async function fetchPermissions(roleId: string, userId?: string): Promise<Record
 
 const AuthContext = createContext<AuthState | null>(null);
 
+// null perms = the fetch never reached the server — keep whatever permissions we already had
+// and just flag them as stale, instead of wiping them out as if the server said "denied".
+function mergePerms(u: AuthUser, perms: Record<string, RolePermFlags> | null): AuthUser {
+  return perms === null
+    ? { ...u, permissionsUnknown: true }
+    : { ...u, permissions: perms, permissionsUnknown: false };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setAuthUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -186,7 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const baseUser = buildUser(claims);
           if (!cancelled) setAuthUser(baseUser);
           const perms = await fetchPermissions(baseUser.roleId, baseUser.id);
-          if (!cancelled) setAuthUser(u => u ? { ...u, permissions: perms } : null);
+          if (!cancelled) setAuthUser(u => u ? mergePerms(u, perms) : null);
         } else {
           clearSession();
         }
@@ -223,7 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (claims) {
       const baseUser = buildUser(claims);
       const perms = await fetchPermissions(baseUser.roleId, baseUser.id);
-      setAuthUser({ ...baseUser, permissions: perms });
+      setAuthUser(mergePerms(baseUser, perms));
     }
   }, []);
 
@@ -231,7 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthUser(current => {
       if (!current) return current;
       fetchPermissions(current.roleId, current.id).then(perms => {
-        setAuthUser(u => u ? { ...u, permissions: perms } : null);
+        setAuthUser(u => u ? mergePerms(u, perms) : null);
       });
       return current;
     });
@@ -244,7 +270,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthUser(current => {
           if (!current) return current;
           fetchPermissions(current.roleId, current.id).then(perms => {
-            setAuthUser(u => u ? { ...u, permissions: perms } : null);
+            setAuthUser(u => u ? mergePerms(u, perms) : null);
           });
           return current;
         });
@@ -262,7 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthUser(current => {
         if (!current) return current;
         fetchPermissions(current.roleId, current.id).then(perms => {
-          setAuthUser(u => u ? { ...u, permissions: perms } : null);
+          setAuthUser(u => u ? mergePerms(u, perms) : null);
         });
         return current;
       });

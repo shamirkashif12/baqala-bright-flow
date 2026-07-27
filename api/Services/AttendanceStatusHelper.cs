@@ -59,4 +59,27 @@ public static class AttendanceStatusHelper
 
     public static DateTime? ClosingTime(StaffAttendance a) =>
         a.RecordedBy is not null ? a.UpdatedAt : a.CheckOut;
+
+    // Late/early-leave minutes from shift timing. Same-day comparison only — does not attempt
+    // to handle a night shift's End time crossing midnight, kept simple for this pass. Shared by
+    // HrAttendanceController (manual Mark/Correct) and ShiftsController (POS check-in/out
+    // auto-populating the same StaffAttendance row) so both compute lateness identically.
+    public static (int LateMinutes, int EarlyLeaveMinutes) ComputeLateEarlyMinutes(WorkShift? shift, DateTime? checkIn, DateTime? checkOut)
+    {
+        if (shift is null) return (0, 0);
+        int late = 0, early = 0;
+        if (checkIn.HasValue && TimeSpan.TryParse(shift.StartTime, out var start))
+        {
+            var allowed = start + TimeSpan.FromMinutes(shift.GraceInMinutes);
+            var diff = checkIn.Value.TimeOfDay - allowed;
+            if (diff.TotalMinutes > 0) late = (int)Math.Ceiling(diff.TotalMinutes);
+        }
+        if (checkOut.HasValue && TimeSpan.TryParse(shift.EndTime, out var end))
+        {
+            var allowed = end - TimeSpan.FromMinutes(shift.GraceOutMinutes);
+            var diff = allowed - checkOut.Value.TimeOfDay;
+            if (diff.TotalMinutes > 0) early = (int)Math.Ceiling(diff.TotalMinutes);
+        }
+        return (late, early);
+    }
 }

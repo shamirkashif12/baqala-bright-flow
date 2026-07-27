@@ -127,6 +127,31 @@ function StatusDot({ active }: { active: boolean }) {
   );
 }
 
+const COUPON_STATUS_STYLES: Record<string, string> = {
+  active: "bg-green-100 text-green-700",
+  limit_reached: "bg-amber-100 text-amber-700",
+  expired: "bg-gray-100 text-gray-500",
+  inactive: "bg-gray-100 text-gray-500",
+};
+const COUPON_STATUS_LABELS: Record<string, string> = {
+  active: "Active",
+  limit_reached: "Limit Reached",
+  expired: "Expired",
+  inactive: "Inactive",
+};
+// A coupon's stored status stays "active" even once it's fully redeemed or past its end date —
+// nothing flips it. Use the backend's derived effectiveStatus so staff can see at a glance why a
+// coupon no longer works, instead of it reading "Active" while POS rejects every attempt to use it.
+function CouponStatusBadge({ status }: { status: string }) {
+  const key = status || "inactive";
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${COUPON_STATUS_STYLES[key] ?? COUPON_STATUS_STYLES.inactive}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${key === "active" ? "bg-green-500" : key === "limit_reached" ? "bg-amber-500" : "bg-gray-400"}`} />
+      {COUPON_STATUS_LABELS[key] ?? status}
+    </span>
+  );
+}
+
 const OFFER_TYPE_COLORS: Record<string, string> = {
   bogo: "bg-purple-100 text-purple-700",
   combo: "bg-blue-100 text-blue-700",
@@ -205,7 +230,7 @@ function CouponsTab() {
   const set = (k: keyof CouponForm) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
   const setS = (k: keyof CouponForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
 
-  const active = coupons.filter(c => c.status === "active").length;
+  const active = coupons.filter(c => (c.effectiveStatus ?? c.status) === "active").length;
 
   return (
     <div className="space-y-4">
@@ -256,7 +281,7 @@ function CouponsTab() {
                     </td>
                     <td className="px-4 py-3 tabular-nums text-sm">{c.usedCount ?? 0} / {c.usageLimit ?? "∞"}</td>
                     <td className="px-4 py-3">
-                      <StatusDot active={c.status === "active"} />
+                      <CouponStatusBadge status={c.effectiveStatus ?? c.status} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 justify-end">

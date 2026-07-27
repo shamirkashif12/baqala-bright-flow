@@ -96,6 +96,10 @@ public class ProductsController(
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Product product)
     {
+        if (product.BasePrice <= 0)
+            return BadRequest(new { message = "Selling price must be greater than zero." });
+        if (product.CostPrice is <= 0)
+            return BadRequest(new { message = "Purchase price must be greater than zero, or left blank." });
         if (await db.Products.AnyAsync(p => p.Sku == product.Sku))
             return Conflict(new { message = $"SKU \"{product.Sku}\" is already used by another product." });
         if (!string.IsNullOrWhiteSpace(product.Barcode) &&
@@ -124,6 +128,10 @@ public class ProductsController(
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Product updated)
     {
+        if (updated.BasePrice <= 0)
+            return BadRequest(new { message = "Selling price must be greater than zero." });
+        if (updated.CostPrice is <= 0)
+            return BadRequest(new { message = "Purchase price must be greater than zero, or left blank." });
         var product = await db.Products.FindAsync(id);
         if (product is null) return NotFound();
         // Sku/Barcode were never copied from `updated` below, so edits to either field silently

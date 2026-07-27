@@ -268,6 +268,11 @@ export const api = {
   },
   receiveBatch: (data: ReceiveBatchPayload) =>
     request<InventoryBatch>("/api/inventory/batches", { method: "POST", body: JSON.stringify(data) }),
+  // Non-FEFO branches only — empty array when the branch uses FEFO picking (the server skips the
+  // computation entirely in that case, since FEFO can't produce this situation).
+  getFefoWarnings: (branchId: string) =>
+    request<{ productId: string; productName: string; nearExpiryBatchNumber: string | null; nearExpiryDate: string | null; newerBatchNumber: string | null; newerReceivedDate: string; message: string }[]>(
+      `/api/inventory/batches/fefo-warnings?branchId=${branchId}`),
   adjustInventory: (data: AdjustInventoryPayload) =>
     request<{ id: string }>("/api/inventory/adjustments", { method: "POST", body: JSON.stringify(data) }),
   getAdjustments: (params?: { branchId?: string; warehouseId?: string; batchId?: string; adjustmentType?: string; productId?: string; adjustedBy?: string; approvalStatus?: string }) => {
@@ -312,6 +317,10 @@ export const api = {
   // Orders
   getOrders: (params?: { branchId?: string[]; status?: string[]; paymentStatus?: string[]; from?: string; to?: string }) =>
     request<Order[]>(`/api/orders${toQuery(params)}`),
+  // Paginated variant of the above — same filters, plus page/pageSize. Passing either query param
+  // switches the backend response shape from a bare array to { total, page, pageSize, items }.
+  getOrdersPaged: (params: { branchId?: string[]; status?: string[]; paymentStatus?: string[]; from?: string; to?: string; page: number; pageSize: number }) =>
+    request<{ total: number; page: number; pageSize: number; items: Order[] }>(`/api/orders${toQuery(params)}`),
   getOrder: (id: string) => request<Order>(`/api/orders/${id}`),
   getOrderByNumber: (num: string) => request<Order>(`/api/orders/by-number/${encodeURIComponent(num)}`),
   createOrder: (data: Partial<Order>) =>
@@ -337,6 +346,10 @@ export const api = {
     request<CashierShift>(`/api/shifts/${id}/close`, { method: "POST", body: JSON.stringify(data) }),
   approveVariance: (id: string) =>
     request<CashierShift>(`/api/shifts/${id}/approve-variance`, { method: "POST" }),
+  overrideOverdueShift: (id: string) =>
+    request<CashierShift>(`/api/shifts/${id}/override-overdue`, { method: "POST" }),
+  bulkForceCloseShifts: (olderThanHours: number) =>
+    request<{ closedCount: number }>("/api/shifts/bulk-force-close", { method: "POST", body: JSON.stringify({ olderThanHours }) }),
 
   // Terminals
   getTerminals: (params?: { branchId?: string[]; status?: string[] }) =>
@@ -388,6 +401,12 @@ export const api = {
     request<Customer>(`/api/customers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   getCustomerLoyalty: (id: string) =>
     request<LoyaltyTransaction[]>(`/api/customers/${id}/loyalty`),
+  getCustomerDuplicates: () =>
+    request<{ groups: { name: string; customers: Customer[] }[]; flagged: Customer[] }>("/api/customers/duplicates"),
+  mergeCustomers: (primaryId: string, duplicateIds: string[]) =>
+    request<Customer>("/api/customers/merge", { method: "POST", body: JSON.stringify({ primaryId, duplicateIds }) }),
+  deleteCustomer: (id: string) =>
+    request<void>(`/api/customers/${id}`, { method: "DELETE" }),
 
   // Loyalty Program
   getLoyaltyPrograms: (branchId?: string) =>
@@ -654,6 +673,10 @@ export const api = {
   },
 
   // Reports
+  getKpiSummary: (params?: { date?: string; branchId?: string }) =>
+    request<KpiSummary>(`/api/reports/kpi-summary${toQuery(params)}`),
+  getBiSummary: (params?: { branchId?: string }) =>
+    request<BiSummary>(`/api/reports/bi-summary${toQuery(params)}`),
   getDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; customerType?: string; hasTobaccoFee?: boolean }) =>
     request<DailySalesReport>(`/api/reports/daily-sales${toQuery(params)}`),
   exportDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; customerType?: string; hasTobaccoFee?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
@@ -1088,6 +1111,9 @@ export interface LeaveRequest {
   reason: string; attachmentUrl?: string; status: string; approverId?: string; approvedAt?: string; rejectionReason?: string;
   createdAt: string; updatedAt: string;
   employee?: Employee; leaveType?: LeaveType; approver?: { id: string; fullName: string };
+  // True when still Pending but fromDate has already arrived — leave already underway with no
+  // decision made. Computed server-side (LeaveController.GetAll), not stored.
+  isOverdue?: boolean;
 }
 
 // HRM — Reports
@@ -1365,8 +1391,10 @@ export interface CashierShift {
   status: string; openedAt: string; closedAt?: string; notes?: string;
   requiresApproval?: boolean; approvedBy?: string; approvedAt?: string;
   closedBy?: string; closeReason?: string;
+  overdueFlaggedAt?: string; overdueOverrideUntil?: string; overdueOverrideBy?: string;
   cashier?: { id: string; fullName: string };
   terminal?: { id: string; terminalCode: string; name: string };
+  ordersCount?: number;
 }
 
 export interface OpenShiftPayload {
@@ -1480,7 +1508,7 @@ export interface Expense {
 export interface Coupon {
   id: string; code: string; name: string; type: string; value: number;
   usageLimit?: number; usedCount: number; startDate: string; endDate: string;
-  status: string;
+  status: string; effectiveStatus: string;
 }
 
 export interface Discount {
@@ -1879,6 +1907,22 @@ export interface DailySalesHour {
   hour: number; transactions: number; grossSales: number; discounts: number; returns: number;
   netSales: number; vat: number; tobaccoFees: number; cash: number; card: number; wallet: number; avgBasket: number;
 }
+export interface KpiSummary {
+  totalScansToday: number;
+  ordersCompletedToday: number;
+  transactionsToday: number;
+  itemsPerOrderToday: number;
+  branchKpi: { branchId: string; ordersToday: number; salesToday: number; avgBasketToday: number }[];
+}
+
+export interface BiSummary {
+  salesTrend: { date: string; netSales: number }[];
+  bestSellers: { productName: string; unitsSold: number; pct: number }[];
+  slowMovers: { productName: string; stockQty: number }[];
+  expiryLoss: { total: number; byCategory: { category: string; value: number }[] };
+  warehouse: { inboundUnits: number; outboundUnits: number; transfersCount: number; adjustmentsCount: number; turnover: number };
+}
+
 export interface DailySalesReport {
   kpis: { grossSales: number; netSales: number; transactions: number; avgBasket: number; vatCollected: number; returnsRefunds: number; tobaccoFees: number };
   hourly: DailySalesHour[];

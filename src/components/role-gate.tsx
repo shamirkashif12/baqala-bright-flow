@@ -1,7 +1,8 @@
 import { type ReactNode } from "react";
 import { Navigate } from "@tanstack/react-router";
 import { useAuth, type AppRole } from "@/lib/auth";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, WifiOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface ModuleGateProps {
   module: string;
@@ -15,7 +16,7 @@ interface ModuleGateProps {
  * via the Roles & Permissions admin screen.
  */
 export function ModuleGate({ module, children, redirectTo = "/login" }: ModuleGateProps) {
-  const { loading, isAuthenticated, user, canViewModule } = useAuth();
+  const { loading, isAuthenticated, user, canViewModule, refreshPermissions } = useAuth();
 
   if (loading) {
     return (
@@ -27,6 +28,21 @@ export function ModuleGate({ module, children, redirectTo = "/login" }: ModuleGa
 
   if (!isAuthenticated || !user) {
     return <Navigate to={redirectTo} />;
+  }
+
+  if (!canViewModule(module) && user.permissionsUnknown) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 px-6 text-center">
+        <div className="rounded-full bg-muted p-4 text-muted-foreground">
+          <WifiOff className="h-6 w-6" />
+        </div>
+        <h2 className="text-lg font-semibold">Connection Problem</h2>
+        <p className="max-w-md text-sm text-muted-foreground">
+          We couldn't reach the server to confirm your access to {module}. Check your connection and try again.
+        </p>
+        <Button className="mt-2" onClick={refreshPermissions}>Retry</Button>
+      </div>
+    );
   }
 
   if (!canViewModule(module)) {

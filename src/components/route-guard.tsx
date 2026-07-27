@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { useRouterState, Link } from "@tanstack/react-router";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth, type AppRole } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -155,13 +155,28 @@ function AccessDenied({ dest }: { dest: string }) {
   );
 }
 
+// Shown when the last permissions fetch never reached the server (connectivity blip), as opposed
+// to a real 401/403 — this is not an authorization decision, so it must not read as one.
+function ConnectivityIssue({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex min-h-[70vh] flex-col items-center justify-center gap-3 px-6 text-center">
+      <WifiOff className="h-12 w-12 text-muted-foreground" />
+      <h1 className="text-xl font-semibold">Connection Problem</h1>
+      <p className="max-w-md text-sm text-muted-foreground">
+        We couldn't reach the server to confirm your access to this page. Check your connection and try again.
+      </p>
+      <Button className="mt-2" onClick={onRetry}>Retry</Button>
+    </div>
+  );
+}
+
 /**
  * Wraps the routed page content. If the signed-in user doesn't have permission for the current
  * path, shows an Access Denied screen and logs the attempt (FRD 3.1) instead of silently
  * redirecting them away.
  */
 export function RouteGuard({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, refreshPermissions } = useAuth();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const loggedPathRef = useRef<string | null>(null);
 
@@ -169,7 +184,12 @@ export function RouteGuard({ children }: { children: ReactNode }) {
     (r) => path === r.url || path.startsWith(r.url + "/"),
   );
 
-  const denied = !loading && !!rule && !isAllowed(rule, user);
+  const wouldDeny = !loading && !!rule && !isAllowed(rule, user);
+  // A rule failure caused by a permissions fetch that never reached the server is a connectivity
+  // problem, not a real authorization decision — don't tell the user they lack access when we
+  // simply don't know yet.
+  const connectivityIssue = wouldDeny && !!user?.permissionsUnknown;
+  const denied = wouldDeny && !connectivityIssue;
 
   useEffect(() => {
     if (denied && user && loggedPathRef.current !== path) {
@@ -180,6 +200,7 @@ export function RouteGuard({ children }: { children: ReactNode }) {
 
   // Still hydrating — render nothing to avoid a flash
   if (loading) return null;
+  if (connectivityIssue) return <ConnectivityIssue onRetry={refreshPermissions} />;
   if (denied) {
     const dest = ROLE_DEFAULT_ROUTES[user!.role as AppRole] ?? "/dashboard";
     return <AccessDenied dest={dest} />;

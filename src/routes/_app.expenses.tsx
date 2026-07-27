@@ -114,7 +114,14 @@ function EntriesTab() {
     setSheetOpen(true);
   };
 
+  const amountValue = Number(form.amount);
+  const amountInvalid = form.amount !== "" && (!Number.isFinite(amountValue) || amountValue <= 0);
+
   const handleSave = async () => {
+    if (!form.amount || amountInvalid) {
+      toast.error("Enter an expense amount greater than zero.");
+      return;
+    }
     setSaving(true);
     const payload = {
       expenseTypeId: form.expenseTypeId,
@@ -321,7 +328,10 @@ function EntriesTab() {
             </FieldRow>
             <div className="grid grid-cols-2 gap-3">
               <FieldRow label="Amount (SAR) *">
-                <Input type="number" value={form.amount} onChange={set("amount")} className="h-9" placeholder="450.00" />
+                <Input type="number" min="0.01" step="0.01" value={form.amount} onChange={set("amount")}
+                  className={`h-9 ${amountInvalid ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                  placeholder="450.00" />
+                {amountInvalid && <p className="text-xs text-destructive">Amount must be greater than zero.</p>}
               </FieldRow>
               <FieldRow label="Paid Amount">
                 <Input type="number" value={form.paidAmount} onChange={set("paidAmount")} className="h-9" placeholder="450.00" />
@@ -336,7 +346,7 @@ function EntriesTab() {
               </FieldRow>
             </div>
             <Button className="w-full gradient-primary text-primary-foreground border-0 mt-2" onClick={handleSave}
-              disabled={saving || !form.expenseTypeId || !form.branchId || !form.amount}>
+              disabled={saving || !form.expenseTypeId || !form.branchId || !form.amount || amountInvalid}>
               {saving ? "Saving…" : editExpense ? "Save Changes" : "Save Expense"}
             </Button>
           </div>

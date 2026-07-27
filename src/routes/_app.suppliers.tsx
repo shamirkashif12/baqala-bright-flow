@@ -25,8 +25,14 @@ import { fileToDataUrl } from "@/lib/image";
 
 export const Route = createFileRoute("/_app/suppliers")({ component: Suppliers });
 
-function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>;
+function FieldRow({ label, children, error }: { label: string; children: React.ReactNode; error?: string }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      {children}
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
+    </div>
+  );
 }
 
 
@@ -41,6 +47,36 @@ const emptyForm: SupplierForm = {
   bankName: "", bankAccountHolder: "", bankAccountNumber: "", bankIban: "", notes: "",
 };
 
+type SupplierFormErrors = Partial<Record<keyof SupplierForm, string>>;
+
+// Mirrors SuppliersController.ValidateRequiredForCreate — only enforced on create, since Update
+// intentionally stays unrestricted so legacy suppliers missing these fields can still be edited.
+const REQUIRED_SUPPLIER_FIELDS: { key: keyof SupplierForm; message: string }[] = [
+  { key: "name", message: "Supplier name is required." },
+  { key: "contactPerson", message: "Contact person is required." },
+  { key: "contactNumber", message: "Phone number is required." },
+  { key: "address", message: "Address is required." },
+  { key: "category", message: "Supplier type/category is required." },
+  { key: "crNumber", message: "CR number is required." },
+  { key: "vatNumber", message: "VAT number is required." },
+];
+
+function validateSupplierForm(form: SupplierForm): SupplierFormErrors {
+  const errors: SupplierFormErrors = {};
+  for (const f of REQUIRED_SUPPLIER_FIELDS) {
+    if (!form[f.key]?.trim()) errors[f.key] = f.message;
+  }
+  return errors;
+}
+
+// Maps the single-field message the server's 400 response returns back onto the form —
+// used as a fallback for whatever validateSupplierForm didn't already catch client-side.
+function mapServerErrorToField(message?: string): SupplierFormErrors | null {
+  if (!message) return null;
+  const hit = REQUIRED_SUPPLIER_FIELDS.find(f => f.message === message);
+  return hit ? { [hit.key]: hit.message } : null;
+}
+
 const SUPPLIER_CATEGORIES = ["Food & Beverage", "Tobacco", "Packaging", "Cleaning & Hygiene", "General Goods", "Other"];
 
 // Module-scope component — NOT inside SuppliersTab, so it never remounts on parent re-render
@@ -50,35 +86,46 @@ function SupplierFormFields({
   onSave,
   saving,
   mode,
+  errors,
+  setErrors,
 }: {
   form: SupplierForm;
   setForm: React.Dispatch<React.SetStateAction<SupplierForm>>;
   onSave: () => void;
   saving: boolean;
   mode: "create" | "edit";
+  errors: SupplierFormErrors;
+  setErrors: React.Dispatch<React.SetStateAction<SupplierFormErrors>>;
 }) {
-  const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+  const clearError = (k: keyof SupplierForm) =>
+    setErrors(prev => (prev[k] ? { ...prev, [k]: undefined } : prev));
+  const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm(p => ({ ...p, [k]: e.target.value }));
-  const setS = (k: keyof SupplierForm) => (v: string) =>
+    clearError(k);
+  };
+  const setS = (k: keyof SupplierForm) => (v: string) => {
     setForm(p => ({ ...p, [k]: v }));
+    clearError(k);
+  };
   const req = mode === "create";
   const label = (text: string, required: boolean) => required ? `${text} *` : text;
+  const errCls = (k: keyof SupplierForm) => (errors[k] ? "border-destructive focus-visible:ring-destructive" : "");
   return (
     <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-      <FieldRow label={label("Name", true)}><Input value={form.name} onChange={set("name")} className="h-9" placeholder="Al-Barakah Trading" required={req} /></FieldRow>
+      <FieldRow label={label("Name", true)} error={errors.name}><Input value={form.name} onChange={set("name")} className={`h-9 ${errCls("name")}`} placeholder="Al-Barakah Trading" required={req} /></FieldRow>
       <FieldRow label="Legal Name"><Input value={form.legalName} onChange={set("legalName")} className="h-9" placeholder="Registered legal business name (if different)" /></FieldRow>
-      <FieldRow label={label("CR Number", true)}><Input value={form.crNumber} onChange={set("crNumber")} className="h-9" placeholder="Commercial Registration number" required={req} /></FieldRow>
-      <FieldRow label={label("VAT Number", true)}><Input value={form.vatNumber} onChange={set("vatNumber")} className="h-9" placeholder="15-digit VAT registration number" required={req} /></FieldRow>
-      <FieldRow label={label("Contact Person", true)}><Input value={form.contactPerson} onChange={set("contactPerson")} className="h-9" required={req} /></FieldRow>
-      <FieldRow label={label("Phone", true)}><Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" required={req} /></FieldRow>
+      <FieldRow label={label("CR Number", true)} error={errors.crNumber}><Input value={form.crNumber} onChange={set("crNumber")} className={`h-9 ${errCls("crNumber")}`} placeholder="Commercial Registration number" required={req} /></FieldRow>
+      <FieldRow label={label("VAT Number", true)} error={errors.vatNumber}><Input value={form.vatNumber} onChange={set("vatNumber")} className={`h-9 ${errCls("vatNumber")}`} placeholder="15-digit VAT registration number" required={req} /></FieldRow>
+      <FieldRow label={label("Contact Person", true)} error={errors.contactPerson}><Input value={form.contactPerson} onChange={set("contactPerson")} className={`h-9 ${errCls("contactPerson")}`} required={req} /></FieldRow>
+      <FieldRow label={label("Phone", true)} error={errors.contactNumber}><Input value={form.contactNumber} onChange={set("contactNumber")} className={`h-9 ${errCls("contactNumber")}`} required={req} /></FieldRow>
       <FieldRow label="Email"><Input value={form.email} onChange={set("email")} className="h-9" type="email" /></FieldRow>
       <FieldRow label="City"><Input value={form.city} onChange={set("city")} className="h-9" /></FieldRow>
       <div className="sm:col-span-2">
-        <FieldRow label={label("Address", true)}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} /></FieldRow>
+        <FieldRow label={label("Address", true)} error={errors.address}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} className={errCls("address")} /></FieldRow>
       </div>
-      <FieldRow label={label("Supplier Type / Category", true)}>
+      <FieldRow label={label("Supplier Type / Category", true)} error={errors.category}>
         <Select value={form.category} onValueChange={setS("category")}>
-          <SelectTrigger className="h-9"><SelectValue placeholder="Select category" /></SelectTrigger>
+          <SelectTrigger className={`h-9 ${errCls("category")}`}><SelectValue placeholder="Select category" /></SelectTrigger>
           <SelectContent>
             {SUPPLIER_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
@@ -609,6 +656,7 @@ function SuppliersTab() {
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
+  const [formErrors, setFormErrors] = useState<SupplierFormErrors>({});
   const [saving, setSaving] = useState(false);
 
   const load = () => {
@@ -622,6 +670,7 @@ function SuppliersTab() {
 
   const openEdit = (s: Supplier) => {
     setEditSupplier(s);
+    setFormErrors({});
     setForm({
       name: s.name, contactPerson: s.contactPerson ?? "", contactNumber: s.contactNumber ?? "", email: s.email ?? "", city: s.city ?? "",
       supplyType: s.supplyType ?? "warehouse", status: s.status,
@@ -633,6 +682,15 @@ function SuppliersTab() {
   };
 
   const handleSave = async () => {
+    if (!editSupplier) {
+      const clientErrors = validateSupplierForm(form);
+      if (Object.keys(clientErrors).length > 0) {
+        setFormErrors(clientErrors);
+        toast.error("Please fix the highlighted fields.");
+        return;
+      }
+    }
+    setFormErrors({});
     setSaving(true);
     try {
       const payload = { ...form, creditLimit: form.creditLimit === "" ? undefined : Number(form.creditLimit) };
@@ -646,6 +704,8 @@ function SuppliersTab() {
       load();
     } catch (e: any) {
       console.error(e);
+      const fieldErrors = mapServerErrorToField(e?.message);
+      if (fieldErrors) setFormErrors(fieldErrors);
       toast.error(e?.message || "Failed to save supplier.");
     } finally {
       setSaving(false);
@@ -698,7 +758,7 @@ function SuppliersTab() {
         </div>
         <div className="flex-1" />
         {canCreate && (
-          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
+          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setFormErrors({}); setCreateOpen(true); }}>
             <Plus className="h-4 w-4" /> Add Supplier
           </Button>
         )}
@@ -756,18 +816,18 @@ function SuppliersTab() {
       />
 
       {/* Edit dialog — centered instead of a side sheet since the form has too many fields to feel cramped in a narrow panel */}
-      <Dialog open={!!editSupplier} onOpenChange={v => !v && setEditSupplier(null)}>
+      <Dialog open={!!editSupplier} onOpenChange={v => { if (!v) { setEditSupplier(null); setFormErrors({}); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Supplier</DialogTitle></DialogHeader>
-          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="edit" />
+          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="edit" errors={formErrors} setErrors={setFormErrors} />
         </DialogContent>
       </Dialog>
 
       {/* Create dialog */}
-      <Dialog open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
+      <Dialog open={createOpen} onOpenChange={v => { if (!v) { setCreateOpen(false); setFormErrors({}); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Add Supplier</DialogTitle></DialogHeader>
-          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="create" />
+          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="create" errors={formErrors} setErrors={setFormErrors} />
         </DialogContent>
       </Dialog>
     </div>

@@ -273,9 +273,9 @@ function Terminals() {
   }, [br, st, user]);
   useEffect(() => { load(); }, [load]);
 
-  useEffect(() => {
+  const reloadSessionLogs = useCallback(() => {
     setLogsLoading(true);
-    api.getShifts({
+    return api.getShifts({
       cashierId:  user?.role === "cashier" ? user.id : undefined,
       terminalId: slTerminal.length ? slTerminal : undefined,
       status:     slStatus.length   ? slStatus   : undefined,
@@ -285,6 +285,31 @@ function Terminals() {
       .then(setSessionLogs)
       .finally(() => setLogsLoading(false));
   }, [slTerminal, slStatus, slDateFrom, slDateTo, user]);
+  useEffect(() => { reloadSessionLogs(); }, [reloadSessionLogs]);
+
+  const { canApprove: canForceCloseShifts } = usePermission("Cashier Shifts");
+  const [forceCloseHours, setForceCloseHours] = useState("24");
+  const [forceClosing, setForceClosing] = useState(false);
+
+  const handleBulkForceClose = async () => {
+    const hours = Number(forceCloseHours);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      toast.error("Enter a valid number of hours.");
+      return;
+    }
+    if (!confirm(`Force-close every session open longer than ${hours}h? This cannot be undone.`)) return;
+    setForceClosing(true);
+    try {
+      const res = await api.bulkForceCloseShifts(hours);
+      toast.success(res.closedCount === 0 ? "No stale sessions found." : `Force-closed ${res.closedCount} session${res.closedCount !== 1 ? "s" : ""}.`);
+      load();
+      reloadSessionLogs();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to force-close sessions.");
+    } finally {
+      setForceClosing(false);
+    }
+  };
 
   const cashiers = users.filter(u => u.roleName?.toLowerCase().includes("cashier"));
 
@@ -555,6 +580,23 @@ function Terminals() {
             </div>
             <span className="text-xs text-muted-foreground ml-auto">{sessionLogs.length} session{sessionLogs.length !== 1 ? "s" : ""}</span>
           </div>
+
+          {canForceCloseShifts && (
+            <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Force close sessions open longer than</span>
+              <Input
+                type="number"
+                min="1"
+                value={forceCloseHours}
+                onChange={e => setForceCloseHours(e.target.value)}
+                className="h-8 w-20"
+              />
+              <span className="text-xs text-muted-foreground">hours</span>
+              <Button size="sm" variant="destructive" className="h-8 ml-1" disabled={forceClosing} onClick={handleBulkForceClose}>
+                {forceClosing ? "Closing…" : "Force Close"}
+              </Button>
+            </div>
+          )}
 
           {logsLoading ? (
             <div className="text-muted-foreground text-sm">Loading…</div>

@@ -39,6 +39,15 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         return settings.RequireManagerApprovalAboveCashThreshold ? settings.CashVarianceThresholdSar : null;
     }
 
+    // Same "Cashier shift policy" tab (Settings → Policies & Conditions) field ShiftAutoCloseService
+    // reads to decide when a shift is overdue — reused here so a manager's "keep it open" override
+    // snoozes for the same window the branch is actually configured with.
+    private async Task<int> GetMaxShiftDurationHoursAsync(Guid branchId)
+    {
+        var settings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == branchId);
+        return settings?.MaxShiftDurationHours ?? new PosSettings().MaxShiftDurationHours;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? branchId,
@@ -70,7 +79,27 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
             scoped = scoped.Where(s => s.TerminalId.HasValue && terminalId.Contains(s.TerminalId.Value));
         if (status is { Length: > 0 })
             scoped = scoped.Where(s => status.Contains(s.Status));
-        return Ok(scoped.Select(ShiftProjection.Compile()).ToList());
+        var scopedList = scoped.ToList();
+
+        // Real per-shift order count for the KPI page's Cashier tab (was hardcoded "—" there —
+        // never computed). Grouped once across every shift-linked order rather than filtering by
+        // this page's shift ids in SQL — a `shiftIds.Contains(...)` Where() throws on this MySQL
+        // provider for 2+ values (see ef-mysql-inlist-gotcha memory).
+        var orderCounts = await db.Orders.Where(o => o.ShiftId != null)
+            .GroupBy(o => o.ShiftId!.Value)
+            .Select(g => new { ShiftId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.ShiftId, x => x.Count);
+
+        return Ok(scopedList.Select(s => new
+        {
+            s.Id, s.CashierId, s.TerminalId, s.BranchId,
+            s.OpeningAmount, s.ClosingAmount, s.CashSales, s.CardSales, s.DigitalSales, s.TotalSales,
+            s.Variance, s.Status, s.OpenedAt, s.ClosedAt, s.Notes, s.RequiresApproval, s.ApprovedBy, s.ApprovedAt,
+            s.ClosedBy, s.CloseReason, s.OverdueFlaggedAt, s.OverdueOverrideUntil, s.OverdueOverrideBy,
+            Cashier = s.Cashier == null ? null : new { s.Cashier.Id, s.Cashier.FullName },
+            Terminal = s.Terminal == null ? null : new { s.Terminal.Id, s.Terminal.TerminalCode, s.Terminal.Name },
+            OrdersCount = orderCounts.GetValueOrDefault(s.Id, 0),
+        }).ToList());
     }
 
     [HttpGet("active")]
@@ -82,7 +111,11 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
 
         var query = db.CashierShifts.Where(s => s.Status == "open").Include(s => s.Cashier).Include(s => s.Terminal).AsQueryable();
         if (branchId.HasValue) query = query.Where(s => s.BranchId == branchId);
-        return Ok(await query.Select(ShiftProjection).ToListAsync());
+        // Deterministic order: most-recently-opened first. Without this, MySQL returns rows in
+        // whatever internal order it likes, so the dashboard's "Active Shift Timer" (which reads
+        // index 0) could randomly surface a days-old, never-closed shift instead of an actual
+        // current one.
+        return Ok(await query.OrderByDescending(s => s.OpenedAt).Select(ShiftProjection).ToListAsync());
     }
 
     // Redacted the same way as GetAll/GetActiveShifts above — full Cashier User (email, username,
@@ -93,7 +126,7 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         s.Id, s.CashierId, s.TerminalId, s.BranchId,
         s.OpeningAmount, s.ClosingAmount, s.CashSales, s.CardSales, s.DigitalSales, s.TotalSales,
         s.Variance, s.Status, s.OpenedAt, s.ClosedAt, s.Notes, s.RequiresApproval, s.ApprovedBy, s.ApprovedAt,
-        s.ClosedBy, s.CloseReason,
+        s.ClosedBy, s.CloseReason, s.OverdueFlaggedAt, s.OverdueOverrideUntil, s.OverdueOverrideBy,
         Cashier = s.Cashier == null ? null : new { s.Cashier.Id, s.Cashier.FullName },
         Terminal = s.Terminal == null ? null : new { s.Terminal.Id, s.Terminal.TerminalCode, s.Terminal.Name },
     };
@@ -117,7 +150,7 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
             shift.Id, shift.CashierId, shift.TerminalId, shift.BranchId,
             shift.OpeningAmount, shift.ClosingAmount, shift.CashSales, shift.CardSales, shift.DigitalSales, shift.TotalSales,
             shift.Variance, shift.Status, shift.OpenedAt, shift.ClosedAt, shift.Notes, shift.RequiresApproval, shift.ApprovedBy, shift.ApprovedAt,
-            shift.ClosedBy, shift.CloseReason,
+            shift.ClosedBy, shift.CloseReason, shift.OverdueFlaggedAt, shift.OverdueOverrideUntil, shift.OverdueOverrideBy,
             Cashier = shift.Cashier == null ? null : new { shift.Cashier.Id, shift.Cashier.FullName },
             Terminal = shift.Terminal == null ? null : new { shift.Terminal.Id, shift.Terminal.TerminalCode, shift.Terminal.Name },
         });
@@ -148,6 +181,14 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
 
         if (req.TerminalId.HasValue)
         {
+            // An offline terminal has no live connection to actually run a session on — carrying
+            // an "open" shift while showing "Offline" is the exact stale-shift inconsistency
+            // reported against POS-04. Reject at the source rather than letting it happen and
+            // cleaning up after.
+            var terminalStatus = await db.Terminals.Where(t => t.Id == req.TerminalId).Select(t => t.Status).FirstOrDefaultAsync();
+            if (terminalStatus == "offline")
+                return Conflict("This terminal is offline and cannot start a new session.");
+
             var terminalTaken = await db.CashierShifts
                 .AnyAsync(s => s.TerminalId == req.TerminalId && s.Status == "open");
             if (terminalTaken)
@@ -180,20 +221,48 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
             if (terminal != null) { terminal.LastSync = now; terminal.UpdatedAt = now; }
         }
 
-        // Opening a shift is this app's real-world equivalent of checking in for work — without
-        // this, the Attendance/Shift report's "Check-in" column has nothing to match against and
-        // shows "—" for every shift, since it can only match a shift to an attendance record that
-        // already exists for the same cashier on the same calendar day.
-        var today = now.Date;
-        var hasAttendanceToday = await db.StaffAttendances
-            .AnyAsync(a => a.UserId == req.CashierId && a.CheckIn != null && a.CheckIn >= today);
-        if (!hasAttendanceToday)
+        // Opening a shift is this app's real-world equivalent of checking in for work. For staff
+        // with an HR profile, this writes directly into the HRM Attendance module (EmployeeId +
+        // Date set) instead of requiring a separate manual "Mark Attendance" entry — see
+        // CloseShift below for the matching check-out write-back.
+        var today = DateOnly.FromDateTime(now);
+        var employee = await db.Employees.FirstOrDefaultAsync(e => e.UserId == req.CashierId);
+        if (employee is not null)
         {
-            db.StaffAttendances.Add(new StaffAttendance
+            var todaysAttendance = await db.StaffAttendances
+                .FirstOrDefaultAsync(a => a.EmployeeId == employee.Id && a.Date == today);
+            if (todaysAttendance is null)
             {
-                Id = Guid.NewGuid(), UserId = req.CashierId, BranchId = req.BranchId,
-                CheckIn = now, Status = "present",
-            });
+                var assignment = await db.EmployeeShiftAssignments
+                    .Include(a => a.Shift)
+                    .Where(a => a.EmployeeId == employee.Id && a.Status == "active"
+                        && a.EffectiveFrom <= today && (a.EffectiveTo == null || a.EffectiveTo >= today))
+                    .OrderByDescending(a => a.EffectiveFrom)
+                    .FirstOrDefaultAsync();
+                var (late, _) = AttendanceStatusHelper.ComputeLateEarlyMinutes(assignment?.Shift, now, null);
+
+                db.StaffAttendances.Add(new StaffAttendance
+                {
+                    Id = Guid.NewGuid(), UserId = req.CashierId, BranchId = req.BranchId,
+                    EmployeeId = employee.Id, Date = today, ShiftId = assignment?.ShiftId,
+                    CheckIn = now, Status = late > 0 ? "late" : "present", LateMinutes = late,
+                });
+            }
+        }
+        else
+        {
+            // No HR profile linked to this login (POS-only account) — fall back to the legacy
+            // UserId-only row so the Attendance/Shift report still has a check-in to match against.
+            var hasAttendanceToday = await db.StaffAttendances
+                .AnyAsync(a => a.UserId == req.CashierId && a.CheckIn != null && a.CheckIn >= now.Date);
+            if (!hasAttendanceToday)
+            {
+                db.StaffAttendances.Add(new StaffAttendance
+                {
+                    Id = Guid.NewGuid(), UserId = req.CashierId, BranchId = req.BranchId,
+                    CheckIn = now, Status = "present",
+                });
+            }
         }
 
         await db.SaveChangesAsync();
@@ -272,6 +341,27 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         {
             var terminal = await db.Terminals.FindAsync(shift.TerminalId.Value);
             if (terminal != null) { terminal.LastSync = now; terminal.UpdatedAt = now; }
+        }
+
+        // Mirror the check-in auto-populated at OpenShift: closing a shift is the POS equivalent
+        // of clocking out, so write it back to that same HRM Attendance row instead of leaving
+        // CheckOut null until someone manually corrects it. A row already IsCorrected (or already
+        // checked out) is left alone — a manual correction takes precedence over this auto-write.
+        var closeEmployee = await db.Employees.FirstOrDefaultAsync(e => e.UserId == shift.CashierId);
+        if (closeEmployee is not null)
+        {
+            var closeDate = DateOnly.FromDateTime(now);
+            var todaysAttendance = await db.StaffAttendances
+                .FirstOrDefaultAsync(a => a.EmployeeId == closeEmployee.Id && a.Date == closeDate && !a.IsCorrected && a.CheckOut == null);
+            if (todaysAttendance is not null)
+            {
+                WorkShift? attendanceShift = todaysAttendance.ShiftId.HasValue
+                    ? await db.WorkShifts.FindAsync(todaysAttendance.ShiftId.Value) : null;
+                var (_, early) = AttendanceStatusHelper.ComputeLateEarlyMinutes(attendanceShift, null, now);
+                todaysAttendance.CheckOut = now;
+                todaysAttendance.EarlyLeaveMinutes = early;
+                todaysAttendance.UpdatedAt = now;
+            }
         }
 
         await db.SaveChangesAsync();
@@ -388,6 +478,101 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
         return Ok(shift);
     }
 
+    // Manager "keep it open" override for a shift ShiftAutoCloseService has flagged as overdue
+    // (open past the branch's configured PosSettings.MaxShiftDurationHours). Snoozes re-flagging
+    // for another full threshold window rather than clearing it permanently — a shift that's
+    // still open once that window elapses gets re-evaluated and re-flagged like any other.
+    [RequirePermission("Cashier Shifts", PermAction.Approve)]
+    [HttpPost("{id:guid}/override-overdue")]
+    public async Task<IActionResult> OverrideOverdue(Guid id)
+    {
+        var shift = await db.CashierShifts.FindAsync(id);
+        if (shift is null) return NotFound();
+        if (shift.Status != "open") return BadRequest("This shift is not open.");
+        if (shift.OverdueFlaggedAt is null) return BadRequest("This shift is not flagged as overdue.");
+
+        var actorId = CallerId();
+        var thresholdHours = await GetMaxShiftDurationHoursAsync(shift.BranchId);
+        var now = DateTime.UtcNow;
+        shift.OverdueFlaggedAt = null;
+        shift.OverdueOverrideUntil = now.AddHours(thresholdHours);
+        shift.OverdueOverrideBy = actorId;
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(
+            action: "Overdue shift kept open by manager override",
+            entityType: "CashierShift",
+            entityId: shift.Id,
+            userId: actorId,
+            branchId: shift.BranchId,
+            details: $"Snoozed for another {thresholdHours}h",
+            severity: "warning");
+
+        return Ok(shift);
+    }
+
+    // Bulk recovery for stuck sessions: closes every open shift older than the given age in one
+    // call, instead of a manager having to open each cashier's shift individually. Branch-scoped
+    // roles only affect their own branch's shifts — mirrors GetAll/GetActiveShifts.
+    [RequirePermission("Cashier Shifts", PermAction.Approve)]
+    [HttpPost("bulk-force-close")]
+    public async Task<IActionResult> BulkForceClose([FromBody] BulkForceCloseRequest req)
+    {
+        if (req.OlderThanHours <= 0) return BadRequest(new { message = "olderThanHours must be greater than 0." });
+
+        var (callerRole, callerBranchId) = GetCallerContext();
+        var cutoff = DateTime.UtcNow.AddHours(-req.OlderThanHours);
+
+        var query = db.CashierShifts.Where(s => s.Status == "open" && s.OpenedAt <= cutoff);
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            query = query.Where(s => s.BranchId == callerBranchId);
+
+        var shifts = await query.ToListAsync();
+        if (shifts.Count == 0) return Ok(new { closedCount = 0 });
+
+        var actorId = CallerId();
+        var now = DateTime.UtcNow;
+
+        foreach (var shift in shifts)
+        {
+            shift.Status = "closed";
+            shift.ClosedAt = now;
+            shift.ClosedBy = actorId;
+            shift.ClosingAmount = shift.OpeningAmount + shift.CashSales;
+            shift.Variance = 0;
+            shift.CloseReason = $"Force-closed by manager (bulk action) — open since {shift.OpenedAt:u}, exceeded {req.OlderThanHours}h threshold";
+            shift.OverdueFlaggedAt = null;
+
+            if (shift.TerminalId.HasValue)
+            {
+                var terminal = await db.Terminals.FindAsync(shift.TerminalId.Value);
+                if (terminal != null) { terminal.LastSync = now; terminal.UpdatedAt = now; }
+            }
+        }
+
+        await db.SaveChangesAsync();
+
+        foreach (var shift in shifts)
+        {
+            await audit.LogAsync(
+                action: "Shift force-closed (bulk)",
+                entityType: "CashierShift",
+                entityId: shift.Id,
+                userId: actorId,
+                branchId: shift.BranchId,
+                details: $"Open since {shift.OpenedAt:u}, force-closed via bulk action (threshold {req.OlderThanHours}h). Closing amount assumed equal to opening + cash sales (no manual count).",
+                severity: "warning");
+
+            await notifications.NotifyUserAsync(shift.CashierId,
+                "Cashier Shift", "Shift Force-Closed", "Shift Force-Closed",
+                $"Your shift was force-closed by a manager (open longer than {req.OlderThanHours}h).",
+                severity: "warning", entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId,
+                terminalId: shift.TerminalId, triggeredBy: actorId);
+        }
+
+        return Ok(new { closedCount = shifts.Count });
+    }
+
     [HttpPost("{id:guid}/cash-movements")]
     public async Task<IActionResult> AddCashMovement(Guid id, [FromBody] ShiftCashMovement movement)
     {
@@ -422,3 +607,4 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
 public record OpenShiftRequest(Guid CashierId, Guid BranchId, Guid? TerminalId, decimal OpeningAmount);
 public record CloseShiftRequest(decimal ClosingAmount, string? Notes, string? Reason);
 public record RejectVarianceRequest(string Reason);
+public record BulkForceCloseRequest(int OlderThanHours);

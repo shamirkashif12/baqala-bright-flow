@@ -71,6 +71,21 @@ public class CashierShift
     [Column("close_reason")]
     public string? CloseReason { get; set; }
 
+    // Set by ShiftAutoCloseService when this shift has been open past the branch's configured
+    // PosSettings.MaxShiftDurationHours and AutoCheckoutOnShiftEnd is off (flag-only mode). Null
+    // means not currently flagged — cleared automatically on close or manager override.
+    [Column("overdue_flagged_at")]
+    public DateTime? OverdueFlaggedAt { get; set; }
+
+    // A manager "keep it open" override — snoozes re-flagging until this time even though the
+    // shift is still past the duration threshold. Set by ShiftsController's override-overdue
+    // endpoint; ShiftAutoCloseService skips flagging/auto-closing while now < this value.
+    [Column("overdue_override_until")]
+    public DateTime? OverdueOverrideUntil { get; set; }
+
+    [Column("overdue_override_by")]
+    public Guid? OverdueOverrideBy { get; set; }
+
     // Navigation
     public User? Cashier { get; set; }
     public Terminal? Terminal { get; set; }

@@ -54,11 +54,14 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
         var db = scope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
         var notifications = scope.ServiceProvider.GetRequiredService<INotificationService>();
         var stockMovements = scope.ServiceProvider.GetRequiredService<IStockMovementService>();
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditService>();
 
         await ScanStockLevelsAsync(db, notifications, ct);
         await ScanExpiringBatchesAsync(db, notifications, stockMovements, ct);
+        await ScanUnrecalledExpiredBatchesAsync(db, notifications, ct);
         await SendDailyExpiryDigestAsync(db, notifications, ct);
         await ScanOfflineTerminalsAsync(db, notifications, ct);
+        await ScanOverdueLeaveRequestsAsync(db, notifications, audit, ct);
     }
 
     // ─── Daily near-expiry digest (FRD §13) ──────────────────────────────────
@@ -257,6 +260,8 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
                     batchId: batch.Id, referenceType: "batch_expiry", referenceId: batch.Id,
                     notes: "Automatic write-off: batch expired",
                     quantityBefore: quantityBefore, quantityAfter: quantityAfter);
+
+                await TryAutoRecallAsync(db, notifications, batch, now, ct);
             }
             else if (batch.Status == "active")
             {
@@ -283,6 +288,60 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
         if (batches.Count > 0) await db.SaveChangesAsync(ct);
     }
 
+    // Auto-open a recall for the expired lot instead of leaving it to a manager to notice the
+    // "Expired" badge on the informational watch-list and file one by hand — sale of this batch
+    // is already blocked (OrdersController separately checks ExpiryDate/Status regardless of
+    // recalls), but until now nothing here ever wrote a ProductRecall row, so the Recalls tab and
+    // its audit/notification trail stayed silent about expired stock unless a person opened one
+    // manually. Skipped if a recall already covers this batch or the whole product — safe to call
+    // repeatedly (every sweep, and from two different call sites) since it's a no-op once one exists.
+    private async Task TryAutoRecallAsync(BaqalaDbContext db, INotificationService notifications, Models.InventoryBatch batch, DateTime now, CancellationToken ct)
+    {
+        var alreadyRecalled = await db.ProductRecalls.AnyAsync(r =>
+            r.ProductId == batch.ProductId && r.Status == "open" &&
+            (r.BatchId == batch.Id || r.BatchId == null), ct);
+        if (alreadyRecalled) return;
+
+        db.ProductRecalls.Add(new Models.ProductRecall
+        {
+            Id = Guid.NewGuid(),
+            RecallNumber = $"RCL-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..4]}",
+            ProductId = batch.ProductId,
+            BatchId = batch.Id,
+            BranchId = batch.BranchId,
+            Reason = $"Auto-recalled: batch {batch.BatchNumber ?? batch.Id.ToString()[..8]} passed its expiry date ({batch.ExpiryDate:yyyy-MM-dd}).",
+            RecallType = "quality_issue",
+            Severity = "high",
+            Status = "open",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+
+        await notifications.NotifyRoleAsync(["Manager", "Admin"], batch.BranchId,
+            "Expiry / Perishable", "Auto-Recall Opened", "Auto-Recall Opened",
+            $"{batch.Product?.Name} (batch {batch.BatchNumber}) auto-recalled — expired stock is blocked from sale.",
+            severity: "error", entityType: "Product", entityId: batch.ProductId);
+    }
+
+    // Catches batches that are ALREADY sitting at Status "expired" but were never auto-recalled —
+    // not just ones transitioning into that state during THIS sweep (ScanExpiringBatchesAsync
+    // above only ever sees a batch once, on the transition). A batch can land in "expired" by a
+    // path other than that transition — imported/seeded data, or simply having expired before this
+    // auto-recall feature existed — and would otherwise sit unrecalled forever. Runs every cycle;
+    // TryAutoRecallAsync's own existence check keeps it a no-op once a batch has been covered.
+    private async Task ScanUnrecalledExpiredBatchesAsync(BaqalaDbContext db, INotificationService notifications, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var expiredBatches = await db.InventoryBatches.Include(b => b.Product)
+            .Where(b => b.Status == "expired")
+            .ToListAsync(ct);
+
+        foreach (var batch in expiredBatches)
+            await TryAutoRecallAsync(db, notifications, batch, now, ct);
+
+        if (expiredBatches.Count > 0) await db.SaveChangesAsync(ct);
+    }
+
     // TerminalsController.UpdateStatus only fires "Terminal Offline" on the transition into
     // offline — a terminal that was already offline before that endpoint was called (or before
     // this notification system existed) would otherwise never surface here. Scanning the
@@ -304,6 +363,45 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
                 $"Terminal {terminal.Name} is offline",
                 severity: "error", entityType: "Terminal", entityId: terminal.Id,
                 terminalId: terminal.Id);
+        }
+    }
+
+    // A Pending leave request whose start date has already arrived is leave that's already
+    // underway with no decision made — nothing transitions it there on its own (it just sits,
+    // untouched, past its own FromDate), so this is the same "standing condition" shape as
+    // ScanOfflineTerminalsAsync above rather than a one-shot action tied to a single call site.
+    private async Task ScanOverdueLeaveRequestsAsync(BaqalaDbContext db, INotificationService notifications, IAuditService audit, CancellationToken ct)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var overdue = await db.LeaveRequests
+            .Include(l => l.Employee)
+            .Where(l => l.Status == "pending" && l.FromDate <= today)
+            .ToListAsync(ct);
+
+        foreach (var leave in overdue)
+        {
+            if (leave.Employee is null) continue;
+
+            var alreadyNotified = await db.Notifications.AnyAsync(n =>
+                n.Type == "Leave Request Overdue" && n.EntityId == leave.Id && !n.IsRead, ct);
+            if (alreadyNotified) continue;
+
+            var message = $"{leave.Employee.FullName} — leave starting {leave.FromDate:yyyy-MM-dd} is still Pending and needs a decision.";
+
+            await audit.LogAsync(
+                action: "Leave request overdue — still pending",
+                entityType: "LeaveRequest",
+                entityId: leave.Id,
+                branchId: leave.Employee.BranchId,
+                details: message,
+                severity: "warning",
+                module: "Leave Management",
+                employeeId: leave.EmployeeId);
+
+            await notifications.NotifyRoleAsync(["Manager", "Admin"], leave.Employee.BranchId,
+                "Leave Management", "Leave Request Overdue", "Leave Request Overdue", message,
+                severity: "warning", entityType: "LeaveRequest", entityId: leave.Id,
+                alsoUserId: leave.ApproverId);
         }
     }
 }

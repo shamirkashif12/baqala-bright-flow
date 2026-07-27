@@ -103,4 +103,11 @@ public class LeaveRequest
     public Employee? Employee { get; set; }
     public LeaveType? LeaveType { get; set; }
     public User? Approver { get; set; }
+
+    // Populated by LeaveController.GetAll — true when this request is still Pending but its
+    // FromDate has already arrived, i.e. leave that's already underway with no decision made.
+    // Compute-on-read, same convention as AttendanceStatusHelper.ApplyDerivedStatus: nothing
+    // persisted, so it can never drift out of sync with Status/FromDate.
+    [NotMapped]
+    public bool IsOverdue { get; set; }
 }

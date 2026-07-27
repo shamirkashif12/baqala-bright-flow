@@ -1507,6 +1507,7 @@ const ar: Record<string, string> = {
   "Overview": "نظرة عامة",
   "Owners · managers · cashiers · technicians": "الملاك · المديرون · الكاشيرون · الفنيون",
   "Packed & waiting for pickup": "معبأ وبانتظار الاستلام",
+  "Packet Food": "أغذية معبأة",
   "Page not found": "الصفحة غير موجودة",
   "Paid": "مدفوع",
   "Paid Amount": "المبلغ المدفوع",

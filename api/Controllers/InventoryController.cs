@@ -17,6 +17,7 @@ public class InventoryController(
     BaqalaDbContext db,
     IStockAlertService stockAlerts,
     IStockMovementService stockMovements,
+    IBatchConsumptionService batchConsumption,
     IAuditService audit,
     ILogger<InventoryController> logger) : ControllerBase
 {
@@ -174,6 +175,57 @@ public class InventoryController(
         if (hasWarehouseFilter) scoped = scoped.Where(b => b.WarehouseId.HasValue && warehouseId!.Contains(b.WarehouseId.Value));
         if (status is { Length: > 0 }) scoped = scoped.Where(b => status.Contains(b.Status));
         return Ok(scoped.ToList());
+    }
+
+    // Soft, non-blocking warning surfaced on the Batches & Expiry page: on a branch that isn't
+    // using FEFO picking (StockTransfersController/BatchConsumptionService only enforce FEFO
+    // automatically when the branch is configured for it), a near-expiry batch can sit unpicked
+    // behind stock that was received more recently — FIFO/manual picking has no reason to prefer
+    // it. Flags exactly that situation so staff can intervene manually instead of the branch
+    // relying on nobody ever noticing until the batch is written off.
+    [HttpGet("batches/fefo-warnings")]
+    public async Task<IActionResult> GetFefoWarnings([FromQuery] Guid branchId)
+    {
+        var strategy = await batchConsumption.GetStrategyAsync(branchId);
+        if (strategy == BatchConsumptionService.Fefo) return Ok(Array.Empty<object>());
+
+        var nearExpiry = await db.InventoryBatches.Include(b => b.Product)
+            .Where(b => b.BranchId == branchId && b.Status == "near_expiry" && b.RemainingQuantity > 0)
+            .ToListAsync();
+        if (nearExpiry.Count == 0) return Ok(Array.Empty<object>());
+
+        // Filtered in-memory rather than `productIds.Contains(b.ProductId)` in the query — a
+        // parameterized List<Guid>.Contains() inside a live EF Where() throws at execution time
+        // on this MySQL provider (ef-mysql-inlist-gotcha), so every other multi-id lookup in this
+        // codebase materializes first and filters after.
+        var productIds = nearExpiry.Select(b => b.ProductId).Distinct().ToHashSet();
+        var siblings = (await db.InventoryBatches
+            .Where(b => b.BranchId == branchId && b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0)
+            .ToListAsync())
+            .Where(b => productIds.Contains(b.ProductId))
+            .ToList();
+
+        var warnings = new List<object>();
+        foreach (var batch in nearExpiry)
+        {
+            var newerStock = siblings
+                .Where(s => s.ProductId == batch.ProductId && s.Id != batch.Id && s.ReceivedDate > batch.ReceivedDate)
+                .OrderByDescending(s => s.ReceivedDate)
+                .FirstOrDefault();
+            if (newerStock is null) continue;
+
+            warnings.Add(new
+            {
+                productId = batch.ProductId,
+                productName = batch.Product?.Name,
+                nearExpiryBatchNumber = batch.BatchNumber,
+                nearExpiryDate = batch.ExpiryDate,
+                newerBatchNumber = newerStock.BatchNumber,
+                newerReceivedDate = newerStock.ReceivedDate,
+                message = $"{batch.Product?.Name}: batch {batch.BatchNumber} is near expiry but batch {newerStock.BatchNumber} (received {newerStock.ReceivedDate:yyyy-MM-dd}, after this lot) sits ahead of it in this branch's non-FEFO picking order.",
+            });
+        }
+        return Ok(warnings);
     }
 
     [HttpGet("batches/expiring")]

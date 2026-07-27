@@ -29,9 +29,10 @@ import { uuid } from "@/lib/utils";
 
 // "Failed to fetch" is the browser's own error when it can't reach anything at all (nothing
 // listening on the local print-agent port) — i.e. no printer/agent has ever been set up on
-// this till, not a real print failure. Silence that case entirely instead of alarming the
-// cashier on every single sale; a printer that's actually configured but errors for a real
-// reason (bad name, out of paper, etc.) still gets a normal HTTP-style error message.
+// this till, not a real print failure. Flag that case with a soft on-screen warning instead
+// of a full error toast — the receipt genuinely didn't print and the cashier needs to know,
+// but it isn't the same as a configured printer erroring for a real reason (bad name, out of
+// paper, etc.), which still gets a normal HTTP-style error message.
 function isPrinterNotSetUp(msg: string): boolean {
   return /failed to fetch|networkerror when attempting to fetch/i.test(msg);
 }
@@ -480,11 +481,29 @@ function POS() {
   useEffect(() => {
     if (lockedBranchId) setBranchId(lockedBranchId);
   }, [lockedBranchId]);
+
+  // An admin has no locked branch, so the picker below would otherwise default to an arbitrary
+  // "first active branch" — mismatched from whatever branch they're actually checked into via an
+  // open shift (Cashier Workspace shows that shift's real branch; this used to show something
+  // else entirely by default). Resolved once on mount, independent of the branch dropdown itself.
+  const [ownShiftBranchId, setOwnShiftBranchId] = useState<string | null>(null);
+  const [ownShiftChecked, setOwnShiftChecked] = useState(!isAdmin);
   useEffect(() => {
-    if (!branchId && branches.length) {
-      setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id);
-    }
-  }, [branches, branchId]);
+    if (!isAdmin) return;
+    api.getActiveShifts()
+      .then((shifts) => {
+        const mine = shifts.find((s) => s.status === "open" && s.cashierId === user?.id);
+        setOwnShiftBranchId(mine?.branchId ?? null);
+      })
+      .catch(() => {})
+      .finally(() => setOwnShiftChecked(true));
+  }, [isAdmin, user?.id]);
+
+  useEffect(() => {
+    if (branchId || !branches.length || !ownShiftChecked) return;
+    const preferred = ownShiftBranchId && branches.some((b) => b.id === ownShiftBranchId) ? ownShiftBranchId : null;
+    setBranchId(preferred ?? branches.find((b) => b.status === "active")?.id ?? branches[0].id);
+  }, [branches, branchId, ownShiftChecked, ownShiftBranchId]);
   const branch = branches.find((b) => b.id === branchId) ?? null;
 
   // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -569,7 +588,11 @@ function POS() {
   const [tobaccoExcisePercentage, setTobaccoExcisePercentage] = useState(100);
 
   // ─── Holds ────────────────────────────────────────────────────────────────────
-  const [holds, setHolds] = useState<{ id: string; items: CartItem[]; total: number; at: string }[]>([]);
+  const [holds, setHolds] = useState<{
+    id: string; items: CartItem[]; total: number; at: string;
+    couponCode: string; appliedCoupon: Coupon | null; appliedDiscounts: Discount[];
+    customer: Customer | null; customerPhone: string; redeemPoints: number;
+  }[]>([]);
 
   // ─── Dialogs ──────────────────────────────────────────────────────────────────
   const [orderOpen, setOrderOpen] = useState(false);
@@ -1290,6 +1313,29 @@ function POS() {
     }
   };
 
+  // Absolute-quantity entry (vs. updateQty's +/- delta) — lets a cashier type e.g. "24" directly
+  // instead of tapping the stepper 24 times. Same stock cap and pack-price re-pricing as updateQty.
+  const setQtyAbsolute = (sku: string, newQty: number) => {
+    let blockedByStock = false;
+    setCart((c) => c.map((i) => {
+      if (i.sku !== sku) return i;
+      let next = Math.max(1, Math.floor(newQty) || 1);
+      // Clamp down to available stock, but never below 1 — a shortfall/negative-stock item
+      // (see QuickStockInDialog's "Sell Anyway", stock recorded as 0) still has to stay
+      // sellable at its pinned qty of 1, same as the +/- stepper already enforces.
+      if (next > i.stock) { blockedByStock = true; next = Math.max(1, i.stock); }
+      const prod = products.find((p) => p.id === i.productId);
+      return { ...i, qty: next, price: prod ? priceForQty(prod, next) : i.price };
+    }));
+    if (blockedByStock) {
+      const item = cart.find((i) => i.sku === sku);
+      toast.error(`Only ${item?.stock ?? 0} in stock`, {
+        description: `"${item?.name ?? "This item"}" has no more available stock at this branch.`,
+        duration: 4000,
+      });
+    }
+  };
+
   const remove = (sku: string) => setCart((c) => c.filter((i) => i.sku !== sku));
 
   const addToCart = (p: Product) => {
@@ -1421,6 +1467,7 @@ function POS() {
       setCustomer(null);
       setCustomerNotFound(true);
       setRedeemPoints(0);
+      toast.info(`No customer found for "${customerPhone.trim()}"`);
     } finally {
       setCustomerLoading(false);
     }
@@ -1480,6 +1527,12 @@ function POS() {
         items: cart,
         total,
         at: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+        couponCode,
+        appliedCoupon,
+        appliedDiscounts,
+        customer,
+        customerPhone,
+        redeemPoints,
       },
       ...h,
     ]);
@@ -1491,6 +1544,14 @@ function POS() {
     const h = holds.find((x) => x.id === id);
     if (!h) return;
     setCart(h.items);
+    setCouponCode(h.couponCode);
+    setAppliedCoupon(h.appliedCoupon);
+    setCouponError(null);
+    setAppliedDiscounts(h.appliedDiscounts);
+    setCustomer(h.customer);
+    setCustomerPhone(h.customerPhone);
+    setCustomerNotFound(false);
+    setRedeemPoints(h.redeemPoints);
     setHolds((hs) => hs.filter((x) => x.id !== id));
     api.notify("Sales / Checkout", "Held Bill Recalled", "Held Bill Recalled", `Held bill ${id} recalled`);
   };
@@ -1651,7 +1712,10 @@ function POS() {
       .then((res) => toast.success(res.message, { id: printId }))
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : "Print failed";
-        if (isPrinterNotSetUp(msg)) { toast.dismiss(printId); return; }
+        if (isPrinterNotSetUp(msg)) {
+          toast.warning("Receipt didn't print — no print agent reachable. Set up a receipt printer via Printer Setup.", { id: printId, duration: 6000 });
+          return;
+        }
         toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
         notifyPrintFailure(msg);
       });
@@ -1819,7 +1883,15 @@ function POS() {
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateQty(item.sku, -1)}>
                           <Minus className="h-3 w-3" />
                         </Button>
-                        <span className="w-6 text-center text-sm font-semibold tabular-nums">{item.qty}</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={item.stock}
+                          value={item.qty}
+                          onChange={(e) => setQtyAbsolute(item.sku, parseInt(e.target.value) || 1)}
+                          onFocus={(e) => e.target.select()}
+                          className="w-12 h-7 px-0 text-center text-sm font-semibold tabular-nums border-0 bg-transparent shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
                         <Button
                           variant="ghost"
                           size="icon"
@@ -2387,6 +2459,12 @@ function POS() {
                       <span className="tabular-nums">-{(invoice.loyaltyDiscountAmount ?? 0).toFixed(2)}</span>
                     </div>
                   )}
+                  {!!invoice.tobaccoExcise && (
+                    <div className="flex justify-between"><span>Tobacco Excise</span><span className="tabular-nums">{invoice.tobaccoExcise.toFixed(2)}</span></div>
+                  )}
+                  {invoice.fees?.map(f => (
+                    <div key={f.name} className="flex justify-between"><span>{f.name}</span><span className="tabular-nums">{f.amount.toFixed(2)}</span></div>
+                  ))}
                   <div className="flex justify-between"><span>{invoice.taxLabel}</span><span className="tabular-nums">{invoice.vat.toFixed(2)}</span></div>
                   <div className="flex justify-between font-bold text-sm pt-1">
                     <span>Total</span>
@@ -2437,7 +2515,10 @@ function POS() {
                   .then((res) => toast.success(res.message, { id: printId }))
                   .catch((err: unknown) => {
                     const msg = err instanceof Error ? err.message : "Print failed";
-                    if (isPrinterNotSetUp(msg)) { toast.dismiss(printId); return; }
+                    if (isPrinterNotSetUp(msg)) {
+                      toast.warning("Receipt didn't print — no print agent reachable. Set up a receipt printer via Printer Setup.", { id: printId, duration: 6000 });
+                      return;
+                    }
                     toast.error(`Print failed: ${msg}`, { id: printId, duration: 6000 });
                     notifyPrintFailure(msg);
                   });

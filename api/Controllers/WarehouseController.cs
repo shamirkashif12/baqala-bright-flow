@@ -89,6 +89,18 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
         if (!await db.Branches.AnyAsync(b => b.Id == request.DestinationBranchId))
             return BadRequest(new { message = "Destination branch not found." });
 
+        // The New Stock Request form already blocks submitting with no line items client-side,
+        // but nothing enforced it here — a handful of historical requests exist with 0 items,
+        // submitted through some path that bypassed (or predates) that client check. Reject
+        // server-side so that gap can't reopen.
+        if (request.Items is not { Count: > 0 })
+            return BadRequest(new { message = "A stock request must have at least one item." });
+
+        // Supplier-sourced requests (no SourceBranchId) skip the on-hand check in the loop below
+        // entirely, so a non-positive quantity there was never rejected at all — only caught here.
+        if (!request.SourceBranchId.HasValue && request.Items.Any(i => i.RequestedQuantity <= 0))
+            return BadRequest(new { message = "Requested quantity must be greater than zero." });
+
         // Reject a request for more than the source branch actually has on hand — previously
         // nothing compared RequestedQuantity to real stock (AvailableStock existed on the model
         // but was never populated or checked), so e.g. requesting 501 of 500 available was

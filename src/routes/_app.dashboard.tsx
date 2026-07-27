@@ -61,12 +61,27 @@ type StatCardDef = {
   change?: number;
 };
 
+function shiftDurationMs(openedAt: string): number {
+  return Date.now() - new Date(openedAt).getTime();
+}
+
 function shiftDuration(openedAt: string): string {
-  const ms = Date.now() - new Date(openedAt).getTime();
+  const ms = shiftDurationMs(openedAt);
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   return `${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m`;
 }
+
+// A shift left open this long is almost certainly a cashier who never clocked out rather
+// than a real ongoing session — flag it instead of presenting the number as routine.
+const STALE_SHIFT_MS = 24 * 3_600_000;
+
+const SALES_CARD_COPY: Record<(typeof periods)[number], { label: string; period: string }> = {
+  Daily: { label: "Today's Sales", period: "today" },
+  Weekly: { label: "Sales This Week", period: "this week" },
+  Monthly: { label: "Sales This Month", period: "this month" },
+  Custom: { label: "Sales (Custom Range)", period: "in the selected range" },
+};
 
 const ALL_CARD_IDS = [
   "pending_orders", "processing_orders", "ready_to_deliver", "delivered_orders",
@@ -80,8 +95,9 @@ const ALL_CARD_IDS = [
 // stock levels) intentionally have no `change` — there's no historical
 // snapshot series to compare those against, so no badge is more honest than
 // inventing one.
-function buildCards(data: DashboardMetrics): StatCardDef[] {
+function buildCards(data: DashboardMetrics, period: (typeof periods)[number]): StatCardDef[] {
   const offlineTerminals = data.terminals.total - data.terminals.active;
+  const salesCopy = SALES_CARD_COPY[period];
   return [
     {
       id: "pending_orders",
@@ -113,9 +129,9 @@ function buildCards(data: DashboardMetrics): StatCardDef[] {
     },
     {
       id: "todays_sales",
-      label: "Today's Sales",
+      label: salesCopy.label,
       value: fmtSAR(data.sales.totalToday),
-      desc: `Gross sales across ${data.branchPerformance?.length ?? 1} branches`,
+      desc: `Gross sales ${salesCopy.period} across ${data.branchPerformance?.length ?? 1} branches`,
       icon: Wallet, href: "/sales", action: "Sales report", accent: "primary",
       change: data.sales.totalTodayDeltaPct,
     },
@@ -149,7 +165,7 @@ function buildCards(data: DashboardMetrics): StatCardDef[] {
   ];
 }
 
-function StatCard({ c }: { c: StatCardDef }) {
+function StatCard({ c, updatedLabel }: { c: StatCardDef; updatedLabel: string }) {
   const accent = c.accent ?? "primary";
   const CardIcon = c.icon;
   const iconBg = {
@@ -183,7 +199,7 @@ function StatCard({ c }: { c: StatCardDef }) {
         <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{c.desc}</p>
       </div>
       <div className="flex items-center justify-between pt-2 border-t border-border/60 text-xs">
-        <span className="text-muted-foreground">Updated live</span>
+        <span className="text-muted-foreground">Updated live{updatedLabel && ` · ${updatedLabel}`}</span>
         <Link to={c.href as any} className="text-primary font-semibold hover:underline inline-flex items-center gap-0.5">
           {c.action} <ArrowRight className="h-3 w-3" />
         </Link>
@@ -316,6 +332,11 @@ function Dashboard() {
   const [warehousePending, setWarehousePending] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Guards against an in-flight request for a since-abandoned branch/period resolving after a
+  // newer one and clobbering it — without this, quickly switching branches could momentarily
+  // show the previous branch's sales figures under the new branch's selector.
+  const loadSeq = useRef(0);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -356,6 +377,7 @@ function Dashboard() {
 
   const loadDashboard = () => {
     setLoading(true);
+    const seq = ++loadSeq.current;
     const apiPeriod = PERIOD_MAP[period] ?? "today";
     const branchId = branch !== "all" ? branch : undefined;
     // allSettled, not all: a permission-gated sibling call failing (shifts/warehouse) must not
@@ -366,12 +388,16 @@ function Dashboard() {
       canViewWarehouses ? api.getWarehouseRequests({ approvalStatus: ["pending"] }) : Promise.resolve([]),
     ])
       .then(([dashR, shiftsR, warehouseR]) => {
+        // A newer loadDashboard() call (branch/period changed again) already landed — this
+        // response is for a filter the user has since moved away from, so drop it.
+        if (seq !== loadSeq.current) return;
         if (dashR.status === "fulfilled") setDashData(dashR.value);
         if (shiftsR.status === "fulfilled") setActiveShifts(shiftsR.value);
         if (warehouseR.status === "fulfilled") setWarehousePending(warehouseR.value.length);
         setLoadError([dashR, shiftsR, warehouseR].some(r => r.status === "rejected"));
+        setLastUpdated(new Date());
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (seq === loadSeq.current) setLoading(false); });
   };
 
   useEffect(() => {
@@ -447,18 +473,29 @@ function Dashboard() {
     active_cashiers: canViewShifts,
     active_terminals: canViewTerminals,
   };
-  const allCards = (dashData ? buildCards(dashData) : []).filter(c => cardPermission[c.id] ?? true);
+  const allCards = (dashData ? buildCards(dashData, period) : []).filter(c => cardPermission[c.id] ?? true);
   const statCards = allCards.filter(c => visibleCards.has(c.id));
   const payBreakdown = dashData?.sales.paymentBreakdown ?? [];
   const cashierPerf = dashData?.cashierPerformance ?? [];
 
   const firstShift = activeShifts[0];
   const shiftTimerValue = firstShift ? shiftDuration(firstShift.openedAt) : "—";
+  const shiftOpenedAt = firstShift ? new Date(firstShift.openedAt) : null;
+  const shiftIsStale = !!firstShift && shiftDurationMs(firstShift.openedAt) > STALE_SHIFT_MS;
+  // A shift open for a day+ almost never started "today" — showing only the time-of-day (as if
+  // it did) is exactly what made a 120+ hour shift look like a same-day timer bug. Show the date
+  // too whenever the shift didn't open today.
+  const shiftSinceLabel = shiftOpenedAt
+    ? shiftOpenedAt.toDateString() === new Date().toDateString()
+      ? shiftOpenedAt.toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })
+      : shiftOpenedAt.toLocaleString("en-SA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : "";
   const shiftHint = firstShift
-    ? `${firstShift.cashier?.fullName ?? "Cashier"} · ${firstShift.terminal?.terminalCode ?? "—"} · since ${new Date(firstShift.openedAt).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })}`
+    ? `${firstShift.cashier?.fullName ?? "Cashier"} · ${firstShift.terminal?.terminalCode ?? "—"} · since ${shiftSinceLabel}${shiftIsStale ? " — never closed?" : ""}`
     : "No active shifts";
 
   const selectedBranchName = branches.find(b => b.id === branch)?.name ?? "All Branches";
+  const updatedLabel = lastUpdated ? lastUpdated.toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
 
   const invKpis = invReport?.kpis;
   // Turnover and movers are ledger-derived; flag when the ledger doesn't span the whole period.
@@ -529,7 +566,7 @@ function Dashboard() {
             <AlertCard tone="destructive" icon={PackageX} label="Low Stock Items"
               value={String(dashData?.inventory.lowStockCount ?? 0)}
               hint={`${dashData?.inventory.outOfStockCount ?? 0} critical · reorder`} href="/inventory" />
-            {canViewShifts && <AlertCard tone="primary" icon={Timer} label="Active Shift Timer"
+            {canViewShifts && <AlertCard tone={shiftIsStale ? "destructive" : "primary"} icon={Timer} label="Active Shift Timer"
               value={shiftTimerValue} hint={shiftHint} href="/cashier-shift" />}
             {canViewWarehouses && <AlertCard tone="warning" icon={Warehouse} label="Pending Warehouse Approvals"
               value={String(warehousePending)}
@@ -546,7 +583,7 @@ function Dashboard() {
           </div>
         ) : statCards.length > 0 ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {statCards.map((c) => <StatCard key={c.id} c={c} />)}
+            {statCards.map((c) => <StatCard key={c.id} c={c} updatedLabel={updatedLabel} />)}
           </div>
         ) : (
           <Card className="p-8 border-border/60 text-center text-muted-foreground text-sm">

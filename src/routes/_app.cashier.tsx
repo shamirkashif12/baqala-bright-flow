@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type CashierShift, type Order } from "@/lib/api";
+import { useBranch } from "@/lib/branch-context";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/cashier")({ component: CashierWorkspace });
@@ -100,6 +101,7 @@ function buildTiles(shift: CashierShift | null, todayOrders: Order[], heldCount:
 function CashierWorkspace() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { branches } = useBranch();
 
   const [shift, setShift] = useState<CashierShift | null>(null);
   const [todayOrders, setTodayOrders] = useState<Order[]>([]);
@@ -144,6 +146,14 @@ function CashierWorkspace() {
 
   const tiles = buildTiles(shift, todayOrders, heldCount);
 
+  // The active shift's own branch — not the fixed `user.branch` profile claim — so this matches
+  // whatever branch POS Checkout is actually operating the shift under. Without this, an admin
+  // covering a different branch (shift.branchId != user.branchId) saw two different "active
+  // branch" values on the two screens for the same session.
+  const activeBranchName = shift
+    ? (branches.find(b => b.id === shift.branchId)?.name ?? user?.branch ?? "Olaya Branch")
+    : (user?.branch ?? "Olaya Branch");
+
   const cashInDrawer = shift
     ? shift.openingAmount + shift.cashSales
     : 0;
@@ -175,7 +185,7 @@ function CashierWorkspace() {
             </h2>
             <p className="text-primary-foreground/80 text-sm mt-1">
               {shift?.terminal?.terminalCode ? `${shift.terminal.terminalCode} · ` : ""}
-              {user?.branch ?? "Olaya Branch"}
+              {activeBranchName}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">

@@ -327,6 +327,18 @@ function generateSKU(name: string): string {
   return parts.length ? `${parts.join("-")}-${suffix}` : `SKU-${suffix}`;
 }
 
+// Retail barcode field only accepts standard scannable formats — EAN-8 (8 digits), UPC-A (12
+// digits) and EAN-13 (13 digits), digits only. A non-conforming value (e.g. a 20+ digit internal
+// SKU pasted into this field) won't ever match what a handheld scanner emits at checkout, so it's
+// rejected here rather than silently stored and causing scan mismatches downstream. Empty is fine
+// — the field itself is optional.
+function barcodeFormatError(barcode: string): string | null {
+  if (!barcode.trim()) return null;
+  if (!/^\d+$/.test(barcode)) return "Barcode must contain digits only.";
+  if (![8, 12, 13].includes(barcode.length)) return "Barcode must be 8 (EAN-8), 12 (UPC-A) or 13 (EAN-13) digits.";
+  return null;
+}
+
 function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   open: boolean; onClose: () => void;
   categories: Category[]; branches: Branch[];
@@ -451,6 +463,8 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     if (missingFields.length > 0) {
       return setError(`${missingFields.join(", ")} ${missingFields.length > 1 ? "are" : "is"} required.`);
     }
+    const barcodeError = barcodeFormatError(form.barcode);
+    if (barcodeError) return setError(barcodeError);
     if (form.expiryDate && form.expiryDate < todayStr) {
       return setError("Expiry date cannot be in the past for stock received today.");
     }
@@ -462,6 +476,12 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     // the orphan it had just silently created).
     if (!form.quantity || Number(form.quantity) <= 0) {
       return setError("Initial quantity must be greater than zero.");
+    }
+    if (Number(form.sellingPrice) <= 0) {
+      return setError("Selling price must be greater than zero.");
+    }
+    if (form.purchasePrice.trim() !== "" && Number(form.purchasePrice) <= 0) {
+      return setError("Purchase price must be greater than zero, or left blank.");
     }
     const badBranchPrice = Object.entries(branchPrices)
       .filter(([id]) => branchIds.includes(id))
@@ -596,7 +616,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             <div className="flex gap-1">
               <div className="relative flex-1">
                 <Input ref={barcodeRef}
-                  className={`h-9 pr-7 ${scanning ? "border-primary ring-1 ring-primary" : ""} ${lookupStatus === "found" ? "border-green-500" : ""}`}
+                  className={`h-9 pr-7 ${scanning ? "border-primary ring-1 ring-primary" : ""} ${lookupStatus === "found" ? "border-green-500" : ""} ${barcodeFormatError(form.barcode) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`}
                   placeholder={scanning ? "Scan now…" : "6281007012340"}
                   value={form.barcode}
                   onChange={e => { set("barcode")(e.target.value); setLookupStatus(null); }}
@@ -620,6 +640,9 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
               <p className="text-[11px] text-amber-600 mt-1">
                 Barcode <span className="font-mono font-semibold">{form.barcode}</span> not found in database — fill details manually
               </p>
+            )}
+            {barcodeFormatError(form.barcode) && (
+              <p className="text-[11px] text-destructive mt-1">{barcodeFormatError(form.barcode)}</p>
             )}
           </FieldRow>
           <FieldRow label="Category *">
@@ -910,9 +933,17 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   const handleSave = async () => {
     if (!item?.product?.id) return;
     if (!form.name || !form.sku || !form.sellingPrice) return setError("Name, SKU and selling price are required.");
+    if (Number(form.sellingPrice) <= 0) {
+      return setError("Selling price must be greater than zero.");
+    }
+    if (form.purchasePrice.trim() !== "" && Number(form.purchasePrice) <= 0) {
+      return setError("Purchase price must be greater than zero, or left blank.");
+    }
     if (form.saleUnitType === "pack" && (!form.itemsPerPack || Number(form.itemsPerPack) < 2)) {
       return setError("A pack must contain at least 2 items.");
     }
+    const barcodeError = barcodeFormatError(form.barcode);
+    if (barcodeError) return setError(barcodeError);
     setSaving(true); setError("");
     try {
       await api.updateProduct(item.product.id, {
@@ -1080,7 +1111,11 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
             <Input className="h-9" value={form.sku} onChange={set("sku")} />
           </FieldRow>
           <FieldRow label="Barcode">
-            <Input className="h-9" value={form.barcode} onChange={set("barcode")} placeholder="6281007012340" />
+            <Input className={`h-9 ${barcodeFormatError(form.barcode) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`}
+              value={form.barcode} onChange={set("barcode")} placeholder="6281007012340" />
+            {barcodeFormatError(form.barcode) && (
+              <p className="text-[11px] text-destructive mt-1">{barcodeFormatError(form.barcode)}</p>
+            )}
           </FieldRow>
           <FieldRow label="Category">
             <Select value={form.categoryId} onValueChange={v => setForm(p => ({ ...p, categoryId: v }))}>

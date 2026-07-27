@@ -218,25 +218,33 @@ type RequestItem = { productId: string; product: Product; requestedQuantity: num
 // ─── MultiSelect ─────────────────────────────────────────────────────────────
 
 function MultiSelect({
-  options, value, onChange, placeholder = "Select…", disabled = false,
+  options, value, onChange, placeholder = "Select…", disabled = false, required = false,
 }: {
   options: { id: string; label: string; sub?: string }[];
   value: string[];
   onChange: (ids: string[]) => void;
   placeholder?: string;
   disabled?: boolean;
+  // Shows a warning ring + tooltip on the closed trigger while nothing is picked yet — this is a
+  // multi-select popover, but its closed state looks identical to an empty single-select/plain
+  // input, giving no visual cue that clicking it opens a checklist rather than a dropdown.
+  required?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const toggle = (id: string) =>
     onChange(value.includes(id) ? value.filter(v => v !== id) : [...value, id]);
   const selected = options.filter(o => value.includes(o.id));
+  const showEmptyWarning = required && !disabled && !open && selected.length === 0;
   return (
     <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
           disabled={disabled}
-          className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          title={showEmptyWarning ? "Select at least one — click to open the list and check the ones you want." : undefined}
+          className={`flex h-9 w-full items-center justify-between rounded-md border bg-background px-3 py-2 text-sm hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+            showEmptyWarning ? "border-amber-400 ring-1 ring-amber-400/40" : "border-input"
+          }`}
         >
           <span className={selected.length === 0 ? "text-muted-foreground" : "font-medium"}>
             {selected.length === 0 ? placeholder : selected.length === 1 ? selected[0].label : `${selected.length} selected`}
@@ -532,7 +540,7 @@ function NewRequestSheet({
                   {destLabel} <span className="text-destructive">*</span>
                   {destCount > 0 && <span className="ml-1.5 text-primary font-normal">({destCount})</span>}
                 </Label>
-                <MultiSelect options={destOptions} value={destinationIds} onChange={setDestinationIds} placeholder={destPlaceholder} />
+                <MultiSelect options={destOptions} value={destinationIds} onChange={setDestinationIds} placeholder={destPlaceholder} required />
               </div>
             )}
           </div>
@@ -544,7 +552,7 @@ function NewRequestSheet({
                 {destLabel} <span className="text-destructive">*</span>
                 {destCount > 0 && <span className="ml-1.5 text-primary font-normal">({destCount} selected)</span>}
               </Label>
-              <MultiSelect options={destOptions} value={destinationIds} onChange={setDestinationIds} placeholder={destPlaceholder} />
+              <MultiSelect options={destOptions} value={destinationIds} onChange={setDestinationIds} placeholder={destPlaceholder} required />
             </div>
           )}
 

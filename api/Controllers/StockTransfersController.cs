@@ -120,7 +120,13 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             // `qty` it actually covered, leaving every other batch's RemainingQuantity untouched
             // even after the aggregate stock had been fully deducted — batch totals silently
             // drifted away from the real on-hand number with every multi-lot transfer.
-            var sourceBatchQuery = db.InventoryBatches.Where(b => b.ProductId == item.ProductId && b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0);
+            // Same live-date check as BatchConsumptionService.ConsumeFefoAsync — Status only flips
+            // to "expired" via a 15-minute background scan, so a lot already past its date but not
+            // yet flagged must still be excluded here, or a transfer would move expired stock to a
+            // branch and make it sellable there.
+            var todayUtc = DateTime.UtcNow.Date;
+            var sourceBatchQuery = db.InventoryBatches.Where(b => b.ProductId == item.ProductId && b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0
+                && (b.ExpiryDate == null || b.ExpiryDate.Value.Date >= todayUtc));
             sourceBatchQuery = transfer.SourceBranchId.HasValue
                 ? sourceBatchQuery.Where(b => b.BranchId == transfer.SourceBranchId)
                 : transfer.SourceWarehouseId.HasValue

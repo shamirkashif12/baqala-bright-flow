@@ -105,6 +105,27 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
         var prevStatus = terminal.Status;
         terminal.Status = req.Status;
         terminal.UpdatedAt = DateTime.UtcNow;
+
+        // An offline terminal can't legitimately keep carrying a live session — same invariant
+        // ShiftsController.OpenShift enforces on the way in. Close it out here on the way in from
+        // "active", instead of leaving a "Session Open" row hanging off a terminal the Network
+        // column now shows as Offline.
+        CashierShift? closedShift = null;
+        if (req.Status == "offline" && prevStatus != "offline")
+        {
+            closedShift = await db.CashierShifts.FirstOrDefaultAsync(s => s.TerminalId == id && s.Status == "open");
+            if (closedShift is not null)
+            {
+                var now = DateTime.UtcNow;
+                closedShift.Status = "closed";
+                closedShift.ClosedAt = now;
+                closedShift.ClosingAmount = closedShift.OpeningAmount + closedShift.CashSales;
+                closedShift.Variance = 0;
+                closedShift.CloseReason = "Auto-closed — terminal went offline";
+                closedShift.OverdueFlaggedAt = null;
+            }
+        }
+
         await db.SaveChangesAsync();
 
         if (req.Status == "offline" && prevStatus != "offline")
@@ -114,6 +135,24 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
                 $"Terminal {terminal.Name} is offline",
                 severity: "error", entityType: "Terminal", entityId: terminal.Id,
                 terminalId: terminal.Id, triggeredBy: CallerId());
+
+            if (closedShift is not null)
+            {
+                await audit.LogAsync(
+                    action: "Shift auto-closed — terminal went offline",
+                    entityType: "CashierShift",
+                    entityId: closedShift.Id,
+                    userId: closedShift.CashierId,
+                    branchId: closedShift.BranchId,
+                    details: $"Open since {closedShift.OpenedAt:u}. Terminal {terminal.Name} went offline; closing amount assumed equal to opening + cash sales (no manual count).",
+                    severity: "warning");
+
+                await notifications.NotifyUserAsync(closedShift.CashierId,
+                    "Cashier Shift", "Shift Auto-Closed", "Shift Auto-Closed",
+                    $"Your shift was automatically closed because terminal {terminal.Name} went offline.",
+                    severity: "warning", entityType: "CashierShift", entityId: closedShift.Id, branchId: closedShift.BranchId,
+                    terminalId: terminal.Id, triggeredBy: CallerId());
+            }
         }
 
         return Ok(terminal);

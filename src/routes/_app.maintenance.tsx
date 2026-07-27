@@ -163,8 +163,8 @@ function Maintenance() {
     || d.branch?.name?.toLowerCase().includes(q.toLowerCase())
   );
 
-  const online     = devices.filter(d => d.status === "online").length;
-  const offline    = devices.filter(d => d.status !== "online").length;
+  const online     = devices.filter(d => d.status === "active").length;
+  const offline    = devices.filter(d => d.status !== "active").length;
   const syncIssues = devices.filter(d => d.syncStatus !== "synced").length;
 
   const onChange = (k: keyof TicketForm) =>

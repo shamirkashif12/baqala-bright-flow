@@ -1,13 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Check, Crown, Zap, Building2, Store, Globe } from "lucide-react";
+import { Check, Crown, Zap, Building2, Store, Globe, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
+import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/plans")({ component: Plans });
 
@@ -16,30 +17,48 @@ type Plan = {
   status: "active" | "current" | "upgrade" | "contact";
   icon: React.FC<{ className?: string }>;
   f: string[];
+  // Numeric caps backing the "X Branches/Terminals/Users" bullet text above — undefined means
+  // unlimited (Enterprise). Used to detect when actual usage has outgrown the current plan.
+  limits: { branches?: number; terminals?: number; users?: number };
 };
 
 const plans: Plan[] = [
   {
     name: "Basic", price: 149, tag: "For a single baqala", featured: false, status: "active",
-    icon: Store,
+    icon: Store, limits: { branches: 1, terminals: 2, users: 5 },
     f: ["1 Branch", "2 Terminals", "5 Users", "Inventory up to 500 SKUs", "Mobile POS: Limited", "Email support"],
   },
   {
     name: "Standard", price: 349, tag: "Growing mart operators", featured: true, status: "current",
-    icon: Zap,
+    icon: Zap, limits: { branches: 3, terminals: 8, users: 20 },
     f: ["3 Branches", "8 Terminals", "20 Users", "Inventory up to 5,000 SKUs", "Warehouse module", "Mobile POS", "Basic BI reporting", "Priority email support"],
   },
   {
     name: "Premium", price: 749, tag: "Multi-branch operations", featured: false, status: "upgrade",
-    icon: Building2,
+    icon: Building2, limits: { branches: 10, terminals: 30, users: 100 },
     f: ["10 Branches", "30 Terminals", "100 Users", "Unlimited SKUs", "Self-checkout kiosk", "Device behavior management", "Advanced BI & KPI", "24/7 phone support"],
   },
   {
     name: "Enterprise", price: 0, tag: "Tailored for chains", featured: false, status: "contact",
-    icon: Globe,
+    icon: Globe, limits: {},
     f: ["Unlimited Branches", "Unlimited Terminals", "Unlimited Users", "Dedicated warehouse hubs", "Mart-to-mart network", "Custom integrations", "Dedicated account manager", "On-site training"],
   },
 ];
+
+const CURRENT_PLAN = plans.find((p) => p.status === "current")!;
+
+type Usage = { branches: number; terminals: number; users: number };
+
+function exceededLimits(usage: Usage, plan: Plan): { label: string; used: number; limit: number }[] {
+  const rows: { label: string; used: number; limit: number }[] = [];
+  if (plan.limits.branches !== undefined && usage.branches > plan.limits.branches)
+    rows.push({ label: "Branches", used: usage.branches, limit: plan.limits.branches });
+  if (plan.limits.terminals !== undefined && usage.terminals > plan.limits.terminals)
+    rows.push({ label: "Terminals", used: usage.terminals, limit: plan.limits.terminals });
+  if (plan.limits.users !== undefined && usage.users > plan.limits.users)
+    rows.push({ label: "Users", used: usage.users, limit: plan.limits.users });
+  return rows;
+}
 
 const BILLING_CYCLE = ["Monthly", "Quarterly (−5%)", "Annual (−15%)"] as const;
 type Cycle = typeof BILLING_CYCLE[number];
@@ -67,9 +86,46 @@ function handlePlanAction(plan: Plan, cycle: Cycle) {
 
 function Plans() {
   const [cycle, setCycle] = useState<Cycle>("Monthly");
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const notified = useRef(false);
+
+  useEffect(() => {
+    Promise.all([api.getBranches(), api.getTerminals(), api.getUsers()])
+      .then(([branches, terminals, users]) => setUsage({ branches: branches.length, terminals: terminals.length, users: users.length }))
+      .catch(() => setUsage(null));
+  }, []);
+
+  const overage = usage ? exceededLimits(usage, CURRENT_PLAN) : [];
+  const nextTier = plans.find((p) => p.status === "upgrade");
+
+  useEffect(() => {
+    if (overage.length && !notified.current) {
+      notified.current = true;
+      toast.warning(`Usage exceeds the ${CURRENT_PLAN.name} plan`, {
+        description: overage.map((o) => `${o.label}: ${o.used}/${o.limit}`).join(" · ") + (nextTier ? ` — upgrade to ${nextTier.name} to stay within limits.` : ""),
+      });
+    }
+  }, [overage, nextTier]);
 
   return (
     <PageShell title="Plans & Pricing" subtitle="Choose the Baqalah POS tier that fits your business">
+      {overage.length > 0 && (
+        <Card className="p-4 border-warning/40 bg-warning/10 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold text-sm">You've outgrown the {CURRENT_PLAN.name} plan</p>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {overage.map((o) => `${o.label}: ${o.used} in use, plan limit is ${o.limit}`).join(" · ")}
+            </p>
+          </div>
+          {nextTier && (
+            <Button size="sm" className="gradient-primary text-primary-foreground border-0 shrink-0" onClick={() => handlePlanAction(nextTier, cycle)}>
+              Upgrade to {nextTier.name}
+            </Button>
+          )}
+        </Card>
+      )}
+
       {/* Billing cycle toggle */}
       <div className="flex justify-center">
         <div className="inline-flex rounded-xl border border-border/60 bg-muted/40 p-1 gap-1">
@@ -176,8 +232,13 @@ function Plans() {
       <Card className="p-5 border-border/60 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="font-semibold">Standard Plan — Active</p>
+            <p className="font-semibold">{CURRENT_PLAN.name} Plan — Active</p>
             <p className="text-sm text-muted-foreground mt-0.5">Next billing date: Jul 29, 2026 · SAR 349/month · Monthly</p>
+            {usage && (
+              <p className={cn("text-sm mt-1", overage.length > 0 ? "text-warning font-medium" : "text-muted-foreground")}>
+                Usage: {usage.branches}/{CURRENT_PLAN.limits.branches ?? "∞"} branches · {usage.terminals}/{CURRENT_PLAN.limits.terminals ?? "∞"} terminals · {usage.users}/{CURRENT_PLAN.limits.users ?? "∞"} users
+              </p>
+            )}
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => toast.info("Billing history", { description: "Please contact support or your account manager for your invoice history." })}>View invoices</Button>

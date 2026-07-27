@@ -392,8 +392,10 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
                 quantityBefore: quantityBefore, quantityAfter: quantityAfter);
         }
 
-        // Update PO status
-        var allReceived = po.Items.All(i => i.Status == "received");
+        // Update PO status. Items.All() is vacuously true on an empty collection — guard against
+        // ever marking a PO fully received when it has no line items on record (data corruption
+        // or an item deleted out-of-band), which would otherwise show "0 items, Fully Received".
+        var allReceived = po.Items.Count > 0 && po.Items.All(i => i.Status == "received");
         var anyReceived = po.Items.Any(i => i.ReceivedQuantity > 0);
         po.Status = allReceived ? "fully_received" : (anyReceived ? "partial_received" : po.Status);
         if (allReceived) po.ReceivedDate = DateTime.UtcNow;

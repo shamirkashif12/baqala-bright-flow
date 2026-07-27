@@ -76,8 +76,16 @@ function ServiceCharges() {
     setFeeDialogOpen(true);
   };
 
+  // Checkout only ever honors "all_products"/"all_orders" (see applicableToLabel above) — marking
+  // a charge with any other applicableTo as Active is misleading since it's never actually applied.
+  const checkoutHonors = (applicableTo: string) => applicableTo === "all_products" || applicableTo === "all_orders";
+
   const toggleStatus = async (r: TaxFeeRule) => {
     const newStatus = r.status === "active" ? "inactive" : "active";
+    if (newStatus === "active" && !checkoutHonors(r.applicableTo)) {
+      toast.error(`"${r.ruleName}" applies to "${applicableToLabel(r.applicableTo)}", which checkout doesn't charge — change what it applies to before activating it.`);
+      return;
+    }
     try {
       await api.updateTaxRule(r.id, { ...r, status: newStatus });
       toast.success(`Charge ${newStatus === "active" ? "activated" : "deactivated"}`);
@@ -86,6 +94,10 @@ function ServiceCharges() {
   };
 
   const handleSave = async () => {
+    if (form.status === "active" && !checkoutHonors(form.applicableTo)) {
+      toast.error(`This charge applies to "${applicableToLabel(form.applicableTo)}", which checkout doesn't charge — it can't be saved as Active.`);
+      return;
+    }
     setSaving(true);
     try {
       const payload = {

@@ -67,7 +67,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         [FromQuery] string[]? status,
         [FromQuery] string[]? paymentStatus,
         [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to)
+        [FromQuery] DateTime? to,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = [callerBranchId.Value];
@@ -113,8 +115,19 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (branchId is { Length: > 0 }) scoped = scoped.Where(o => branchId.Contains(o.BranchId));
         if (status is { Length: > 0 }) scoped = scoped.Where(o => status.Contains(o.OrderStatus));
         if (paymentStatus is { Length: > 0 }) scoped = scoped.Where(o => paymentStatus.Contains(o.PaymentStatus));
-        var orders = scoped.Take(200).ToList();
-        return Ok(orders);
+        var filtered = scoped.ToList();
+
+        var totalCount = filtered.Count;
+        var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 50;
+        var effectivePage = page is > 0 ? page.Value : 1;
+        // page/pageSize are optional — omitting them keeps the old "return up to 200, no paging"
+        // behavior for callers that don't paginate (Cashier dashboard, Branches, Sales, Returns).
+        var orders = page.HasValue || pageSize.HasValue
+            ? filtered.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToList()
+            : filtered.Take(200).ToList();
+
+        if (!page.HasValue && !pageSize.HasValue) return Ok(orders);
+        return Ok(new { total = totalCount, page = effectivePage, pageSize = effectivePageSize, items = orders });
     }
 
     [HttpGet("{id:guid}")]
@@ -266,25 +279,60 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 return BadRequest(new { message = $"These items require an attendant: {string.Join(", ", ineligible)}." });
         }
 
+        // Single per-branch settings row backs every "block expired items" toggle the admin can
+        // see (Compliance → "Auto-block expired items" and POS Settings → Scan & Expiry both read
+        // and write this same PosSettings.BlockExpiredItems column) — this is the one place
+        // checkout actually consults it, so flipping either UI now has a real effect instead of
+        // being purely decorative. Defaults to true (block) when a branch has no settings row yet.
+        var posSettings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
+        var blockExpiredItems = posSettings?.BlockExpiredItems ?? true;
+
         // Block sale of expired items: if a product's only tracked batches at this
         // branch are expired, it cannot be sold — mirrors the "Block sale of expired
         // items" Rules Engine rule, enforced here since checkout must not rely solely
         // on client-side checks.
-        foreach (var item in order.Items)
+        if (blockExpiredItems)
         {
-            var hasAnyBatches = await db.InventoryBatches
-                .AnyAsync(b => b.ProductId == item.ProductId && b.BranchId == order.BranchId);
-            if (!hasAnyBatches) continue;
-
-            var hasSellableStock = await db.InventoryBatches.AnyAsync(b =>
-                b.ProductId == item.ProductId && b.BranchId == order.BranchId &&
-                b.RemainingQuantity > 0 && b.Status != "expired" &&
-                (b.ExpiryDate == null || b.ExpiryDate.Value.Date >= DateTime.UtcNow.Date));
-
-            if (!hasSellableStock)
+            foreach (var item in order.Items)
             {
-                var product = await db.Products.FindAsync(item.ProductId);
-                return BadRequest(new { message = $"Cannot sell '{product?.Name ?? "item"}' — all available stock for this product is expired." });
+                var hasAnyBatches = await db.InventoryBatches
+                    .AnyAsync(b => b.ProductId == item.ProductId && b.BranchId == order.BranchId);
+                if (!hasAnyBatches) continue;
+
+                var hasSellableStock = await db.InventoryBatches.AnyAsync(b =>
+                    b.ProductId == item.ProductId && b.BranchId == order.BranchId &&
+                    b.RemainingQuantity > 0 && b.Status != "expired" &&
+                    (b.ExpiryDate == null || b.ExpiryDate.Value.Date >= DateTime.UtcNow.Date));
+
+                if (!hasSellableStock)
+                {
+                    var product = await db.Products.FindAsync(item.ProductId);
+                    return BadRequest(new { message = $"Cannot sell '{product?.Name ?? "item"}' — all available stock for this product is expired." });
+                }
+            }
+        }
+
+        // Block a sale that would take on-hand stock negative, unless the branch's PosSettings
+        // explicitly opt in (AllowNegativeStock, default false). This flag has been stored and
+        // editable from Settings since it was added, but nothing ever read it — the "reduce
+        // inventory stock" step below always let quantity go negative regardless, so toggling it
+        // off in the UI had no effect. Checked per-product (summed across duplicate line items)
+        // against current on-hand before any stock row is mutated, so a multi-item sale either
+        // fully succeeds or is rejected before touching the ledger.
+        if (posSettings is not null && !posSettings.AllowNegativeStock)
+        {
+            foreach (var group in order.Items.GroupBy(i => i.ProductId))
+            {
+                var needed = group.Sum(i => i.Quantity);
+                var onHand = await db.InventoryStocks
+                    .Where(s => s.ProductId == group.Key && s.BranchId == order.BranchId)
+                    .Select(s => (decimal?)s.Quantity)
+                    .FirstOrDefaultAsync() ?? 0;
+                if (onHand - needed < 0)
+                {
+                    var product = await db.Products.FindAsync(group.Key);
+                    return BadRequest(new { message = $"Cannot sell '{product?.Name ?? "item"}' — only {onHand:0.##} on hand and this branch does not allow negative stock." });
+                }
             }
         }
 
@@ -311,11 +359,15 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             var blocking = recalls.FirstOrDefault(r => r.BatchId == null);
             if (blocking is null)
             {
-                var recalledBatchIds = recalls.Select(r => r.BatchId!.Value).ToList();
-                var stillOnHand = await db.InventoryBatches
-                    .Where(b => recalledBatchIds.Contains(b.Id) && b.BranchId == order.BranchId && b.RemainingQuantity > 0)
+                // Materialize this product's batches at the branch first, then filter against the
+                // recalled batch ids in memory — a `recalledBatchIds.Contains(b.Id)` filter inside
+                // the live query fails to type-map on this MySQL EF provider (same gotcha worked
+                // around throughout this file, e.g. the self-checkout eligibility loop above).
+                var branchBatches = await db.InventoryBatches
+                    .Where(b => b.ProductId == productId && b.BranchId == order.BranchId && b.RemainingQuantity > 0)
                     .Select(b => b.Id)
                     .ToListAsync();
+                var stillOnHand = branchBatches.ToHashSet();
                 blocking = recalls.FirstOrDefault(r => stillOnHand.Contains(r.BatchId!.Value));
             }
 
@@ -407,6 +459,35 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 return BadRequest(new { message = "This coupon is restricted to specific customers." });
         }
 
+        // "No discount on tobacco items" — Rules Engine rule (seeded RuleType "discount",
+        // RuleConfig condition "Category = Tobacco"). Tobacco is tracked per-product
+        // (Product.IsTobacco), not via an actual "Tobacco" category, so this resolves the rule
+        // against that flag directly rather than a category name match. Only enforced when the
+        // rule is actually Active — this is the one place checkout consults the Rules Engine
+        // table at all, so toggling this specific rule off/on now has a real effect.
+        var tobaccoRuleActive = await db.RulesEngine.AnyAsync(r =>
+            r.IsActive && r.RuleType == "discount" && r.RuleName == "No discount on tobacco items" &&
+            (r.BranchId == null || r.BranchId == order.BranchId));
+        // Looked up one product at a time rather than a Where(productIds.Contains(...)) query —
+        // the MySQL EF provider in use here fails to type-map a List<Guid> inside Contains().
+        var tobaccoProductCategories = new Dictionary<Guid, Guid?>();
+        if (tobaccoRuleActive)
+        {
+            foreach (var productId in order.Items.Select(i => i.ProductId).Distinct())
+            {
+                var product = await db.Products.FindAsync(productId);
+                if (product is { IsTobacco: true }) tobaccoProductCategories[productId] = product.CategoryId;
+            }
+        }
+        var tobaccoProductIds = tobaccoProductCategories.Keys.ToHashSet();
+
+        bool DiscountCoversTobacco(string appliesTo, Guid? productId, Guid? categoryId) => appliesTo switch
+        {
+            "product" => productId.HasValue && tobaccoProductIds.Contains(productId.Value),
+            "category" => categoryId.HasValue && tobaccoProductCategories.Values.Contains(categoryId),
+            _ => tobaccoProductIds.Count > 0, // "all"/"branch"
+        };
+
         var validatedDiscountTotal = 0m;
         var anyRuleReference = appliedCoupon != null;
         foreach (var d in order.Discounts)
@@ -431,6 +512,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 if (order.Items.Any(i => excluded.Contains(i.ProductId)))
                     return BadRequest(new { message = $"The discount \"{d.Name}\" doesn't apply to one or more items in this order." });
             }
+            if (tobaccoProductIds.Count > 0 && DiscountCoversTobacco(rule.AppliesTo, rule.ProductId, rule.CategoryId))
+                return BadRequest(new { message = $"The discount \"{d.Name}\" cannot be applied — tobacco items are not eligible for discounts." });
 
             var basis = rule.AppliesTo switch
             {
@@ -445,6 +528,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
         if (appliedCoupon != null)
         {
+            if (tobaccoProductIds.Count > 0 && DiscountCoversTobacco(appliedCoupon.ApplicableTo, appliedCoupon.ApplicableId, appliedCoupon.ApplicableId))
+                return BadRequest(new { message = "This coupon cannot be applied — tobacco items are not eligible for discounts." });
+
             var couponBasis = appliedCoupon.ApplicableTo switch
             {
                 "product" => order.Items.Where(i => i.ProductId == appliedCoupon.ApplicableId).Sum(i => i.TotalPrice),

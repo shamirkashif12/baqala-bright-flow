@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { CalendarClock, Ban, ShieldAlert, Download, X, Plus, Loader2, PackageX, CheckCircle2 } from "lucide-react";
+import { CalendarClock, Ban, ShieldAlert, Download, X, Plus, Loader2, PackageX, CheckCircle2, AlertTriangle } from "lucide-react";
 import {
   api, excludeDisabledBranches,
   type InventoryBatch, type Branch, type Warehouse, type Product,
@@ -405,6 +405,17 @@ function Batches() {
     }
   }
 
+  // FEFO enforcement warnings (soft, non-blocking): on a branch not using FEFO picking, flags
+  // near-expiry batches sitting behind stock received more recently. Only meaningful per-branch
+  // (the setting and the pick order are both branch-scoped), so this is skipped entirely when
+  // "all branches" is selected rather than guessing which branch a warning belongs to.
+  const [fefoWarnings, setFefoWarnings] = useState<Awaited<ReturnType<typeof api.getFefoWarnings>>>([]);
+  useEffect(() => {
+    const effectiveBranchIds = lockedBranchId ? [lockedBranchId] : branchFilter;
+    if (effectiveBranchIds.length !== 1) { setFefoWarnings([]); return; }
+    api.getFefoWarnings(effectiveBranchIds[0]).then(setFefoWarnings).catch(() => setFefoWarnings([]));
+  }, [lockedBranchId, branchFilter]);
+
   // Load metadata once on mount
   useEffect(() => {
     api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
@@ -528,6 +539,19 @@ function Batches() {
           <Download className="h-4 w-4" /> Export ({filtered.length})
         </Button>
       </div>
+
+      {/* FEFO enforcement warnings — this branch isn't picking First-Expired-First-Out, so
+          near-expiry stock can sit unpicked behind more recently received stock. */}
+      {fefoWarnings.length > 0 && (
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800/60 p-3 space-y-1.5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-4 w-4" /> FEFO not enforced — {fefoWarnings.length} near-expiry item(s) at risk
+          </div>
+          <ul className="text-xs text-amber-800/90 dark:text-amber-300/90 space-y-1 pl-6 list-disc">
+            {fefoWarnings.map((w, i) => <li key={i}>{w.message}</li>)}
+          </ul>
+        </div>
+      )}
 
       {/* Table */}
       <Card className="border-border/60 shadow-card">

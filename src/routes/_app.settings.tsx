@@ -326,7 +326,16 @@ function Settings() {
                 <h3 className="font-semibold text-lg">Preferences</h3>
                 <div className="mt-4 space-y-3">
                   <ToggleRow kvKey="pref.arabicReceipt"  label="Arabic receipt by default"      desc="Print Arabic receipt; English as secondary"            defaultVal={true} />
-                  <ToggleRow kvKey="pref.blockExpired"   label="Auto-block expired items at POS" desc="Cashier cannot scan expired SKU"                         defaultVal={true} />
+                  {/* "Block expired items" used to be a 4th independent copy of this same toggle
+                     (alongside Rules Engine, Compliance, and POS Settings → Scan & Expiry) —
+                     none of which agreed with each other or actually affected checkout. It's now
+                     controlled in one place; this links there instead of duplicating the switch. */}
+                  <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5 bg-muted/30">
+                    <div>
+                      <p className="font-medium text-sm">Auto-block expired items at POS</p>
+                      <p className="text-xs text-muted-foreground">Managed per-branch in POS Settings → Scan & Expiry (also shown on the Compliance page) — not duplicated here.</p>
+                    </div>
+                  </div>
                   <ToggleRow kvKey="pref.whatsappInvoice" label="Send invoice via WhatsApp"     desc="Customer receives ZATCA QR by WhatsApp"                 defaultVal={true} />
                   <ToggleRow kvKey="pref.twoFactor"      label="Two-factor for admin actions"   desc="Require OTP for refunds, voids, price changes"          defaultVal={false} />
                 </div>
@@ -335,7 +344,6 @@ function Settings() {
                   <Button className="gradient-primary text-primary-foreground border-0 shadow-glow"
                     onClick={() => saveKv({
                       "pref.arabicReceipt":   kv["pref.arabicReceipt"]   ?? "1",
-                      "pref.blockExpired":    kv["pref.blockExpired"]    ?? "1",
                       "pref.whatsappInvoice": kv["pref.whatsappInvoice"] ?? "1",
                       "pref.twoFactor":       kv["pref.twoFactor"]       ?? "0",
                     }, "Preferences saved")}>

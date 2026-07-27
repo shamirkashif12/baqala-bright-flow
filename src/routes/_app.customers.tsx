@@ -221,6 +221,12 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
 }
 
 // ─── Edit / Create form ───────────────────────────────────────────────────────
+// Kept in sync with the backend's format check in CustomersController (E.164 international or
+// bare Saudi mobile — matches what this business actually has on file: local numbers entered
+// without a country code, and foreign customers' numbers entered in full E.164 form).
+const PHONE_RE = /^(\+[1-9]\d{7,14}|05\d{8})$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 type CustomerForm = { fullName: string; phone: string; email: string; tier: string; status: string };
 const emptyForm: CustomerForm = { fullName: "", phone: "", email: "", tier: "standard", status: "active" };
 
@@ -242,6 +248,14 @@ function CustomerForm({ editing, onSaved, onCancel }: {
   const handleSave = async () => {
     if (!form.fullName.trim() || !form.phone.trim() || !form.email.trim()) {
       setError("Full name, phone and email are required.");
+      return;
+    }
+    if (!PHONE_RE.test(form.phone.trim())) {
+      setError("Enter a valid phone number, e.g. +966501234567 or 0501234567.");
+      return;
+    }
+    if (!EMAIL_RE.test(form.email.trim())) {
+      setError("Enter a valid email address, e.g. name@example.com.");
       return;
     }
     setSaving(true); setError(null);
@@ -298,9 +312,136 @@ function CustomerForm({ editing, onSaved, onCancel }: {
   );
 }
 
+// ─── Duplicate customer cleanup ────────────────────────────────────────────────
+function DuplicateGroupCard({ group, onChanged }: {
+  group: { name: string; customers: Customer[] }; onChanged: () => void;
+}) {
+  const [primaryId, setPrimaryId] = useState(group.customers[0].id);
+  const [merging, setMerging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const merge = async () => {
+    setMerging(true); setError(null);
+    try {
+      await api.mergeCustomers(primaryId, group.customers.filter(c => c.id !== primaryId).map(c => c.id));
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to merge.");
+      setMerging(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border/60 p-3 space-y-2">
+      <p className="text-sm font-semibold">
+        {group.name} <span className="text-xs text-muted-foreground font-normal">({group.customers.length} records)</span>
+      </p>
+      <div className="space-y-1.5">
+        {group.customers.map(c => (
+          <label key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs cursor-pointer">
+            <input type="radio" name={`primary-${group.name}`} checked={primaryId === c.id} onChange={() => setPrimaryId(c.id)} />
+            <span className="font-mono text-muted-foreground">{c.customerCode}</span>
+            <span>{c.phone}</span>
+            {c.email && <span className="text-muted-foreground">{c.email}</span>}
+            <span className="text-muted-foreground"><SARIcon />{c.totalSpend.toLocaleString()} spent</span>
+            {primaryId === c.id && <Badge variant="outline" className="text-[10px] border-green-400/40 text-green-600">Keep this one</Badge>}
+          </label>
+        ))}
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={merge} disabled={merging}>
+        {merging ? "Merging…" : "Merge into selected"}
+      </Button>
+    </div>
+  );
+}
+
+function FlaggedCustomerRow({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const remove = async () => {
+    if (!confirm(`Delete "${customer.fullName || customer.phone}"? This can't be undone.`)) return;
+    setBusy(true); setError(null);
+    try {
+      await api.deleteCustomer(customer.id);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-border/60 p-2.5 text-xs">
+      <div className="min-w-0">
+        <p className="font-medium truncate">{customer.fullName.trim() || <span className="italic text-muted-foreground">No name</span>}</p>
+        <p className="text-muted-foreground truncate">{customer.phone}{customer.email ? ` · ${customer.email}` : ""}</p>
+        {error && <p className="text-destructive mt-1">{error}</p>}
+      </div>
+      <Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30 shrink-0" onClick={remove} disabled={busy}>
+        {busy ? "Deleting…" : "Delete"}
+      </Button>
+    </div>
+  );
+}
+
+function DuplicatesPanel({ onClose }: { onClose: () => void }) {
+  const [groups, setGroups] = useState<{ name: string; customers: Customer[] }[]>([]);
+  const [flagged, setFlagged] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.getCustomerDuplicates()
+      .then(r => { setGroups(r.groups); setFlagged(r.flagged); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
+        <Loader2 className="h-4 w-4 animate-spin" /> Scanning for duplicates…
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 mt-2">
+      {groups.length === 0 && flagged.length === 0 && (
+        <p className="text-sm text-muted-foreground italic text-center py-8">No duplicate or low-quality customer records found.</p>
+      )}
+      {groups.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Duplicate name matches ({groups.length})
+          </p>
+          <div className="space-y-2">
+            {groups.map(g => <DuplicateGroupCard key={g.name} group={g} onChanged={load} />)}
+          </div>
+        </div>
+      )}
+      {flagged.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Low-quality records ({flagged.length})
+          </p>
+          <p className="text-xs text-muted-foreground">Missing/near-empty name or an invalid phone number.</p>
+          <div className="space-y-2">
+            {flagged.map(c => <FlaggedCustomerRow key={c.id} customer={c} onChanged={load} />)}
+          </div>
+        </div>
+      )}
+      <Button variant="outline" className="w-full" onClick={onClose}>Close</Button>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 function Customers() {
-  const { canCreate } = usePermission("Customers");
+  const { canCreate, canDelete } = usePermission("Customers");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -310,6 +451,7 @@ function Customers() {
   const [dateTo, setDateTo] = useState("");
   const [selected, setSelected] = useState<Customer | null>(null);
   const [editTarget, setEditTarget] = useState<Customer | null | "new">(null);
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [tierProgram, setTierProgram] = useState<LoyaltyProgram | null>(null);
   const tiers = buildTiers(tierProgram);
 
@@ -345,6 +487,11 @@ function Customers() {
   const handleSaved = () => {
     setEditTarget(null);
     setSelected(null);
+    load();
+  };
+
+  const closeDuplicates = () => {
+    setDuplicatesOpen(false);
     load();
   };
 
@@ -391,6 +538,11 @@ function Customers() {
           )}
         </div>
         <div className="flex-1" />
+        {canDelete && (
+          <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => setDuplicatesOpen(true)}>
+            Merge Duplicates
+          </Button>
+        )}
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => setEditTarget("new")}>
             <Plus className="h-4 w-4" /> Add Customer
@@ -478,6 +630,21 @@ function Customers() {
             onSaved={handleSaved}
             onCancel={() => setEditTarget(null)}
           />
+        </SheetContent>
+      </Sheet>
+
+      {/* Merge duplicates drawer — refresh the main list on ANY close path (X button, Escape,
+          overlay click, or the panel's own Close button), not just the in-panel button, since
+          merges/deletes done inside can change what this list shows. */}
+      <Sheet
+        open={duplicatesOpen}
+        onOpenChange={v => { if (v) setDuplicatesOpen(true); else closeDuplicates(); }}
+      >
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Merge Duplicate Customers</SheetTitle>
+          </SheetHeader>
+          {duplicatesOpen && <DuplicatesPanel onClose={closeDuplicates} />}
         </SheetContent>
       </Sheet>
     </PageShell>

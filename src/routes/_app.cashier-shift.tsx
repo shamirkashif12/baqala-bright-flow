@@ -14,6 +14,7 @@ import { MetricCard } from "@/components/metric-card";
 import {
   Clock, Banknote, CreditCard, Smartphone, LogIn, LogOut,
   RefreshCw, CheckCircle2, XCircle, Loader2, UserCheck,
+  Monitor, MonitorX, AlertTriangle, ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type CashierShift, type User, type Branch, type Terminal } from "@/lib/api";
@@ -50,14 +51,23 @@ function Shift() {
   const effectiveCashierId = isCashier ? (user?.id ?? undefined) : undefined;
 
   const [shifts, setShifts] = useState<CashierShift[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
+  // Every open shift at the branch (unrestricted by cashierId) — the same "which terminals are
+  // taken" lookup CheckInDialog does, needed here to compute Free/Occupied counts correctly even
+  // when the signed-in role only sees its own shift in `shifts` above.
+  const [capacityShifts, setCapacityShifts] = useState<CashierShift[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [checkoutShift, setCheckoutShift] = useState<CashierShift | null>(null);
 
   const refetch = useCallback(() => {
     setLoading(true);
-    api.getShifts({ branchId: effectiveBranchId ? [effectiveBranchId] : undefined, cashierId: effectiveCashierId })
-      .then(s => { setShifts(s); setLoadError(false); })
+    Promise.all([
+      api.getShifts({ branchId: effectiveBranchId ? [effectiveBranchId] : undefined, cashierId: effectiveCashierId }),
+      api.getTerminals({ branchId: effectiveBranchId ? [effectiveBranchId] : undefined }),
+      api.getActiveShifts(effectiveBranchId),
+    ])
+      .then(([s, t, active]) => { setShifts(s); setTerminals(t); setCapacityShifts(active); setLoadError(false); })
       // Keep the previously loaded shifts on failure — an unhandled rejection here used to
       // leave the queue rendered as zero/empty as if loaded (86eyag3ny).
       .catch(() => setLoadError(true))
@@ -70,7 +80,14 @@ function Shift() {
     api.approveVariance(id).then(refetch).catch((e: any) => toast.error(e?.message || "Failed to approve variance."));
   };
 
+  const overrideOverdue = (id: string) => {
+    api.overrideOverdueShift(id).then(refetch).catch((e: any) => toast.error(e?.message || "Failed to keep shift open."));
+  };
+
   const activeShifts = shifts.filter(s => s.status === "open");
+  const occupiedTerminalIds = new Set(capacityShifts.map(s => s.terminalId).filter((id): id is string => !!id));
+  const occupiedTerminalCount = terminals.filter(t => occupiedTerminalIds.has(t.id)).length;
+  const freeTerminalCount = terminals.length - occupiedTerminalCount;
   // Cashier sees only their own active shift in the banner; managers see all
   const bannerShifts = isCashier
     ? activeShifts.filter(s => s.cashierId === user?.id)
@@ -85,31 +102,52 @@ function Shift() {
       {/* Active shifts banner */}
       {bannerShifts.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {bannerShifts.map(s => (
-            <Card key={s.id} className="p-4 border-2 border-success/40 bg-success/5 flex items-center justify-between gap-3">
+          {bannerShifts.map(s => {
+            const isOverdue = !!s.overdueFlaggedAt;
+            return (
+            <Card key={s.id} className={`p-4 border-2 flex items-center justify-between gap-3 ${isOverdue ? "border-destructive/40 bg-destructive/5" : "border-success/40 bg-success/5"}`}>
               <div className="flex items-center gap-3 min-w-0">
-                <div className="h-10 w-10 rounded-xl bg-success/15 text-success flex items-center justify-center flex-shrink-0">
-                  <UserCheck className="h-5 w-5" />
+                <div className={`h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isOverdue ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"}`}>
+                  {isOverdue ? <AlertTriangle className="h-5 w-5" /> : <UserCheck className="h-5 w-5" />}
                 </div>
                 <div className="min-w-0">
-                  <p className="font-semibold text-sm truncate">{s.cashier?.fullName ?? "Cashier"}</p>
+                  <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+                    {s.cashier?.fullName ?? "Cashier"}
+                    {isOverdue && (
+                      <Badge className="bg-destructive/15 text-destructive border-destructive/30 text-[10px]">Overdue</Badge>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     {s.terminal?.terminalCode ?? "—"} · {new Date(s.openedAt).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })} · {elapsed(s.openedAt)}
                   </p>
                   <p className="text-xs text-muted-foreground tabular-nums">Cash Sales: {fmt(s.cashSales)}</p>
                 </div>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1 text-destructive border-destructive/30 hover:bg-destructive/10 flex-shrink-0"
-                onClick={() => setCheckoutShift(s)}
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Check Out
-              </Button>
+              <div className="flex gap-1.5 flex-shrink-0">
+                {isOverdue && !isCashier && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => overrideOverdue(s.id)}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Keep Open
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 text-destructive border-destructive/30 hover:bg-destructive/10"
+                  onClick={() => setCheckoutShift(s)}
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  Check Out
+                </Button>
+              </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <Card className="p-5 border-2 border-muted bg-muted/30">
@@ -146,8 +184,10 @@ function Shift() {
       </div>
 
       {/* Summary metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
         <MetricCard label="Active Shifts" value={String(activeShifts.length)} icon={Clock} accent="primary" />
+        <MetricCard label="Free Terminals" value={String(freeTerminalCount)} icon={Monitor} accent={freeTerminalCount === 0 ? "destructive" : "success"} />
+        <MetricCard label="Occupied Terminals" value={String(occupiedTerminalCount)} icon={MonitorX} />
         <MetricCard label="Total Cash" value={<><SARIcon />{" "}{fmt(totalCash)}</>} icon={Banknote} accent="success" />
         <MetricCard label="Total Card" value={<><SARIcon />{" "}{fmt(totalCard)}</>} icon={CreditCard} />
         <MetricCard label="Total Wallet" value={<><SARIcon />{" "}{fmt(totalDigital)}</>} icon={Smartphone} />
@@ -182,6 +222,7 @@ function Shift() {
                   const isOpen = s.status === "open";
                   const varVal = s.variance ?? 0;
                   const flagged = !isOpen && s.requiresApproval;
+                  const isOverdue = isOpen && !!s.overdueFlaggedAt;
                   return (
                     <tr key={s.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
                       <td className="px-4 py-3 font-medium">{s.cashier?.fullName ?? s.cashierId.slice(0, 8)}</td>
@@ -198,7 +239,11 @@ function Shift() {
                         {new Date(s.openedAt).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" })}
                       </td>
                       <td className="px-4 py-3">
-                        {isOpen ? (
+                        {isOverdue ? (
+                          <Badge className="bg-destructive/15 text-destructive border-destructive/30 gap-1 text-[11px]">
+                            <AlertTriangle className="h-3 w-3" />Overdue
+                          </Badge>
+                        ) : isOpen ? (
                           <Badge className="bg-success/15 text-success border-success/30 gap-1 text-[11px]">
                             <CheckCircle2 className="h-3 w-3" />Open
                           </Badge>
@@ -214,14 +259,26 @@ function Shift() {
                       </td>
                       <td className="px-4 py-3">
                         {isOpen && (!isCashier || s.cashierId === user?.id) ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1 h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                            onClick={() => setCheckoutShift(s)}
-                          >
-                            <LogOut className="h-3 w-3" />Check Out
-                          </Button>
+                          <div className="flex gap-1.5">
+                            {isOverdue && !isCashier && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1 h-7 text-xs"
+                                onClick={() => overrideOverdue(s.id)}
+                              >
+                                <ShieldCheck className="h-3 w-3" />Keep Open
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1 h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                              onClick={() => setCheckoutShift(s)}
+                            >
+                              <LogOut className="h-3 w-3" />Check Out
+                            </Button>
+                          </div>
                         ) : flagged && !isCashier ? (
                           <Button
                             size="sm"

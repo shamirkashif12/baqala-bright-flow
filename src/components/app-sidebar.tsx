@@ -64,6 +64,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -84,6 +85,9 @@ type NavItem = {
   roles?: AppRole[];
   // blockRoles: hide from these roles even if the DB grants canView=true.
   blockRoles?: AppRole[];
+  // children: renders a small dropdown next to the item linking to related pages
+  // (used for grouping, e.g. Customers & Loyalty → Coupons/Loyalty Program).
+  children?: { title: string; url: string }[];
 };
 
 type NavGroup = { label: string; items: NavItem[] };
@@ -99,7 +103,13 @@ const navGroups: NavGroup[] = [
       // { title: "MPOS App Preview",    url: "/mpos-app",      icon: Smartphone,
       //   roles: ["tenant_admin"] },
       { title: "Orders",              url: "/orders",        icon: ShoppingBag,    module: "Orders" },
-      { title: "Customers",           url: "/customers",     icon: Users,          module: "Customers" },
+      { title: "Customers & Loyalty", url: "/customers",     icon: Users,          module: "Customers",
+        children: [
+          { title: "Discount Coupons",  url: "/coupons" },
+          { title: "Loyalty Programs",  url: "/loyalty-program" },
+          { title: "Customer Rewards",  url: "/loyalty-program" },
+          { title: "Promotions",        url: "/coupons" },
+        ] },
       { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
       { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
       { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower" },
@@ -238,7 +248,7 @@ export function AppSidebar() {
               {visibleItems.map((item) => {
                 const active = path === item.url || path.startsWith(item.url + "/");
                 return (
-                  <SidebarMenuItem key={item.url}>
+                  <SidebarMenuItem key={item.url} className={item.children ? "flex items-center gap-1" : undefined}>
                     <SidebarMenuButton
                       asChild
                       isActive={active}
@@ -249,6 +259,25 @@ export function AppSidebar() {
                         <span>{t(item.title)}</span>
                       </Link>
                     </SidebarMenuButton>
+                    {item.children && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/50 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground transition-colors"
+                            title={`More ${t(item.title)} options`}
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" side="right">
+                          {item.children.map((child) => (
+                            <DropdownMenuItem key={child.title} onClick={() => navigate({ to: child.url })}>
+                              {t(child.title)}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </SidebarMenuItem>
                 );
               })}

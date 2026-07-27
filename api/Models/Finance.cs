@@ -143,6 +143,17 @@ public class Coupon
     public User? CreatedByUser { get; set; }
     public ICollection<Order> Orders { get; set; } = [];
     public ICollection<CustomerCoupon> CustomerCoupons { get; set; } = [];
+
+    // Status alone doesn't tell staff WHY a coupon no longer redeems — an exhausted coupon stays
+    // stored as "active" forever (nothing flips it), which is exactly what looked like a bug: a
+    // coupon showing "Active" at POS returns "Invalid or expired coupon". Derive the user-facing
+    // status instead of trusting the stored column for display.
+    [NotMapped]
+    public string EffectiveStatus =>
+        Status != "active" ? Status :
+        UsageLimit.HasValue && UsedCount >= UsageLimit.Value ? "limit_reached" :
+        EndDate < DateTime.UtcNow ? "expired" :
+        "active";
 }
 
 // Zero rows for a Coupon = open to every customer (backward compatible with every coupon that

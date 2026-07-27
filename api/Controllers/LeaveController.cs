@@ -89,11 +89,25 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
         if (dateTo.HasValue) query = query.Where(l => l.FromDate <= dateTo);
 
         query = query.OrderByDescending(l => l.FromDate);
-        if (!page.HasValue && !pageSize.HasValue) return Ok(await query.ToListAsync());
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        void ApplyOverdueFlag(IEnumerable<LeaveRequest> leaves)
+        {
+            foreach (var l in leaves)
+                l.IsOverdue = l.Status == "pending" && l.FromDate <= today;
+        }
+
+        if (!page.HasValue && !pageSize.HasValue)
+        {
+            var all = await query.ToListAsync();
+            ApplyOverdueFlag(all);
+            return Ok(all);
+        }
         var totalCount = await query.CountAsync();
         var effectivePageSize = pageSize is > 0 and <= 200 ? pageSize.Value : 25;
         var effectivePage = page is > 0 ? page.Value : 1;
         var rows = await query.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToListAsync();
+        ApplyOverdueFlag(rows);
         return Ok(new { items = rows, totalCount });
     }
 

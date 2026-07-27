@@ -12,17 +12,18 @@ import { SearchableMultiSelect } from "@/components/report-filters/searchable-mu
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader as DHeader, DialogTitle as DTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from "@/components/ui/pagination";
 import {
   Printer, Download, Globe, Pencil, Package, CreditCard,
   User, Store, ChevronRight, Loader2, RefreshCw,
   CheckCircle2, XCircle, Clock, Truck, AlertCircle, X, RotateCcw, Trash2, Ban,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Order, type Branch, type CustomerReturnItem, type Product } from "@/lib/api";
+import { api, type Order, type OrderPayment, type Branch, type CustomerReturnItem, type Product } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { useCompanyHeader } from "@/lib/use-company-header";
-import { SARIcon } from "@/lib/currency";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/orders")({ component: Orders });
 
@@ -60,12 +61,21 @@ function StatusDot({ status }: { status: string }) {
   return <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${colors[status] ?? "bg-muted-foreground"}`} />;
 }
 
-function SBadge({ status }: { status: string }) {
+function SBadge({ status, label }: { status: string; label?: string }) {
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${statusColor(status)}`}>
-      <StatusDot status={status} />{status.replace(/_/g, " ")}
+      <StatusDot status={status} />{label ?? status.replace(/_/g, " ")}
     </span>
   );
+}
+
+// A voided order keeps whatever PaymentStatus it had at checkout ("paid"/"partially_paid") until
+// the backend explicitly flips it to "cancelled" (OrderVoidService.VoidAsync) — money was taken
+// but the order never completed, so it still needs reconciling/refunding. The generic "Cancelled"
+// label reads as just another status; spelling it out as "Refund Due" is what actually answers
+// the owner's question of whether money still needs to go back to the customer.
+function paymentBadgeLabel(paymentStatus: string): string | undefined {
+  return paymentStatus === "cancelled" ? "Refund Due" : undefined;
 }
 
 function statusIcon(s: string) {
@@ -73,6 +83,25 @@ function statusIcon(s: string) {
   if (["cancelled", "refunded"].includes(s)) return <XCircle className="h-4 w-4 text-red-500" />;
   if (["processing", "ready_to_deliver"].includes(s)) return <Truck className="h-4 w-4 text-blue-500" />;
   return <Clock className="h-4 w-4 text-yellow-500" />;
+}
+
+function paymentMethodLabel(method: string): string {
+  if (method === "qr") return "QR";
+  return method.charAt(0).toUpperCase() + method.slice(1);
+}
+
+// A cash+card split still only ever carried payments[0]'s method almost everywhere it was
+// rendered (detail drawer, printed receipt) — silently dropping every other payment line. These
+// two helpers are the single source of truth for "how does this order's payment break down",
+// shared by the list table, the detail drawer and the printed receipt so all three agree.
+function paymentBreakdownText(payments: OrderPayment[]): string {
+  return payments.map(p => `${paymentMethodLabel(p.paymentMethod)} ${p.amount.toFixed(2)}`).join(" + ");
+}
+
+function PaymentBreakdown({ payments, className }: { payments?: OrderPayment[]; className?: string }) {
+  if (!payments || payments.length === 0) return null;
+  if (payments.length === 1) return <span className={className}>{paymentMethodLabel(payments[0].paymentMethod)}</span>;
+  return <span className={className}>{paymentBreakdownText(payments)}</span>;
 }
 
 function exportCSV(orders: Order[], companyHeader: string) {
@@ -140,7 +169,7 @@ function printOrders(orders: Order[], companyHeader: string) {
 }
 
 function printReceipt(order: Order, companyHeader: string) {
-  const payMethod = order.payments?.[0]?.paymentMethod ?? "—";
+  const payLine = order.payments && order.payments.length > 0 ? paymentBreakdownText(order.payments) : "—";
   const items = (order.items ?? []).map(item => `
     <tr>
       <td style="padding:4px 0">${(item as any).product?.name ?? "Product"}</td>
@@ -179,7 +208,7 @@ function printReceipt(order: Order, companyHeader: string) {
     <div class="small">Date: ${new Date(order.createdAt).toLocaleString("en-SA", { dateStyle: "medium", timeStyle: "short" })}</div>
     ${order.cashier ? `<div class="small">Cashier: ${order.cashier.fullName}</div>` : ""}
     ${order.customer ? `<div class="small">Customer: ${order.customer.fullName}</div>` : ""}
-    <div class="small">Payment: <span style="text-transform:capitalize">${payMethod}</span></div>
+    <div class="small">Payment: <span>${payLine}</span></div>
     <div class="divider"></div>
     <table>
       <thead><tr>
@@ -805,8 +834,6 @@ function OrderDetail({ orderId, onStatusChanged }: {
 
   if (!order) return <div className="text-center py-12 text-muted-foreground">Order not found.</div>;
 
-  const payMethod = order.payments?.[0]?.paymentMethod;
-
   return (
     <div className="space-y-5 pb-8">
       {/* Header */}
@@ -819,7 +846,7 @@ function OrderDetail({ orderId, onStatusChanged }: {
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <SBadge status={order.orderStatus} />
-          <SBadge status={order.paymentStatus} />
+          <SBadge status={order.paymentStatus} label={paymentBadgeLabel(order.paymentStatus)} />
           <div className="flex gap-1.5 mt-0.5">
             <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => printReceipt(order, companyHeader)}>
               <Printer className="h-3.5 w-3.5" /> Print
@@ -871,12 +898,14 @@ function OrderDetail({ orderId, onStatusChanged }: {
             </div>
           </div>
         )}
-        {payMethod && (
+        {!!order.payments?.length && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <CreditCard className="h-4 w-4 shrink-0" />
             <div>
               <p className="text-[11px]">Payment</p>
-              <p className="font-medium text-foreground capitalize">{payMethod}</p>
+              <p className="font-medium text-foreground">
+                <PaymentBreakdown payments={order.payments} />
+              </p>
             </div>
           </div>
         )}
@@ -1045,7 +1074,10 @@ function POSTab() {
   const companyHeader = useCompanyHeader();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
 
+  const PAGE_SIZE = 50;
   const [orders, setOrders] = useState<Order[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -1065,24 +1097,31 @@ function POSTab() {
     if (!lockedBranchId) api.getBranches("active").then(setBranches).catch(() => {});
   }, [lockedBranchId]);
 
+  // Changing a filter invalidates whatever page we were on (page 3 of the old result set may not
+  // exist in the new one) — jump back to page 1 rather than requesting a now-meaningless offset.
+  useEffect(() => { setPage(1); }, [branchIds, stFilter, dateFrom, dateTo]);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.getOrders({
+    api.getOrdersPaged({
       branchId: branchIds.length ? branchIds : undefined,
       status: stFilter.length ? stFilter : undefined,
       from: dateFrom || undefined,
       to: dateTo || undefined,
+      page,
+      pageSize: PAGE_SIZE,
     })
-      .then(o => { setOrders(o); setLoadError(false); })
+      .then(({ items, total }) => { setOrders(items); setTotal(total); setLoadError(false); })
       // Keep previously loaded orders on failure — an unhandled rejection here used to
       // render zero tiles / an empty list as if loaded (86eyag3ny).
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
-  }, [branchIds, stFilter, dateFrom, dateTo]);
+  }, [branchIds, stFilter, dateFrom, dateTo, page]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Client-side text search only
+  // Client-side text search — scoped to the currently loaded page only, since orders are now
+  // fetched a page at a time rather than all-at-once (see bug3: "Showing 200 of 200 orders").
   const filtered = useMemo(() => orders.filter(o => {
     if (!q) return true;
     return o.orderNumber?.toLowerCase().includes(q.toLowerCase()) ||
@@ -1090,9 +1129,11 @@ function POSTab() {
       o.cashier?.fullName?.toLowerCase().includes(q.toLowerCase());
   }), [orders, q]);
 
-  // Summary cards
+  // Summary cards — Total Orders reflects the full filtered result set (server-counted); Revenue
+  // and Pending are necessarily scoped to the current page now that orders are paginated.
   const totalRevenue = filtered.reduce((s, o) => s + o.totalAmount, 0);
   const pendingCount = filtered.filter(o => o.orderStatus === "pending").length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-4">
@@ -1100,9 +1141,9 @@ function POSTab() {
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Total Orders", value: filtered.length, color: "text-foreground" },
-          { label: "Revenue", value: <><SARIcon />{totalRevenue.toFixed(2)}</>, color: "text-primary" },
-          { label: "Pending", value: pendingCount, color: "text-yellow-600" },
+          { label: "Total Orders", value: total, color: "text-foreground" },
+          { label: "Revenue (this page)", value: <><SARIcon />{fmtSAR(totalRevenue)}</>, color: "text-primary" },
+          { label: "Pending (this page)", value: pendingCount, color: "text-yellow-600" },
         ].map(c => (
           <Card key={c.label} className="px-4 py-3 border-border/60 shadow-card">
             <p className="text-xs text-muted-foreground">{c.label}</p>
@@ -1186,9 +1227,16 @@ function POSTab() {
                     <td className="px-3 py-3 font-mono text-xs font-bold text-primary">{o.orderNumber}</td>
                     <td className="px-3 py-3 text-xs">{o.branch?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{o.cashier?.fullName ?? "—"}</td>
-                    <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{o.totalAmount.toFixed(2)}</td>
+                    <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{fmtSAR(o.totalAmount)}</td>
                     <td className="px-3 py-3"><SBadge status={o.orderStatus} /></td>
-                    <td className="px-3 py-3"><SBadge status={o.paymentStatus} /></td>
+                    <td className="px-3 py-3">
+                      <SBadge status={o.paymentStatus} label={paymentBadgeLabel(o.paymentStatus)} />
+                      {(o.payments?.length ?? 0) > 1 && (
+                        <p className="mt-1 text-[11px] text-muted-foreground whitespace-nowrap">
+                          <PaymentBreakdown payments={o.payments} />
+                        </p>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-xs text-muted-foreground">
                       {new Date(o.createdAt).toLocaleDateString("en-SA")}
                     </td>
@@ -1208,9 +1256,34 @@ function POSTab() {
               </tbody>
             </table>
           </div>
-          {filtered.length > 0 && (
-            <div className="px-4 py-2 border-t border-border/40 text-xs text-muted-foreground">
-              Showing {filtered.length} of {orders.length} orders
+          {total > 0 && (
+            <div className="flex items-center justify-between px-4 py-2 border-t border-border/40 text-xs text-muted-foreground">
+              <span>
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total} orders
+              </span>
+              {totalPages > 1 && (
+                <Pagination className="mx-0 w-auto">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        onClick={e => { e.preventDefault(); if (page > 1) setPage(p => p - 1); }}
+                        className={page <= 1 ? "pointer-events-none opacity-40" : ""}
+                      />
+                    </PaginationItem>
+                    <PaginationItem>
+                      <span className="px-2 tabular-nums">Page {page} of {totalPages}</span>
+                    </PaginationItem>
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        onClick={e => { e.preventDefault(); if (page < totalPages) setPage(p => p + 1); }}
+                        className={page >= totalPages ? "pointer-events-none opacity-40" : ""}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              )}
             </div>
           )}
         </Card>

@@ -178,7 +178,13 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 grossSales = g.Sum(o => o.Subtotal),
                 discounts = g.Sum(o => o.DiscountAmount),
                 vat = g.Sum(o => o.TaxAmount),
-                netSales = g.Sum(o => o.TotalAmount - o.TaxAmount),
+                // True net revenue — gross less discounts, net of tax/tobacco excise/custom fees
+                // (those are pass-through charges, not product sales). Matches the NetSales formula
+                // already used everywhere else in this report suite (see LoadDailyLineItemsAsync:
+                // `gross - discounts - returnValue`) — this hand-rolled query previously used
+                // `TotalAmount - TaxAmount`, which adds tobacco excise back in and could show Net
+                // Sales higher than Gross Sales on any day with meaningful tobacco volume.
+                netSales = g.Sum(o => o.Subtotal - o.DiscountAmount),
                 tobaccoFees = g.Sum(o => o.TobaccoFeeAmount),
             })
             .ToListAsync();
@@ -203,12 +209,13 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             var card = paymentsByHourMethod.Where(p => p.Hour == h && p.PaymentMethod == "card").Sum(p => p.amount);
             var wallet = paymentsByHourMethod.Where(p => p.Hour == h && p.PaymentMethod == "wallet").Sum(p => p.amount);
             var transactions = o?.transactions ?? 0;
+            var grossSales = o?.grossSales ?? 0m;
             var netSales = (o?.netSales ?? 0m) - returns;
             hourly.Add(new DailySalesHour
             {
                 Hour = h,
                 Transactions = transactions,
-                GrossSales = o?.grossSales ?? 0m,
+                GrossSales = grossSales,
                 Discounts = o?.discounts ?? 0m,
                 Returns = returns,
                 NetSales = netSales,
@@ -217,7 +224,10 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 Cash = cash,
                 Card = card,
                 Wallet = wallet,
-                AvgBasket = transactions > 0 ? Math.Round(netSales / transactions, 2) : 0m,
+                // Avg basket = typical transaction size before discounts/returns, so it's the
+                // (now-corrected, no-longer-inflated) Net Sales figure's gross counterpart — see
+                // note above; using Net Sales here previously overstated it further.
+                AvgBasket = transactions > 0 ? Math.Round(grossSales / transactions, 2) : 0m,
             });
         }
 
@@ -227,16 +237,17 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .ToListAsync();
 
         var kpiTransactions = hourly.Sum(h => h.Transactions);
+        var kpiGrossSales = hourly.Sum(h => h.GrossSales);
         var kpiNetSales = hourly.Sum(h => h.NetSales);
 
         return new DailySalesResult
         {
             Kpis = new DailySalesKpis
             {
-                GrossSales = hourly.Sum(h => h.GrossSales),
+                GrossSales = kpiGrossSales,
                 NetSales = kpiNetSales,
                 Transactions = kpiTransactions,
-                AvgBasket = kpiTransactions > 0 ? Math.Round(kpiNetSales / kpiTransactions, 2) : 0m,
+                AvgBasket = kpiTransactions > 0 ? Math.Round(kpiGrossSales / kpiTransactions, 2) : 0m,
                 VatCollected = hourly.Sum(h => h.Vat),
                 ReturnsRefunds = hourly.Sum(h => h.Returns),
                 TobaccoFees = ordersByHour.Sum(x => x.tobaccoFees),
@@ -244,6 +255,195 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             Hourly = hourly,
             PaymentSplit = paymentSplit,
         };
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // KPI Evaluation — real, directly-derivable metrics only (RPT-KPI). Per-scan timing/
+    // misscan-rate KPIs are NOT computed here: nothing in this system instruments individual
+    // scan events, so there is no real data to report for those, and this endpoint doesn't
+    // invent a number to fill the gap. What IS real and derivable from existing Orders/OrderItems
+    // data — scan volume, completed order counts, per-branch performance — is computed below.
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("kpi-summary")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetKpiSummary([FromQuery] DateTime? date, [FromQuery] Guid? branchId)
+    {
+        var (scopeRole, scopeBranchId) = GetCallerContext();
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+        var day = (date ?? DateTime.UtcNow).Date;
+        var dayEnd = day.AddDays(1);
+
+        var ordersQ = db.Orders.Where(o => o.CreatedAt >= day && o.CreatedAt < dayEnd);
+        if (branchId.HasValue) ordersQ = ordersQ.Where(o => o.BranchId == branchId);
+        var orders = await ordersQ.Select(o => new { o.Id, o.OrderStatus, o.BranchId, o.TotalAmount }).ToListAsync();
+
+        var itemsQ = db.OrderItems.Include(i => i.Order)
+            .Where(i => i.Order != null && i.Order.CreatedAt >= day && i.Order.CreatedAt < dayEnd);
+        if (branchId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.BranchId == branchId);
+        var totalScansToday = await itemsQ.SumAsync(i => (int?)i.Quantity) ?? 0;
+
+        var transactionsToday = orders.Count;
+        var ordersCompletedToday = orders.Count(o => o.OrderStatus == "completed");
+
+        var branchKpi = orders
+            .GroupBy(o => o.BranchId)
+            .Select(g => new
+            {
+                branchId = g.Key,
+                ordersToday = g.Count(),
+                salesToday = g.Sum(o => o.TotalAmount),
+                avgBasketToday = g.Count() > 0 ? Math.Round(g.Sum(o => o.TotalAmount) / g.Count(), 2) : 0m,
+            })
+            .ToList();
+
+        return Ok(new
+        {
+            totalScansToday,
+            ordersCompletedToday,
+            transactionsToday,
+            itemsPerOrderToday = transactionsToday > 0 ? Math.Round((decimal)totalScansToday / transactionsToday, 1) : 0m,
+            branchKpi,
+        });
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Business Intelligence dashboard summary (BI-DASH). Every figure here is a real aggregate
+    // over existing Orders/OrderItems/InventoryStocks/InventoryAdjustments/StockTransfers/
+    // PurchaseOrders data. The BI page previously rendered several widgets (Sales Trends, Best
+    // Selling Products, Slow Moving SKUs, Expiry Loss, Warehouse Insights) as hardcoded "Sample
+    // data" sitting right next to genuinely live tiles (Revenue Today, Orders Today) — easy to
+    // mistake for real figures. Nothing here is invented; where there's genuinely no backing
+    // definition anywhere in this system (e.g. a "stock turnover" spec beyond the COGS/current-
+    // stock-value approximation already used in the Inventory Dashboard report), this reuses that
+    // same approximation rather than making up a new formula.
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("bi-summary")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetBiSummary([FromQuery] Guid? branchId)
+    {
+        var (scopeRole, scopeBranchId) = GetCallerContext();
+        if (scopeRole is not null && scopeRole != "tenant_admin" && scopeBranchId.HasValue) branchId = scopeBranchId;
+
+        var today = DateTime.UtcNow.Date;
+        var weekStart = today.AddDays(-6);
+        var monthStart = new DateTime(today.Year, today.Month, 1);
+        var trendStart = today.AddDays(-13);
+
+        // Sales trend — net sales per day, last 14 days
+        var trendOrdersQ = db.Orders.Where(o => o.CreatedAt >= trendStart && o.CreatedAt < today.AddDays(1) && o.PaymentStatus == "paid");
+        if (branchId.HasValue) trendOrdersQ = trendOrdersQ.Where(o => o.BranchId == branchId);
+        var trendRaw = await trendOrdersQ
+            .GroupBy(o => o.CreatedAt.Date)
+            .Select(g => new { date = g.Key, netSales = g.Sum(o => o.Subtotal - o.DiscountAmount) })
+            .ToListAsync();
+        var trendMap = trendRaw.ToDictionary(x => x.date, x => x.netSales);
+        var salesTrend = Enumerable.Range(0, 14)
+            .Select(i => trendStart.AddDays(i))
+            .Select(d => new { date = d.ToString("yyyy-MM-dd"), netSales = trendMap.GetValueOrDefault(d, 0m) })
+            .ToList();
+
+        // Best selling products — units sold this month, top 5
+        var itemsQ = db.OrderItems.Include(i => i.Order).Include(i => i.Product)
+            .Where(i => i.Order != null && i.Order.CreatedAt >= monthStart && i.Order.PaymentStatus == "paid");
+        if (branchId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.BranchId == branchId);
+        var itemRows = await itemsQ.Select(i => new { i.ProductId, Name = i.Product!.Name, i.Quantity }).ToListAsync();
+        var bestSellers = itemRows.GroupBy(x => x.ProductId)
+            .Select(g => new { productName = g.First().Name, unitsSold = g.Sum(x => x.Quantity) })
+            .OrderByDescending(x => x.unitsSold)
+            .Take(5)
+            .ToList();
+        var maxUnits = bestSellers.Count > 0 ? bestSellers.Max(x => x.unitsSold) : 1;
+        var bestSellersOut = bestSellers
+            .Select(x => new { x.productName, x.unitsSold, pct = maxUnits > 0 ? (int)Math.Round(x.unitsSold / maxUnits * 100) : 0 })
+            .ToList();
+
+        // Slow moving SKUs — currently in stock, zero sales in the last 30 days
+        var recentSaleStart = today.AddDays(-30);
+        var recentItemsQ = db.OrderItems.Include(i => i.Order)
+            .Where(i => i.Order != null && i.Order.CreatedAt >= recentSaleStart && i.Order.PaymentStatus == "paid");
+        if (branchId.HasValue) recentItemsQ = recentItemsQ.Where(i => i.Order!.BranchId == branchId);
+        var recentlySoldProductIds = (await recentItemsQ.Select(i => i.ProductId).Distinct().ToListAsync()).ToHashSet();
+
+        var stockQ = db.InventoryStocks.Include(s => s.Product).Where(s => s.Quantity > 0);
+        if (branchId.HasValue) stockQ = stockQ.Where(s => s.BranchId == branchId);
+        var stockRows = await stockQ.Select(s => new { s.ProductId, Name = s.Product!.Name, s.Quantity }).ToListAsync();
+        var slowMovers = stockRows
+            .Where(s => !recentlySoldProductIds.Contains(s.ProductId))
+            .GroupBy(s => s.ProductId)
+            .Select(g => new { productName = g.First().Name, stockQty = g.Sum(x => x.Quantity) })
+            .OrderByDescending(x => x.stockQty)
+            .Take(5)
+            .ToList();
+
+        // Expiry loss this month — real write-offs whose reason is "expired" (mirrors the Waste &
+        // Spoilage report's own "only value that actually left inventory" rule).
+        var expiredQ = db.InventoryAdjustments.Include(a => a.Product).ThenInclude(p => p!.Category)
+            .Where(a => a.AdjustmentType == "expired" && (a.ApprovalStatus == null || a.ApprovalStatus == "approved") && a.CreatedAt >= monthStart);
+        if (branchId.HasValue) expiredQ = expiredQ.Where(a => a.BranchId == branchId);
+        var expiredRows = await expiredQ.Select(a => new
+        {
+            Category = a.Product != null && a.Product.Category != null ? a.Product.Category.Name : "Other",
+            Value = a.Quantity * (a.Product!.CostPrice ?? a.Product.BasePrice),
+        }).ToListAsync();
+        var expiryLossByCategory = expiredRows.GroupBy(x => x.Category)
+            .Select(g => new { category = g.Key, value = g.Sum(x => x.Value) })
+            .OrderByDescending(x => x.value)
+            .ToList();
+
+        // Warehouse insights — this week
+        var poReceivedQ = db.PurchaseOrderItems.Include(i => i.PurchaseOrder)
+            .Where(i => i.PurchaseOrder != null && i.PurchaseOrder.ReceivedDate != null && i.PurchaseOrder.ReceivedDate >= weekStart);
+        if (branchId.HasValue) poReceivedQ = poReceivedQ.Where(i => i.PurchaseOrder!.BranchId == branchId);
+        var poInbound = await poReceivedQ.SumAsync(i => (decimal?)i.ReceivedQuantity) ?? 0m;
+
+        var transferReceivedQ = db.StockTransferItems.Include(i => i.Transfer)
+            .Where(i => i.Transfer != null && i.Transfer.CompletedDate != null && i.Transfer.CompletedDate >= weekStart);
+        if (branchId.HasValue) transferReceivedQ = transferReceivedQ.Where(i => i.Transfer!.DestBranchId == branchId);
+        var transferInbound = await transferReceivedQ.SumAsync(i => (decimal?)i.ReceivedQuantity) ?? 0m;
+
+        var weekOutboundQ = db.OrderItems.Include(i => i.Order)
+            .Where(i => i.Order != null && i.Order.CreatedAt >= weekStart && i.Order.PaymentStatus == "paid");
+        if (branchId.HasValue) weekOutboundQ = weekOutboundQ.Where(i => i.Order!.BranchId == branchId);
+        var outboundUnits = await weekOutboundQ.SumAsync(i => (int?)i.Quantity) ?? 0;
+
+        var transfersThisWeekQ = db.StockTransfers.Where(t => t.Status == "completed" && t.CompletedDate != null && t.CompletedDate >= weekStart);
+        if (branchId.HasValue) transfersThisWeekQ = transfersThisWeekQ.Where(t => t.DestBranchId == branchId || t.SourceBranchId == branchId);
+        var transfersCount = await transfersThisWeekQ.CountAsync();
+
+        var adjustmentsThisWeekQ = db.InventoryAdjustments.Where(a => a.CreatedAt >= weekStart);
+        if (branchId.HasValue) adjustmentsThisWeekQ = adjustmentsThisWeekQ.Where(a => a.BranchId == branchId);
+        var adjustmentsCount = await adjustmentsThisWeekQ.CountAsync();
+
+        // Turnover — COGS of units sold this month ÷ current inventory value at cost. Current
+        // value stands in for "average inventory" since there are no historical stock snapshots
+        // (same approximation the Inventory Dashboard report uses).
+        var monthCogsQ = db.OrderItems.Include(i => i.Order).Include(i => i.Product)
+            .Where(i => i.Order != null && i.Order.CreatedAt >= monthStart && i.Order.PaymentStatus == "paid");
+        if (branchId.HasValue) monthCogsQ = monthCogsQ.Where(i => i.Order!.BranchId == branchId);
+        var monthCogs = await monthCogsQ.SumAsync(i => (decimal?)(i.Quantity * (i.Product!.CostPrice ?? 0m))) ?? 0m;
+
+        var stockValueQ = db.InventoryStocks.Include(s => s.Product).Where(s => s.Quantity > 0);
+        if (branchId.HasValue) stockValueQ = stockValueQ.Where(s => s.BranchId == branchId);
+        var stockValue = await stockValueQ.SumAsync(s => (decimal?)(s.Quantity * (s.Product!.CostPrice ?? 0m))) ?? 0m;
+        var turnover = stockValue > 0 ? Math.Round(monthCogs / stockValue, 2) : 0m;
+
+        return Ok(new
+        {
+            salesTrend,
+            bestSellers = bestSellersOut,
+            slowMovers,
+            expiryLoss = new { total = expiredRows.Sum(x => x.Value), byCategory = expiryLossByCategory },
+            warehouse = new
+            {
+                inboundUnits = poInbound + transferInbound,
+                outboundUnits,
+                transfersCount,
+                adjustmentsCount,
+                turnover,
+            },
+        });
     }
 
     // ───────────────────────────────────────────────────────────────────────
@@ -406,10 +606,21 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 Gross = i.UnitPrice * i.Quantity,
                 i.DiscountAmount,
                 i.TaxAmount,
+                OrderTaxAmount = i.Order!.TaxAmount,
                 i.TobaccoFeeAmount,
                 Cogs = i.Quantity * (i.Product!.CostPrice ?? 0m),
             })
             .ToListAsync();
+
+        // A line-level filter (category/product/cashier/terminal) can select only some of an
+        // order's items, so the order's own TaxAmount can't be attributed to that subset — VAT
+        // for a filtered report still has to sum the (independently rounded) per-item TaxAmount.
+        // Unfiltered, though, every item of every matching order is present, so summing
+        // OrderTaxAmount once per distinct order matches the single order-level rounding Orders
+        // and ZATCA invoices use, instead of drifting by rounding each line separately and adding
+        // the pieces back up (visible as a ±0.01 SAR gap against the Orders/ZATCA total for the
+        // same transaction).
+        var isLineFiltered = categoryId.HasValue || cashierId.HasValue || terminalId.HasValue || productId.HasValue || hasTobaccoFee;
 
         var returnsQ = db.CustomerReturnItems
             .Include(ri => ri.Return)
@@ -440,6 +651,9 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             var gross = items.Sum(x => x.Gross);
             var discounts = items.Sum(x => x.DiscountAmount);
             var returnValue = returns.Sum(x => x.RefundAmount);
+            var vat = isLineFiltered
+                ? items.Sum(x => x.TaxAmount)
+                : items.DistinctBy(x => x.OrderId).Sum(x => x.OrderTaxAmount);
             result.Add(new DailyLineAgg
             {
                 Transactions = items.Select(x => x.OrderId).Distinct().Count(),
@@ -447,7 +661,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 Discounts = discounts,
                 Returns = returnValue,
                 NetSales = gross - discounts - returnValue,
-                Vat = items.Sum(x => x.TaxAmount),
+                Vat = vat,
                 Cogs = items.Sum(x => x.Cogs),
                 TobaccoFees = items.Sum(x => x.TobaccoFeeAmount),
             });

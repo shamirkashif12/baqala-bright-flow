@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, ArrowRight, ArrowLeft, Bell, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 export type TourStep = {
@@ -164,8 +164,8 @@ export function ProductTour({
             <Bell className="h-6 w-6 text-primary" />
           </div>
           <div className="space-y-1.5">
-            <h2 className="text-lg font-bold">{welcomeTitle}</h2>
-            <p className="text-sm text-muted-foreground">{welcomeBody}</p>
+            <DialogTitle className="text-lg font-bold">{welcomeTitle}</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">{welcomeBody}</DialogDescription>
           </div>
           <div className="flex gap-2 justify-center">
             <Button variant="outline" className="gap-1.5" onClick={end}>

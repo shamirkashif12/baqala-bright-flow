@@ -37,7 +37,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
             branchId = callerBranchId;
 
-        var query = db.ZatcaInvoices.AsQueryable();
+        var query = db.ZatcaInvoices.Include(z => z.Branch).AsQueryable();
         if (branchId.HasValue) query = query.Where(z => z.BranchId == branchId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(z => z.ZatcaStatus == status);
         return Ok(await query.OrderByDescending(z => z.IssueDate).Take(200).ToListAsync());

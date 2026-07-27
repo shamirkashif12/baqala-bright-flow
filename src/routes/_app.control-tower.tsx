@@ -219,10 +219,10 @@ function ControlTower() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <HeroPill icon={ShieldCheck} label="Branches"  value={String(totals.activeBranches)} />
-            <HeroPill icon={Activity}    label="Active"    value={String(totals.activeTerminals)} />
-            <HeroPill icon={WifiOff}     label="Offline"   value={String(totals.alerts)} tone="danger" />
-            <HeroPill icon={UserCheck}   label="On Shift"  value={String(totals.staffOnShift)} />
+            <HeroPill icon={ShieldCheck} label="Branches Active"   value={String(totals.activeBranches)} />
+            <HeroPill icon={Activity}    label="Terminals Active"  value={String(totals.activeTerminals)} />
+            <HeroPill icon={WifiOff}     label="Terminals Offline" value={String(totals.alerts)} tone="danger" />
+            <HeroPill icon={UserCheck}   label="Staff On Shift"    value={String(totals.staffOnShift)} />
           </div>
         </div>
       </div>

@@ -210,14 +210,12 @@ public static class DataSeeder
             });
         }
 
-        // ─── Compliance Rules (RulesEngine) ───────────────────────────────────
-        db.RulesEngine.AddRange(
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Auto-block expired items", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"blockSale\": true, \"reason\": \"expired\"}", Priority = 100, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Warn 7 days before expiry", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"warnDays\": 7}", Priority = 90, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Require manager approval for refund > 100 SAR", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"threshold\": 100, \"requireManagerPin\": true}", Priority = 80, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Max return period 7 days", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"maxDays\": 7}", Priority = 70, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Loyalty points on paid orders", RuleType = "discount", AppliesTo = "all", RuleConfig = "{\"pointsPerSar\": 1}", Priority = 60, IsActive = true, CreatedBy = uAbdullah.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
-        );
+        // Compliance rules (RulesEngine) are seeded below via SeedRulesEngineAsync's fuller
+        // catalog, not here — this used to insert 5 ad-hoc rows directly, which satisfied that
+        // call's `!await db.RulesEngine.AnyAsync()` guard before it ever ran, so the real catalog
+        // (including "Block sale of expired items" and "No discount on tobacco items") never
+        // seeded on a fresh install. See PatchSeedComplianceRulesAsync for the already-seeded-DB
+        // backfill.
 
         // ─── Audit Logs (initial seed events) ────────────────────────────────
         db.AuditLogs.AddRange(
@@ -278,6 +276,42 @@ public static class DataSeeder
             await SeedStockTransfersAsync(db);
 
         await SeedTestUsersAsync(db);
+        await CleanupCouponDataIssuesAsync(db);
+        await CleanupTaxFeeRuleDataIssuesAsync(db);
+    }
+
+    // ─── Cleanup: stray/mismatched coupon data found in QA — runs every startup (idempotent,
+    // becomes a no-op once fixed) rather than only on a fresh DB, since these rows were created
+    // at runtime through the admin UI, not by the seed itself. ────────────────────────────────
+    private static async Task CleanupCouponDataIssuesAsync(BaqalaDbContext db)
+    {
+        var stray = await db.Coupons.Where(c => c.Name.ToLower().Contains("coupen error")).ToListAsync();
+        if (stray.Count > 0) db.Coupons.RemoveRange(stray);
+
+        // "Summer 25% Off" (SUMMER25) was found with Value=50, contradicting its own name —
+        // a runtime data-entry mistake, not something the seed ever produced.
+        var summer25 = await db.Coupons.FirstOrDefaultAsync(c => c.Code == "SUMMER25");
+        if (summer25 is not null && summer25.Value != 25) summer25.Value = 25;
+
+        if (stray.Count > 0 || (summer25 is not null && db.Entry(summer25).State == EntityState.Modified))
+            await db.SaveChangesAsync();
+    }
+
+    // "Card Payment Surcharge (1%)" was seeded with its rate in VatPercentage (the field the "vat"
+    // rule type reads) instead of ExcisePercentage (what feeTypeDisplay on the Service Charges page
+    // actually reads for a custom_fee row) — so it showed blank Type/Value despite the name stating
+    // a rate. Runs every startup like the coupon cleanup above; a no-op once corrected.
+    private static async Task CleanupTaxFeeRuleDataIssuesAsync(BaqalaDbContext db)
+    {
+        var cardSurcharge = await db.TaxFeeRules.FirstOrDefaultAsync(
+            r => r.RuleType == "custom_fee" && r.RuleName.Contains("Card Payment Surcharge"));
+        if (cardSurcharge is null) return;
+        if (cardSurcharge.CustomFeeAmount <= 0 && cardSurcharge.ExcisePercentage <= 0 && cardSurcharge.VatPercentage > 0)
+        {
+            cardSurcharge.ExcisePercentage = cardSurcharge.VatPercentage;
+            cardSurcharge.VatPercentage = 0;
+            await db.SaveChangesAsync();
+        }
     }
 
     // ─── Backfill: Purchase Orders (GRN) ────────────────────────────────────────
@@ -1727,6 +1761,66 @@ public static class DataSeeder
         await db.SaveChangesAsync();
     }
 
+    // Fresh-database seeding (above, in SeedAsync) used to insert 5 ad-hoc "compliance rules"
+    // directly, then call SeedRulesEngineAsync's fuller 14-rule catalog only `if
+    // (!await db.RulesEngine.AnyAsync())` — a guard that was already false by the time it ran,
+    // since the 5 ad-hoc rows had just been saved moments earlier in the same seed pass. So the
+    // richer catalog (which is what FR-ADM-06/the Rules Engine screen was actually designed
+    // around — e.g. "Block sale of expired items" and "No discount on tobacco items") never
+    // seeded on any environment that went through that path, including this one. The early
+    // AddRange is removed for future fresh installs; this patch backfills already-seeded DBs:
+    // it drops the 4 old ad-hoc rows whose concept the fuller catalog supersedes under a
+    // different name, then inserts whichever of the 14 intended rules aren't present yet
+    // (checked by exact RuleName, so an admin's own edits/renames are left alone).
+    public static async Task PatchSeedComplianceRulesAsync(BaqalaDbContext db)
+    {
+        var supersededNames = new[]
+        {
+            "Auto-block expired items", "Require manager approval for refund > 100 SAR",
+            "Max return period 7 days", "Loyalty points on paid orders",
+        };
+        // Materialize then filter in memory — a parameterized array .Contains() inside a live EF
+        // Where() fails to type-map on this MySQL provider (same gotcha as elsewhere in this file).
+        var allRules = await db.RulesEngine.ToListAsync();
+        var toRemove = allRules.Where(r => supersededNames.Contains(r.RuleName)).ToList();
+        if (toRemove.Count > 0)
+        {
+            db.RulesEngine.RemoveRange(toRemove);
+            await db.SaveChangesAsync();
+        }
+
+        var existingNames = allRules.Select(r => r.RuleName).Except(toRemove.Select(r => r.RuleName)).ToHashSet();
+        if (existingNames.Count >= 14) return; // already fully seeded
+
+        var uAdmin = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
+        if (uAdmin is null) return;
+
+        var intended = new[]
+        {
+            new RulesEngine { RuleName = "Max return period — 7 days", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"condition\":\"Days since purchase ≤ 7\",\"action\":\"Allow return with valid receipt\"}", Priority = 100 },
+            new RulesEngine { RuleName = "Perishables — 24h return window", RuleType = "return", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Perishable AND hours since purchase ≤ 24\",\"action\":\"Allow return with inspection\"}", Priority = 95 },
+            new RulesEngine { RuleName = "Block sale of expired items", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"condition\":\"Batch expiry date < today\",\"action\":\"Block sale and alert cashier\"}", Priority = 90 },
+            new RulesEngine { RuleName = "Manager approval — refund > SAR 100", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"Refund amount > 100\",\"action\":\"Require manager PIN approval\"}", Priority = 85 },
+            new RulesEngine { RuleName = "Supervisor approval — void or discount > SAR 50", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"Void or discount amount > 50\",\"action\":\"Require supervisor override PIN\"}", Priority = 80 },
+            new RulesEngine { RuleName = "Cash variance > SAR 200 — manager review", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"End-of-shift cash variance > 200\",\"action\":\"Flag shift for manager review before close\"}", Priority = 75 },
+            new RulesEngine { RuleName = "VIP customer — 10% automatic discount", RuleType = "discount", AppliesTo = "customer_tier", RuleConfig = "{\"condition\":\"Customer tier = VIP or Platinum\",\"action\":\"Apply 10% discount automatically\"}", Priority = 70 },
+            new RulesEngine { RuleName = "Loyalty points — 1 point per SAR spent", RuleType = "discount", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order payment status = paid\",\"action\":\"Award 1 loyalty point per SAR spent\"}", Priority = 60 },
+            new RulesEngine { RuleName = "No discount on tobacco items", RuleType = "discount", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Tobacco\",\"action\":\"Block all discount applications on tobacco SKUs\"}", Priority = 55 },
+            new RulesEngine { RuleName = "Coupon — single use per customer", RuleType = "coupon", AppliesTo = "all", RuleConfig = "{\"condition\":\"Customer has not used this coupon before\",\"action\":\"Accept coupon and mark as used for this customer\"}", Priority = 50 },
+            new RulesEngine { RuleName = "Coupon — validate active date range", RuleType = "coupon", AppliesTo = "all", RuleConfig = "{\"condition\":\"Current date between coupon startDate and endDate\",\"action\":\"Accept coupon if within validity window\"}", Priority = 45 },
+            new RulesEngine { RuleName = "Delivery service fee — SAR 10", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order channel = Delivery\",\"action\":\"Add SAR 10 delivery service fee to order total\"}", Priority = 40 },
+            new RulesEngine { RuleName = "Eid week — 5% holiday surcharge", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Date falls within Eid holiday week\",\"action\":\"Add 5% surcharge to all orders\"}", Priority = 35, IsActive = false },
+        };
+        foreach (var rule in intended.Where(r => !existingNames.Contains(r.RuleName)))
+        {
+            rule.Id = Guid.NewGuid();
+            rule.CreatedBy = uAdmin.Id;
+            rule.CreatedAt = rule.UpdatedAt = DateTime.UtcNow;
+            db.RulesEngine.Add(rule);
+        }
+        await db.SaveChangesAsync();
+    }
+
     // ─── Backfill: Discounts ─────────────────────────────────────────────────
     private static async Task SeedDiscountsAsync(BaqalaDbContext db)
     {
@@ -2077,7 +2171,11 @@ public static class DataSeeder
 
         var cashier = await db.Users.Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.BranchId == branch.Id && u.Role!.Name == "Cashier" && u.Status == "active");
-        var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.BranchId == branch.Id);
+        // Must be an active terminal — picking the branch's first terminal regardless of status
+        // was seeding an "open" shift onto e.g. an offline terminal (POS-04/Jeddah) on every dev
+        // boot, which is exactly the "offline terminal carrying a live session" inconsistency this
+        // demo data must never manufacture.
+        var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.BranchId == branch.Id && t.Status == "active");
         var products = await db.Products.Where(p => p.Status == "active").Take(3).ToListAsync();
         if (cashier is null || products.Count == 0) return;
 

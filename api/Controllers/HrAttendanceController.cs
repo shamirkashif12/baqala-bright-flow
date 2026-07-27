@@ -32,27 +32,6 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
     private async Task<Guid?> GetOwnEmployeeIdAsync(Guid? callerId) =>
         callerId.HasValue ? await db.Employees.Where(e => e.UserId == callerId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
-    // Late/early-leave minutes from shift timing. Same-day comparison only — does not attempt
-    // to handle a night shift's End time crossing midnight, kept simple for this pass.
-    private static (int lateMinutes, int earlyLeaveMinutes) ComputeMinutes(WorkShift? shift, DateTime? checkIn, DateTime? checkOut)
-    {
-        if (shift is null) return (0, 0);
-        int late = 0, early = 0;
-        if (checkIn.HasValue && TimeSpan.TryParse(shift.StartTime, out var start))
-        {
-            var allowed = start + TimeSpan.FromMinutes(shift.GraceInMinutes);
-            var diff = checkIn.Value.TimeOfDay - allowed;
-            if (diff.TotalMinutes > 0) late = (int)Math.Ceiling(diff.TotalMinutes);
-        }
-        if (checkOut.HasValue && TimeSpan.TryParse(shift.EndTime, out var end))
-        {
-            var allowed = end - TimeSpan.FromMinutes(shift.GraceOutMinutes);
-            var diff = allowed - checkOut.Value.TimeOfDay;
-            if (diff.TotalMinutes > 0) early = (int)Math.Ceiling(diff.TotalMinutes);
-        }
-        return (late, early);
-    }
-
     private async Task<HashSet<(Guid? BranchId, DateOnly Date)>> LoadActiveHolidaysAsync() =>
         (await db.Holidays.Where(h => h.Status == "active").Select(h => new { h.BranchId, h.Date }).ToListAsync())
             .Select(h => (h.BranchId, h.Date)).ToHashSet();
@@ -155,7 +134,7 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
         if (exists) return Conflict(new { message = "Attendance already recorded for this employee on this date. Use Manual Correction to update it." });
 
         WorkShift? shift = req.ShiftId.HasValue ? await db.WorkShifts.FindAsync(req.ShiftId.Value) : null;
-        var (late, early) = ComputeMinutes(shift, req.CheckInTime, req.CheckOutTime);
+        var (late, early) = AttendanceStatusHelper.ComputeLateEarlyMinutes(shift, req.CheckInTime, req.CheckOutTime);
         var status = req.Status;
         if (shift is not null && req.CheckInTime.HasValue && late > 0 && status == "present") status = "late";
 
@@ -198,7 +177,7 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
 
         attendance.ShiftId = req.ShiftId ?? attendance.ShiftId;
         WorkShift? shift = attendance.ShiftId.HasValue ? await db.WorkShifts.FindAsync(attendance.ShiftId.Value) : null;
-        var (late, early) = ComputeMinutes(shift, req.CheckInTime ?? attendance.CheckIn, req.CheckOutTime ?? attendance.CheckOut);
+        var (late, early) = AttendanceStatusHelper.ComputeLateEarlyMinutes(shift, req.CheckInTime ?? attendance.CheckIn, req.CheckOutTime ?? attendance.CheckOut);
 
         attendance.CheckIn = req.CheckInTime ?? attendance.CheckIn;
         attendance.CheckOut = req.CheckOutTime ?? attendance.CheckOut;
