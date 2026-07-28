@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class FinanceController(BaqalaDbContext db, ICouponCreationService couponCreation, IAuditService audit) : ControllerBase
+public class FinanceController(BaqalaDbContext db, ICouponCreationService couponCreation, IAuditService audit, IApprovalNotificationService approvalNotifications) : ControllerBase
 {
     // Mirrors the GetCallerContext pattern used across the other controllers.
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -277,6 +277,8 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
             };
             db.ApprovalRequests.Add(pending);
             await db.SaveChangesAsync();
+            await approvalNotifications.NotifyPendingAsync(pending, "Coupons",
+                "Coupon awaiting approval", $"Coupon {coupon.Code} — {coupon.Name} is waiting for your approval.");
             return Accepted(new { message = "Coupon request sent for manager approval.", approvalRequestId = pending.Id });
         }
 

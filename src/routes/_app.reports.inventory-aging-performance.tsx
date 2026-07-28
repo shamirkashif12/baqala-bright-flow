@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -25,6 +26,24 @@ const firstOfMonthStr = () => {
 };
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// Product Status is the catalog state of the SKU (Product.status) — distinct from the performance
+// tier below, which this report derives. A discontinued SKU showing as Dead Stock is expected;
+// an active one is the finding.
+const PRODUCT_STATUSES = [
+  { id: "active", label: "Active" },
+  { id: "inactive", label: "Inactive" },
+  { id: "discontinued", label: "Discontinued" },
+];
+const CLASSIFICATIONS = [
+  "Star Products", "High Performers", "Average Performers", "Slow Moving Products", "Dead Stock",
+].map((c) => ({ id: c, label: c }));
+
+const PRODUCT_STATUS_CLASS: Record<string, string> = {
+  active: "bg-success/15 text-success",
+  inactive: "bg-muted text-muted-foreground",
+  discontinued: "bg-destructive/15 text-destructive",
+};
+
 function InventoryAgingPerformance() {
   const { user, canViewModule } = useAuth();
   const { canExport } = usePermission("Reports");
@@ -38,6 +57,8 @@ function InventoryAgingPerformance() {
   const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [productIds, setProductIds] = useState<string[]>([]);
+  const [productStatuses, setProductStatuses] = useState<string[]>([]);
+  const [classifications, setClassifications] = useState<string[]>([]);
   const [data, setData] = useState<PerfData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,7 +75,9 @@ function InventoryAgingPerformance() {
     warehouseId: warehouseIds.length ? warehouseIds : undefined,
     categoryId: categoryIds.length ? categoryIds : undefined,
     productId: productIds.length ? productIds : undefined,
-  }), [branchIds, warehouseIds, categoryIds, productIds]);
+    productStatus: productStatuses.length ? productStatuses : undefined,
+    classification: classifications.length ? classifications : undefined,
+  }), [branchIds, warehouseIds, categoryIds, productIds, productStatuses, classifications]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -122,6 +145,22 @@ function InventoryAgingPerformance() {
             onChange={setProductIds}
           />
         </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Product Statuses"
+            options={PRODUCT_STATUSES}
+            selected={productStatuses}
+            onChange={setProductStatuses}
+          />
+        </div>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Classifications"
+            options={CLASSIFICATIONS}
+            selected={classifications}
+            onChange={setClassifications}
+          />
+        </div>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -149,6 +188,14 @@ function InventoryAgingPerformance() {
             { key: "sku", label: "SKU" },
             { key: "productName", label: "Product" },
             { key: "category", label: "Category" },
+            {
+              key: "productStatus", label: "Product Status",
+              render: (r: ProductPerformanceRow) => (
+                <Badge variant="outline" className={`text-[10px] border-0 capitalize ${PRODUCT_STATUS_CLASS[r.productStatus] ?? "bg-muted text-muted-foreground"}`}>
+                  {r.productStatus}
+                </Badge>
+              ),
+            },
             { key: "unitsSold", label: "Units Sold" },
             { key: "salesValue", label: "Sales Value", render: (r: ProductPerformanceRow) => <><SARIcon />{fmt(r.salesValue)}</> },
             ...(canViewCost

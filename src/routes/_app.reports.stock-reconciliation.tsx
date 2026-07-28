@@ -109,7 +109,7 @@ function StockReconciliation() {
 
   return (
     <PageShell
-      title="Stock Reconciliation"
+      title="Stocktaking Report (Inventory Count)"
       subtitle="Stock review, audit and reconciliation — system vs counted quantity by count session"
     >
       <div className="flex flex-wrap items-center gap-2">

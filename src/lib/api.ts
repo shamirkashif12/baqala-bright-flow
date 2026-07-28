@@ -327,13 +327,16 @@ export const api = {
     request<Order>("/api/orders", { method: "POST", body: JSON.stringify(data) }),
   updateOrderStatus: (id: string, status: string) =>
     request<Order>(`/api/orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  // Both return the updated Order on a 200, or a 202 `{ message, approvalRequestId }` when the
+  // caller lacks Orders:Approve and the change was queued in the Approval Center instead of
+  // applied — callers must check `approvalRequestId` before claiming the order changed.
   editOrder: (id: string, data: {
     items: OrderEditItem[]; notes?: string; paymentMethod?: string; discountAmount?: number;
     updateCustomer?: boolean; customerId?: string | null;
   }) =>
-    request<Order>(`/api/orders/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    request<OrderMutationResult>(`/api/orders/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   voidOrder: (id: string, data: { reason?: string }) =>
-    request<Order>(`/api/orders/${id}`, { method: "DELETE", body: JSON.stringify(data) }),
+    request<OrderMutationResult>(`/api/orders/${id}`, { method: "DELETE", body: JSON.stringify(data) }),
 
   // Cashier Shifts
   getShifts: (params?: { branchId?: string[]; cashierId?: string; terminalId?: string[]; status?: string[]; dateFrom?: string; dateTo?: string }) =>
@@ -709,7 +712,7 @@ export const api = {
   getInventorySnapshotScope: () =>
     request<InventorySnapshotScope>("/api/reports/inventory-snapshot/scope"),
 
-  getInventoryDashboardReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; locationType?: string; moverLimit?: number }) =>
+  getInventoryDashboardReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; locationType?: string; productId?: string[]; productStatus?: string[]; classification?: string[]; ageBucket?: string[]; moverLimit?: number }) =>
     request<InventoryDashboardReport>(`/api/reports/inventory-dashboard${toQuery(params)}`),
 
   // FRD §2.1 — the "Stock Review" / "Stock Audit" / "Inventory Reconciliation" filters all describe
@@ -722,9 +725,9 @@ export const api = {
   exportStockReconciliationReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; productId?: string[]; categoryId?: string[]; countedBy?: string[]; status?: string[]; varianceOnly?: boolean; countType?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/stock-reconciliation/export${toQuery(params)}`),
 
-  getProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[] }) =>
+  getProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; productStatus?: string[]; classification?: string[] }) =>
     request<ProductPerformanceReport>(`/api/reports/inventory-aging-performance${toQuery(params)}`),
-  exportProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; productStatus?: string[]; classification?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/inventory-aging-performance/export${toQuery(params)}`),
 
   getBranchSalesReport: (params?: { from?: string; to?: string; city?: string; branchId?: string; customerType?: string; cashierId?: string; terminalId?: string; productId?: string; categoryId?: string; hasTobaccoFee?: boolean }) =>
@@ -752,9 +755,9 @@ export const api = {
   exportSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/supplier-performance/export${toQuery(params)}`),
 
-  getSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string }) =>
+  getSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string; productId?: string[]; returnedBy?: string[]; approvedBy?: string[] }) =>
     request<SupplierReturnsReportRow[]>(`/api/reports/supplier-returns${toQuery(params)}`),
-  exportSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string; productId?: string[]; returnedBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/supplier-returns/export${toQuery(params)}`),
 
   getStockTransferReport: (params?: { from?: string; to?: string; transferType?: string; status?: string[]; sourceBranchId?: string[]; sourceWarehouseId?: string[]; destBranchId?: string[]; destWarehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[] }) =>
@@ -771,6 +774,11 @@ export const api = {
     request<EmployeeAuditRow[]>(`/api/reports/employee-audit-center${toQuery(params)}`),
   exportEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/employee-audit-center/export${toQuery(params)}`),
+
+  // Shared by the Employee Activity Report and the Employee Audit Center — the affected products,
+  // quantities and before/after values behind one audit row.
+  getAuditDetail: (auditLogId: string) =>
+    request<AuditDetail>(`/api/reports/audit-detail/${auditLogId}`),
 
   getWasteSpoilageReport: (params?: { from?: string; to?: string; branchId?: string[]; reason?: string; productId?: string[]; categoryId?: string[]; adjustedBy?: string[]; isTobacco?: boolean; warehouseId?: string[]; approvedBy?: string[]; approvalStatus?: string[] }) =>
     request<WasteSpoilageReport>(`/api/reports/waste-spoilage${toQuery(params)}`),
@@ -1370,6 +1378,9 @@ export interface Order {
   // that succeeded server-side but whose response was lost to a timeout returns the SAME order
   // on retry instead of creating a duplicate paid order (backend dedupes on this).
   clientRequestId?: string;
+  // Only populated on list rows (GET /api/orders) — a queued cancellation or modification
+  // awaiting a manager's decision.
+  pendingApproval?: OrderPendingApproval | null;
 }
 
 export interface OrderItem {
@@ -1378,6 +1389,23 @@ export interface OrderItem {
 }
 
 export interface OrderEditItem { id?: string; productId: string; quantity: number; unitPrice: number; }
+
+// A cancellation/modification queued against this order and still awaiting a decision. Present on
+// list rows so the Orders screen itself can flag work waiting on a manager, instead of the request
+// being visible only in the Approval Center.
+export interface OrderPendingApproval {
+  id: string;
+  requestType: string;
+  requestedAt: string;
+  requestedByName?: string;
+  reason?: string;
+  summary: string;
+}
+
+// Edit/void either applied (an Order comes back) or was queued for manager approval (202 with an
+// approvalRequestId and nothing else). Partial<Order> so callers can't read order fields without
+// first checking which of the two happened.
+export type OrderMutationResult = Partial<Order> & { approvalRequestId?: string; message?: string };
 
 export interface OrderPayment {
   id?: string; paymentMethod: string; amount: number; status: string;
@@ -1996,6 +2024,8 @@ export interface InventoryDataWindow {
 // FRD §2.7 — one row per product at one location.
 export interface InventoryAgingRow {
   productId: string; sku: string; productName: string; category: string;
+  // active | inactive | discontinued — catalog state of the SKU, distinct from `classification`.
+  productStatus: string;
   location: string; locationType: "branch" | "warehouse";
   onHandQty: number; stockValue: number;
   // Null when no batch record exists — the stock row alone can't say when goods arrived.
@@ -2056,6 +2086,9 @@ export interface StockReconciliationReport {
 export type ProductPerformanceTier = "Star Products" | "High Performers" | "Average Performers" | "Slow Moving Products" | "Dead Stock";
 export interface ProductPerformanceRow {
   productId: string; sku: string; productName: string; category: string;
+  // Catalog status of the product itself (active | inactive | discontinued) — not the performance
+  // `classification` below.
+  productStatus: string;
   unitsSold: number; salesValue: number; cogs: number; grossProfit: number; marginPct?: number | null;
   currentStockQty: number; currentStockValue: number;
   // null when there's no batch record at all (predates batch tracking, or nothing on hand).
@@ -2139,11 +2172,14 @@ export interface SupplierPerformanceReport {
 }
 
 export interface SupplierReturnsReportItem {
-  productName: string; sku: string; returnedQuantity: number; unitCost: number; totalValue: number; reason: string; notes?: string;
+  productId: string; productName: string; sku: string;
+  requestedQuantity: number; approvedQuantity?: number | null; receivedQuantity?: number | null;
+  returnedQuantity: number; unitCost: number; totalValue: number; reason: string; notes?: string;
 }
 export interface SupplierReturnsReportRow {
-  returnNumber: string; returnDate: string; supplierName: string; warehouseName: string;
-  returnedBy: string; approvedBy: string; status: string; totalValue: number; items: SupplierReturnsReportItem[];
+  id: string; returnNumber: string; returnDate: string; supplierName: string; warehouseName: string;
+  returnedBy: string; approvedBy: string; status: string; returnReason?: string; notes?: string;
+  totalQuantity: number; totalValue: number; items: SupplierReturnsReportItem[];
 }
 
 export interface StockTransferReportRow {
@@ -2163,6 +2199,24 @@ export interface PurchaseOrderReportRow {
 export interface EmployeeAuditRow {
   id: string; createdAt: string; employeeName: string; actionCategory: string; actionLabel: string;
   oldValueSummary?: string; newValueSummary?: string; branchName: string; deviceName: string; relatedTransaction: string; severity: string;
+  itemCount: number; totalQuantity: number;
+}
+
+export interface AuditDetailItem {
+  productName: string; sku: string; quantity: number; unitPrice?: number | null; lineTotal?: number | null; note?: string;
+}
+export interface AuditFieldChange {
+  field: string; oldValue?: string | null; newValue?: string | null;
+}
+export interface AuditDetail {
+  id: string; createdAt: string; action: string; actionLabel: string;
+  module?: string; entityType?: string; entityId?: string;
+  employeeName: string; performedBy: string; branchName: string; deviceName: string;
+  ipAddress?: string; severity: string; notes?: string;
+  relatedTransaction: string;
+  transactionFields: AuditFieldChange[];
+  changes: AuditFieldChange[];
+  items: AuditDetailItem[];
 }
 
 export interface WasteSpoilageRow {

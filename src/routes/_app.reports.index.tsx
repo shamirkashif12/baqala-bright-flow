@@ -61,7 +61,9 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/purchase-orders", exportFile: () => api.exportPurchaseOrderReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch & warehouse", icon: Boxes, color: "warning",
       href: "/reports/inventory-snapshot", exportFile: () => api.exportInventorySnapshotReport({ exportedBy }) },
-    { code: "stock-reconciliation", name: "Stock Reconciliation", desc: "Stock review / audit — system vs counted", icon: ClipboardCheck, color: "primary",
+    // Named for what the business calls it (Stocktaking / Inventory Count) rather than only for
+    // the reconciliation step it ends in — that mismatch is why it read as a missing report.
+    { code: "stock-reconciliation", name: "Stocktaking Report", desc: "Inventory count sessions — system vs counted quantity, variance and sign-off", icon: ClipboardCheck, color: "primary",
       href: "/reports/stock-reconciliation", exportFile: () => api.exportStockReconciliationReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     // KPI dashboard rather than a tabular report — there is no row set to export, so it opts out
     // of the export affordance the others share.

@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, IBatchConsumptionService batchConsumption, IStockMovementService stockMovements, IOrderVoidService orderVoidService, ILogger<OrdersController> logger) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, IBatchConsumptionService batchConsumption, IStockMovementService stockMovements, IOrderVoidService orderVoidService, IOrderEditService orderEditService, IApprovalNotificationService approvalNotifications, ILogger<OrdersController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's orders —
     // mirrors ReportsController.GetCallerContext. Previously branchId was just an optional query
@@ -27,9 +27,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     // identically-named resolver, duplicated per-controller like GetCallerContext above since
     // this codebase has no shared service layer for per-entity logic. Governs EARNING/REDEMPTION
     // terms only (rate, redemption value, min/max redeem) — these are allowed to vary per branch.
-    private async Task<LoyaltyProgram?> ResolveLoyaltyProgramAsync(Guid branchId) =>
-        await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == branchId && p.IsActive)
-        ?? await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == null && p.IsActive);
+    // Implementation lives on OrderEditService (which needs the identical answer when replaying an
+    // approved order modification) — delegated rather than duplicated so the two can't drift.
+    private Task<LoyaltyProgram?> ResolveLoyaltyProgramAsync(Guid branchId) =>
+        OrderEditService.ResolveLoyaltyProgramAsync(db, branchId);
 
     // Tier (Standard/Silver/Gold/Platinum) is a single field on Customer, shared across every
     // branch — it can't be recomputed against whichever branch's program happens to be active for
@@ -39,8 +40,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     // never from a branch override, regardless of which branch this order belongs to. If the
     // default program itself is inactive, tier is frozen (not recomputed) rather than falling
     // back to some other branch's numbers.
-    private async Task<LoyaltyProgram?> ResolveGlobalTierConfigAsync() =>
-        await db.LoyaltyPrograms.FirstOrDefaultAsync(p => p.BranchId == null && p.IsActive);
+    private Task<LoyaltyProgram?> ResolveGlobalTierConfigAsync() =>
+        OrderEditService.ResolveGlobalTierConfigAsync(db);
 
     // FRD 16.1 "POS Actions" — the Employee Activity Report can only surface these rows if they
     // carry module/employeeId like every HRM audit call already does; POS-side actions predate
@@ -122,9 +123,41 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var effectivePage = page is > 0 ? page.Value : 1;
         // page/pageSize are optional — omitting them keeps the old "return up to 200, no paging"
         // behavior for callers that don't paginate (Cashier dashboard, Branches, Sales, Returns).
-        var orders = page.HasValue || pageSize.HasValue
+        var paged = page.HasValue || pageSize.HasValue
             ? filtered.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize).ToList()
             : filtered.Take(200).ToList();
+
+        // A queued cancellation/modification left no trace on the order itself — the order simply
+        // looked untouched, so a manager had no way to know from this screen that someone was
+        // waiting on them. Attach the pending request so the list can badge the row and offer
+        // Approve/Reject inline. Only the current page's orders are annotated.
+        var pendingByOrder = (await db.ApprovalRequests
+                .Include(a => a.RequestedByUser)
+                .Where(a => a.Status == "pending" && a.EntityType == "Order")
+                .OrderByDescending(a => a.RequestedAt)
+                .ToListAsync())
+            .Where(a => a.EntityId.HasValue)
+            .GroupBy(a => a.EntityId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var orders = paged.Select(o => new
+        {
+            o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
+            o.Subtotal, o.DiscountAmount, o.LoyaltyPointsRedeemed, o.LoyaltyDiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
+            o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
+            o.Branch, o.Cashier, o.Items, o.Payments, o.Discounts, o.ServiceCharges,
+            PendingApproval = pendingByOrder.TryGetValue(o.Id, out var pa)
+                ? new
+                {
+                    pa.Id,
+                    pa.RequestType,
+                    pa.RequestedAt,
+                    RequestedByName = pa.RequestedByUser?.FullName,
+                    pa.Reason,
+                    Summary = ApprovalsController.EntityLabel(pa),
+                }
+                : null,
+        }).ToList();
 
         if (!page.HasValue && !pageSize.HasValue) return Ok(orders);
         return Ok(new { total = totalCount, page = effectivePage, pageSize = effectivePageSize, items = orders });
@@ -712,8 +745,42 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     entityId: order.Id,
                     userId: order.CashierId,
                     branchId: order.BranchId,
-                    details: System.Text.Json.JsonSerializer.Serialize(new { order.OrderNumber, order.DiscountAmount, order.Subtotal }),
+                    details: System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        order.OrderNumber, order.DiscountAmount, order.Subtotal,
+                        DiscountPct = order.Subtotal > 0 ? Math.Round(order.DiscountAmount / order.Subtotal * 100m, 2) : 0m,
+                        Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
+                    }),
                     severity: "warning",
+                    module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId), terminalId: order.TerminalId);
+            }
+
+            // Price Overrides at the till. Line prices arrive from the client, so a cashier
+            // selling at anything other than the resolved price left no trace at all — this is
+            // the activity the client flagged as missing from the audit trail. One row per
+            // repriced product, matching what an order EDIT records (see OrderEditService).
+            var expectedPrices = await orderEditService.ResolveExpectedPricesAsync(
+                order.Items.Select(i => i.ProductId), order.BranchId, order.CustomerId);
+            foreach (var line in order.Items)
+            {
+                if (!expectedPrices.TryGetValue(line.ProductId, out var listPrice)) continue;
+                if (line.UnitPrice == listPrice) continue;
+                await audit.LogAsync(
+                    action: "price_override",
+                    entityType: "Order",
+                    entityId: order.Id,
+                    userId: order.CashierId,
+                    branchId: order.BranchId,
+                    details: System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        order.OrderNumber,
+                        ListPrice = listPrice,
+                        OverriddenPrice = line.UnitPrice,
+                        Variance = line.UnitPrice - listPrice,
+                        Items = new[] { new { line.ProductId, line.Quantity, line.UnitPrice, line.TotalPrice } },
+                    }),
+                    severity: "warning",
+                    beforeValue: System.Text.Json.JsonSerializer.Serialize(new { UnitPrice = listPrice }),
                     module: "POS", employeeId: await ResolveEmployeeIdAsync(order.CashierId), terminalId: order.TerminalId);
             }
         }
@@ -1079,7 +1146,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     // Recomputed here (rather than carried over) whenever items are edited, since quantities/
     // lines/prices can all change including brand-new lines.
     private static decimal CalcTobaccoFee(decimal unitPrice, decimal minimumExciseAmount, decimal excisePercentage) =>
-        Math.Max(minimumExciseAmount, unitPrice * excisePercentage / 100m);
+        OrderEditService.CalcTobaccoFee(unitPrice, minimumExciseAmount, excisePercentage);
 
     // Falls back to the historical hardcoded values (25 SAR / 100%) only if no tobacco_excise
     // rule row exists at all — every seeded/live environment has exactly one, so this is a safety
@@ -1087,18 +1154,19 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     // mandatory KSA tax on tobacco items, not an optional toggle, so an inactive rule still
     // supplies its configured rate/minimum here (this mirrors EditOrder's pre-existing behavior
     // of always charging excise on tobacco items regardless of rule status — unchanged by this).
-    private async Task<(decimal MinimumExciseAmount, decimal ExcisePercentage)> ResolveTobaccoExciseConfigAsync()
-    {
-        var rule = await db.TaxFeeRules.Where(r => r.RuleType == "tobacco_excise")
-            .OrderByDescending(r => r.Status == "active").FirstOrDefaultAsync();
-        return rule is null ? (25m, 100m) : (rule.MinimumExciseAmount, rule.ExcisePercentage);
-    }
+    private Task<(decimal MinimumExciseAmount, decimal ExcisePercentage)> ResolveTobaccoExciseConfigAsync() =>
+        OrderEditService.ResolveTobaccoExciseConfigAsync(db);
 
     // Order Editing (FR: "Edit orders from dashboard" — manager corrects mistakes, editable order
-    // with audit log). Permission-gated only — a cashier without Orders:Edit simply cannot edit.
-    // Scope: line items (qty/price/add/remove), notes, discount override, payment method (single-
-    // payment orders only — split payments must be corrected via void + re-sale), and which
-    // customer the order is attributed to.
+    // with audit log). Scope: line items (qty/price/add/remove), notes, discount override, payment
+    // method (single-payment orders only — split payments must be corrected via void + re-sale),
+    // and which customer the order is attributed to.
+    //
+    // Approval Workflow: an order modification rewrites money that has already been taken, so it
+    // follows the same maker-checker shape as VoidOrder below — a caller holding Orders:Approve
+    // (i.e. already a manager) edits immediately (self-approve), anyone else's edit is queued in
+    // the Approval Center and the order is left untouched until a manager decides. The edit itself
+    // lives in IOrderEditService so both paths run identical code.
     [RequirePermission("Orders", PermAction.Edit)]
     [HttpPatch("{id:guid}")]
     public async Task<IActionResult> EditOrder(Guid id, [FromBody] OrderEditRequest req)
@@ -1107,293 +1175,96 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
         var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { message = "Order not found." });
+        if (order.OrderStatus == "cancelled") return BadRequest(new { message = "A cancelled order can't be edited." });
 
-        // Captured before any mutation below — needed to reverse this order's OLD contribution to
-        // loyalty (earned points, TotalSpend) once the new totals are known, see the loyalty
-        // re-sync block below.
-        var oldCustomerId = order.CustomerId;
-        var oldTotalAmount = order.TotalAmount;
+        var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Orders", PermAction.Approve);
 
-        if (req.PaymentMethod is not null && order.Payments.Count > 1)
-            return BadRequest(new { message = "This order has split payments — payment method can't be edited here." });
+        // Discount policy caps (POS Settings → CashierMaxDiscountPct / ManagerMaxDiscountPct) were
+        // configurable but never actually enforced anywhere — a cashier could set any discount they
+        // liked. The manager cap is a hard ceiling for everyone except tenant_admin; the cashier cap
+        // is what routes an over-cap edit into the approval queue below.
+        var settings = await db.PosSettings.AsNoTracking().FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
+        var requestedSubtotal = req.Items.Sum(i => i.Quantity * i.UnitPrice);
+        var requestedDiscountPct = req.DiscountAmount.HasValue && requestedSubtotal > 0
+            ? req.DiscountAmount.Value / requestedSubtotal * 100m
+            : 0m;
+        var isAdmin = User.FindFirst("role")?.Value == "tenant_admin";
+        var managerCap = settings?.ManagerMaxDiscountPct ?? 25m;
+        var cashierCap = settings?.CashierMaxDiscountPct ?? 5m;
+        if (!isAdmin && requestedDiscountPct > managerCap)
+            return BadRequest(new { message = $"A discount of {requestedDiscountPct:0.##}% exceeds the {managerCap:0.##}% maximum allowed on this branch." });
 
-        var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new
+        // A repriced line is a Price Override — an approval-based action in its own right, so it
+        // routes to the queue for a caller who can't self-approve even when no discount is involved.
+        var expectedPrices = await orderEditService.ResolveExpectedPricesAsync(
+            req.Items.Select(i => i.ProductId), order.BranchId, order.CustomerId);
+        var oldPriceByProduct = order.Items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.First().UnitPrice);
+        var hasPriceOverride = req.Items.Any(i =>
+            expectedPrices.TryGetValue(i.ProductId, out var listPrice)
+            && i.UnitPrice != listPrice
+            && (!oldPriceByProduct.TryGetValue(i.ProductId, out var was) || was != i.UnitPrice));
+
+        if (!canSelfApprove)
         {
-            order.Subtotal,
-            order.DiscountAmount,
-            order.TaxAmount,
-            order.TotalAmount,
-            order.Notes,
-            order.CustomerId,
-            PaymentMethod = order.Payments.FirstOrDefault()?.PaymentMethod,
-            Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
-        });
-        var oldDiscount = order.DiscountAmount;
-
-        // Reconcile inventory by the delta between old and new quantity per product — mirrors the
-        // decrement block in Create. Grouped by product first so a product simply changing
-        // quantity (the common case) nets to one adjustment instead of a remove-then-re-add.
-        var oldQtyByProduct = order.Items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.Sum(i => i.Quantity));
-        var newQtyByProduct = req.Items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.Sum(i => i.Quantity));
-        foreach (var productId in oldQtyByProduct.Keys.Union(newQtyByProduct.Keys))
-        {
-            var delta = newQtyByProduct.GetValueOrDefault(productId, 0m) - oldQtyByProduct.GetValueOrDefault(productId, 0m);
-            if (delta == 0) continue;
-
-            var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.ProductId == productId && s.BranchId == order.BranchId);
-            if (stock != null)
+            var pending = new ApprovalRequest
             {
-                stock.Quantity -= delta;
-                stock.LastUpdated = DateTime.UtcNow;
-                stock.UpdatedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                db.InventoryStocks.Add(new InventoryStock
-                {
-                    Id = Guid.NewGuid(),
-                    ProductId = productId,
-                    BranchId = order.BranchId,
-                    Quantity = -delta,
-                    LastUpdated = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                });
-            }
-        }
-
-        // Replace line items wholesale rather than diffing individual rows — OrderItem has no
-        // dependents of its own besides Order, so this is safe and much simpler. This also covers
-        // "adding items"/"modifying prices": a line with a new ProductId or a UnitPrice different
-        // from the original is just another entry in req.Items, nothing special-cased.
-        //
-        // Looked up one product at a time rather than `productIds.Contains(p.Id)` — the MySQL EF
-        // Core provider used here cannot assign a type mapping to a parameterized List<Guid>
-        // IN-list (same constraint noted throughout ReportsController), which throws at query time.
-        var productIds = req.Items.Select(i => i.ProductId).Distinct().ToList();
-        var tobaccoFlags = new Dictionary<Guid, bool>();
-        foreach (var pid in productIds)
-            tobaccoFlags[pid] = await db.Products.Where(p => p.Id == pid).Select(p => p.IsTobacco).FirstOrDefaultAsync();
-        var (minimumExciseAmount, excisePercentage) = await ResolveTobaccoExciseConfigAsync();
-
-        db.OrderItems.RemoveRange(order.Items);
-        var newItems = req.Items.Select(it =>
-        {
-            var totalPrice = it.Quantity * it.UnitPrice;
-            var isTobacco = tobaccoFlags.GetValueOrDefault(it.ProductId);
-            return new OrderItem
-            {
-                Id = Guid.NewGuid(),
-                OrderId = order.Id,
-                ProductId = it.ProductId,
-                Quantity = it.Quantity,
-                UnitPrice = it.UnitPrice,
-                TotalPrice = totalPrice,
-                TobaccoFeeAmount = isTobacco ? it.Quantity * CalcTobaccoFee(it.UnitPrice, minimumExciseAmount, excisePercentage) : 0,
-                CreatedAt = DateTime.UtcNow,
+                RequestType = "order_modification",
+                EntityType = "Order",
+                EntityId = order.Id,
+                BranchId = order.BranchId,
+                RequestedBy = CallerId() ?? Guid.Empty,
+                Reason = req.Notes,
+                // The full edit payload — replayed verbatim by ApprovalsController.Decide, which is
+                // the only way the approved edit can be exactly the edit that was reviewed.
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(req),
             };
-        }).ToList();
-        db.OrderItems.AddRange(newItems);
+            db.ApprovalRequests.Add(pending);
+            await db.SaveChangesAsync();
 
-        // Recompute totals server-side from the new items — never trust a client-sent total.
-        // Discount either carries over proportionally (capped to the new subtotal) or is replaced
-        // outright when the caller explicitly sends an override (req.DiscountAmount).
-        var newSubtotal = newItems.Sum(i => i.TotalPrice);
-        var newTobaccoFee = newItems.Sum(i => i.TobaccoFeeAmount);
-        // Can't let an edit shrink the order below what's already been redeemed in loyalty points —
-        // those points already left the customer's balance, this endpoint has no concept of giving
-        // them back, and forcing the discount up to cover it here would push the total negative.
-        if (order.LoyaltyDiscountAmount > newSubtotal)
-        {
-            return BadRequest(new
-            {
-                message = $"This order already has SAR {order.LoyaltyDiscountAmount:F2} redeemed via loyalty points — " +
-                           $"the new subtotal (SAR {newSubtotal:F2}) can't be reduced below that. Void the order instead if it needs to be this small."
-            });
-        }
-
-        var newDiscount = req.DiscountAmount.HasValue
-            ? Math.Clamp(req.DiscountAmount.Value, 0, newSubtotal)
-            : Math.Min(order.DiscountAmount, newSubtotal);
-
-        // Same reasoning as above — the discount itself can't be edited down below the redeemed
-        // amount either, even if the subtotal is still large enough overall.
-        if (newDiscount < order.LoyaltyDiscountAmount) newDiscount = order.LoyaltyDiscountAmount;
-
-        // VAT is charged on (subtotal - discount + tobacco fee), not on subtotal alone (see
-        // Create()) — so the rate must be derived from that same taxable base, not just Subtotal,
-        // or a discounted/tobacco order's effective rate would be under/over-stated when re-applied
-        // to the new totals below.
-        var oldTaxableBase = order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount;
-        var taxRate = oldTaxableBase > 0 ? order.TaxAmount / oldTaxableBase : 0m;
-        var newTaxableBase = Math.Max(0, newSubtotal - newDiscount + newTobaccoFee);
-
-        order.Subtotal = newSubtotal;
-        order.DiscountAmount = newDiscount;
-        order.TobaccoFeeAmount = newTobaccoFee;
-        order.TaxAmount = Math.Round(newTaxableBase * taxRate, 2);
-        order.TotalAmount = newSubtotal - newDiscount + order.TobaccoFeeAmount + order.TaxAmount + order.CustomFeeAmount;
-        order.Notes = req.Notes;
-
-        // Loyalty re-sync: TotalAmount just changed (and CustomerId may be about to be
-        // reassigned below) after points were already earned against the OLD total for the OLD
-        // customer in Create() — replay the same reversal-then-earn steps Void/Refund use so
-        // balance/TotalSpend/Tier don't silently drift from what this order now actually
-        // represents. The existing REDEMPTION is deliberately left alone (already floor-checked
-        // above) — those points genuinely left the original customer's balance and stay
-        // attributed to them even if the order is reassigned; only the EARN side is re-derived.
-        var finalCustomerId = req.UpdateCustomer ? req.CustomerId : oldCustomerId;
-
-        if (oldCustomerId.HasValue)
-        {
-            var oldCustomer = await db.Customers.FindAsync(oldCustomerId.Value);
-            if (oldCustomer != null)
-            {
-                var oldEarnTxn = await db.LoyaltyTransactions
-                    .FirstOrDefaultAsync(t => t.OrderId == order.Id && t.TransactionType == "earn");
-                if (oldEarnTxn != null)
-                {
-                    var clawback = -Math.Min(oldEarnTxn.Points, oldCustomer.LoyaltyBalance);
-                    if (clawback != 0)
-                    {
-                        oldCustomer.LoyaltyBalance += clawback;
-                        db.LoyaltyTransactions.Add(new LoyaltyTransaction
-                        {
-                            Id = Guid.NewGuid(),
-                            CustomerId = oldCustomer.Id,
-                            OrderId = order.Id,
-                            BranchId = order.BranchId,
-                            TransactionType = "adjust",
-                            Points = clawback,
-                            BalanceAfter = oldCustomer.LoyaltyBalance,
-                            Description = $"Reversal for edited order {order.OrderNumber}",
-                            CreatedAt = DateTime.UtcNow,
-                        });
-                    }
-                }
-                oldCustomer.TotalSpend = Math.Max(0, oldCustomer.TotalSpend - oldTotalAmount);
-
-                // If the order is staying with this same customer, the earn step below recomputes
-                // Tier from the fully-netted TotalSpend anyway — only recompute it here when the
-                // order is being reassigned away, since nothing else will touch this customer again.
-                if (finalCustomerId != oldCustomerId)
-                {
-                    // Tier thresholds are global (see ResolveGlobalTierConfigAsync) — never
-                    // resolved per this order's branch.
-                    var tierConfig = await ResolveGlobalTierConfigAsync();
-                    if (tierConfig != null)
-                    {
-                        oldCustomer.Tier = oldCustomer.TotalSpend >= tierConfig.PlatinumThreshold ? "platinum"
-                            : oldCustomer.TotalSpend >= tierConfig.GoldThreshold ? "gold"
-                            : oldCustomer.TotalSpend >= tierConfig.SilverThreshold ? "silver"
-                            : "standard";
-                    }
-                }
-            }
-        }
-
-        if (finalCustomerId.HasValue)
-        {
-            // FindAsync returns the SAME tracked instance as the block above when
-            // finalCustomerId == oldCustomerId, so the reversal's TotalSpend subtraction and this
-            // addition net out correctly against the same in-memory customer.
-            var earningCustomer = await db.Customers.FindAsync(finalCustomerId.Value);
-            if (earningCustomer != null)
-            {
-                var program = await ResolveLoyaltyProgramAsync(order.BranchId);
-                earningCustomer.TotalSpend += order.TotalAmount;
-                if (program != null)
-                {
-                    // Tier thresholds/multipliers are global (see ResolveGlobalTierConfigAsync) —
-                    // never resolved per this order's branch.
-                    var tierConfig = await ResolveGlobalTierConfigAsync();
-                    if (tierConfig != null)
-                    {
-                        earningCustomer.Tier = earningCustomer.TotalSpend >= tierConfig.PlatinumThreshold ? "platinum"
-                            : earningCustomer.TotalSpend >= tierConfig.GoldThreshold ? "gold"
-                            : earningCustomer.TotalSpend >= tierConfig.SilverThreshold ? "silver"
-                            : "standard";
-                    }
-
-                    var earnMultiplier = tierConfig is null ? 1m : earningCustomer.Tier switch
-                    {
-                        "platinum" => tierConfig.PlatinumEarnMultiplier,
-                        "gold" => tierConfig.GoldEarnMultiplier,
-                        "silver" => tierConfig.SilverEarnMultiplier,
-                        _ => 1m,
-                    };
-                    var earned = Math.Floor(order.TotalAmount * program.PointsPerCurrencyUnit * earnMultiplier);
-                    if (earned > 0)
-                    {
-                        earningCustomer.LoyaltyBalance += earned;
-                        db.LoyaltyTransactions.Add(new LoyaltyTransaction
-                        {
-                            Id = Guid.NewGuid(),
-                            CustomerId = earningCustomer.Id,
-                            OrderId = order.Id,
-                            BranchId = order.BranchId,
-                            TransactionType = "earn",
-                            Points = earned,
-                            BalanceAfter = earningCustomer.LoyaltyBalance,
-                            Description = $"Earned from edited order {order.OrderNumber}",
-                            ExpiryDate = program.PointsExpiryDays.HasValue
-                                ? DateTime.UtcNow.AddDays(program.PointsExpiryDays.Value)
-                                : null,
-                            CreatedAt = DateTime.UtcNow,
-                        });
-                    }
-                }
-            }
-        }
-
-        if (req.UpdateCustomer) order.CustomerId = req.CustomerId;
-        order.UpdatedAt = DateTime.UtcNow;
-
-        if (req.PaymentMethod is not null)
-        {
-            var payment = order.Payments.FirstOrDefault();
-            if (payment is not null) payment.PaymentMethod = req.PaymentMethod;
-        }
-
-        await db.SaveChangesAsync();
-
-        var afterSnapshot = System.Text.Json.JsonSerializer.Serialize(new
-        {
-            order.Subtotal,
-            order.DiscountAmount,
-            order.TaxAmount,
-            order.TotalAmount,
-            order.Notes,
-            order.CustomerId,
-            PaymentMethod = order.Payments.FirstOrDefault()?.PaymentMethod,
-            Items = newItems.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
-        });
-        await audit.LogAsync(
-            action: "edit_order",
-            entityType: "Order",
-            entityId: order.Id,
-            userId: CallerId(),
-            branchId: order.BranchId,
-            details: afterSnapshot,
-            severity: "info",
-            beforeValue: beforeSnapshot,
-            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
-
-        // Employee Audit Center — "Gave discount" as its own filterable activity type, same as
-        // Create's. Only fires when the edit actually increases the discount (a fresh grant),
-        // not every edit of an already-discounted order.
-        if (order.DiscountAmount > oldDiscount)
-        {
             await audit.LogAsync(
-                action: "Gave Discount",
+                action: "request_order_modification",
                 entityType: "Order",
                 entityId: order.Id,
                 userId: CallerId(),
                 branchId: order.BranchId,
-                details: System.Text.Json.JsonSerializer.Serialize(new { order.OrderNumber, order.DiscountAmount, order.Subtotal }),
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    order.OrderNumber,
+                    RequestedSubtotal = requestedSubtotal,
+                    RequestedDiscount = req.DiscountAmount,
+                    RequestedDiscountPct = Math.Round(requestedDiscountPct, 2),
+                    PriceOverride = hasPriceOverride,
+                    Items = req.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, TotalPrice = i.Quantity * i.UnitPrice }),
+                }),
                 severity: "warning",
-                beforeValue: System.Text.Json.JsonSerializer.Serialize(new { DiscountAmount = oldDiscount }),
-                module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
+                notes: req.Notes,
+                // "Orders", not "POS" — this happens on the Orders management screen, not at the
+                // till. The module is what an auditor filters the activity report by, so it has to
+                // name where the action was actually taken.
+                module: "Orders", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
+
+            await approvalNotifications.NotifyPendingAsync(pending, "Orders",
+                hasPriceOverride ? "Price override awaiting approval" : "Order modification awaiting approval",
+                $"Order {order.OrderNumber}: {req.Items.Count} line(s), SAR {requestedSubtotal:0.##}"
+                    + (requestedDiscountPct > 0 ? $", {requestedDiscountPct:0.##}% discount" : "")
+                    + (hasPriceOverride ? ", includes a price override" : "")
+                    + " — needs your approval.");
+
+            return Accepted(new
+            {
+                message = requestedDiscountPct > cashierCap
+                    ? $"A discount of {requestedDiscountPct:0.##}% is above your {cashierCap:0.##}% limit — the change was sent for manager approval."
+                    : "Order modification sent for manager approval.",
+                approvalRequestId = pending.Id,
+            });
+        }
+
+        var outcome = await orderEditService.ApplyAsync(id, req, CallerId());
+        if (!outcome.Success)
+        {
+            return outcome.ErrorMessage == "Order not found."
+                ? NotFound(new { message = outcome.ErrorMessage })
+                : BadRequest(new { message = outcome.ErrorMessage });
         }
 
         var updated = await db.Orders
@@ -1436,10 +1307,51 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             };
             db.ApprovalRequests.Add(pending);
             await db.SaveChangesAsync();
+
+            // The maker half of the maker-checker pair. Without this, a cancellation request that
+            // a manager later rejects left no trace at all of who asked for it — the Approval
+            // Center row is the only record, and the employee reports never saw it.
+            await audit.LogAsync(
+                action: "request_order_cancellation",
+                entityType: "Order",
+                entityId: order.Id,
+                userId: CallerId(),
+                branchId: order.BranchId,
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    order.OrderNumber, order.Subtotal, order.DiscountAmount, order.TotalAmount,
+                    Reason = req.Reason,
+                    Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
+                }),
+                severity: "warning",
+                notes: req.Reason,
+                module: "Orders", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
+
+            await approvalNotifications.NotifyPendingAsync(pending, "Orders",
+                "Order cancellation awaiting approval",
+                $"Order {order.OrderNumber} (SAR {order.TotalAmount:0.##}) is queued for cancellation"
+                    + (string.IsNullOrWhiteSpace(req.Reason) ? "" : $" — \"{req.Reason}\"") + ".");
+
             return Accepted(new { message = "Void request sent for manager approval.", approvalRequestId = pending.Id });
         }
 
-        var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new { order.OrderStatus, order.PaymentStatus });
+        // Captured BEFORE the void — the cancelled state is what the trail needs to show was
+        // undone, including every line that went back on the shelf. The old snapshot recorded
+        // only the order number and reason, so the Employee Activity Report / Audit Center could
+        // never answer "which products, how many" for a cancellation.
+        var beforeSnapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            order.OrderStatus,
+            order.PaymentStatus,
+            order.Subtotal,
+            order.DiscountAmount,
+            order.TaxAmount,
+            order.TotalAmount,
+            Items = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }),
+        });
+        var voidedItems = order.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice }).ToList();
+        var voidedTotals = new { order.Subtotal, order.DiscountAmount, order.TaxAmount, order.TotalAmount };
+
         await orderVoidService.VoidAsync(order, req.Reason);
 
         await audit.LogAsync(
@@ -1448,11 +1360,24 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             entityId: order.Id,
             userId: CallerId(),
             branchId: order.BranchId,
-            details: $"{{\"orderNumber\":\"{order.OrderNumber}\",\"reason\":{System.Text.Json.JsonSerializer.Serialize(req.Reason)}}}",
-            severity: "info",
+            details: System.Text.Json.JsonSerializer.Serialize(new
+            {
+                order.OrderNumber,
+                OrderStatus = order.OrderStatus,
+                PaymentStatus = order.PaymentStatus,
+                voidedTotals.Subtotal,
+                voidedTotals.DiscountAmount,
+                voidedTotals.TaxAmount,
+                voidedTotals.TotalAmount,
+                Reason = req.Reason,
+                Items = voidedItems,
+            }),
+            // A cancellation reverses money and stock — it belongs on the same "spot this" tier as
+            // a refund or a deletion, not filed under routine info.
+            severity: "warning",
             beforeValue: beforeSnapshot,
             notes: req.Reason,
-            module: "POS", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
+            module: "Orders", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: order.TerminalId);
 
         return Ok(order);
     }

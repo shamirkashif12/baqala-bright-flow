@@ -119,6 +119,9 @@ const navGroups: NavGroup[] = [
     label: "Stock",
     items: [
       { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Stocks" },
+      // The counting tool has always existed as a tab inside /stocks; it needed a front door of
+      // its own under the name the business actually uses for it.
+      { title: "Stocktaking",          url: "/stocktaking",     icon: ClipboardCheck, module: "Stocks" },
       { title: "Inventory",            url: "/inventory",       icon: Package,       module: "Inventory" },
       // Gated on Inventory, matching PricingController — see the comment there on why price rules
       // deliberately don't get a permission module of their own.

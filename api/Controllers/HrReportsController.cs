@@ -283,7 +283,10 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         if (a.Contains("reject")) return "Rejected";
         if (a.Contains("delete") || a.Contains("void") || a.Contains("cancel")) return "Deleted";
         if (a.Contains("create") || a.Contains("receive") || a.Contains("add")) return "Created";
-        if (a.Contains("update") || a.Contains("edit")) return "Updated";
+        // "price_override" and "request_order_modification" both fell through to "Other", which
+        // made the two activities the client asked to be traceable the least filterable rows in
+        // the report. Both are changes to an existing record — the same bucket as an edit.
+        if (a.Contains("update") || a.Contains("edit") || a.Contains("override") || a.Contains("modif")) return "Updated";
         return "Other";
     }
 

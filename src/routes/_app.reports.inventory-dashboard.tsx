@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { PerformanceTierBadge } from "@/components/report-filters/performance-tier-badge";
 import { MetricCard } from "@/components/metric-card";
@@ -30,6 +31,25 @@ const firstOfMonthStr = () => {
 };
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// Catalog state of the SKU — the filter the client asked for. Distinct from the performance
+// Classification below: a Dead Stock line reads very differently once you can see the product was
+// discontinued deliberately rather than having quietly stopped selling.
+const PRODUCT_STATUSES = [
+  { id: "active", label: "Active" },
+  { id: "inactive", label: "Inactive" },
+  { id: "discontinued", label: "Discontinued" },
+];
+const CLASSIFICATIONS = ["Star Products", "High Performers", "Average Performers", "Slow Moving Products", "Dead Stock"]
+  .map((c) => ({ id: c, label: c }));
+// Mirrors ReportsController.BucketFor's buckets exactly.
+const AGE_BUCKETS = ["0-30 days", "31-60 days", "61-90 days", "90+ days"].map((b) => ({ id: b, label: b }));
+
+const PRODUCT_STATUS_CLASS: Record<string, string> = {
+  active: "bg-success/15 text-success",
+  inactive: "bg-muted text-muted-foreground",
+  discontinued: "bg-destructive/15 text-destructive",
+};
+
 function InventoryDashboard() {
   const { user, canViewModule } = useAuth();
   usePermission("Reports");
@@ -42,6 +62,11 @@ function InventoryDashboard() {
   const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
   const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
+  const [productStatuses, setProductStatuses] = useState<string[]>([]);
+  const [classifications, setClassifications] = useState<string[]>([]);
+  const [ageBuckets, setAgeBuckets] = useState<string[]>([]);
+  const [locationTypeFilter, setLocationTypeFilter] = useState<string>("all");
   const [deadOnly, setDeadOnly] = useState(false);
   const [data, setData] = useState<InventoryDashboardReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,15 +76,26 @@ function InventoryDashboard() {
 
   const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
   const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
-  const { categories } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
+  const { categories, products } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
 
   useEffect(() => { api.getInventorySnapshotScope().then(setScope).catch(() => {}); }, []);
+
+  // Drop product selections the current (category-narrowed) list no longer offers, so the table
+  // can't silently empty while a stale name is still shown in the picker.
+  useEffect(() => {
+    setProductIds((prev) => prev.filter((id) => products.some((p) => p.id === id)));
+  }, [products]);
 
   const filters = useMemo(() => ({
     branchId: branchIds.length ? branchIds : undefined,
     warehouseId: warehouseIds.length ? warehouseIds : undefined,
     categoryId: categoryIds.length ? categoryIds : undefined,
-  }), [branchIds, warehouseIds, categoryIds]);
+    productId: productIds.length ? productIds : undefined,
+    productStatus: productStatuses.length ? productStatuses : undefined,
+    classification: classifications.length ? classifications : undefined,
+    ageBucket: ageBuckets.length ? ageBuckets : undefined,
+    locationType: locationTypeFilter !== "all" ? locationTypeFilter : undefined,
+  }), [branchIds, warehouseIds, categoryIds, productIds, productStatuses, classifications, ageBuckets, locationTypeFilter]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -122,6 +158,46 @@ function InventoryDashboard() {
             onChange={setCategoryIds}
           />
         </div>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Products"
+            options={products.map((p) => ({ id: p.id, label: p.name }))}
+            selected={productIds}
+            onChange={setProductIds}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Product Statuses"
+            options={PRODUCT_STATUSES}
+            selected={productStatuses}
+            onChange={setProductStatuses}
+          />
+        </div>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Statuses (Aging)"
+            options={CLASSIFICATIONS}
+            selected={classifications}
+            onChange={setClassifications}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Age Buckets"
+            options={AGE_BUCKETS}
+            selected={ageBuckets}
+            onChange={setAgeBuckets}
+          />
+        </div>
+        <Select value={locationTypeFilter} onValueChange={setLocationTypeFilter}>
+          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Branch & Warehouse</SelectItem>
+            <SelectItem value="branch">Branch only</SelectItem>
+            <SelectItem value="warehouse">Warehouse only</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
@@ -189,6 +265,14 @@ function InventoryDashboard() {
             columns={[
               { key: "sku", label: "SKU" },
               { key: "productName", label: "Product" },
+              {
+                key: "productStatus", label: "Product Status",
+                render: (r: InventoryAgingRow) => (
+                  <Badge variant="outline" className={`text-[10px] border-0 capitalize ${PRODUCT_STATUS_CLASS[r.productStatus] ?? "bg-muted text-muted-foreground"}`}>
+                    {r.productStatus}
+                  </Badge>
+                ),
+              },
               { key: "location", label: "Location" },
               {
                 key: "locationType", label: "Type",

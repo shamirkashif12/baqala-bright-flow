@@ -4,8 +4,11 @@ import { PageShell } from "@/components/app-topbar";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
+import { AuditDetailDrawer } from "@/components/audit-detail-drawer";
+import { Eye } from "lucide-react";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
 import { api, type EmployeeActivityRow, type Employee, type User, type ReportExportFormat } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -24,7 +27,9 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-const MODULES = ["Employees", "HR Master Data", "HR Attendance", "HR Shifts", "Leave Management", "Authentication", "POS", "Returns"];
+// "Inventory" (product/category deletions) and "Approvals" (maker-checker decisions) were logged
+// but had no way to be filtered for — the two modules an auditor reaches for first.
+const MODULES = ["Employees", "HR Master Data", "HR Attendance", "HR Shifts", "Leave Management", "Authentication", "POS", "Orders", "Returns", "Inventory", "Approvals", "Audit Logs"];
 // BRD 16.2 fixed Activity Type set — mirrors HrReportsController.ActivityTypeOf's buckets exactly.
 const ACTIVITY_TYPES = ["Created", "Updated", "Deleted", "Approved", "Rejected", "Exported", "Login", "Logout", "Correction", "Access Denied", "Other"];
 
@@ -54,6 +59,7 @@ function EmployeeActivityReport() {
   const [activityType, setActivityType] = useState("all");
   const [referenceId, setReferenceId] = useState("");
   const [ipOrDevice, setIpOrDevice] = useState("");
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const filterParams = {
     branchId: branchLocked ? (user?.branchId ?? undefined) : (branchId === "all" ? undefined : branchId),
@@ -101,6 +107,16 @@ function EmployeeActivityReport() {
     { key: "device", label: "Device / IP Address", render: r => [r.deviceName, r.ipAddress].filter(Boolean).join(" / ") || "—" },
     { key: "referenceId", label: "Reference ID", render: r => r.entityId ? `${r.entityId.slice(0, 8)}…` : "—" },
     { key: "severity", label: "Severity", render: r => <Badge variant="outline" className={`text-[10px] border-0 ${severityTone(r.severity)}`}>{r.severity}</Badge> },
+    // The one-line Old/New Value summaries above deliberately drop line items — this opens the
+    // full record: every affected product, its quantity and price, and the field-level diff.
+    {
+      key: "details", label: "Details",
+      render: r => (
+        <Button size="icon" variant="ghost" className="h-7 w-7" title="View full detail" onClick={() => setDetailId(r.id)}>
+          <Eye className="h-3.5 w-3.5" />
+        </Button>
+      ),
+    },
   ];
 
   return (
@@ -157,6 +173,8 @@ function EmployeeActivityReport() {
           <PaginatedDataTable columns={columns} rows={rows} emptyMessage="No activity matches the current filters." />
         )}
       </div>
+
+      <AuditDetailDrawer auditLogId={detailId} onClose={() => setDetailId(null)} />
     </PageShell>
   );
 }

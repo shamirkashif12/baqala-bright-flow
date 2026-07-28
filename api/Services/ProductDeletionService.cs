@@ -34,6 +34,28 @@ public class ProductDeletionService(BaqalaDbContext db, IAuditService audit, ILo
             var employeeId = actorId.HasValue
                 ? await db.Employees.Where(e => e.UserId == actorId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()
                 : null;
+
+            // What was still on the shelf when the product went. A deletion snapshot of catalog
+            // fields alone can't answer the auditor's actual question — how much stock did this
+            // remove from view, and where was it — so the quantities are captured here, at the
+            // one moment they're still true.
+            var branchQty = await db.InventoryStocks.Where(s => s.ProductId == product.Id).SumAsync(s => (decimal?)s.Quantity) ?? 0m;
+            var warehouseQty = await db.WarehouseStocks.Where(s => s.ProductId == product.Id).SumAsync(s => (decimal?)s.Quantity) ?? 0m;
+
+            var snapshot = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                product.Name,
+                product.Sku,
+                product.Barcode,
+                product.BasePrice,
+                Status = product.Status,
+                BranchStockOnHand = branchQty,
+                WarehouseStockOnHand = warehouseQty,
+                // Shaped like every other snapshot's Items array so the shared audit-detail
+                // resolver renders it as a product line without special-casing deletions.
+                Items = new[] { new { ProductId = product.Id, Quantity = branchQty + warehouseQty, UnitPrice = product.BasePrice, TotalPrice = (branchQty + warehouseQty) * product.BasePrice } },
+            });
+
             await audit.LogAsync(
                 action: "delete_product",
                 entityType: "Product",
@@ -41,8 +63,11 @@ public class ProductDeletionService(BaqalaDbContext db, IAuditService audit, ILo
                 userId: actorId,
                 employeeId: employeeId,
                 branchId: branchId,
-                details: System.Text.Json.JsonSerializer.Serialize(ProductsController.Snapshot(product)),
+                details: snapshot,
                 severity: "warning",
+                // Module was never set, so this row was invisible to the Employee Activity
+                // Report's module filter — a product deletion is Inventory activity.
+                module: "Inventory",
                 beforeValue: System.Text.Json.JsonSerializer.Serialize(before));
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for product {ProductId} (delete_product)", product.Id); }
@@ -67,7 +92,8 @@ public class ProductDeletionService(BaqalaDbContext db, IAuditService audit, ILo
                 entityId: id,
                 userId: actorId,
                 details: System.Text.Json.JsonSerializer.Serialize(before),
-                severity: "warning");
+                severity: "warning",
+                module: "Inventory");
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for category {CategoryId} (delete_category)", id); }
 

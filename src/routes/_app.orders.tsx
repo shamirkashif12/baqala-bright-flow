@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -30,6 +31,13 @@ export const Route = createFileRoute("/_app/orders")({ component: Orders });
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const ORDER_STATUSES = ["pending", "processing", "ready_to_deliver", "delivered", "completed", "cancelled", "refunded"];
 const PAYMENT_STATUSES = ["pending", "paid", "partially_paid", "refunded"];
+
+// Mirrors the Approval Center's labels for the two request types that can be raised against an
+// order, so the same request reads identically on both screens.
+const APPROVAL_TYPE_LABELS: Record<string, string> = {
+  order_cancellation: "Cancellation pending",
+  order_modification: "Modification pending",
+};
 
 // Statuses reachable from the "Update Status" editor — deliberately excludes "cancelled": voiding
 // an order has to reverse stock and the cashier shift's totals (see OrdersController.VoidOrder /
@@ -548,7 +556,7 @@ function EditOrderDialog({ order, open, onClose, onDone }: {
     setSaving(true);
     setError("");
     try {
-      await api.editOrder(order.id, {
+      const result = await api.editOrder(order.id, {
         items: activeLines.map(l => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })),
         notes: notes || undefined,
         discountAmount: discount,
@@ -556,6 +564,10 @@ function EditOrderDialog({ order, open, onClose, onDone }: {
         updateCustomer: customerChanged,
         customerId: customerChanged ? (customer?.id ?? null) : undefined,
       });
+      // Without Orders:Approve the edit is queued, not applied — say so rather than letting the
+      // dialog close as if the order had already changed.
+      if (result.approvalRequestId) toast.info(result.message ?? "Order modification sent for manager approval.");
+      else toast.success("Order updated.");
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save changes.");
@@ -743,8 +755,9 @@ function VoidOrderDialog({ order, open, onClose, onDone }: {
     setSaving(true);
     setError("");
     try {
-      await api.voidOrder(order.id, { reason: reason.trim() || undefined });
-      toast.success("Order voided.");
+      const result = await api.voidOrder(order.id, { reason: reason.trim() || undefined });
+      if (result.approvalRequestId) toast.info(result.message ?? "Void request sent for manager approval.");
+      else toast.success("Order voided.");
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to void order.");
@@ -1087,6 +1100,12 @@ function POSTab() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Approval Center work that concerns THIS list — a queued cancellation/modification is invisible
+  // on the order itself otherwise, which is exactly what made managers miss these requests.
+  const { canApprove: canApproveOrders } = usePermission("Orders");
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState<Order | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   // Sync if user loads after mount (auth hydration)
   useEffect(() => {
@@ -1133,17 +1152,39 @@ function POSTab() {
   // and Pending are necessarily scoped to the current page now that orders are paginated.
   const totalRevenue = filtered.reduce((s, o) => s + o.totalAmount, 0);
   const pendingCount = filtered.filter(o => o.orderStatus === "pending").length;
+  const pendingApprovalCount = filtered.filter(o => o.pendingApproval).length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const decideApproval = async (order: Order, approved: boolean, reason?: string) => {
+    if (!order.pendingApproval) return;
+    setDecidingId(order.pendingApproval.id);
+    try {
+      await api.decideApproval(order.pendingApproval.id, approved, reason);
+      toast.success(approved ? "Request approved." : "Request rejected.");
+      setRejecting(null);
+      setRejectReason("");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to submit decision");
+    } finally {
+      setDecidingId(null);
+    }
+  };
 
   return (
     <div className="space-y-4">
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className={`grid gap-3 ${pendingApprovalCount > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
         {[
           { label: "Total Orders", value: total, color: "text-foreground" },
           { label: "Revenue (this page)", value: <><SARIcon />{fmtSAR(totalRevenue)}</>, color: "text-primary" },
           { label: "Pending (this page)", value: pendingCount, color: "text-yellow-600" },
+          // Only shown when there is actually something waiting — a permanent "0 awaiting
+          // approval" tile trains people to stop reading it.
+          ...(pendingApprovalCount > 0
+            ? [{ label: canApproveOrders ? "Awaiting your approval" : "Awaiting approval", value: pendingApprovalCount, color: "text-destructive" }]
+            : []),
         ].map(c => (
           <Card key={c.label} className="px-4 py-3 border-border/60 shadow-card">
             <p className="text-xs text-muted-foreground">{c.label}</p>
@@ -1213,6 +1254,9 @@ function POSTab() {
                   <th className="px-3 py-3 font-semibold">Total</th>
                   <th className="px-3 py-3 font-semibold">Status</th>
                   <th className="px-3 py-3 font-semibold">Payment</th>
+                  {/* Only rendered for people who can actually decide — for everyone else it would
+                      be a column of "waiting" they can do nothing about. */}
+                  {(canApproveOrders || pendingApprovalCount > 0) && <th className="px-3 py-3 font-semibold">Approval</th>}
                   <th className="px-3 py-3 font-semibold">Date</th>
                   <th className="px-3 py-3 font-semibold w-10"></th>
                 </tr>
@@ -1237,6 +1281,41 @@ function POSTab() {
                         </p>
                       )}
                     </td>
+                    {(canApproveOrders || pendingApprovalCount > 0) && (
+                      <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                        {o.pendingApproval ? (
+                          <div className="flex flex-col gap-1.5">
+                            <Badge variant="secondary" className="w-fit gap-1 text-[10px] whitespace-nowrap">
+                              <Clock className="h-3 w-3" />
+                              {APPROVAL_TYPE_LABELS[o.pendingApproval.requestType] ?? "Pending approval"}
+                            </Badge>
+                            <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                              by {o.pendingApproval.requestedByName ?? "—"}
+                            </span>
+                            {canApproveOrders && (
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="sm" className="h-6 px-2 text-[11px] gradient-primary text-primary-foreground border-0"
+                                  disabled={decidingId === o.pendingApproval.id}
+                                  onClick={() => decideApproval(o, true)}
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm" variant="outline" className="h-6 px-2 text-[11px] border-destructive/50 text-destructive"
+                                  disabled={decidingId === o.pendingApproval.id}
+                                  onClick={() => setRejecting(o)}
+                                >
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-3 py-3 text-xs text-muted-foreground">
                       {new Date(o.createdAt).toLocaleDateString("en-SA")}
                     </td>
@@ -1247,7 +1326,7 @@ function POSTab() {
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="text-center py-12 text-muted-foreground text-sm">
+                    <td colSpan={canApproveOrders || pendingApprovalCount > 0 ? 9 : 8} className="text-center py-12 text-muted-foreground text-sm">
                       <AlertCircle className="h-6 w-6 mx-auto mb-2 opacity-40" />
                       No orders match the current filters.
                     </td>
@@ -1288,6 +1367,38 @@ function POSTab() {
           )}
         </Card>
       )}
+
+      {/* Reject a queued cancellation/modification — a reason is mandatory server-side. */}
+      <Dialog open={!!rejecting} onOpenChange={v => { if (!v) { setRejecting(null); setRejectReason(""); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DHeader><DTitle className="text-base">Reject request</DTitle></DHeader>
+          {rejecting?.pendingApproval && (
+            <div className="space-y-3">
+              <p className="text-sm">{rejecting.pendingApproval.summary}</p>
+              <p className="text-xs text-muted-foreground">
+                Requested by {rejecting.pendingApproval.requestedByName ?? "—"} on{" "}
+                {new Date(rejecting.pendingApproval.requestedAt).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" })}
+              </p>
+              <Input
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Rejection reason (required)"
+                className="h-9"
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRejecting(null); setRejectReason(""); }}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={!rejectReason.trim() || decidingId === rejecting?.pendingApproval?.id}
+              onClick={() => rejecting && decideApproval(rejecting, false, rejectReason.trim())}
+            >
+              Reject
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Order detail drawer */}
       <Sheet open={!!selectedId} onOpenChange={v => !v && setSelectedId(null)}>
