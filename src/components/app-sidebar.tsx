@@ -121,12 +121,12 @@ const navGroups: NavGroup[] = [
       // { title: "MPOS App Preview",    url: "/mpos-app",      icon: Smartphone,
       //   roles: ["tenant_admin"] },
       { title: "Orders",              url: "/orders",        icon: ShoppingBag,    module: "Orders" },
+      // One child per destination — "Customer Rewards" and "Promotions" used to sit here too but
+      // pointed at these same two routes, so both entries of each pair lit up as active at once.
       { title: "Customers & Loyalty", url: "/customers",     icon: Users,          module: "Customers",
         children: [
           { title: "Discount Coupons",  url: "/coupons" },
           { title: "Loyalty Programs",  url: "/loyalty-program" },
-          { title: "Customer Rewards",  url: "/loyalty-program" },
-          { title: "Promotions",        url: "/coupons" },
         ] },
       { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
       { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
@@ -280,7 +280,7 @@ export function AppSidebar() {
                   <SidebarMenuButton
                     asChild
                     isActive={active}
-                    className="data-[active=true]:bg-sidebar-primary data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-glow data-[active=true]:font-semibold rounded-xl h-10"
+                    className="data-[active=true]:bg-sidebar-primary data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-glow data-[active=true]:font-semibold rounded-xl h-9 text-[13px] text-sidebar-foreground/85"
                   >
                     <Link to={item.url}>
                       <item.icon className="h-4 w-4" />
@@ -314,7 +314,11 @@ export function AppSidebar() {
                         <SidebarMenuSub className="mt-1">
                           {item.children.map((child) => (
                             <SidebarMenuSubItem key={child.title}>
-                              <SidebarMenuSubButton asChild isActive={isActiveUrl(path, child.url)}>
+                              <SidebarMenuSubButton
+                                asChild
+                                size="sm"
+                                isActive={isActiveUrl(path, child.url)}
+                              >
                                 <Link to={child.url}>
                                   <span>{t(child.title)}</span>
                                 </Link>
@@ -343,10 +347,10 @@ export function AppSidebar() {
                 onOpenChange={(v) => setOpenGroups((s) => ({ ...s, [group.label]: v }))}
               >
                 <CollapsibleTrigger asChild>
-                  <button className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors">
+                  <button className="w-full flex items-center justify-between px-3 py-2 text-[13px] font-bold uppercase tracking-[0.08em] text-sidebar-foreground/90 hover:text-sidebar-foreground transition-colors">
                     <span>{t(group.label)}</span>
                     <ChevronDown
-                      className={`h-3.5 w-3.5 transition-transform ${open ? "" : "-rotate-90"}`}
+                      className={`h-4 w-4 transition-transform ${open ? "" : "-rotate-90"}`}
                     />
                   </button>
                 </CollapsibleTrigger>
