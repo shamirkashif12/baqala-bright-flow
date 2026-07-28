@@ -352,6 +352,13 @@ app.Use(async (context, next) =>
         var method = context.Request.Method;
         var allowed =
             (method == "GET" && path.StartsWith("/api/products")) ||
+            // The kiosk must only ever recognize items actually stocked at its own paired
+            // branch, not the whole tenant-wide catalog — this is the branch-scoped stock
+            // join the staffed POS itself uses. GetStock already self-enforces branch scoping
+            // for a non-tenant_admin caller (forces the query to the caller's own `branchId`
+            // claim regardless of what's passed), so this can't be used to read another
+            // branch's stock even if a client tried.
+            (method == "GET" && path.StartsWith("/api/inventory/stock")) ||
             // The kiosk must price a basket exactly as the staffed till does. Without this the
             // kiosk's resolve call 403s, its price map falls back to Product.BasePrice, and a
             // branch/tier/scheduled price would apply at the till but not at the lane — a silent,
