@@ -128,6 +128,23 @@ public class InventoryController(
             });
         }
 
+        // Captured before Remove — once the row is gone there is nothing left to resolve the
+        // product or its quantity from, which is why the audit trail previously showed this
+        // deletion with no affected product at all.
+        var deletedProduct = await db.Products.Where(p => p.Id == stock.ProductId)
+            .Select(p => new { p.Name, p.Sku, p.BasePrice }).FirstOrDefaultAsync();
+        var deletedSnapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ProductName = deletedProduct?.Name,
+            Sku = deletedProduct?.Sku,
+            Quantity = stock.Quantity,
+            ReservedQuantity = stock.ReservedQuantity,
+            BranchId = stock.BranchId,
+            // Same Items shape every other snapshot uses, so the shared audit-detail resolver
+            // renders it as a product line without special-casing stock-row deletions.
+            Items = new[] { new { ProductId = stock.ProductId, Quantity = stock.Quantity, UnitPrice = deletedProduct?.BasePrice, TotalPrice = stock.Quantity * (deletedProduct?.BasePrice ?? 0m) } },
+        });
+
         db.InventoryStocks.Remove(stock);
         await db.SaveChangesAsync();
 
@@ -135,7 +152,8 @@ public class InventoryController(
         await audit.LogAsync(action: "Inventory stock row deleted", entityType: "InventoryStock", entityId: stock.Id,
             userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId),
             branchId: stock.BranchId, severity: "warning",
-            beforeValue: $"productId={stock.ProductId}", module: "Inventory");
+            details: deletedSnapshot,
+            beforeValue: deletedSnapshot, module: "Inventory");
 
         return NoContent();
     }

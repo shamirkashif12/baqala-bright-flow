@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { useState, type ElementType } from "react";
+import { useEffect, useState, type ElementType } from "react";
 import {
   LayoutDashboard,
   ScanBarcode,
@@ -61,10 +61,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -92,6 +94,22 @@ type NavItem = {
 
 type NavGroup = { label: string; items: NavItem[] };
 
+const isActiveUrl = (path: string, url: string) => path === url || path.startsWith(url + "/");
+
+// The group whose page we're currently on — the only one that starts expanded.
+const activeGroupLabel = (path: string) =>
+  navGroups.find((g) => g.items.some((it) => isActiveUrl(path, it.url)))?.label ?? "";
+
+// A parent item (e.g. Customers & Loyalty) expands only when we're on it or one of its sub-pages.
+const activeParentUrl = (path: string) =>
+  navGroups
+    .flatMap((g) => g.items)
+    .find(
+      (it) =>
+        it.children &&
+        (isActiveUrl(path, it.url) || it.children.some((c) => isActiveUrl(path, c.url))),
+    )?.url ?? "";
+
 const navGroups: NavGroup[] = [
   {
     label: "Operate",
@@ -103,12 +121,12 @@ const navGroups: NavGroup[] = [
       // { title: "MPOS App Preview",    url: "/mpos-app",      icon: Smartphone,
       //   roles: ["tenant_admin"] },
       { title: "Orders",              url: "/orders",        icon: ShoppingBag,    module: "Orders" },
+      // One child per destination — "Customer Rewards" and "Promotions" used to sit here too but
+      // pointed at these same two routes, so both entries of each pair lit up as active at once.
       { title: "Customers & Loyalty", url: "/customers",     icon: Users,          module: "Customers",
         children: [
           { title: "Discount Coupons",  url: "/coupons" },
           { title: "Loyalty Programs",  url: "/loyalty-program" },
-          { title: "Customer Rewards",  url: "/loyalty-program" },
-          { title: "Promotions",        url: "/coupons" },
         ] },
       { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
       { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
@@ -119,6 +137,9 @@ const navGroups: NavGroup[] = [
     label: "Stock",
     items: [
       { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Stocks" },
+      // The counting tool has always existed as a tab inside /stocks; it needed a front door of
+      // its own under the name the business actually uses for it.
+      { title: "Stocktaking",          url: "/stocktaking",     icon: ClipboardCheck, module: "Stocks" },
       { title: "Inventory",            url: "/inventory",       icon: Package,       module: "Inventory" },
       // Gated on Inventory, matching PricingController — see the comment there on why price rules
       // deliberately don't get a permission module of their own.
@@ -211,9 +232,19 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { t, dir } = useI18n();
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(navGroups.map((g) => [g.label, true])),
-  );
+  // Everything starts collapsed except the group holding the page we landed on.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
+    [activeGroupLabel(path)]: true,
+  }));
+  const [openItems, setOpenItems] = useState<Record<string, boolean>>(() => ({
+    [activeParentUrl(path)]: true,
+  }));
+
+  // On every navigation, re-collapse the sidebar down to just the branch we're on.
+  useEffect(() => {
+    setOpenGroups({ [activeGroupLabel(path)]: true });
+    setOpenItems({ [activeParentUrl(path)]: true });
+  }, [path]);
 
   const canSee = (item: NavItem) => {
     // Explicit block overrides DB canView (e.g. finance_user on Cashier Shifts)
@@ -239,45 +270,64 @@ export function AppSidebar() {
         {navGroups.map((group) => {
           const visibleItems = group.items.filter(canSee);
           if (visibleItems.length === 0) return null;
-          const open = openGroups[group.label] ?? true;
-          const groupHasActive = visibleItems.some(
-            (it) => path === it.url || path.startsWith(it.url + "/"),
-          );
+          const open = openGroups[group.label] ?? false;
           const renderItems = (
             <SidebarMenu>
               {visibleItems.map((item) => {
-                const active = path === item.url || path.startsWith(item.url + "/");
+                const active = isActiveUrl(path, item.url);
+                const itemOpen = openItems[item.url] ?? false;
+                const button = (
+                  <SidebarMenuButton
+                    asChild
+                    isActive={active}
+                    className="data-[active=true]:bg-sidebar-primary data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-glow data-[active=true]:font-semibold rounded-xl h-9 text-[13px] text-sidebar-foreground/85"
+                  >
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{t(item.title)}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                );
+                if (!item.children || collapsed) {
+                  return <SidebarMenuItem key={item.url}>{button}</SidebarMenuItem>;
+                }
                 return (
-                  <SidebarMenuItem key={item.url} className={item.children ? "flex items-center gap-1" : undefined}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={active}
-                      className="data-[active=true]:bg-sidebar-primary data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-glow data-[active=true]:font-semibold rounded-xl h-10"
+                  <SidebarMenuItem key={item.url}>
+                    <Collapsible
+                      open={itemOpen}
+                      onOpenChange={(v) => setOpenItems((s) => ({ ...s, [item.url]: v }))}
                     >
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{t(item.title)}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                    {item.children && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                      <div className="flex items-center gap-1">
+                        {button}
+                        <CollapsibleTrigger asChild>
                           <button
                             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/50 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground transition-colors"
                             title={`More ${t(item.title)} options`}
                           >
-                            <ChevronDown className="h-3.5 w-3.5" />
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 transition-transform ${itemOpen ? "" : "-rotate-90"}`}
+                            />
                           </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" side="right">
+                        </CollapsibleTrigger>
+                      </div>
+                      <CollapsibleContent>
+                        <SidebarMenuSub className="mt-1">
                           {item.children.map((child) => (
-                            <DropdownMenuItem key={child.title} onClick={() => navigate({ to: child.url })}>
-                              {t(child.title)}
-                            </DropdownMenuItem>
+                            <SidebarMenuSubItem key={child.title}>
+                              <SidebarMenuSubButton
+                                asChild
+                                size="sm"
+                                isActive={isActiveUrl(path, child.url)}
+                              >
+                                <Link to={child.url}>
+                                  <span>{t(child.title)}</span>
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
                           ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </Collapsible>
                   </SidebarMenuItem>
                 );
               })}
@@ -293,14 +343,14 @@ export function AppSidebar() {
           return (
             <SidebarGroup key={group.label}>
               <Collapsible
-                open={open || groupHasActive}
+                open={open}
                 onOpenChange={(v) => setOpenGroups((s) => ({ ...s, [group.label]: v }))}
               >
                 <CollapsibleTrigger asChild>
-                  <button className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors">
+                  <button className="w-full flex items-center justify-between px-3 py-2 text-[13px] font-bold uppercase tracking-[0.08em] text-sidebar-foreground/90 hover:text-sidebar-foreground transition-colors">
                     <span>{t(group.label)}</span>
                     <ChevronDown
-                      className={`h-3.5 w-3.5 transition-transform ${open ? "" : "-rotate-90"}`}
+                      className={`h-4 w-4 transition-transform ${open ? "" : "-rotate-90"}`}
                     />
                   </button>
                 </CollapsibleTrigger>

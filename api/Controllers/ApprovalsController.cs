@@ -19,7 +19,9 @@ namespace BaqalaPOS.Api.Controllers;
 public class ApprovalsController(
     BaqalaDbContext db,
     IAuditService audit,
+    INotificationService notifications,
     IOrderVoidService orderVoidService,
+    IOrderEditService orderEditService,
     IProductDeletionService productDeletion,
     IDiscountCreationService discountCreation,
     IOfferCreationService offerCreation,
@@ -42,6 +44,7 @@ public class ApprovalsController(
         "offer" => "Coupons",
         "coupon" => "Coupons",
         "order_cancellation" => "Orders",
+        "order_modification" => "Orders",
         "item_deletion" => "Inventory",
         "refund_return" => "Returns",
         "stock_count" => "Stocks",
@@ -175,7 +178,10 @@ public class ApprovalsController(
         return Ok(filtered.OrderByDescending(r => r.RequestedAt).Take(500).ToList());
     }
 
-    private static string EntityLabel(ApprovalRequest a) => a.RequestType switch
+    // Public so the Orders list can label a pending request inline with exactly the same wording
+    // the Approval Center uses — two descriptions of the same request that disagree is worse than
+    // no description at all.
+    public static string EntityLabel(ApprovalRequest a) => a.RequestType switch
     {
         // Previously a bare "New discount request" — every row looked identical regardless of
         // what was actually being asked for. DetailsJson already carries the full request payload
@@ -185,6 +191,10 @@ public class ApprovalsController(
         "offer" => OfferLabel(a),
         "coupon" => CouponLabel(a),
         "order_cancellation" => "Order cancellation",
+        // DetailsJson carries the full OrderEditRequest — showing what the edit actually does
+        // (how many lines, what discount) is the difference between a reviewable request and a
+        // row the manager has to approve blind.
+        "order_modification" => OrderModificationLabel(a),
         // DetailsJson carries a {name, sku?} snapshot taken at request time (see
         // ProductsController.Delete/DeleteCategory) — falls back to the generic label for any
         // request raised before that snapshot existed.
@@ -209,6 +219,22 @@ public class ApprovalsController(
     }
 
     private record ItemDeletionDetails(string? Name, string? Sku);
+
+    private static string OrderModificationLabel(ApprovalRequest a)
+    {
+        if (string.IsNullOrEmpty(a.DetailsJson)) return "Order modification";
+        try
+        {
+            var req = System.Text.Json.JsonSerializer.Deserialize<OrderEditRequest>(a.DetailsJson, CaseInsensitiveJson);
+            if (req is null || req.Items.Count == 0) return "Order modification";
+            var subtotal = req.Items.Sum(i => i.Quantity * i.UnitPrice);
+            var discountPart = req.DiscountAmount is > 0
+                ? $", SAR {req.DiscountAmount:0.##} discount"
+                : "";
+            return $"Order modification — {req.Items.Count} line(s), SAR {subtotal:0.##}{discountPart}";
+        }
+        catch (System.Text.Json.JsonException) { return "Order modification"; }
+    }
 
     private static string DiscountLabel(ApprovalRequest a)
     {
@@ -313,6 +339,16 @@ public class ApprovalsController(
                         await orderVoidService.VoidAsync(order, pending.Reason);
                     break;
 
+                case "order_modification":
+                    var editReq = System.Text.Json.JsonSerializer.Deserialize<OrderEditRequest>(pending.DetailsJson!, CaseInsensitiveJson)
+                        ?? throw new InvalidOperationException("Approval request has no stored order edit payload.");
+                    // Applied through the same service the immediate (self-approve) path uses, so
+                    // an approved modification is byte-for-byte the modification that was reviewed.
+                    var editOutcome = await orderEditService.ApplyAsync(pending.EntityId!.Value, editReq, actorId);
+                    if (!editOutcome.Success)
+                        return BadRequest(new { message = editOutcome.ErrorMessage });
+                    break;
+
                 case "item_deletion":
                     if (pending.EntityType == "Category")
                         await productDeletion.DeleteCategoryAsync(pending.EntityId!.Value, actorId);
@@ -328,15 +364,49 @@ public class ApprovalsController(
         if (!req.Approved) pending.RejectionReason = req.Reason;
         await db.SaveChangesAsync();
 
+        // The decision row previously carried no payload at all, so the employee reports showed
+        // "Approved Request" with nothing to say what was approved, and the employee filter
+        // dropped it entirely (that matches on EmployeeId, which was never set).
+        var employeeId = actorId.HasValue
+            ? await db.Employees.Where(e => e.UserId == actorId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()
+            : null;
         await audit.LogAsync(
             action: $"{(req.Approved ? "approve" : "reject")}_{pending.RequestType}",
             entityType: pending.EntityType,
             entityId: pending.EntityId,
             userId: actorId,
             branchId: pending.BranchId,
+            details: System.Text.Json.JsonSerializer.Serialize(new
+            {
+                RequestType = pending.RequestType,
+                Request = EntityLabel(pending),
+                RequestedAt = pending.RequestedAt,
+                Decision = pending.Status,
+                Reason = req.Reason ?? pending.Reason,
+            }),
             severity: req.Approved ? "info" : "warning",
+            beforeValue: System.Text.Json.JsonSerializer.Serialize(new { Status = "pending" }),
             notes: req.Reason,
-            module: "Approvals");
+            module: "Approvals",
+            employeeId: employeeId);
+
+        // Close the loop for whoever raised it — until now the requester had no way to learn the
+        // outcome short of re-opening the Approval Center and looking for their own row.
+        if (pending.RequestedBy != Guid.Empty && pending.RequestedBy != actorId)
+        {
+            await notifications.NotifyUserAsync(
+                pending.RequestedBy,
+                category: "Admin / Security",
+                type: "approval_decision",
+                title: req.Approved ? "Request approved" : "Request rejected",
+                message: $"{EntityLabel(pending)} was {(req.Approved ? "approved" : "rejected")}"
+                    + (string.IsNullOrWhiteSpace(req.Reason) ? "." : $" — \"{req.Reason}\"."),
+                severity: req.Approved ? "info" : "warning",
+                entityType: "ApprovalRequest",
+                entityId: pending.Id,
+                branchId: pending.BranchId,
+                triggeredBy: actorId);
+        }
 
         return Ok(pending);
     }

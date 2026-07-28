@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/offers")]
-public class OffersController(BaqalaDbContext db, IOfferCreationService offerCreation, IAuditService audit) : ControllerBase
+public class OffersController(BaqalaDbContext db, IOfferCreationService offerCreation, IAuditService audit, IApprovalNotificationService approvalNotifications) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
@@ -70,6 +70,8 @@ public class OffersController(BaqalaDbContext db, IOfferCreationService offerCre
             };
             db.ApprovalRequests.Add(pending);
             await db.SaveChangesAsync();
+            await approvalNotifications.NotifyPendingAsync(pending, "Coupons",
+                "Offer awaiting approval", $"{req.Name} ({req.OfferType}) is waiting for your approval.");
             return Accepted(new { message = "Offer request sent for manager approval.", approvalRequestId = pending.Id });
         }
 

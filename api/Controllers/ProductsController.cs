@@ -14,6 +14,7 @@ public class ProductsController(
     INotificationService notifications,
     IAuditService audit,
     IProductDeletionService productDeletion,
+    IApprovalNotificationService approvalNotifications,
     ILogger<ProductsController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
@@ -234,6 +235,9 @@ public class ProductsController(
         };
         db.ApprovalRequests.Add(pending);
         await db.SaveChangesAsync();
+        await approvalNotifications.NotifyPendingAsync(pending, "Inventory",
+            "Product deletion awaiting approval",
+            $"{product.Name} ({product.Sku}) is queued for deletion and needs your approval.");
         return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
     }
 
@@ -292,6 +296,9 @@ public class ProductsController(
         };
         db.ApprovalRequests.Add(pending);
         await db.SaveChangesAsync();
+        await approvalNotifications.NotifyPendingAsync(pending, "Inventory",
+            "Category deletion awaiting approval",
+            $"Category {category.Name} is queued for deletion and needs your approval.");
         return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
     }
 

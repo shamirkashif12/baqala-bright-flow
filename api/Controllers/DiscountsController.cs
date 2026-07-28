@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/discounts")]
-public class DiscountsController(BaqalaDbContext db, IDiscountCreationService discountCreation, IAuditService audit) : ControllerBase
+public class DiscountsController(BaqalaDbContext db, IDiscountCreationService discountCreation, IAuditService audit, IApprovalNotificationService approvalNotifications) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
@@ -56,6 +56,9 @@ public class DiscountsController(BaqalaDbContext db, IDiscountCreationService di
             };
             db.ApprovalRequests.Add(pending);
             await db.SaveChangesAsync();
+            await approvalNotifications.NotifyPendingAsync(pending, "Coupons",
+                "Discount awaiting approval",
+                $"{req.Name} — {(req.DiscountType == "fixed" ? $"SAR {req.Value:0.##}" : $"{req.Value:0.##}%")} off is waiting for your approval.");
             return Accepted(new { message = "Discount request sent for manager approval.", approvalRequestId = pending.Id });
         }
 

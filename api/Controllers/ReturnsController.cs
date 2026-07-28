@@ -216,7 +216,10 @@ public class ReturnsController(
     [HttpPatch("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveReturnRequest req)
     {
-        var ret = await db.CustomerReturns.FindAsync(id);
+        // Items loaded (FindAsync wouldn't) so the audit row below can record WHICH products were
+        // refunded, not just the total — the Employee Audit Center showed "—" products for every
+        // refund approval otherwise.
+        var ret = await db.CustomerReturns.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id);
         if (ret is null) return NotFound();
 
         var role = User.FindFirst("role")?.Value;
@@ -241,7 +244,11 @@ public class ReturnsController(
             entityId: ret.Id,
             userId: CallerId(),
             branchId: ret.BranchId,
-            details: System.Text.Json.JsonSerializer.Serialize(new { ret.Status, ret.ApprovedBy, ret.RefundAmount, ret.ReturnNumber }),
+            details: System.Text.Json.JsonSerializer.Serialize(new
+            {
+                ret.Status, ret.ApprovedBy, ret.RefundAmount, ret.ReturnNumber, ret.ReturnType, ret.RefundMethod, ret.Reason,
+                Items = ret.Items.Select(i => new { i.ProductId, i.Quantity, i.UnitPrice, TotalPrice = i.RefundAmount, i.Condition }),
+            }),
             severity: "warning",
             beforeValue: beforeSnapshot,
             module: "Returns", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: terminalId);

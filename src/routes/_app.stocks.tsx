@@ -658,13 +658,17 @@ function ManualStockOutDialog({ branches, products, onDone }: { branches: Branch
   );
 }
 
-// ─── Stocking Review (Stock Filters: physical count / live reconciliation) ────
-// Self-contained tab: snapshots system quantity per product at start, lets a manager scan/enter
+// ─── Stocktaking / Inventory Count (physical count → live reconciliation) ─────
+// Self-contained panel: snapshots system quantity per product at start, lets a manager scan/enter
 // counted quantities, then submits for review. Nothing touches on-hand stock until a reviewer and
 // then an approver both sign off (maker-checker, same shape as the Wastage gate) — the approval
 // step is what finally reconciles the variance through the InventoryAdjustment pipeline the
 // Stock-Out/Wastage tabs already write to.
-function StockingReviewTab({ branches, warehouses }: { branches: Branch[]; warehouses: Warehouse[] }) {
+//
+// Exported because it's also the whole of the standalone /stocktaking page. It was only ever
+// reachable as a tab buried inside this page under the name "Stocking Review", which is why the
+// client reported the inventory-count tool as missing — same tool, now with a front door.
+export function StocktakingPanel({ branches, warehouses }: { branches: Branch[]; warehouses: Warehouse[] }) {
   const { user } = useAuth();
   const { canCreate, canEdit, canApprove } = usePermission("Stocks");
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
@@ -1311,7 +1315,7 @@ function Stocks() {
           <TabsTrigger value="delivery" className="gap-1.5"><Truck className="h-3.5 w-3.5" />Store Delivery</TabsTrigger>
           <TabsTrigger value="wastage" className="gap-1.5"><Trash2 className="h-3.5 w-3.5" />Wastage</TabsTrigger>
           <TabsTrigger value="movement" className="gap-1.5"><History className="h-3.5 w-3.5" />Movement</TabsTrigger>
-          <TabsTrigger value="stocking-review" className="gap-1.5"><ClipboardCheck className="h-3.5 w-3.5" />Stocking Review</TabsTrigger>
+          <TabsTrigger value="stocking-review" className="gap-1.5"><ClipboardCheck className="h-3.5 w-3.5" />Stocktaking</TabsTrigger>
           <TabsTrigger value="reports" className="gap-1.5"><FileBarChart className="h-3.5 w-3.5" />Reports</TabsTrigger>
         </TabsList>
 
@@ -1658,9 +1662,9 @@ function Stocks() {
           </Card>
         </TabsContent>
 
-        {/* ── Stocking Review (Stock Filters: live count / reconciliation) ── */}
+        {/* ── Stocktaking / Inventory Count (live count → reconciliation) ── */}
         <TabsContent value="stocking-review">
-          <StockingReviewTab branches={branches} warehouses={warehouses} />
+          <StocktakingPanel branches={branches} warehouses={warehouses} />
         </TabsContent>
 
         {/* ── Reports ── */}

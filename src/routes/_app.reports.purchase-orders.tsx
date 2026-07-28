@@ -13,6 +13,7 @@ import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { api, type PurchaseOrderReportRow, type ReportExportFormat, type Supplier, type Warehouse, type User } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
+import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -104,6 +105,7 @@ function PurchaseReports() {
   const [statuses, setStatuses] = useState<string[]>([]);
   const [createdByIds, setCreatedByIds] = useState<string[]>([]);
   const [approvedByIds, setApprovedByIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -111,9 +113,14 @@ function PurchaseReports() {
   const [loading, setLoading] = useState(true);
   const [viewPo, setViewPo] = useState<PurchaseOrderReportRow | null>(null);
 
+  const { products } = useReportFilterOptions(branchIds.length === 1 ? branchIds[0] : undefined, undefined);
+
   useEffect(() => { api.getSuppliers().then(setSuppliers).catch(() => {}); }, []);
   useEffect(() => { api.getWarehouses().then(setWarehouses).catch(() => {}); }, []);
   useEffect(() => { api.getUsers().then(setUsers).catch(() => {}); }, []);
+  useEffect(() => {
+    setProductIds((prev) => prev.filter((id) => products.some((p) => p.id === id)));
+  }, [products]);
 
   const filterParams = {
     from, to,
@@ -123,6 +130,9 @@ function PurchaseReports() {
     status: statuses.length ? statuses : undefined,
     createdBy: createdByIds.length ? createdByIds : undefined,
     approvedBy: approvedByIds.length ? approvedByIds : undefined,
+    // Narrows to POs CONTAINING the product; the backend also narrows the line items themselves,
+    // so the drawer shows that product's lines rather than every line of every PO it appeared on.
+    productId: productIds.length ? productIds : undefined,
   };
 
   const load = useCallback(() => {
@@ -132,7 +142,7 @@ function PurchaseReports() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, supplierIds, branchIds, warehouseIds, statuses, createdByIds, approvedByIds]);
+  }, [from, to, supplierIds, branchIds, warehouseIds, statuses, createdByIds, approvedByIds, productIds]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -189,6 +199,14 @@ function PurchaseReports() {
             options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
             selected={statuses}
             onChange={setStatuses}
+          />
+        </div>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Products"
+            options={products.map((p) => ({ id: p.id, label: p.name }))}
+            selected={productIds}
+            onChange={setProductIds}
           />
         </div>
         <div className="w-40">

@@ -22,10 +22,15 @@ export const Route = createFileRoute("/_app/reports/approval-center")({ componen
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
   discount: "Discount",
+  offer: "Offer",
+  coupon: "Coupon",
   order_cancellation: "Order Cancellation",
+  // Order edits (line changes, repricing, discount overrides) by anyone without Orders:Approve —
+  // queued here rather than applied, same maker-checker shape as a cancellation.
+  order_modification: "Order Modification",
   item_deletion: "Item Deletion",
   refund_return: "Refund / Return",
-  stock_count: "Stock Count",
+  stock_count: "Stocktaking / Inventory Count",
   stock_transfer: "Stock Transfer",
   wastage_adjustment: "Wastage / Write-off",
 };
@@ -79,9 +84,14 @@ function ApprovalCenter() {
     Stocks: usePermission("Stocks").canApprove,
     "Stock Transfers": usePermission("Stock Transfers").canApprove,
   };
+  // Mirrors ApprovalsController.ModuleFor exactly — the server re-checks the same module before
+  // acting, so a mismatch here only ever hides a button the caller could legitimately press.
   const moduleForRequestType: Record<string, keyof typeof modulePerms> = {
     discount: "Coupons",
+    offer: "Coupons",
+    coupon: "Coupons",
     order_cancellation: "Orders",
+    order_modification: "Orders",
     item_deletion: "Inventory",
     refund_return: "Returns",
     stock_count: "Stocks",
