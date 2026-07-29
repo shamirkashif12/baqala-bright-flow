@@ -117,6 +117,31 @@ public class OrderEditService(
         // quantity (the common case) nets to one adjustment instead of a remove-then-re-add.
         var oldQtyByProduct = order.Items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.Sum(i => i.Quantity));
         var newQtyByProduct = req.Items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.Sum(i => i.Quantity));
+
+        // Same guard as OrdersController.Create — raising a line's quantity on an existing order
+        // is still a sale, so it must not be able to push on-hand stock negative when the branch
+        // hasn't opted into AllowNegativeStock. Checked up front, before any stock row is mutated,
+        // so a rejected edit leaves inventory untouched rather than partially applied.
+        var posSettings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
+        if (posSettings is not null && !posSettings.AllowNegativeStock)
+        {
+            foreach (var productId in oldQtyByProduct.Keys.Union(newQtyByProduct.Keys))
+            {
+                var delta = newQtyByProduct.GetValueOrDefault(productId, 0m) - oldQtyByProduct.GetValueOrDefault(productId, 0m);
+                if (delta <= 0) continue;
+
+                var onHand = await db.InventoryStocks
+                    .Where(s => s.ProductId == productId && s.BranchId == order.BranchId)
+                    .Select(s => (decimal?)s.Quantity)
+                    .FirstOrDefaultAsync() ?? 0;
+                if (onHand - delta < 0)
+                {
+                    var product = await db.Products.FindAsync(productId);
+                    return new OrderEditOutcome(false, $"Cannot increase '{product?.Name ?? "item"}' — only {onHand:0.##} on hand and this branch does not allow negative stock.");
+                }
+            }
+        }
+
         foreach (var productId in oldQtyByProduct.Keys.Union(newQtyByProduct.Keys))
         {
             var delta = newQtyByProduct.GetValueOrDefault(productId, 0m) - oldQtyByProduct.GetValueOrDefault(productId, 0m);

@@ -13,17 +13,21 @@ public class Terminal
     [MaxLength(50), Column("terminal_code")]
     public string? TerminalCode { get; set; }
 
-    [Required, MaxLength(255), Column("name")]
+    // Not [Required] — that made ASP.NET's automatic model validation short-circuit before
+    // TerminalsController's own checks could run, surfacing only the generic "One or more
+    // validation errors occurred." instead of a field-specific message. Validated explicitly in
+    // the controller instead (same pattern as Suppliers/Warehouses/Branches).
+    [MaxLength(255), Column("name")]
     public string Name { get; set; } = default!;
 
-    [Required, Column("branch_id")]
+    [Column("branch_id")]
     public Guid BranchId { get; set; }
 
     [Column("assigned_cashier_id")]
     public Guid? AssignedCashierId { get; set; }
 
     // active | offline | syncing | session_open | session_closed
-    [Required, MaxLength(20), Column("status")]
+    [MaxLength(20), Column("status")]
     public string Status { get; set; } = "offline";
 
     [Column("last_sync")]
@@ -114,4 +118,38 @@ public class Device
     // Navigation
     public Branch? Branch { get; set; }
     public Terminal? Terminal { get; set; }
+}
+
+[Table("maintenance_tickets")]
+public class MaintenanceTicket
+{
+    [Key, Column("id")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required, Column("device_id")]
+    public Guid DeviceId { get; set; }
+
+    [Required, MaxLength(50), Column("issue_type")]
+    public string IssueType { get; set; } = default!;
+
+    [Required, MaxLength(20), Column("priority")]
+    public string Priority { get; set; } = "medium"; // low | medium | high | critical
+
+    [Required, Column("description")]
+    public string Description { get; set; } = default!;
+
+    [MaxLength(255), Column("reported_by")]
+    public string? ReportedBy { get; set; }
+
+    [Required, MaxLength(20), Column("status")]
+    public string Status { get; set; } = "open"; // open | in_progress | resolved
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    // Navigation
+    public Device? Device { get; set; }
 }

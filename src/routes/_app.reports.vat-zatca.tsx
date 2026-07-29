@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
+import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -14,7 +15,7 @@ import { api, type VatZatcaReport as VatZatcaData, type VatZatcaRow, type Report
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { ShieldCheck, CheckCircle2, Clock, XCircle } from "lucide-react";
+import { ShieldCheck, CheckCircle2, Clock, XCircle, X } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/vat-zatca")({ component: VatZatca });
@@ -68,33 +69,47 @@ function VatZatca() {
     status: s, count: (data?.rows ?? []).filter((r) => r.zatcaStatus === s).length,
   })).filter((s) => s.count > 0);
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchId !== (lockedBranchId ?? "all") || zatcaStatus !== "all";
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchId(lockedBranchId ?? "all"); setZatcaStatus("all");
+  };
+
   return (
     <PageShell title="VAT / ZATCA Report" subtitle="Taxable amounts, VAT collected/reversed and e-invoicing status">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
+          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         </div>
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+          <FilterField label="Branch">
+            <Select value={branchId} onValueChange={setBranchId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        )}
+        <FilterField label="ZATCA Status">
+          <Select value={zatcaStatus} onValueChange={setZatcaStatus}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="ZATCA Status" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              <SelectItem value="all">Any Status</SelectItem>
+              <SelectItem value="accepted">Accepted</SelectItem>
+              <SelectItem value="submitted">Submitted</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
             </SelectContent>
           </Select>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
         )}
-        <Select value={zatcaStatus} onValueChange={setZatcaStatus}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="ZATCA Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Any Status</SelectItem>
-            <SelectItem value="accepted">Accepted</SelectItem>
-            <SelectItem value="submitted">Submitted</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

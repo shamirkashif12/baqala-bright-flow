@@ -173,17 +173,17 @@ public static class DataSeeder
 
         var orders = new[]
         {
-            MakeOrder("ORD-10241", brOlaya.Id,   uKhalid.Id, tOlaya1.Id, shiftFahad.Id,   "pending",   "pending",    "cash",
+            MakeOrder(SeedOrderNumber(), brOlaya.Id,   uKhalid.Id, tOlaya1.Id, shiftFahad.Id,   "pending",   "pending",    "cash",
                 [(almLaban.Id, 3m, 6.50m), (pepsi.Id, 10m, 2.50m)]),
-            MakeOrder("ORD-10240", brOlaya.Id,   uKhalid.Id, tOlaya1.Id, shiftFahad.Id,   "processing","paid",       "card",
+            MakeOrder(SeedOrderNumber(), brOlaya.Id,   uKhalid.Id, tOlaya1.Id, shiftFahad.Id,   "processing","paid",       "card",
                 [(lipton.Id, 2m, 18.50m), (kitkat.Id, 5m, 4.50m)]),
-            MakeOrder("ORD-10239", brKhobar.Id,  uNora.Id,   tKhobar.Id, shiftClosed.Id,  "ready_to_deliver","paid", "wallet",
+            MakeOrder(SeedOrderNumber(), brKhobar.Id,  uNora.Id,   tKhobar.Id, shiftClosed.Id,  "ready_to_deliver","paid", "wallet",
                 [(pepsi.Id, 6m, 2.50m), (almLaban.Id, 2m, 6.50m)]),
-            MakeOrder("ORD-10238", brKhobar.Id,  uNora.Id,   tKhobar.Id, shiftClosed.Id,  "delivered", "paid",       "card",
+            MakeOrder(SeedOrderNumber(), brKhobar.Id,  uNora.Id,   tKhobar.Id, shiftClosed.Id,  "delivered", "paid",       "card",
                 [(lipton.Id, 4m, 18.50m), (kitkat.Id, 8m, 4.50m)]),
-            MakeOrder("ORD-10237", brJeddah.Id,  uSara.Id,   null,       null,            "cancelled", "refunded",   "cash",
+            MakeOrder(SeedOrderNumber(), brJeddah.Id,  uSara.Id,   null,       null,            "cancelled", "refunded",   "cash",
                 [(almLaban.Id, 4m, 6.50m)]),
-            MakeOrder("ORD-10236", brOlaya.Id,   uAbdullah.Id, tOlaya1.Id, shiftFahad.Id, "delivered", "paid",       "wallet",
+            MakeOrder(SeedOrderNumber(), brOlaya.Id,   uAbdullah.Id, tOlaya1.Id, shiftFahad.Id, "delivered", "paid",       "wallet",
                 [(kitkat.Id, 10m, 4.50m), (lipton.Id, 3m, 18.50m), (pepsi.Id, 20m, 2.50m)]),
         };
         db.Orders.AddRange(orders);
@@ -1112,6 +1112,13 @@ public static class DataSeeder
         CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
     };
 
+    // Matches the real order-number shape OrdersController.Create/OnlineOrdersController.Create
+    // generate at checkout (ORD-yyyyMMdd-XXXXXX) — seed data previously used ad-hoc formats
+    // ("ORD-10238", "ORD-TODAY-...") that never appear on a genuinely-created order, which read as
+    // inconsistent length/format to anyone comparing seeded orders against live ones.
+    private static string SeedOrderNumber() =>
+        $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+
     private static Order MakeOrder(
         string number, Guid branchId, Guid cashierId, Guid? terminalId, Guid? shiftId,
         string orderStatus, string paymentStatus, string paymentMethod,
@@ -1384,6 +1391,7 @@ public static class DataSeeder
                 P(r, "Cashier Workspace",   true,  true,  true,  true,  true,  true),
                 P(r, "Cashier Shifts",      true,  true,  true,  true,  true,  true),
                 P(r, "Orders",              true,  true,  true,  true,  true,  true),
+                P(r, "Online Orders",       true,  true,  true,  true,  true,  true),
                 P(r, "Coupons",             true,  true,  true,  true,  true,  true),
                 P(r, "Loyalty Program",     true,  true,  true,  true,  true,  true),
                 P(r, "Customers",           true,  true,  true,  true,  true,  true),
@@ -1424,6 +1432,7 @@ public static class DataSeeder
                 P(r, "Cashier Workspace",   true,  true,  true,  false, true,  false),
                 P(r, "Cashier Shifts",      true,  false, false, false, true,  true),
                 P(r, "Orders",              true,  true,  true,  true,  true,  true),
+                P(r, "Online Orders",       true,  true,  true,  true,  true,  true),
                 P(r, "Coupons",             true,  true,  true,  true,  true,  false),
                 P(r, "Loyalty Program",     true,  false, true,  false, false, true),
                 P(r, "Customers",           true,  true,  true,  false, false, true),
@@ -1464,6 +1473,7 @@ public static class DataSeeder
                 P(r, "Cashier Workspace",   true,  true,  true,  false, false, false),
                 P(r, "Cashier Shifts",      true,  true,  false, false, false, false),
                 P(r, "Orders",              true,  true,  false, true,  false, false),
+                P(r, "Online Orders",       false, false, false, false, false, false),
                 P(r, "Coupons",             true,  false, false, false, false, false),
                 P(r, "Loyalty Program",     true,  false, false, false, false, false),
                 P(r, "Customers",           true,  true,  false, false, false, false),
@@ -1504,6 +1514,7 @@ public static class DataSeeder
                 P(r, "Cashier Workspace",   false, false, false, false, false, false),
                 P(r, "Cashier Shifts",      false, false, false, false, false, false),
                 P(r, "Orders",              true,  false, false, false, false, false),
+                P(r, "Online Orders",       false, false, false, false, false, false),
                 P(r, "Coupons",             false, false, false, false, false, false),
                 P(r, "Loyalty Program",     false, false, false, false, false, false),
                 P(r, "Customers",           false, false, false, false, false, false),
@@ -1551,6 +1562,7 @@ public static class DataSeeder
                 P(r, "Cashier Workspace",   true,  true,  true,  false, true,  false),
                 P(r, "Cashier Shifts",      true,  true,  true,  false, true,  true),
                 P(r, "Orders",              true,  true,  true,  true,  true,  true),
+                P(r, "Online Orders",       true,  false, false, false, false, false),
                 P(r, "Coupons",             true,  false, false, false, true,  false),
                 P(r, "Loyalty Program",     true,  false, false, false, false, false),
                 P(r, "Customers",           true,  true,  true,  false, false, false),
@@ -1591,6 +1603,7 @@ public static class DataSeeder
                 P(r, "Cashier Workspace",   false, false, false, false, false, false),
                 P(r, "Cashier Shifts",      true,  false, false, false, false, true),
                 P(r, "Orders",              true,  false, false, false, false, true),
+                P(r, "Online Orders",       true,  false, false, false, false, true),
                 P(r, "Coupons",             true,  false, false, false, false, true),
                 P(r, "Loyalty Program",     true,  false, false, false, false, true),
                 P(r, "Customers",           true,  false, false, false, false, true),
@@ -1631,6 +1644,7 @@ public static class DataSeeder
                 P(r, "Cashier Workspace",   false, false, false, false, false, false),
                 P(r, "Cashier Shifts",      false, false, false, false, false, false),
                 P(r, "Orders",              true,  false, false, false, false, true),
+                P(r, "Online Orders",       false, false, false, false, false, false),
                 P(r, "Coupons",             true,  true,  true,  false, false, true),
                 // Loyalty Program: Marketing owns rewards/campaigns/referrals (BRD §4), so it's
                 // the designated administrator of loyalty configuration — same access as Coupons.
@@ -1675,6 +1689,7 @@ public static class DataSeeder
                 P(r, "Cashier Workspace",   false, false, false, false, false, false),
                 P(r, "Cashier Shifts",      false, false, false, false, false, false),
                 P(r, "Orders",              true,  false, false, false, false, false),
+                P(r, "Online Orders",       false, false, false, false, false, false),
                 P(r, "Coupons",             false, false, false, false, false, false),
                 P(r, "Loyalty Program",     false, false, false, false, false, false),
                 P(r, "Customers",           false, false, false, false, false, false),
@@ -1817,6 +1832,91 @@ public static class DataSeeder
             rule.CreatedBy = uAdmin.Id;
             rule.CreatedAt = rule.UpdatedAt = DateTime.UtcNow;
             db.RulesEngine.Add(rule);
+        }
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Patch: reconcile batch RemainingQuantity totals against the aggregate stock row ──────
+    // Batch-less adjustments (Manual Stock-Out/Wastage with no batch picked — batch selection is
+    // optional there) and any FEFO-consumption failure at sale time (best-effort by design, so it
+    // never blocks a sale) both decrement InventoryStock.Quantity without touching any batch's
+    // RemainingQuantity. Repeated enough times, a product's batches collectively show more
+    // "remaining" than the aggregate says is actually on hand — e.g. Inventory shows 0 while a
+    // batch still reads 3/10. This doesn't change that tradeoff going forward (still best-effort,
+    // still doesn't require a batch on every adjustment); it just brings existing drifted rows
+    // back into agreement, trimming the newest-received batches first since the oldest are the
+    // ones FEFO would have already drawn down correctly.
+    public static async Task PatchReconcileBatchStockDriftAsync(BaqalaDbContext db)
+    {
+        var activeBatches = await db.InventoryBatches
+            .Where(b => b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0)
+            .ToListAsync();
+        if (activeBatches.Count == 0) return;
+
+        var groups = activeBatches.GroupBy(b => (b.ProductId, b.BranchId));
+        var stocks = await db.InventoryStocks.ToListAsync();
+        var stockByKey = stocks.ToDictionary(s => (s.ProductId, (Guid?)s.BranchId), s => s);
+
+        var changed = false;
+        foreach (var group in groups)
+        {
+            if (!group.Key.BranchId.HasValue) continue; // warehouse-held batches have no matching InventoryStock row
+            if (!stockByKey.TryGetValue((group.Key.ProductId, group.Key.BranchId), out var stock)) continue;
+
+            var batchTotal = group.Sum(b => b.RemainingQuantity);
+            var excess = batchTotal - stock.Quantity;
+            if (excess <= 0) continue;
+
+            // Newest-received first — the oldest batch in a FEFO shop is the one most likely to
+            // already be genuinely correct, having been drawn down by real (successful) sales.
+            foreach (var batch in group.OrderByDescending(b => b.ReceivedDate))
+            {
+                if (excess <= 0) break;
+                var take = Math.Min(batch.RemainingQuantity, excess);
+                batch.RemainingQuantity -= take;
+                if (batch.RemainingQuantity <= 0) batch.Status = "consumed";
+                batch.UpdatedAt = DateTime.UtcNow;
+                excess -= take;
+                changed = true;
+            }
+        }
+        if (changed) await db.SaveChangesAsync();
+    }
+
+    // ─── Patch: backfill ApprovedQuantity on already-approved/completed transfers ──
+    // StockTransfersController.UpdateStatus now sets item.ApprovedQuantity when a transfer moves
+    // to "approved" (there's no partial-approval UI, so it's always == RequestedQuantity), but that
+    // only covers transfers approved from now on — rows that went through approval before this fix
+    // (including seeded demo data inserted directly at "completed" status) still show a blank
+    // "Approved Qty" column. Idempotent: only touches rows still null.
+    public static async Task PatchBackfillTransferApprovedQuantityAsync(BaqalaDbContext db)
+    {
+        var items = await db.StockTransferItems
+            .Include(i => i.Transfer)
+            .Where(i => i.ApprovedQuantity == null && i.Transfer!.Status != "draft" && i.Transfer.Status != "pending_approval")
+            .ToListAsync();
+        if (items.Count == 0) return;
+        foreach (var item in items)
+            item.ApprovedQuantity = item.RequestedQuantity;
+        await db.SaveChangesAsync();
+    }
+
+    // ─── Patch: clamp any negative on-hand stock rows to zero ───────────────────
+    // OrdersController.Create and OrderEditService.ApplyAsync now both block a sale/edit from
+    // pushing stock negative unless AllowNegativeStock is on, but that only guards the two write
+    // paths going forward — rows that went negative before those guards existed (or via manual
+    // stock adjustments predating this fix) stay negative forever otherwise, showing up as e.g. a
+    // branch's Admin Overview "Inventory Value" going below zero. Idempotent: only touches rows
+    // still negative.
+    public static async Task PatchClampNegativeStockAsync(BaqalaDbContext db)
+    {
+        var negative = await db.InventoryStocks.Where(s => s.Quantity < 0).ToListAsync();
+        if (negative.Count == 0) return;
+        foreach (var stock in negative)
+        {
+            stock.Quantity = 0;
+            stock.LastUpdated = DateTime.UtcNow;
+            stock.UpdatedAt = DateTime.UtcNow;
         }
         await db.SaveChangesAsync();
     }
@@ -2206,7 +2306,7 @@ public static class DataSeeder
                 // genuinely created earlier the same day, once this patch finally runs).
                 var order = new Order
                 {
-                    Id = Guid.NewGuid(), OrderNumber = $"ORD-TODAY-{branch.BranchCode}-{today:yyyyMMdd}-{i + 1}", Source = "pos",
+                    Id = Guid.NewGuid(), OrderNumber = SeedOrderNumber(), Source = "pos",
                     BranchId = branch.Id, CashierId = cashier.Id, TerminalId = terminal?.Id, ShiftId = shift.Id,
                     OrderStatus = "delivered", PaymentStatus = "paid",
                     Subtotal = subtotal, TaxAmount = tax,

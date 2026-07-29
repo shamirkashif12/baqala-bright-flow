@@ -10,10 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, Loader2, Plus, Search, ChevronDown, Check, X, CheckCircle, Truck } from "lucide-react";
+import { RotateCcw, Loader2, Plus, Search, ChevronDown, Check, X, CheckCircle, Truck, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import { api, type StockTransfer, type Warehouse, type Supplier, type StockTransferItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -299,11 +300,34 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
   const selectedCount = selectedWhIds.length;
   const grandTotal = costPerWarehouse * Math.max(selectedCount, 1);
 
+  // Item quantities are auto-picked from the source PO/WR/transfer's ORDERED quantity, not what's
+  // actually still on hand right now — stock can have moved since. Previously that gap was only
+  // caught at approval time ("quantity not available"), well after the return was drafted. Capping
+  // against the CURRENT warehouse stock here (the minimum across every selected warehouse, so a
+  // multi-warehouse batch return can't exceed what its tightest warehouse actually has) surfaces
+  // the same problem at creation time instead.
+  const maxAvailableFor = (productId: string): number | null => {
+    if (selectedWhIds.length === 0) return null;
+    const quantities = selectedWhIds.map(whId => {
+      const wh = warehouses.find(w => w.id === whId);
+      return wh?.stock?.find(s => s.productId === productId)?.quantity ?? 0;
+    });
+    return Math.min(...quantities);
+  };
+  const overStockItems = validItems.filter(i => {
+    const max = maxAvailableFor(i.productId);
+    return max !== null && i.requestedQuantity > max;
+  });
+
   const handleSubmit = async () => {
     if (selectedWhIds.length === 0) { setError("Select at least one warehouse to return from."); return; }
     if (!effectiveSupplierId) { setError("Select a supplier to return to."); return; }
     if (!returnReason) { setError("Select a return reason."); return; }
     if (validItems.length === 0) { setError("No valid items to return."); return; }
+    if (overStockItems.length > 0) {
+      setError(`${overStockItems[0].productName} — only ${maxAvailableFor(overStockItems[0].productId)} available at the selected warehouse(s). Reduce the quantity or deselect that warehouse.`);
+      return;
+    }
     setSaving(true); setError("");
     try {
       const batchId = selectedWhIds.length > 1 ? uuid() : undefined;
@@ -501,27 +525,38 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
                 <div className="grid grid-cols-[1fr_56px_80px] gap-2 px-1 text-[10px] text-muted-foreground uppercase tracking-wider">
                   <span>Product</span><span className="text-center">Qty</span><span className="text-right">Unit Cost</span>
                 </div>
-                {items.map((item, idx) => (
-                  <div key={idx} className="grid grid-cols-[1fr_56px_80px] gap-2 items-center">
-                    <span className="text-sm truncate" title={item.productName}>{item.productName}</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={item.requestedQuantity}
-                      onChange={e => setItems(prev => prev.map((it, i) => i === idx ? { ...it, requestedQuantity: Math.max(1, parseInt(e.target.value) || 1) } : it))}
-                      className="h-8 text-xs text-center px-1"
-                    />
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={item.unitCost}
-                      onChange={e => setItems(prev => prev.map((it, i) => i === idx ? { ...it, unitCost: e.target.value } : it))}
-                      className="h-8 text-xs text-right px-2"
-                      placeholder="0.00"
-                    />
-                  </div>
-                ))}
+                {items.map((item, idx) => {
+                  const maxAvailable = maxAvailableFor(item.productId);
+                  const isOverStock = maxAvailable !== null && item.requestedQuantity > maxAvailable;
+                  return (
+                    <div key={idx} className="space-y-0.5">
+                      <div className="grid grid-cols-[1fr_56px_80px] gap-2 items-center">
+                        <span className="text-sm truncate" title={item.productName}>{item.productName}</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={item.requestedQuantity}
+                          onChange={e => setItems(prev => prev.map((it, i) => i === idx ? { ...it, requestedQuantity: Math.max(1, parseInt(e.target.value) || 1) } : it))}
+                          className={`h-8 text-xs text-center px-1 ${isOverStock ? "border-destructive ring-1 ring-destructive" : ""}`}
+                        />
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={item.unitCost}
+                          onChange={e => setItems(prev => prev.map((it, i) => i === idx ? { ...it, unitCost: e.target.value } : it))}
+                          className="h-8 text-xs text-right px-2"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      {maxAvailable !== null && (
+                        <p className={`text-[10px] text-right pr-1 ${isOverStock ? "text-destructive" : "text-muted-foreground"}`}>
+                          {maxAvailable} available at selected warehouse(s)
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
                 {items.length === 0 && (
                   <p className="text-xs text-muted-foreground text-center py-3">No items loaded from order.</p>
                 )}
@@ -579,7 +614,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
               <Button
                 className="flex-1 gradient-primary text-primary-foreground border-0"
                 onClick={handleSubmit}
-                disabled={saving || selectedWhIds.length === 0}
+                disabled={saving || selectedWhIds.length === 0 || overStockItems.length > 0}
               >
                 {saving
                   ? <><Loader2 className="h-4 w-4 animate-spin mr-1.5" />Creating…</>
@@ -606,6 +641,8 @@ function SupplierReturns() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [rtsOpen, setRtsOpen] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<StockTransfer[] | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -615,17 +652,24 @@ function SupplierReturns() {
       .finally(() => setLoading(false));
   };
 
-  const updateStatus = async (group: StockTransfer[], newStatus: string) => {
+  const updateStatus = async (group: StockTransfer[], newStatus: string, reason?: string) => {
     const key = group[0].id + "_" + newStatus;
     setActionLoading(key);
     try {
-      for (const t of group) await api.updateTransferStatus(t.id, newStatus, user?.id);
+      for (const t of group) await api.updateTransferStatus(t.id, newStatus, user?.id, reason);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to update one or more transfers.");
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const confirmCancel = async () => {
+    if (!cancelTarget) return;
+    await updateStatus(cancelTarget, "cancelled", cancelReason.trim());
+    setCancelTarget(null);
+    setCancelReason("");
   };
 
   useEffect(() => { load(); }, []);
@@ -666,8 +710,8 @@ function SupplierReturns() {
       {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <MetricCard label="Total RTS" value={String(transfers.length)} icon={RotateCcw} accent="default" />
-        <MetricCard label="Completed" value={String(completed.length)} icon={RotateCcw} accent="success" />
-        <MetricCard label="Total Credit Value" value={`SAR ${totalRtsValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={RotateCcw} accent="primary" />
+        <MetricCard label="Completed" value={String(completed.length)} icon={CheckCircle} accent="success" />
+        <MetricCard label="Total Credit Value" value={`SAR ${totalRtsValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={DollarSign} accent="primary" />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mt-4">
@@ -758,7 +802,10 @@ function SupplierReturns() {
                           : "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_CLS[t.status] ?? "bg-muted text-muted-foreground"}`}>
+                        <span
+                          title={t.status === "cancelled" && t.cancelReason ? `Reason: ${t.cancelReason}` : undefined}
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_CLS[t.status] ?? "bg-muted text-muted-foreground"}`}
+                        >
                           {t.status.replace(/_/g, " ")}
                         </span>
                       </td>
@@ -791,10 +838,10 @@ function SupplierReturns() {
                               Complete
                             </Button>
                           )}
-                          {t.status !== "completed" && t.status !== "cancelled" && canDelete && (
+                          {t.status !== "completed" && t.status !== "cancelled" && t.status !== "rejected" && canDelete && (
                             <Button size="sm" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
                               disabled={actionLoading === group[0].id + "_cancelled"}
-                              onClick={() => updateStatus(group, "cancelled")}>
+                              onClick={() => setCancelTarget(group)}>
                               <X className="h-3 w-3" />
                             </Button>
                           )}
@@ -817,6 +864,22 @@ function SupplierReturns() {
       )}
 
       <RtsSheet open={rtsOpen} onOpenChange={setRtsOpen} onCreated={load} />
+
+      <Dialog open={!!cancelTarget} onOpenChange={v => { if (!v) { setCancelTarget(null); setCancelReason(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Cancel Return?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Please provide a reason for cancelling this return.</p>
+          <Textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={3}
+            className="mt-2" placeholder="e.g. Created in error, supplier already refunded…" />
+          <DialogFooter className="gap-2 mt-2">
+            <Button variant="outline" onClick={() => { setCancelTarget(null); setCancelReason(""); }}>Back</Button>
+            <Button variant="destructive" disabled={!cancelReason.trim() || (!!cancelTarget && actionLoading === cancelTarget[0].id + "_cancelled")}
+              onClick={confirmCancel}>
+              Confirm Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

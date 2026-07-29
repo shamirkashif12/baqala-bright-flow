@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AuditDetailDrawer } from "@/components/audit-detail-drawer";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -15,7 +15,7 @@ import { useBranch } from "@/lib/branch-context";
 import { api, type EmployeeAuditRow, type Employee, type ReportExportFormat } from "@/lib/api";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { ShieldAlert, Users, Percent, Ban, Eye } from "lucide-react";
+import { ShieldAlert, Users, Percent, Ban, Eye, X } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/employee-audit-center")({ component: EmployeeAuditCenter });
 
@@ -106,6 +106,13 @@ function EmployeeAuditCenter() {
     }
   };
 
+  const hasFilters = dateFrom !== firstOfMonthStr() || dateTo !== todayStr() || branchIds.length > 0
+    || employeeIds.length > 0 || categories.length > 0 || search !== "";
+  const clearFilters = () => {
+    setDateFrom(firstOfMonthStr()); setDateTo(todayStr()); setBranchIds([]); setEmployeeIds([]);
+    setCategories([]); setSearch("");
+  };
+
   const employeeCount = useMemo(() => new Set(rows.map(r => r.employeeName)).size, [rows]);
   const discountCount = useMemo(() => rows.filter(r => r.actionCategory === "Gave Discount").length, [rows]);
   const riskCount = useMemo(() => rows.filter(r => r.actionCategory === "Cancelled Item" || r.actionCategory === "Refunded Order" || r.actionCategory === "Deleted Item").length, [rows]);
@@ -137,39 +144,52 @@ function EmployeeAuditCenter() {
   return (
     <PageShell title="Employee Audit Center" subtitle="Full employee activity history for audit and misuse tracking">
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
+        <div className="flex flex-wrap items-end gap-2">
+          <FilterField label="From"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
+          <FilterField label="To"><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" /></FilterField>
           {isManagerTier && (
             <>
-              <div className="w-40">
-                <SearchableMultiSelect
-                  placeholder="All Branches"
-                  options={branches.map(b => ({ id: b.id, label: b.name }))}
-                  selected={branchIds}
-                  onChange={setBranchIds}
-                />
-              </div>
-              <div className="w-48">
-                <SearchableMultiSelect
-                  placeholder="All Employees"
-                  options={employees.map(e => ({ id: e.id, label: e.fullName }))}
-                  selected={employeeIds}
-                  onChange={setEmployeeIds}
-                />
-              </div>
+              <FilterField label="Branch">
+                <div className="w-40">
+                  <SearchableMultiSelect
+                    placeholder="All Branches"
+                    options={branches.map(b => ({ id: b.id, label: b.name }))}
+                    selected={branchIds}
+                    onChange={setBranchIds}
+                  />
+                </div>
+              </FilterField>
+              <FilterField label="Employee">
+                <div className="w-48">
+                  <SearchableMultiSelect
+                    placeholder="All Employees"
+                    options={employees.map(e => ({ id: e.id, label: e.fullName }))}
+                    selected={employeeIds}
+                    onChange={setEmployeeIds}
+                  />
+                </div>
+              </FilterField>
             </>
           )}
-          <div className="w-48">
-            <SearchableMultiSelect
-              placeholder="All Activity Types"
-              options={CATEGORIES.map(c => ({ id: c, label: c }))}
-              selected={categories}
-              onChange={setCategories}
-            />
-          </div>
-          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employee or action…" className="h-9 w-56" />
+          <FilterField label="Activity Type">
+            <div className="w-48">
+              <SearchableMultiSelect
+                placeholder="All Activity Types"
+                options={CATEGORIES.map(c => ({ id: c, label: c }))}
+                selected={categories}
+                onChange={setCategories}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Search">
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employee or action…" className="h-9 w-56" />
+          </FilterField>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
           <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
         </div>
 

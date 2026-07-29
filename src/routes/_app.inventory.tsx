@@ -14,11 +14,12 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Minus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
-  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft,
+  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft, X,
 } from "lucide-react";
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
-import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList } from "@/lib/api";
+import { TierMultiSelect } from "@/components/tier-multi-select";
+import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList, type ProductImage, type ProductVariant } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -44,28 +45,6 @@ function daysLeft(date?: string | null) {
 function fmtPrice(n?: number | null) {
   if (n == null) return "—";
   return n.toFixed(2);
-}
-
-// Plain tier names — matched exactly by PriceResolutionService (never "and above"), so picking
-// several here creates one price rule per tier, all at the same price.
-const TIER_OPTIONS: { value: CustomerTier; label: string }[] = [
-  { value: "standard", label: "Standard" },
-  { value: "silver", label: "Silver" },
-  { value: "gold", label: "Gold" },
-  { value: "platinum", label: "Platinum" },
-];
-
-function TierMultiSelect({ selected, onToggle }: { selected: CustomerTier[]; onToggle: (tier: CustomerTier) => void }) {
-  return (
-    <div className="flex rounded-lg border border-border/60 overflow-hidden shrink-0">
-      {TIER_OPTIONS.map(({ value, label }) => (
-        <button key={value} type="button" onClick={() => onToggle(value)}
-          className={`px-3 py-1.5 text-xs transition-colors ${selected.includes(value) ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted/50"}`}>
-          {label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -235,6 +214,75 @@ function ProductImagePicker({ value, onChange }: { value: string; onChange: (dat
   );
 }
 
+// Additional, optional gallery images shown as a carousel on the public online ordering page's
+// product cards — separate from the single "primary" photo above. Needs a real product id, so
+// this only ever appears in the Edit dialog. One-at-a-time upload + flat list with delete, same
+// UX pattern as the Supplier/Employee document attachment sections elsewhere in this app.
+function ProductGallerySection({ productId }: { productId: string }) {
+  const [images, setImages] = useState<ProductImage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const load = () => api.getProductImages(productId).then(setImages).catch(() => setImages([])).finally(() => setLoading(false));
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [productId]);
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      await api.uploadProductImage(productId, dataUrl);
+      await load();
+    } catch {
+      toast.error("Failed to upload image");
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const remove = async (imageId: string) => {
+    try {
+      await api.deleteProductImage(productId, imageId);
+      setImages(prev => prev.filter(i => i.id !== imageId));
+    } catch {
+      toast.error("Failed to remove image");
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <FieldRow label="Gallery Photos (optional)">
+        <div className="space-y-2">
+          {!loading && images.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {images.map(img => (
+                <div key={img.id} className="relative h-16 w-16 shrink-0">
+                  <img src={img.fileUrl} alt="" className="h-16 w-16 rounded-md border border-border/60 object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => remove(img.id)}
+                    className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-xs shadow"
+                    aria-label="Remove image"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <Button type="button" size="sm" variant="outline" onClick={() => inputRef.current?.click()} disabled={uploading}>
+            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+            Add photo
+          </Button>
+          <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
+        </div>
+      </FieldRow>
+    </div>
+  );
+}
+
 // ─── Receive Stock Dialog (from an in-transit Stock Transfer) ────────────────
 // Stock may only enter a branch through PO → Stock Transfer → in_transit → receive
 // (StockTransfersController.ReceiveTransfer) — this replaces the old free-form "Receive Batch"
@@ -400,9 +448,16 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     itemsPerPack: "",
     purchasePrice: "", sellingPrice: "",
     quantity: "100", expiryDate: "",
+    // For weight-sold items (meat, produce) quantity is entered in kg rather than whole units —
+    // EditProductDialog already supports this flag, but Add Product had no way to set it, so every
+    // newly-created product came in as unit-based even when it should have been weight-based.
+    weightBased: false,
+    // Was always auto-generated (`INIT-{id}`) with no way to record the supplier's own batch/lot
+    // number for a fresh product's opening stock.
+    batchNumber: "",
     vatPct: "15", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
-    discount: "", imageUrl: "",
+    discount: "", imageUrl: "", description: "",
   });
 
   // Multi-branch: the product is stocked into every selected branch (same opening quantity), and
@@ -437,7 +492,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     setBranchPrices({});
     setTierPrice({ tiers: [], price: "" });
     setPriceSchedule({ from: "", to: "" });
-    setForm({ name: "", sku: "", barcode: "", categoryId: "", saleUnitType: "single", itemsPerPack: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "" });
+    setForm({ name: "", sku: "", barcode: "", categoryId: "", saleUnitType: "single", itemsPerPack: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", weightBased: false, batchNumber: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "", description: "" });
   };
 
   const missingFields = [
@@ -508,9 +563,10 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
         taxPercentage: Number(form.vatPct) || 15,
         reorderLevel: 10,
         status: "active",
-        weightBased: false,
+        weightBased: form.weightBased,
         isTobacco: form.isTobacco,
         imageUrl: form.imageUrl || undefined,
+        description: form.description.trim() || undefined,
         // Pack & unit (FRD §12): a pack sells as one unit at the Selling Price above.
         saleUnitType: form.saleUnitType,
         itemsPerPack: form.saleUnitType === "pack" ? Number(form.itemsPerPack) : null,
@@ -527,7 +583,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
           quantity: Number(form.quantity),
           purchaseCost: Number(form.purchasePrice) || undefined,
           expiryDate: form.expiryDate || undefined,
-          batchNumber: `INIT-${product.id.slice(0, 6).toUpperCase()}`,
+          batchNumber: form.batchNumber.trim() || `INIT-${product.id.slice(0, 6).toUpperCase()}`,
         } as Parameters<typeof api.receiveBatch>[0]);
       }
 
@@ -594,6 +650,16 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
         <div className="mt-2">
           <FieldRow label="Product Photo">
             <ProductImagePicker value={form.imageUrl} onChange={set("imageUrl")} />
+          </FieldRow>
+        </div>
+        <div className="mt-3">
+          <FieldRow label="Description (optional)">
+            <Textarea
+              className="min-h-16 text-sm"
+              placeholder="Shown to customers on the public online ordering page…"
+              value={form.description}
+              onChange={e => set("description")(e.target.value)}
+            />
           </FieldRow>
         </div>
         <div className="grid grid-cols-2 gap-3 mt-3">
@@ -708,12 +774,21 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
               single item — the item count is just for your reference.
             </p>
           )}
-          <FieldRow label="Quantity *">
-            <Input type="number" min={1} className={`h-9 ${submitted && (!form.quantity || Number(form.quantity) <= 0) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`} placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
+          <FieldRow label={form.weightBased ? "Quantity (kg) *" : "Quantity *"}>
+            <Input type="number" min={1} step={form.weightBased ? "0.001" : "1"} className={`h-9 ${submitted && (!form.quantity || Number(form.quantity) <= 0) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`} placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Expiry Date">
             <Input type="date" className="h-9" min={todayStr} value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
           </FieldRow>
+          <FieldRow label="Batch Number (optional)">
+            <Input className="h-9" placeholder="Auto-generated if left blank" value={form.batchNumber} onChange={e => set("batchNumber")(e.target.value)} />
+          </FieldRow>
+          <div className="flex items-end pb-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" className="h-4 w-4" checked={form.weightBased} onChange={e => setForm(p => ({ ...p, weightBased: e.target.checked }))} />
+              Sold by weight (kg) — e.g. meat, produce
+            </label>
+          </div>
 
           {/* Discount */}
           <div className="col-span-2">
@@ -870,7 +945,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     sellingPrice: "", purchasePrice: "",
     vatPct: "15", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
-    discount: "", imageUrl: "",
+    discount: "", imageUrl: "", description: "",
     status: "active", weightBased: false,
   });
 
@@ -888,6 +963,53 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   // The one customer-tier price group for this product: whichever tiers already have a saved rule
   // (all sharing the same price/schedule), re-derived from `rules` every time it (re)loads.
   const [tierForm, setTierForm] = useState({ tiers: [] as CustomerTier[], price: "", from: "", to: "" });
+
+  // Variants (e.g. "Size: Small/Large", "Flavor: Original/Spicy") — the backend endpoints
+  // (getProductVariants/addProductVariant/deleteProductVariant) already existed but no page ever
+  // called them, so a product could never actually be given a variant with its own SKU/barcode.
+  const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const [variantBusy, setVariantBusy] = useState(false);
+  const [variantForm, setVariantForm] = useState({ variantType: "", variantValue: "", skuSuffix: "", barcode: "", priceModifier: "0" });
+
+  const loadVariants = (productId: string) =>
+    api.getProductVariants(productId).then(setVariants).catch(() => setVariants([]));
+
+  const addVariant = async () => {
+    if (!item?.product?.id) return;
+    if (!variantForm.variantType.trim() || !variantForm.variantValue.trim()) {
+      return setError("Enter both a variant type (e.g. Size) and value (e.g. Large).");
+    }
+    setVariantBusy(true); setError("");
+    try {
+      await api.addProductVariant(item.product.id, {
+        variantType: variantForm.variantType.trim(),
+        variantValue: variantForm.variantValue.trim(),
+        skuSuffix: variantForm.skuSuffix.trim() || undefined,
+        barcode: variantForm.barcode.trim() || undefined,
+        priceModifier: Number(variantForm.priceModifier) || 0,
+        status: "active",
+      });
+      setVariantForm({ variantType: "", variantValue: "", skuSuffix: "", barcode: "", priceModifier: "0" });
+      await loadVariants(item.product.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add variant.");
+    } finally {
+      setVariantBusy(false);
+    }
+  };
+
+  const deleteVariant = async (variantId: string) => {
+    if (!item?.product?.id) return;
+    setVariantBusy(true);
+    try {
+      await api.deleteProductVariant(item.product.id, variantId);
+      await loadVariants(item.product.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete variant.");
+    } finally {
+      setVariantBusy(false);
+    }
+  };
 
   const loadRules = (productId: string) =>
     api.getPriceLists({ productId }).then(list => {
@@ -919,6 +1041,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
       discountType: (p.discountType as "percentage" | "fixed") ?? "percentage",
       discount: p.discount != null ? String(p.discount) : "",
       imageUrl: p.imageUrl ?? "",
+      description: p.description ?? "",
       // Carried through unchanged — this dialog has no controls for either, so it must not
       // clobber them. Previously hardcoded to "active"/false on every save, which silently
       // un-discontinued products and reset weight-based (kg-priced) items to unit pricing.
@@ -928,6 +1051,8 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     setEditingRuleId(null);
     setError("");
     loadRules(p.id);
+    loadVariants(p.id);
+    setVariantForm({ variantType: "", variantValue: "", skuSuffix: "", barcode: "", priceModifier: "0" });
   }, [item]);
 
   const handleSave = async () => {
@@ -958,6 +1083,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         discount: form.discount ? Number(form.discount) : undefined,
         discountType: form.discount ? form.discountType : undefined,
         imageUrl: form.imageUrl || undefined,
+        description: form.description.trim() || undefined,
         status: form.status,
         weightBased: form.weightBased,
         saleUnitType: form.saleUnitType,
@@ -1101,6 +1227,17 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         <div className="mt-2">
           <FieldRow label="Product Photo">
             <ProductImagePicker value={form.imageUrl} onChange={v => setForm(p => ({ ...p, imageUrl: v }))} />
+          </FieldRow>
+        </div>
+        {item?.product?.id && <ProductGallerySection productId={item.product.id} />}
+        <div className="mt-3">
+          <FieldRow label="Description (optional)">
+            <Textarea
+              className="min-h-16 text-sm"
+              placeholder="Shown to customers on the public online ordering page…"
+              value={form.description}
+              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+            />
           </FieldRow>
         </div>
         <div className="grid grid-cols-2 gap-3 mt-3">
@@ -1265,6 +1402,37 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
               <Button type="button" size="sm" variant="outline" className="w-full gap-1"
                 disabled={ruleBusy || tierForm.tiers.length === 0} onClick={saveTierGroup}>
                 Save price &amp; schedule
+              </Button>
+            </div>
+          </div>
+
+          <div className="col-span-2 space-y-2 rounded-lg border border-border/60 p-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Variants (e.g. Size, Flavor)</p>
+            {variants.length > 0 && (
+              <div className="space-y-1">
+                {variants.map(v => (
+                  <div key={v.id} className="flex items-center justify-between text-xs border-b border-border/40 pb-1.5 last:border-0">
+                    <span>
+                      <span className="font-medium">{v.variantType}: {v.variantValue}</span>
+                      {v.skuSuffix && <span className="text-muted-foreground"> · SKU +{v.skuSuffix}</span>}
+                      {v.barcode && <span className="text-muted-foreground"> · {v.barcode}</span>}
+                      {v.priceModifier !== 0 && <span className="text-muted-foreground"> · {v.priceModifier > 0 ? "+" : ""}{v.priceModifier} SAR</span>}
+                    </span>
+                    <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" disabled={variantBusy} onClick={() => deleteVariant(v.id)}>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-1.5">
+              <Input className="h-8 text-xs" placeholder="Type (e.g. Size)" value={variantForm.variantType} onChange={e => setVariantForm(p => ({ ...p, variantType: e.target.value }))} />
+              <Input className="h-8 text-xs" placeholder="Value (e.g. Large)" value={variantForm.variantValue} onChange={e => setVariantForm(p => ({ ...p, variantValue: e.target.value }))} />
+              <Input className="h-8 text-xs" placeholder="SKU suffix (optional)" value={variantForm.skuSuffix} onChange={e => setVariantForm(p => ({ ...p, skuSuffix: e.target.value }))} />
+              <Input className="h-8 text-xs" placeholder="Barcode (optional)" value={variantForm.barcode} onChange={e => setVariantForm(p => ({ ...p, barcode: e.target.value }))} />
+              <Input type="number" className="h-8 text-xs" placeholder="Price modifier (SAR)" value={variantForm.priceModifier} onChange={e => setVariantForm(p => ({ ...p, priceModifier: e.target.value }))} />
+              <Button size="sm" variant="outline" className="h-8 text-xs" disabled={variantBusy} onClick={addVariant}>
+                <Plus className="h-3 w-3 mr-1" /> Add Variant
               </Button>
             </div>
           </div>
@@ -1876,8 +2044,8 @@ function Inventory() {
           <span className="text-xs text-muted-foreground">–</span>
           <Input type="date" className="h-9 w-36" value={expiryTo} onChange={e => setExpiryTo(e.target.value)} title="Expiry to" />
           {(expiryFrom || expiryTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
-              <ScanLine className="h-3.5 w-3.5" />
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" title="Clear expiry filter" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
+              <X className="h-3.5 w-3.5" />
             </Button>
           )}
         </div>
@@ -1923,8 +2091,19 @@ function Inventory() {
                           </button>
                         </td>
                         <td className="px-3 py-3">
-                          <p className="font-semibold text-sm">{s.product?.name ?? "—"}</p>
-                          <p className="text-xs text-muted-foreground font-mono">{s.product?.sku} · {s.product?.barcode}</p>
+                          <div className="flex items-center gap-2.5">
+                            {s.product?.imageUrl ? (
+                              <img src={s.product.imageUrl} alt="" className="h-9 w-9 rounded-md border border-border/60 object-cover shrink-0" />
+                            ) : (
+                              <div className="h-9 w-9 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center shrink-0" title="No image uploaded">
+                                <ImageOff className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm truncate">{s.product?.name ?? "—"}</p>
+                              <p className="text-xs text-muted-foreground font-mono">{s.product?.sku} · {s.product?.barcode}</p>
+                            </div>
+                          </div>
                         </td>
                         <td className="px-3 py-3 text-xs">
                           {s.product?.saleUnitType === "pack" ? (

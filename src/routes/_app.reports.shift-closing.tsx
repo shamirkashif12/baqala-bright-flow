@@ -2,8 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { StatusBadge } from "@/components/module-placeholder";
+import { StatusBadge, FilterField } from "@/components/module-placeholder";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
@@ -13,6 +15,7 @@ import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { localDateStr } from "@/lib/utils";
 import { toast } from "sonner";
+import { Eye, X } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/shift-closing")({ component: ShiftClosingReport });
 
@@ -25,7 +28,7 @@ function timeStr(v?: string) {
 function ShiftClosingReport() {
   const { user } = useAuth();
   const { branches } = useBranch();
-  const { canExport } = usePermission("Reports");
+  const { canExport } = usePermission("HR Shifts");
   const branchLocked = user?.role !== "tenant_admin";
 
   const [rows, setRows] = useState<ShiftClosingRow[]>([]);
@@ -39,6 +42,7 @@ function ShiftClosingReport() {
   const [departmentId, setDepartmentId] = useState("all");
   const [shiftId, setShiftId] = useState("all");
   const [closingStatus, setClosingStatus] = useState("all");
+  const [detailRow, setDetailRow] = useState<ShiftClosingRow | null>(null);
 
   const filterParams = {
     branchId: branchLocked ? (user?.branchId ?? undefined) : (branchId === "all" ? undefined : branchId),
@@ -79,50 +83,78 @@ function ShiftClosingReport() {
     { key: "status", label: "Closing Status", render: r => <StatusBadge status={r.closingStatus} /> },
     { key: "closedBy", label: "Closed By", render: r => r.closedBy ?? "—" },
     { key: "remarks", label: "Remarks", render: r => r.remarks ?? "—" },
+    {
+      key: "actions", label: "Action",
+      render: r => (
+        <Button size="icon" variant="ghost" className="h-7 w-7" title="View detail" onClick={() => setDetailRow(r)}>
+          <Eye className="h-3.5 w-3.5" />
+        </Button>
+      ),
+    },
   ];
+
+  const hasFilters = dateFrom !== todayStr || dateTo !== todayStr || branchId !== "all" || departmentId !== "all"
+    || shiftId !== "all" || closingStatus !== "all";
+  const clearFilters = () => {
+    setDateFrom(todayStr); setDateTo(todayStr); setBranchId("all"); setDepartmentId("all");
+    setShiftId("all"); setClosingStatus("all");
+  };
 
   return (
     <PageShell title="Shift Closing Report" subtitle="Monitor shift closing completion and exceptions" breadcrumb={["Human Resources", "Shift Closing Report"]}>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
+        <div className="flex flex-wrap items-end gap-2">
+          <FilterField label="From"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+          <FilterField label="To"><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" /></FilterField>
           {!branchLocked && (
-            <Select value={branchId} onValueChange={setBranchId}>
+            <FilterField label="Branch">
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+          <FilterField label="Department">
+            <Select value={departmentId} onValueChange={setDepartmentId}>
               <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="all">All Departments</SelectItem>
+                {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
               </SelectContent>
             </Select>
+          </FilterField>
+          <FilterField label="Shift">
+            <Select value={shiftId} onValueChange={setShiftId}>
+              <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Shifts</SelectItem>
+                {shifts.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Status">
+            <Select value={closingStatus} onValueChange={setClosingStatus}>
+              <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="Open">Open</SelectItem>
+                <SelectItem value="Closed">Closed</SelectItem>
+                <SelectItem value="Late Closed">Late Closed</SelectItem>
+                <SelectItem value="Manually Closed">Manually Closed</SelectItem>
+                <SelectItem value="Checkout Missing">Checkout Missing</SelectItem>
+                <SelectItem value="Cancelled">Cancelled</SelectItem>
+                <SelectItem value="Not Applicable">Not Applicable</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
           )}
-          <Select value={departmentId} onValueChange={setDepartmentId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={shiftId} onValueChange={setShiftId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Shifts</SelectItem>
-              {shifts.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={closingStatus} onValueChange={setClosingStatus}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="Open">Open</SelectItem>
-              <SelectItem value="Closed">Closed</SelectItem>
-              <SelectItem value="Late Closed">Late Closed</SelectItem>
-              <SelectItem value="Manually Closed">Manually Closed</SelectItem>
-              <SelectItem value="Checkout Missing">Checkout Missing</SelectItem>
-              <SelectItem value="Cancelled">Cancelled</SelectItem>
-              <SelectItem value="Not Applicable">Not Applicable</SelectItem>
-            </SelectContent>
-          </Select>
           <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
         </div>
 
@@ -132,6 +164,37 @@ function ShiftClosingReport() {
           <PaginatedDataTable columns={columns} rows={rows} emptyMessage="No shift closing records match the current filters." />
         )}
       </div>
+
+      <Dialog open={!!detailRow} onOpenChange={v => !v && setDetailRow(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Shift Closing Detail</DialogTitle></DialogHeader>
+          {detailRow && (
+            <div className="space-y-2 text-sm">
+              {[
+                ["Date", detailRow.date ?? "—"],
+                ["Employee", detailRow.employee ? `${detailRow.employee.fullName} (${detailRow.employee.employeeCode})` : "—"],
+                ["Department", detailRow.department ?? "—"],
+                ["Shift", detailRow.shift?.name ?? "—"],
+                ["Scheduled", detailRow.shift ? `${detailRow.scheduledStart}–${detailRow.scheduledEnd}` : "—"],
+                ["Actual Check-In", timeStr(detailRow.actualCheckIn)],
+                ["Actual Check-Out", timeStr(detailRow.actualCheckOut)],
+                ["Closing Time", timeStr(detailRow.closingTime)],
+                ["Closed By", detailRow.closedBy ?? "—"],
+                ["Remarks", detailRow.remarks ?? "—"],
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between border-b border-border/40 pb-1.5">
+                  <span className="text-muted-foreground">{k}</span>
+                  <span className="font-medium text-right max-w-[60%]">{v}</span>
+                </div>
+              ))}
+              <div className="flex justify-between pt-1">
+                <span className="text-muted-foreground">Closing Status</span>
+                <StatusBadge status={detailRow.closingStatus} />
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

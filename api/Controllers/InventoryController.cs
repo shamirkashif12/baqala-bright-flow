@@ -42,7 +42,7 @@ public class InventoryController(
         userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
     [HttpGet("stock")]
-    public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock, [FromQuery] Guid? categoryId)
+    public async Task<IActionResult> GetStock([FromQuery] Guid? branchId, [FromQuery] bool? lowStock, [FromQuery] Guid? categoryId, [FromQuery] bool includeDiscontinued = false)
     {
         // Branch-scoped roles may only see their own branch's stock — this was previously
         // enforced only in the React component (locking the branch dropdown), so a direct
@@ -53,13 +53,16 @@ public class InventoryController(
         var query = db.InventoryStocks
             .Include(i => i.Product).ThenInclude(p => p!.Category)
             .Include(i => i.Branch)
-            // A discontinued product (including one left behind by a failed create — the "Add
-            // Product" flow soft-deletes via this same status field if the initial stock/batch
-            // call fails after the product row was already committed) has no business appearing
-            // as a sellable, zero-stock catalog row on any of this endpoint's callers (Inventory,
-            // Stocks, POS, Orders, etc.).
-            .Where(i => i.Product!.Status != "discontinued")
             .AsQueryable();
+        // A discontinued product (including one left behind by a failed create — the "Add
+        // Product" flow soft-deletes via this same status field if the initial stock/batch
+        // call fails after the product row was already committed) has no business appearing
+        // as a sellable, zero-stock catalog row on this endpoint's sale-facing callers (POS,
+        // Orders, generic pickers). The Stocks admin page's Overview tab is the one exception —
+        // it needs to keep showing a product's last-known stock row so it still lines up with
+        // that same product's historical entries on the Movement tab, instead of the product
+        // just vanishing from Overview the moment it's discontinued.
+        if (!includeDiscontinued) query = query.Where(i => i.Product!.Status != "discontinued");
         if (branchId.HasValue) query = query.Where(i => i.BranchId == branchId);
         if (lowStock == true) query = query.Where(i => i.Quantity <= i.ReorderLevel);
         if (categoryId.HasValue) query = query.Where(i => i.Product!.CategoryId == categoryId);

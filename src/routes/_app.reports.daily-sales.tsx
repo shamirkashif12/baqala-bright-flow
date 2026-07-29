@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -16,7 +17,7 @@ import { api, type DailySalesReport, type ReportExportFormat, type Terminal, typ
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Wallet, Receipt, Percent, RotateCcw } from "lucide-react";
+import { Wallet, Receipt, Percent, RotateCcw, X } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/daily-sales")({ component: DailySales });
@@ -87,6 +88,13 @@ function DailySales() {
     }
   };
 
+  const hasFilters = date !== todayStr() || branchId !== (lockedBranchId ?? "all") || terminalId !== "all"
+    || cashierId !== "all" || paymentMethod !== "all" || customerType !== "all" || hasTobaccoFee !== false;
+  const clearFilters = () => {
+    setDate(todayStr()); setBranchId(lockedBranchId ?? "all"); setTerminalId("all"); setCashierId("all");
+    setPaymentMethod("all"); setCustomerType("all"); setHasTobaccoFee(false);
+  };
+
   const kpis = data?.kpis;
   const fmt = (n: number) => fmtSAR(n);
   const hourlyRows = data?.hourly ?? [];
@@ -146,6 +154,11 @@ function DailySales() {
           <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
           Tobacco fee only
         </label>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -225,6 +238,25 @@ function DailySales() {
               rows={visibleRows}
             />
           )}
+
+          <div className="pt-2">
+            <h3 className="text-sm font-semibold mb-2">Sales per Item</h3>
+            {(data?.items.length ?? 0) === 0 ? (
+              <Card className="p-6 border-border/60 shadow-card text-center text-sm text-muted-foreground">
+                No items sold for this day/filter.
+              </Card>
+            ) : (
+              <PaginatedDataTable
+                columns={[
+                  { key: "productName", label: "Item", render: (r) => <span className="font-medium">{r.productName}</span> },
+                  { key: "sku", label: "SKU", render: (r) => <span className="font-mono text-xs text-muted-foreground">{r.sku}</span> },
+                  { key: "quantitySold", label: "Quantity Sold", render: (r) => <span className="tabular-nums">{r.quantitySold}</span> },
+                  { key: "grossSales", label: "Amount", render: (r) => <span className="tabular-nums font-semibold"><SARIcon />{fmt(r.grossSales)}</span> },
+                ]}
+                rows={data?.items ?? []}
+              />
+            )}
+          </div>
         </>
       )}
     </PageShell>

@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -15,7 +15,7 @@ import { api, type StockTransferReportRow, type ReportExportFormat, type Warehou
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { ArrowLeftRight, Boxes, CheckCircle, DollarSign, Eye } from "lucide-react";
+import { ArrowLeftRight, Boxes, CheckCircle, DollarSign, Eye, X } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/stock-transfer")({ component: StockTransferReport });
 
@@ -152,6 +152,15 @@ function StockTransferReport() {
 
   useEffect(() => { load(); }, [load]);
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || transferType !== "all"
+    || statuses.length > 0 || sourceWarehouseIds.length > 0 || destWarehouseIds.length > 0
+    || productIds.length > 0 || createdByIds.length > 0 || approvedByIds.length > 0;
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setTransferType("all");
+    setStatuses([]); setSourceWarehouseIds([]); setDestWarehouseIds([]);
+    setProductIds([]); setCreatedByIds([]); setApprovedByIds([]);
+  };
+
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportStockTransferReport({ ...filterParams, exportedBy: user?.id, format });
@@ -167,67 +176,86 @@ function StockTransferReport() {
 
   return (
     <PageShell title="Stock Transfer Report" subtitle="Full history of stock movement between warehouses and branches">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
+          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         </div>
-        <Select value={transferType} onValueChange={setTransferType}>
-          <SelectTrigger className="h-9 w-48"><SelectValue placeholder="Transfer Type" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            {TRANSFER_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <div className="w-36">
-          <SearchableMultiSelect
-            placeholder="All Statuses"
-            options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
-            selected={statuses}
-            onChange={setStatuses}
-          />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="Any Source Warehouse"
-            options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-            selected={sourceWarehouseIds}
-            onChange={setSourceWarehouseIds}
-          />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="Any Destination Warehouse"
-            options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-            selected={destWarehouseIds}
-            onChange={setDestWarehouseIds}
-          />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={products.map((p) => ({ id: p.id, label: p.name }))}
-            selected={productIds}
-            onChange={setProductIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="Created By: Anyone"
-            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-            selected={createdByIds}
-            onChange={setCreatedByIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="Approved By: Anyone"
-            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-            selected={approvedByIds}
-            onChange={setApprovedByIds}
-          />
-        </div>
+        <FilterField label="Transfer Type">
+          <Select value={transferType} onValueChange={setTransferType}>
+            <SelectTrigger className="h-9 w-48"><SelectValue placeholder="Transfer Type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              {TRANSFER_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Status">
+          <div className="w-36">
+            <SearchableMultiSelect
+              placeholder="All Statuses"
+              options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
+              selected={statuses}
+              onChange={setStatuses}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Source Warehouse">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="Any Source Warehouse"
+              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+              selected={sourceWarehouseIds}
+              onChange={setSourceWarehouseIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Destination Warehouse">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="Any Destination Warehouse"
+              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+              selected={destWarehouseIds}
+              onChange={setDestWarehouseIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Product">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Created By">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Created By: Anyone"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={createdByIds}
+              onChange={setCreatedByIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Approved By">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Approved By: Anyone"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={approvedByIds}
+              onChange={setApprovedByIds}
+            />
+          </div>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

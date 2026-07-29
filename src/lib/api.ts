@@ -190,6 +190,15 @@ export const api = {
   deleteProduct: (id: string, reason?: string) =>
     request<{ message: string; approvalRequestId: string }>(`/api/products/${id}`, { method: "DELETE", body: JSON.stringify({ reason }) }),
 
+  // Gallery images — additive, optional extras alongside Product.imageUrl (the "primary" image).
+  // Needs a real product id, so only available once a product has been saved at least once.
+  getProductImages: (productId: string) =>
+    request<ProductImage[]>(`/api/products/${productId}/images`),
+  uploadProductImage: (productId: string, fileUrl: string) =>
+    request<ProductImage>(`/api/products/${productId}/images`, { method: "POST", body: JSON.stringify({ fileUrl }) }),
+  deleteProductImage: (productId: string, imageId: string) =>
+    request<void>(`/api/products/${productId}/images/${imageId}`, { method: "DELETE" }),
+
   // Pricing (FRD §12) — branch / customer-tier / scheduled / pack price rules.
   //
   // resolvePrices is the one the POS cares about: it returns the effective unit price for every
@@ -241,7 +250,8 @@ export const api = {
     request<ProductRecall>(`/api/recalls/${id}/close`, { method: "POST", body: JSON.stringify({ resolution }) }),
 
   // Categories
-  getCategories: () => request<Category[]>("/api/categories"),
+  getCategories: (opts?: { includeInactive?: boolean }) =>
+    request<Category[]>(`/api/categories${opts?.includeInactive ? "?includeInactive=true" : ""}`),
   createCategory: (data: Partial<Category>) =>
     request<Category>("/api/categories", { method: "POST", body: JSON.stringify(data) }),
   updateCategory: (id: string, data: Partial<Category>) =>
@@ -251,7 +261,7 @@ export const api = {
     request<{ message: string; approvalRequestId: string }>(`/api/categories/${id}`, { method: "DELETE", body: JSON.stringify({ reason }) }),
 
   // Inventory
-  getStock: (params?: { branchId?: string; lowStock?: boolean; categoryId?: string }) => {
+  getStock: (params?: { branchId?: string; lowStock?: boolean; categoryId?: string; includeDiscontinued?: boolean }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<InventoryStock[]>(`/api/inventory/stock${q ? `?${q}` : ""}`);
   },
@@ -315,11 +325,11 @@ export const api = {
     request<StockCount>(`/api/stock-counts/${id}/cancel`, { method: "PATCH" }),
 
   // Orders
-  getOrders: (params?: { branchId?: string[]; status?: string[]; paymentStatus?: string[]; from?: string; to?: string }) =>
+  getOrders: (params?: { branchId?: string[]; status?: string[]; paymentStatus?: string[]; paymentMethod?: string[]; customerId?: string; from?: string; to?: string }) =>
     request<Order[]>(`/api/orders${toQuery(params)}`),
   // Paginated variant of the above — same filters, plus page/pageSize. Passing either query param
   // switches the backend response shape from a bare array to { total, page, pageSize, items }.
-  getOrdersPaged: (params: { branchId?: string[]; status?: string[]; paymentStatus?: string[]; from?: string; to?: string; page: number; pageSize: number }) =>
+  getOrdersPaged: (params: { branchId?: string[]; status?: string[]; paymentStatus?: string[]; paymentMethod?: string[]; customerId?: string; from?: string; to?: string; page: number; pageSize: number }) =>
     request<{ total: number; page: number; pageSize: number; items: Order[] }>(`/api/orders${toQuery(params)}`),
   getOrder: (id: string) => request<Order>(`/api/orders/${id}`),
   getOrderByNumber: (num: string) => request<Order>(`/api/orders/by-number/${encodeURIComponent(num)}`),
@@ -337,6 +347,36 @@ export const api = {
     request<OrderMutationResult>(`/api/orders/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   voidOrder: (id: string, data: { reason?: string }) =>
     request<OrderMutationResult>(`/api/orders/${id}`, { method: "DELETE", body: JSON.stringify(data) }),
+
+  // Online Ordering — the public catalog/checkout calls are unauthenticated (same request()
+  // helper; it just has no token in localStorage on that page, same as the public loyalty page).
+  getOnlineOrderCatalog: (branchId: string) =>
+    request<OnlineOrderCatalog>(`/api/online-orders/public/${branchId}/catalog`),
+  // Read-only preview of the real server-computed totals (product discount, offers, tobacco
+  // excise, custom fees, VAT) — creates nothing. None of that pricing logic is safe to duplicate
+  // client-side, so the checkout page's order summary calls this instead of estimating locally.
+  quoteOnlineOrder: (branchId: string, items: Array<{ productId: string; quantity: number }>) =>
+    request<OnlineOrderQuote>(`/api/online-orders/public/${branchId}/quote`, {
+      method: "POST", body: JSON.stringify(items),
+    }),
+  placeOnlineOrder: (branchId: string, data: PlaceOnlineOrderPayload) =>
+    request<{ orderNumber: string; totalAmount: number }>(`/api/online-orders/public/${branchId}`, {
+      method: "POST", body: JSON.stringify(data),
+    }),
+  getOnlineOrdersPaged: (params: { branchId?: string[]; status?: string[]; page: number; pageSize: number }) =>
+    request<{ total: number; page: number; pageSize: number; items: OnlineOrder[] }>(`/api/online-orders${toQuery(params)}`),
+  updateOnlineOrderItems: (id: string, items: OnlineOrderItemEdit[]) =>
+    request<{ id: string; subtotal: number; taxAmount: number; totalAmount: number }>(
+      `/api/online-orders/${id}/items`, { method: "PATCH", body: JSON.stringify({ items }) }),
+  approveOnlineOrder: (id: string, paymentMethod: string) =>
+    request<{ id: string; orderStatus: string; approvedAt: string }>(
+      `/api/online-orders/${id}/approve`, { method: "PATCH", body: JSON.stringify({ paymentMethod }) }),
+  rejectOnlineOrder: (id: string, reason: string) =>
+    request<{ id: string; orderStatus: string; rejectionReason: string }>(
+      `/api/online-orders/${id}/reject`, { method: "PATCH", body: JSON.stringify({ reason }) }),
+  deliverOnlineOrder: (id: string) =>
+    request<{ id: string; orderStatus: string; paymentStatus: string }>(
+      `/api/online-orders/${id}/deliver`, { method: "PATCH" }),
 
   // Cashier Shifts
   getShifts: (params?: { branchId?: string[]; cashierId?: string; terminalId?: string[]; status?: string[]; dateFrom?: string; dateTo?: string }) =>
@@ -398,6 +438,10 @@ export const api = {
   },
   getCustomerByPhone: (phone: string) =>
     request<Customer>(`/api/customers/by-phone/${encodeURIComponent(phone)}`),
+  // Ranked name-or-phone candidate search (POS) — see CustomersController.Lookup; unlike
+  // getCustomerByPhone this can return several matches instead of one unexplained guess.
+  lookupCustomers: (query: string, limit?: number) =>
+    request<Customer[]>(`/api/customers/lookup${toQuery({ query, limit })}`),
   createCustomer: (data: Partial<Customer>) =>
     request<Customer>("/api/customers", { method: "POST", body: JSON.stringify(data) }),
   updateCustomer: (id: string, data: Partial<Customer>) =>
@@ -450,8 +494,8 @@ export const api = {
     request<Expense>(`/api/finance/expenses/${id}/approve`, { method: "PATCH", body: JSON.stringify({ approved, approvedBy }) }),
   getExpenseTypes: (includeInactive = false) =>
     request<ExpenseType[]>(`/api/finance/expense-types${includeInactive ? "?includeInactive=true" : ""}`),
-  createExpenseType: (data: { name: string; nameAr?: string; description?: string }) =>
-    request<ExpenseType>("/api/finance/expense-types", { method: "POST", body: JSON.stringify({ ...data, isActive: true }) }),
+  createExpenseType: (data: { name: string; nameAr?: string; description?: string; isActive?: boolean }) =>
+    request<ExpenseType>("/api/finance/expense-types", { method: "POST", body: JSON.stringify({ ...data, isActive: data.isActive ?? true }) }),
   updateExpenseType: (id: string, data: { name: string; nameAr?: string; description?: string; isActive: boolean }) =>
     request<ExpenseType>(`/api/finance/expense-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteExpenseType: (id: string) =>
@@ -464,8 +508,8 @@ export const api = {
     request<Coupon>(`/api/finance/coupons/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteCoupon: (id: string) =>
     request<void>(`/api/finance/coupons/${id}`, { method: "DELETE" }),
-  validateCoupon: (code: string) =>
-    request<Coupon>(`/api/finance/coupons/validate/${code}`),
+  validateCoupon: (code: string, params?: { customerId?: string; branchId?: string }) =>
+    request<Coupon>(`/api/finance/coupons/validate/${code}${toQuery(params)}`),
   getTaxRules: (branchId?: string) =>
     request<TaxFeeRule[]>(`/api/finance/tax-rules${branchId ? `?branchId=${branchId}` : ""}`),
   createTaxRule: (data: Partial<TaxFeeRule>) =>
@@ -476,6 +520,11 @@ export const api = {
   // Warehouse
   getWarehouseRequests: (params?: { branchId?: string; approvalStatus?: string[]; deliveryStatus?: string[] }) =>
     request<WarehouseRequest[]>(`/api/warehouse/requests${toQuery(params)}`),
+  // The list endpoint above doesn't eager-load line items (would be wasted payload for the table
+  // view) — this one does, for the "View request" detail drawer that needs to show what was
+  // actually requested.
+  getWarehouseRequestById: (id: string) =>
+    request<WarehouseRequest>(`/api/warehouse/requests/${id}`),
   createWarehouseRequest: (data: Partial<WarehouseRequest>) =>
     request<WarehouseRequest>("/api/warehouse/requests", { method: "POST", body: JSON.stringify(data) }),
   approveWarehouseRequest: (id: string, approved: boolean, approvedBy: string) =>
@@ -526,8 +575,8 @@ export const api = {
     request<StockTransfer[]>(`/api/stock-transfers/batch/${encodeURIComponent(batchId)}`),
   createStockTransfer: (data: Partial<StockTransfer>) =>
     request<StockTransfer>("/api/stock-transfers", { method: "POST", body: JSON.stringify(data) }),
-  updateTransferStatus: (id: string, status: string, approvedBy?: string) =>
-    request<StockTransfer>(`/api/stock-transfers/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, approvedBy }) }),
+  updateTransferStatus: (id: string, status: string, approvedBy?: string, cancelReason?: string) =>
+    request<StockTransfer>(`/api/stock-transfers/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, approvedBy, cancelReason }) }),
   receiveStockTransfer: (id: string, items: { itemId: string; receivedQuantity: number; notes?: string }[], approvedBy?: string) =>
     request<StockTransfer>(`/api/stock-transfers/${id}/receive`, { method: "POST", body: JSON.stringify({ items, approvedBy }) }),
 
@@ -856,6 +905,16 @@ export const api = {
   updateDeviceStatus: (id: string, status: string, syncStatus?: string) =>
     request<DeviceRecord>(`/api/devices/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, syncStatus }) }),
 
+  // Maintenance tickets
+  getMaintenanceTickets: (params?: { branchId?: string; status?: string }) => {
+    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
+    return request<MaintenanceTicketRecord[]>(`/api/maintenance-tickets${q ? `?${q}` : ""}`);
+  },
+  createMaintenanceTicket: (data: { deviceId: string; issueType: string; priority: string; description: string; reportedBy?: string }) =>
+    request<MaintenanceTicketRecord>("/api/maintenance-tickets", { method: "POST", body: JSON.stringify(data) }),
+  updateMaintenanceTicketStatus: (id: string, status: string) =>
+    request<MaintenanceTicketRecord>(`/api/maintenance-tickets/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
   // Discounts
   getDiscounts: (params?: { isActive?: boolean }) => {
     const q = params?.isActive !== undefined ? `?isActive=${params.isActive}` : "";
@@ -1081,9 +1140,12 @@ export interface Branch {
   status: string; createdAt: string;
 }
 
-/** Filters out disabled branches — use for any dropdown/selector; management pages that need to show/re-enable disabled branches should NOT use this. */
+/** Keeps only active branches — use for any dropdown/selector (POS branch switch, warehouse/PO
+ * destination pickers, etc). A branch can be "active" | "inactive" | "disabled"; this used to only
+ * filter out "disabled", so an "inactive" branch still showed up everywhere, including POS.
+ * Management pages that need to show/re-enable inactive or disabled branches should NOT use this. */
 export function excludeDisabledBranches(branches: Branch[]): Branch[] {
-  return branches.filter((b) => b.status !== "disabled");
+  return branches.filter((b) => b.status === "active");
 }
 
 export interface Role {
@@ -1209,11 +1271,16 @@ export interface Product {
   status: string; weightBased: boolean; isTobacco: boolean;
   discount?: number; discountType?: "percentage" | "fixed";
   imageUrl?: string;
+  description?: string;
   // Pack & unit pricing (FRD §12): "single" (default) or "pack". A pack is sold as one unit at its
   // own basePrice; itemsPerPack is informational (items inside one pack).
   saleUnitType?: "single" | "pack";
   itemsPerPack?: number | null;
   category?: { id: string; name: string; nameAr?: string };
+}
+
+export interface ProductImage {
+  id: string; productId: string; fileUrl: string; sortOrder: number; uploadedAt: string;
 }
 
 export interface InventoryStock {
@@ -1498,6 +1565,69 @@ export interface PublicLoyaltyLookup {
   }>;
 }
 
+export interface OnlineOrderCatalogProduct {
+  productId: string; name: string; nameAr?: string; description?: string;
+  // Ordered, primary image first (if set) then gallery images by sort order. Empty when the
+  // product has no images at all — the public page falls back to a category illustration.
+  images: string[];
+  unitOfMeasure: string; categoryName?: string;
+  // originalPrice is the pre-discount/offer resolved price; unitPrice is what the customer
+  // actually pays. The public page shows originalPrice crossed out whenever they differ.
+  originalPrice: number; unitPrice: number;
+  isTobacco: boolean;
+  // Human-readable label for an active bogo/buy_a_get_b/product_offer targeting this product
+  // (e.g. "Buy 1 Get 1 Free", "20% OFF") — absent when no such offer is running.
+  offerBadge?: string;
+  available: number;
+}
+
+export interface OnlineOrderCatalog {
+  branchName: string;
+  products: OnlineOrderCatalogProduct[];
+}
+
+export interface OnlineOrderQuote {
+  items: Array<{
+    productId: string; quantity: number; originalUnitPrice: number; unitPrice: number; totalPrice: number;
+    isBonus: boolean; offerName?: string;
+  }>;
+  subtotal: number;
+  tobaccoFeeAmount: number;
+  customFees: Array<{ name: string; amount: number }>;
+  customFeeAmount: number;
+  taxAmount: number;
+  totalAmount: number;
+}
+
+export interface PlaceOnlineOrderPayload {
+  items: Array<{ productId: string; quantity: number }>;
+  fullName: string; phone: string; email?: string;
+  addressLine: string; latitude?: number | null; longitude?: number | null; notes?: string;
+}
+
+// unitPrice here is the admin's override — omitting a line removes it from the order.
+export interface OnlineOrderItemEdit { orderItemId?: string; productId: string; quantity: number; unitPrice: number; }
+
+export interface OnlineOrderDeliveryDetail {
+  fullName: string; phone: string; email?: string; addressLine: string;
+  latitude?: number; longitude?: number; notes?: string;
+}
+
+export interface OnlineOrderServiceCharge { id: string; name: string; amount: number; }
+
+export interface OnlineOrder {
+  id: string; orderNumber: string; branchId: string;
+  subtotal: number; taxAmount: number; tobaccoFeeAmount: number; customFeeAmount: number; totalAmount: number;
+  paymentStatus: string; orderStatus: string;
+  rejectionReason?: string; approvedAt?: string;
+  createdAt: string; updatedAt: string;
+  branch?: { id: string; name: string };
+  items: Array<{ id: string; productId: string; quantity: number; unitPrice: number; totalPrice: number; tobaccoFeeAmount?: number; productName?: string }>;
+  payments: Array<{ id: string; paymentMethod: string; amount: number; status: string }>;
+  serviceCharges: OnlineOrderServiceCharge[];
+  delivery?: OnlineOrderDeliveryDetail;
+}
+
 export interface LoyaltyReportRow {
   branchId: string; branchName: string;
   pointsEarned: number; pointsRedeemed: number; pointsExpired: number;
@@ -1527,7 +1657,7 @@ export interface ExpenseType {
 
 export interface Expense {
   id: string; expenseTypeId: string; branchId: string; amount: number;
-  paidAmount?: number; paymentMethod?: string;
+  paidAmount?: number; paymentMethod?: string; cardLastFour?: string;
   description?: string; referenceNumber?: string; expenseDate: string; status: string;
   expenseType?: { id: string; name: string };
   branch?: { id: string; name: string };
@@ -1535,7 +1665,15 @@ export interface Expense {
 
 export interface Coupon {
   id: string; code: string; name: string; type: string; value: number;
-  usageLimit?: number; usedCount: number; startDate: string; endDate: string;
+  minOrderAmount?: number; maxDiscountAmount?: number;
+  usageLimit?: number; usedCount: number;
+  applicableTo?: string; // all | category | product
+  applicableId?: string;
+  branchId?: string; // null/undefined = valid at every branch
+  startDate: string; endDate: string;
+  // Optional daily time-of-day window (e.g. "18:00:00") on top of startDate/endDate — both unset
+  // means no time-of-day restriction, valid all day.
+  startTime?: string; endTime?: string;
   status: string; effectiveStatus: string;
 }
 
@@ -1545,6 +1683,9 @@ export interface Discount {
   productId?: string; categoryId?: string; branchId?: string;
   discountType: string; // percentage | fixed
   value: number; isActive: boolean;
+  maxDiscountAmount?: number;
+  combinable?: boolean; // false = can't be applied alongside any other discount/coupon
+  autoApply?: boolean; // true = POS applies it automatically once the cart is eligible
   startDate?: string; endDate?: string; createdAt: string;
   requiresCustomer?: boolean;
   // JSON array of product ids carved out of an all/branch/category scoped discount
@@ -1720,6 +1861,10 @@ export interface PosSettingsRecord {
   allowNearExpirySale: boolean;
   blockExpiredItems: boolean;
   blockNonpermissibleItems: boolean;
+  // Online Ordering tab
+  onlineOrderingEnabled: boolean;
+  onlineOrderingMinOrderAmountSar: number;
+  onlineOrderingMaxOrderValueSar: number;
 }
 
 export interface ComplianceRule {
@@ -1734,6 +1879,13 @@ export interface DeviceRecord {
   behaviourProfile?: string; lastActivity?: string; createdAt: string;
   branch?: { id: string; name: string };
   terminal?: { id: string; terminalCode: string; name: string };
+}
+
+export interface MaintenanceTicketRecord {
+  id: string; deviceId: string; issueType: string; priority: string;
+  description: string; reportedBy?: string; status: string;
+  createdAt: string; updatedAt: string;
+  device?: DeviceRecord;
 }
 
 export interface AdjustInventoryPayload {
@@ -1852,7 +2004,7 @@ export interface StockTransfer {
   sourceBranchId?: string; sourceWarehouseId?: string; sourceSupplierId?: string;
   destBranchId?: string; destWarehouseId?: string; destSupplierId?: string;
   purchaseOrderId?: string; createdBy: string; approvedBy?: string; receivedBy?: string;
-  status: string; returnReason?: string; notes?: string; batchId?: string;
+  status: string; returnReason?: string; cancelReason?: string; notes?: string; batchId?: string;
   expectedDate?: string; completedDate?: string; createdAt: string; updatedAt: string;
   sourceBranch?: { id: string; name: string };
   sourceWarehouse?: { id: string; name: string; code: string };
@@ -1919,6 +2071,7 @@ export interface DashboardMetrics {
   terminals: { active: number; total: number };
   inventory: {
     lowStockCount: number; outOfStockCount: number; expiringCount: number;
+    expiringBranchCount: number; alreadyExpiredCount: number;
     lowStockItems: { name: string; qty: number; branch: string }[];
     expiringItems: { name: string; daysLeft: number; branch: string }[];
   };
@@ -1951,10 +2104,14 @@ export interface BiSummary {
   warehouse: { inboundUnits: number; outboundUnits: number; transfersCount: number; adjustmentsCount: number; turnover: number };
 }
 
+export interface DailySalesItemRow {
+  productName: string; sku: string; quantitySold: number; grossSales: number;
+}
 export interface DailySalesReport {
   kpis: { grossSales: number; netSales: number; transactions: number; avgBasket: number; vatCollected: number; returnsRefunds: number; tobaccoFees: number };
   hourly: DailySalesHour[];
   paymentSplit: { method: string; amount: number }[];
+  items: DailySalesItemRow[];
 }
 
 export interface MonthlyDayRow {
@@ -2162,7 +2319,7 @@ export interface CategoryPerformanceReport {
 }
 
 export interface SupplierPerformanceRow {
-  supplierId: string; supplierName: string; poCount: number; orderedQty: number; receivedQty: number;
+  supplierId: string; supplierName: string; supplierStatus: string; poCount: number; orderedQty: number; receivedQty: number;
   fillRatePct: number; averageLeadTimeDays: number; lateDeliveries: number; purchaseValue: number;
   outstandingDues: number; supplierReturnsQty: number; rtsValue: number; lastPoDate: string;
 }

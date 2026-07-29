@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
@@ -43,6 +43,8 @@ function ApplyLeaveFields({ form, setForm, onSave, saving, employees, leaveTypes
   const set = (k: keyof ApplyForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
   const totalDays = Math.max(0, Math.round((new Date(form.toDate).getTime() - new Date(form.fromDate).getTime()) / 86400000) + 1);
   const [uploading, setUploading] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
@@ -50,6 +52,7 @@ function ApplyLeaveFields({ form, setForm, onSave, saving, employees, leaveTypes
     try {
       const url = await fileToDataUrl(file);
       setForm(p => ({ ...p, attachmentUrl: url }));
+      setFileName(file.name);
     } catch {
       toast.error("Failed to attach file.");
     } finally {
@@ -78,8 +81,10 @@ function ApplyLeaveFields({ form, setForm, onSave, saving, employees, leaveTypes
       <p className="text-xs text-muted-foreground">Total: {totalDays} day{totalDays === 1 ? "" : "s"} (server excludes holidays)</p>
       <FieldRow label="Reason" required><Textarea value={form.reason} onChange={set("reason")} className="min-h-20" /></FieldRow>
       <FieldRow label="Attachment">
-        <Input type="file" accept=".pdf,image/*" disabled={uploading} onChange={e => handleFile(e.target.files?.[0])} className="h-9" />
-        {form.attachmentUrl && <p className="text-xs text-success mt-1">File attached.</p>}
+        <Button type="button" size="sm" variant="outline" className="w-full" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+          {uploading ? "Uploading…" : (fileName ?? "Choose File (PDF/JPG/PNG)")}
+        </Button>
+        <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
       </FieldRow>
       <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving || !form.employeeId || !form.leaveTypeId || !form.reason.trim()}>
         {saving ? "Submitting…" : "Apply Leave"}
@@ -230,8 +235,6 @@ function LeavesTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search employee name or ID…" className="h-9 w-52" />
-        <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} placeholder="From" className="h-9 w-36" />
-        <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} placeholder="To" className="h-9 w-36" />
         {!branchLocked && canViewAll && (
           <div className="w-40">
             <SearchableMultiSelect
@@ -282,6 +285,20 @@ function LeavesTab() {
             onChange={setStatusFilter}
           />
         </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">From</span>
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-36" />
+          <span className="text-xs text-muted-foreground">To</span>
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-36" />
+        </div>
+        {(q || branchFilter.length > 0 || departmentFilter.length > 0 || approverFilter.length > 0 || typeFilter !== "all" || statusFilter.length > 0 || dateFrom || dateTo) && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={() => {
+            setQ(""); setBranchFilter([]); setDepartmentFilter([]); setApproverFilter([]);
+            setTypeFilter("all"); setStatusFilter([]); setDateFrom(""); setDateTo("");
+          }}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export
@@ -330,6 +347,11 @@ function LeavesTab() {
                           </span>
                         )}
                       </div>
+                      {l.status === "rejected" && l.rejectionReason && (
+                        <p className="text-[11px] text-destructive mt-1 max-w-[160px] truncate" title={l.rejectionReason}>
+                          {l.rejectionReason}
+                        </p>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-xs">{l.approver?.fullName ?? "—"}</td>
                     <td className="px-3 py-3">

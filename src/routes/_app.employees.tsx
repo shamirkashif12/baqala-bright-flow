@@ -14,9 +14,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
-import { StatusBadge } from "@/components/module-placeholder";
+import { StatusBadge, PaginatedDataTable } from "@/components/module-placeholder";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Eye, Pencil, Plus, Trash2, Camera, User as UserIcon, Phone, Building2, IdCard, CalendarClock, MoreHorizontal } from "lucide-react";
+import { Eye, Pencil, Plus, Trash2, Camera, User as UserIcon, Phone, Building2, IdCard, CalendarClock, MoreHorizontal, Loader2, LayoutGrid, List, FileText } from "lucide-react";
 import { toast } from "sonner";
 import {
   api, type Employee, type Department, type Designation, type Role, type WorkShift, type EmployeeShiftAssignment,
@@ -41,11 +41,22 @@ export const Route = createFileRoute("/_app/employees")({
 
 const todayStr = localDateStr();
 
-function FieldRow({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+// Saudi mobile: 05XXXXXXXX (10 digits) or +9665XXXXXXXX/9665XXXXXXXX (12 digits with country code).
+function isValidSaudiPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  return /^05\d{8}$/.test(digits) || /^9665\d{8}$/.test(digits);
+}
+// Saudi National ID (citizens, starts with 1) / Iqama (residents, starts with 2) — always 10 digits.
+function isValidNationalId(id: string): boolean {
+  return /^\d{10}$/.test(id.trim());
+}
+
+function FieldRow({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
       <Label className="text-xs">{label}{required && <span className="text-destructive"> *</span>}</Label>
       {children}
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
     </div>
   );
 }
@@ -126,7 +137,11 @@ function EmployeeFormFields({
     }
   };
 
+  const phoneInvalid = !!form.phone && !isValidSaudiPhone(form.phone);
+  const nationalIdInvalid = !!form.nationalId && !isValidNationalId(form.nationalId);
+
   const missing = !form.fullName || !form.email || !form.phone || !form.nationalId || !form.branchId || !form.hireDate || !form.currentAddress
+    || phoneInvalid || nationalIdInvalid
     || (form.hasLogin && !linkedUser && (!form.username.trim() || !form.password.trim() || form.roleId === "none"));
 
   return (
@@ -148,11 +163,15 @@ function EmployeeFormFields({
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Basic Information</p>
         <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2"><FieldRow label="Full Name" required><Input value={form.fullName} onChange={set("fullName")} className="h-9" /></FieldRow></div>
+          <FieldRow label="Full Name" required><Input value={form.fullName} onChange={set("fullName")} className="h-9" /></FieldRow>
           <FieldRow label="Email" required><Input type="email" value={form.email} onChange={set("email")} className="h-9" /></FieldRow>
-          <FieldRow label="Phone Number" required><Input value={form.phone} onChange={set("phone")} className="h-9" placeholder="+966 5XX XXX XXX" /></FieldRow>
-          <FieldRow label="Emergency Contact"><Input value={form.emergencyContact} onChange={set("emergencyContact")} className="h-9" /></FieldRow>
-          <FieldRow label="National ID / Iqama" required><Input value={form.nationalId} onChange={set("nationalId")} className="h-9" /></FieldRow>
+          <FieldRow label="Phone Number" required error={phoneInvalid ? "Enter a valid Saudi mobile number (05XXXXXXXX)." : undefined}>
+            <Input value={form.phone} onChange={set("phone")} className="h-9" maxLength={17} placeholder="+966 5XX XXX XXX" />
+          </FieldRow>
+          <FieldRow label="Emergency Contact"><Input value={form.emergencyContact} onChange={set("emergencyContact")} className="h-9" maxLength={17} /></FieldRow>
+          <FieldRow label="National ID / Iqama" required error={nationalIdInvalid ? "Must be exactly 10 digits." : undefined}>
+            <Input value={form.nationalId} onChange={set("nationalId")} className="h-9" maxLength={10} inputMode="numeric" />
+          </FieldRow>
           <FieldRow label="ID / Iqama Expiry"><Input type="date" value={form.iqamaExpiry} onChange={set("iqamaExpiry")} className="h-9" /></FieldRow>
           <FieldRow label="Date of Birth"><Input type="date" max={todayStr} value={form.dateOfBirth} onChange={set("dateOfBirth")} className="h-9" /></FieldRow>
           <FieldRow label="Gender">
@@ -497,8 +516,10 @@ function EmployeeLeavesSection({ employee }: { employee: Employee }) {
   const [toDate, setToDate] = useState(localDateStr());
   const [reason, setReason] = useState("");
   const [attachmentUrl, setAttachmentUrl] = useState<string | undefined>();
+  const [attachmentName, setAttachmentName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const leaveFileInputRef = useRef<HTMLInputElement>(null);
 
   const [assigningPolicy, setAssigningPolicy] = useState(false);
   const [policyId, setPolicyId] = useState(employee.leavePolicyId ?? "");
@@ -521,6 +542,7 @@ function EmployeeLeavesSection({ employee }: { employee: Employee }) {
       setApplying(false);
       setReason("");
       setAttachmentUrl(undefined);
+      setAttachmentName(null);
       reload();
     } catch (e: any) {
       toast.error(e?.message || "Failed to apply leave.");
@@ -589,21 +611,28 @@ function EmployeeLeavesSection({ employee }: { employee: Employee }) {
       )}
       {applying && (
         <div className="rounded-xl border border-border/60 p-3 space-y-2 mb-3">
-          <Select value={leaveTypeId} onValueChange={setLeaveTypeId}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select leave type" /></SelectTrigger>
-            <SelectContent>{leaveTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
-          </Select>
+          <FieldRow label="Leave Type" required>
+            <Select value={leaveTypeId} onValueChange={setLeaveTypeId}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select leave type" /></SelectTrigger>
+              <SelectContent>{leaveTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </FieldRow>
           <div className="grid grid-cols-2 gap-2">
-            <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="h-9" />
-            <Input type="date" value={toDate} min={fromDate} onChange={e => setToDate(e.target.value)} className="h-9" />
+            <FieldRow label="From Date" required><Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="h-9" /></FieldRow>
+            <FieldRow label="To Date" required><Input type="date" value={toDate} min={fromDate} onChange={e => setToDate(e.target.value)} className="h-9" /></FieldRow>
           </div>
-          <Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason" className="min-h-14" />
-          <Input type="file" accept=".pdf,image/*" disabled={uploading} onChange={async e => {
+          <FieldRow label="Reason" required>
+            <Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason" className="min-h-14" />
+          </FieldRow>
+          <Button type="button" size="sm" variant="outline" className="w-full" disabled={uploading} onClick={() => leaveFileInputRef.current?.click()}>
+            {uploading ? "Uploading…" : (attachmentName ?? "Choose File (PDF/JPG/PNG, optional)")}
+          </Button>
+          <input ref={leaveFileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={async e => {
             const file = e.target.files?.[0];
             if (!file) return;
             setUploading(true);
-            try { setAttachmentUrl(await fileToDataUrl(file)); } catch { toast.error("Failed to attach file."); } finally { setUploading(false); }
-          }} className="h-9" />
+            try { setAttachmentUrl(await fileToDataUrl(file)); setAttachmentName(file.name); } catch { toast.error("Failed to attach file."); } finally { setUploading(false); }
+          }} />
           <div className="flex gap-2">
             <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!leaveTypeId || !reason.trim() || saving} onClick={handleApply}>
               {saving ? "Submitting…" : "Submit"}
@@ -651,6 +680,8 @@ function EmployeeDocumentsSection({ employee }: { employee: Employee }) {
   const [expiryDate, setExpiryDate] = useState("");
   const [file, setFile] = useState<{ name: string; url: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<EmployeeDocument | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reload = () => { api.getEmployeeDocuments(employee.id).then(setDocuments).catch(() => {}); };
@@ -683,13 +714,17 @@ function EmployeeDocumentsSection({ employee }: { employee: Employee }) {
     }
   };
 
-  const handleDelete = async (docId: string) => {
-    if (!confirm("Delete this document?")) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.deleteEmployeeDocument(employee.id, docId);
+      await api.deleteEmployeeDocument(employee.id, deleteTarget.id);
+      setDeleteTarget(null);
       reload();
     } catch (e: any) {
       toast.error(e?.message || "Failed to delete document.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -698,7 +733,7 @@ function EmployeeDocumentsSection({ employee }: { employee: Employee }) {
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Documents</p>
         {canEdit && !uploading && (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setUploading(true)}>Upload Document</Button>
+          <Button size="sm" variant="outline" onClick={() => setUploading(true)}>Upload Document</Button>
         )}
       </div>
       {uploading && (
@@ -707,7 +742,12 @@ function EmployeeDocumentsSection({ employee }: { employee: Employee }) {
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>{DOC_TYPES().map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
           </Select>
-          <Input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} placeholder="Expiry date (optional)" className="h-9" />
+          {/* Native date inputs render their own fixed mm/dd/yyyy placeholder and silently ignore
+              the `placeholder` attribute — without a real label above it, this field showed no
+              indication of what date it wanted (upload date? issue date? expiry date?). */}
+          <FieldRow label="Expiry Date (optional)">
+            <Input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} className="h-9" />
+          </FieldRow>
           <Button size="sm" variant="outline" className="w-full" onClick={() => fileInputRef.current?.click()}>{file ? file.name : "Choose File (PDF/JPG/PNG)"}</Button>
           <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleFile} />
           <div className="flex gap-2">
@@ -724,21 +764,45 @@ function EmployeeDocumentsSection({ employee }: { employee: Employee }) {
         <div className="space-y-1.5">
           {documents.map(d => {
             const st = documentStatus(d);
+            const isImage = d.fileUrl?.startsWith("data:image");
             return (
               <div key={d.id} className="flex items-center justify-between text-xs border-b border-border/40 pb-1.5">
-                <div>
-                  <span className="font-medium">{d.documentType}</span>
-                  <span className="text-muted-foreground"> · {d.fileName}{d.expiryDate && ` · exp. ${d.expiryDate}`}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
+                <a href={d.fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 min-w-0 hover:text-primary" title="View file">
+                  {isImage ? (
+                    <img src={d.fileUrl} alt="" className="h-8 w-8 rounded object-cover border border-border/60 shrink-0" />
+                  ) : (
+                    <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                  )}
+                  <span className="min-w-0">
+                    <span className="font-medium">{d.documentType}</span>
+                    <span className="text-muted-foreground"> · {d.fileName}{d.expiryDate && ` · exp. ${d.expiryDate}`}</span>
+                  </span>
+                </a>
+                <div className="flex items-center gap-1.5 shrink-0">
                   <Badge variant="outline" className={`text-[10px] border-0 ${st.tone}`}>{st.label}</Badge>
-                  {canDelete && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => handleDelete(d.id)}><Trash2 className="h-3 w-3" /></Button>}
+                  {canDelete && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => setDeleteTarget(d)}><Trash2 className="h-3 w-3" /></Button>}
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Delete document?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-semibold text-foreground">{deleteTarget?.documentType}</span> ({deleteTarget?.fileName})? This cannot be undone.
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -753,6 +817,8 @@ function EmployeeContractsSection({ employee }: { employee: Employee }) {
   const [openEnded, setOpenEnded] = useState(false);
   const [file, setFile] = useState<{ name: string; url: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [terminateTarget, setTerminateTarget] = useState<EmployeeContract | null>(null);
+  const [terminating, setTerminating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reload = () => { api.getEmployeeContracts(employee.id).then(setContracts).catch(() => {}); };
@@ -786,13 +852,17 @@ function EmployeeContractsSection({ employee }: { employee: Employee }) {
     }
   };
 
-  const handleTerminate = async (contractId: string) => {
-    if (!confirm("Terminate this contract?")) return;
+  const handleTerminate = async () => {
+    if (!terminateTarget) return;
+    setTerminating(true);
     try {
-      await api.terminateEmployeeContract(employee.id, contractId);
+      await api.terminateEmployeeContract(employee.id, terminateTarget.id);
+      setTerminateTarget(null);
       reload();
     } catch (e: any) {
       toast.error(e?.message || "Failed to terminate contract.");
+    } finally {
+      setTerminating(false);
     }
   };
 
@@ -801,7 +871,7 @@ function EmployeeContractsSection({ employee }: { employee: Employee }) {
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contracts</p>
         {canEdit && !uploading && (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setUploading(true)}>Upload Contract</Button>
+          <Button size="sm" variant="outline" onClick={() => setUploading(true)}>Upload Contract</Button>
         )}
       </div>
       {uploading && (
@@ -813,8 +883,12 @@ function EmployeeContractsSection({ employee }: { employee: Employee }) {
             </SelectContent>
           </Select>
           <div className="grid grid-cols-2 gap-2">
-            <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="h-9" />
-            <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} disabled={openEnded} className="h-9" />
+            <FieldRow label="Contract Start Date">
+              <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="h-9" />
+            </FieldRow>
+            <FieldRow label="Contract End Date">
+              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} disabled={openEnded} className="h-9" />
+            </FieldRow>
           </div>
           <label className="flex items-center gap-2 text-xs">
             <Checkbox checked={openEnded} onCheckedChange={v => setOpenEnded(!!v)} /> Open-ended contract
@@ -833,20 +907,51 @@ function EmployeeContractsSection({ employee }: { employee: Employee }) {
         <p className="text-xs text-muted-foreground">No contracts uploaded yet.</p>
       ) : (
         <div className="space-y-1.5">
-          {contracts.map(c => (
-            <div key={c.id} className="flex items-center justify-between text-xs border-b border-border/40 pb-1.5">
-              <div>
+          {contracts.map(c => {
+            const isImage = c.fileUrl?.startsWith("data:image");
+            const body = (
+              <span className="min-w-0">
                 <span className="font-medium">{c.contractType}</span>
-                <span className="text-muted-foreground"> · {c.startDate} → {c.openEnded ? "Open-ended" : (c.endDate ?? "—")}</span>
+                <span className="text-muted-foreground"> · {c.startDate} → {c.openEnded ? "Open-ended" : (c.endDate ?? "—")}{c.fileName && ` · ${c.fileName}`}</span>
+              </span>
+            );
+            return (
+              <div key={c.id} className="flex items-center justify-between text-xs border-b border-border/40 pb-1.5">
+                {c.fileUrl ? (
+                  <a href={c.fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 min-w-0 hover:text-primary" title="View file">
+                    {isImage ? (
+                      <img src={c.fileUrl} alt="" className="h-8 w-8 rounded object-cover border border-border/60 shrink-0" />
+                    ) : (
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                    )}
+                    {body}
+                  </a>
+                ) : body}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <StatusBadge status={c.status} />
+                  {canEdit && c.status === "active" && <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5" onClick={() => setTerminateTarget(c)}>Terminate</Button>}
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                <StatusBadge status={c.status} />
-                {canEdit && c.status === "active" && <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5" onClick={() => handleTerminate(c.id)}>Terminate</Button>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      <Dialog open={!!terminateTarget} onOpenChange={v => !v && setTerminateTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Terminate contract?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Terminate this <span className="font-semibold text-foreground">{terminateTarget?.contractType}</span> contract? This cannot be undone.
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setTerminateTarget(null)} disabled={terminating}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handleTerminate} disabled={terminating}>
+              {terminating && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Terminate
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -984,6 +1089,7 @@ function EmployeesTab() {
   const [shiftFilter, setShiftFilter] = useState<string[]>([]);
   const [leaveStatusFilter, setLeaveStatusFilter] = useState<string[]>([]);
   const [shifts, setShifts] = useState<WorkShift[]>([]);
+  const [viewMode, setViewMode] = useState<"card" | "list">("card");
 
   const [viewEmployee, setViewEmployee] = useState<Employee | null>(null);
   // The employee open in the Add/Edit drawer. Null means "creating a brand-new employee, not
@@ -1113,12 +1219,15 @@ function EmployeesTab() {
   };
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const handleDelete = async (e: Employee) => {
-    if (!confirm(`Deactivate employee "${e.fullName}"?`)) return;
+  const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const e = deleteTarget;
     setDeletingId(e.id);
     try {
       await api.deleteEmployee(e.id);
       toast.success(`${e.fullName} deactivated.`);
+      setDeleteTarget(null);
       load();
     } catch (err: any) {
       toast.error(err?.message || "Failed to deactivate employee.");
@@ -1276,6 +1385,14 @@ function EmployeesTab() {
           />
         </div>
         <div className="flex-1" />
+        <div className="flex items-center gap-1 rounded-lg border border-border/60 p-0.5">
+          <Button size="icon" variant={viewMode === "card" ? "default" : "ghost"} className={`h-7 w-7 ${viewMode === "card" ? "gradient-primary text-primary-foreground" : ""}`} title="Card view" onClick={() => setViewMode("card")}>
+            <LayoutGrid className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="icon" variant={viewMode === "list" ? "default" : "ghost"} className={`h-7 w-7 ${viewMode === "list" ? "gradient-primary text-primary-foreground" : ""}`} title="List view" onClick={() => setViewMode("list")}>
+            <List className="h-3.5 w-3.5" />
+          </Button>
+        </div>
         <ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} />
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openCreate}>
@@ -1288,6 +1405,40 @@ function EmployeesTab() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{[1, 2, 3, 4, 5, 6].map(i => <Skeleton key={i} className="h-44 rounded-xl" />)}</div>
       ) : filtered.length === 0 ? (
         <Card className="border-border/60 shadow-card py-14 text-center text-sm text-muted-foreground">No employees found.</Card>
+      ) : viewMode === "list" ? (
+        <PaginatedDataTable
+          columns={[
+            { key: "fullName", label: "Name", render: e => (
+              <button onClick={() => setViewEmployee(e)} className="flex items-center gap-2 text-left hover:text-primary">
+                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                  {e.profileImageUrl ? <img src={e.profileImageUrl} alt="" className="h-full w-full object-cover" /> : <UserIcon className="h-4 w-4 text-muted-foreground" />}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm truncate">{e.fullName}</p>
+                  <p className="text-xs text-muted-foreground font-mono">{e.employeeCode}</p>
+                </div>
+              </button>
+            ) },
+            { key: "branch", label: "Branch", render: e => e.branch?.name ?? "—" },
+            { key: "department", label: "Department", render: e => e.department?.name ?? "—" },
+            { key: "designation", label: "Designation", render: e => e.designation?.name ?? "—" },
+            { key: "phone", label: "Phone" },
+            { key: "status", label: "Status", render: e => <StatusBadge status={e.employmentStatus} /> },
+            { key: "actions", label: "Actions", render: e => (
+              <div className="flex justify-end gap-1">
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewEmployee(e)}><Eye className="h-3.5 w-3.5" /></Button>
+                {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(e)}><Pencil className="h-3.5 w-3.5" /></Button>}
+                {canDelete && (
+                  <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(e)} disabled={deletingId === e.id}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ) },
+          ]}
+          rows={filtered}
+          emptyMessage="No employees found."
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map(e => (
@@ -1297,7 +1448,7 @@ function EmployeesTab() {
               onView={() => setViewEmployee(e)}
               onEdit={() => openEdit(e)}
               onEditTab={(tab) => openEdit(e, tab)}
-              onDelete={() => handleDelete(e)}
+              onDelete={() => setDeleteTarget(e)}
               onActivate={() => handleActivate(e)}
               canEdit={canEdit}
               canDelete={canDelete}
@@ -1335,6 +1486,22 @@ function EmployeesTab() {
               {activeEmployee && <EmployeeShiftsSection employee={activeEmployee} onChanged={load} />}
             </TabsContent>
           </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Deactivate employee?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Deactivate <span className="font-semibold text-foreground">{deleteTarget?.fullName}</span>?
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} disabled={!!deletingId}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={!!deletingId}>
+              {deletingId && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Deactivate
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

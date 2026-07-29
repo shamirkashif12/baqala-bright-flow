@@ -21,6 +21,7 @@ import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
 import { api, type Supplier, type SupplierDocument, type PurchaseOrder, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
+import { isValidSaudiCr, isValidSaudiPhone, isValidSaudiVat } from "@/lib/validation";
 import { fileToDataUrl } from "@/lib/image";
 
 export const Route = createFileRoute("/_app/suppliers")({ component: Suppliers });
@@ -69,15 +70,43 @@ function validateSupplierForm(form: SupplierForm): SupplierFormErrors {
   return errors;
 }
 
+// Format checks — unlike REQUIRED_SUPPLIER_FIELDS, these run on both create and edit: a value
+// that's present but malformed (e.g. a 4-digit "CR number") should never be savable, even when
+// editing a legacy supplier. Mirrors SuppliersController.ValidateFormats.
+const FORMAT_VALIDATORS: { key: keyof SupplierForm; check: (v: string) => boolean; message: string }[] = [
+  { key: "contactNumber", check: isValidSaudiPhone, message: "Enter a valid Saudi mobile number (05XXXXXXXX)." },
+  { key: "crNumber", check: isValidSaudiCr, message: "Enter a valid CR number (10 digits)." },
+  { key: "vatNumber", check: isValidSaudiVat, message: "Enter a valid VAT number (15 digits, starting and ending with 3)." },
+];
+
+function validateSupplierFormats(form: SupplierForm): SupplierFormErrors {
+  const errors: SupplierFormErrors = {};
+  for (const f of FORMAT_VALIDATORS) {
+    const value = form[f.key]?.trim();
+    if (value && !f.check(value)) errors[f.key] = f.message;
+  }
+  return errors;
+}
+
 // Maps the single-field message the server's 400 response returns back onto the form —
-// used as a fallback for whatever validateSupplierForm didn't already catch client-side.
+// used as a fallback for whatever validateSupplierForm/validateSupplierFormats didn't already
+// catch client-side.
 function mapServerErrorToField(message?: string): SupplierFormErrors | null {
   if (!message) return null;
-  const hit = REQUIRED_SUPPLIER_FIELDS.find(f => f.message === message);
+  const hit = REQUIRED_SUPPLIER_FIELDS.find(f => f.message === message) ?? FORMAT_VALIDATORS.find(f => f.message === message);
   return hit ? { [hit.key]: hit.message } : null;
 }
 
 const SUPPLIER_CATEGORIES = ["Food & Beverage", "Tobacco", "Packaging", "Cleaning & Hygiene", "General Goods", "Other"];
+// Was a free-text field with no list to pick from.
+const SAUDI_CITIES = [
+  "Riyadh", "Jeddah", "Makkah", "Madinah", "Dammam", "Khobar", "Dhahran",
+  "Taif", "Tabuk", "Buraidah", "Khamis Mushait", "Abha", "Najran", "Jazan",
+  "Hail", "Al Ahsa", "Yanbu", "Jubail", "Qatif", "Sakaka",
+];
+// Matches the fixed list already used in the PO wizard (_app.purchase-orders.tsx) — was free text
+// here with no list, so a supplier's own terms and the PO wizard's terms could drift in wording.
+const PAYMENT_TERMS_OPTIONS = ["Net 30", "Net 60", "On Delivery", "Immediate", "COD", "Advance Payment"];
 
 // Module-scope component — NOT inside SuppliersTab, so it never remounts on parent re-render
 function SupplierFormFields({
@@ -119,7 +148,17 @@ function SupplierFormFields({
       <FieldRow label={label("Contact Person", true)} error={errors.contactPerson}><Input value={form.contactPerson} onChange={set("contactPerson")} className={`h-9 ${errCls("contactPerson")}`} required={req} /></FieldRow>
       <FieldRow label={label("Phone", true)} error={errors.contactNumber}><Input value={form.contactNumber} onChange={set("contactNumber")} className={`h-9 ${errCls("contactNumber")}`} required={req} /></FieldRow>
       <FieldRow label="Email"><Input value={form.email} onChange={set("email")} className="h-9" type="email" /></FieldRow>
-      <FieldRow label="City"><Input value={form.city} onChange={set("city")} className="h-9" /></FieldRow>
+      <FieldRow label="City">
+        <div className="space-y-1">
+          <Select value={SAUDI_CITIES.includes(form.city) ? form.city : ""} onValueChange={setS("city")}>
+            <SelectTrigger className="h-9"><SelectValue placeholder="Select city" /></SelectTrigger>
+            <SelectContent>
+              {SAUDI_CITIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Input value={form.city} onChange={set("city")} className="h-8 text-xs" placeholder="Or type a city not listed above" />
+        </div>
+      </FieldRow>
       <div className="sm:col-span-2">
         <FieldRow label={label("Address", true)} error={errors.address}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} className={errCls("address")} /></FieldRow>
       </div>
@@ -141,10 +180,20 @@ function SupplierFormFields({
           </SelectContent>
         </Select>
       </FieldRow>
-      <FieldRow label="Payment Terms"><Input value={form.paymentTerms} onChange={set("paymentTerms")} className="h-9" placeholder="e.g. Net 30, COD, Advance Payment" /></FieldRow>
+      <FieldRow label="Payment Terms">
+        <div className="space-y-1">
+          <Select value={PAYMENT_TERMS_OPTIONS.includes(form.paymentTerms) ? form.paymentTerms : ""} onValueChange={setS("paymentTerms")}>
+            <SelectTrigger className="h-9"><SelectValue placeholder="Select payment terms" /></SelectTrigger>
+            <SelectContent>
+              {PAYMENT_TERMS_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Input value={form.paymentTerms} onChange={set("paymentTerms")} className="h-8 text-xs" placeholder="Or type custom terms" />
+        </div>
+      </FieldRow>
       <FieldRow label="Credit Limit (SAR)"><Input value={form.creditLimit} onChange={set("creditLimit")} className="h-9" type="number" min="0" step="0.01" /></FieldRow>
       <FieldRow label="Bank Name"><Input value={form.bankName} onChange={set("bankName")} className="h-9" /></FieldRow>
-      <FieldRow label="Bank Account Holder"><Input value={form.bankAccountHolder} onChange={set("bankAccountHolder")} className="h-9" /></FieldRow>
+      <FieldRow label="Bank Account Holder Name"><Input value={form.bankAccountHolder} onChange={set("bankAccountHolder")} className="h-9" /></FieldRow>
       <FieldRow label="Bank Account Number"><Input value={form.bankAccountNumber} onChange={set("bankAccountNumber")} className="h-9" /></FieldRow>
       <FieldRow label="IBAN"><Input value={form.bankIban} onChange={set("bankIban")} className="h-9" placeholder="SAxx xxxx xxxx xxxx xxxx xxxx" /></FieldRow>
       <div className="sm:col-span-2">
@@ -412,7 +461,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                   ["Payment Terms", supplier.paymentTerms ?? "—"],
                   ["Credit Limit", supplier.creditLimit != null ? `SAR ${supplier.creditLimit.toLocaleString()}` : "—"],
                   ["Bank Name", supplier.bankName ?? "—"],
-                  ["Bank Account Holder", supplier.bankAccountHolder ?? "—"],
+                  ["Bank Account Holder Name", supplier.bankAccountHolder ?? "—"],
                   ["Bank Account Number", supplier.bankAccountNumber ?? "—"],
                   ["IBAN", supplier.bankIban ?? "—"],
                   ["Notes", supplier.notes ?? "—"],
@@ -682,13 +731,11 @@ function SuppliersTab() {
   };
 
   const handleSave = async () => {
-    if (!editSupplier) {
-      const clientErrors = validateSupplierForm(form);
-      if (Object.keys(clientErrors).length > 0) {
-        setFormErrors(clientErrors);
-        toast.error("Please fix the highlighted fields.");
-        return;
-      }
+    const clientErrors = { ...(editSupplier ? {} : validateSupplierForm(form)), ...validateSupplierFormats(form) };
+    if (Object.keys(clientErrors).length > 0) {
+      setFormErrors(clientErrors);
+      toast.error("Please fix the highlighted fields.");
+      return;
     }
     setFormErrors({});
     setSaving(true);

@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import {
   Loader2, Building2, Languages, Bell, ShieldCheck,
-  Receipt, CreditCard, Database, KeyRound,
+  Receipt, CreditCard, Database, KeyRound, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type ZatcaSettings, type CompanyProfile } from "@/lib/api";
@@ -233,7 +233,22 @@ function Settings() {
     <PageShell
       title="Settings"
       subtitle="Business · tax · operations · security"
-      actions={<BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />}
+      actions={
+        <div className="flex items-end gap-2">
+          <div className="space-y-1">
+            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Branch</Label>
+            <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
+          </div>
+          {!lockedBranchId && branches.length > 1 && (
+            <Button
+              variant="ghost" size="sm" className="h-9 gap-1.5 text-xs"
+              onClick={() => setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id)}
+            >
+              <X className="h-3.5 w-3.5" /> Clear
+            </Button>
+          )}
+        </div>
+      }
     >
       {kvLoadError && <LoadErrorBanner onRetry={loadKv} />}
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">

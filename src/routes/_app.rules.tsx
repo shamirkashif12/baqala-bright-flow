@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
-import { DataTable, StatusBadge } from "@/components/module-placeholder";
+import { DataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetFooter } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Workflow, ShieldCheck, Percent, BadgeDollarSign, Plus, Power, Eye, Pencil, Trash2, Loader2 } from "lucide-react";
+import { Workflow, ShieldCheck, Percent, BadgeDollarSign, Plus, Eye, Pencil, Trash2, Loader2, ToggleLeft, X } from "lucide-react";
 import { api, excludeDisabledBranches, type ComplianceRule, type Branch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -67,9 +68,20 @@ function Rules() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [view, setView] = useState<ComplianceRule | null>(null);
+  const [viewOnly, setViewOnly] = useState(false);
   const [editForm, setEditForm] = useState<RuleFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ComplianceRule | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const hasFilters = !!search || typeFilter !== "all" || branchFilter !== "all" || !!dateFrom || !!dateTo;
+  const clearFilters = () => { setSearch(""); setTypeFilter("all"); setBranchFilter("all"); setDateFrom(""); setDateTo(""); };
 
   const reload = () => api.getComplianceRules({ includeInactive: true }).then(setRules).catch(() => {});
 
@@ -91,9 +103,11 @@ function Rules() {
 
   useEffect(() => { load(); }, []);
 
-  const openView = (r: ComplianceRule) => { setEditForm(ruleToForm(r)); setView(r); };
+  const openView = (r: ComplianceRule) => { setEditForm(ruleToForm(r)); setView(r); setViewOnly(true); };
+  const openEdit = (r: ComplianceRule) => { setEditForm(ruleToForm(r)); setView(r); setViewOnly(false); };
 
   const active = rules.filter(r => r.isActive).length;
+  const inactive = rules.length - active;
   const approvalCount = rules.filter(r => r.ruleType?.toLowerCase().includes("approval")).length;
   const discountCount = rules.filter(r =>
     r.ruleType?.toLowerCase().includes("discount") || r.ruleType?.toLowerCase().includes("return")
@@ -101,6 +115,16 @@ function Rules() {
   const feeCount = rules.filter(r =>
     r.ruleType?.toLowerCase().includes("fee") || r.ruleType?.toLowerCase().includes("tax")
   ).length;
+
+  const distinctTypes = [...new Set(rules.map(r => r.ruleType))].sort();
+  const filteredRules = rules.filter(r => {
+    if (search && !r.ruleName.toLowerCase().includes(search.toLowerCase())) return false;
+    if (typeFilter !== "all" && r.ruleType !== typeFilter) return false;
+    if (branchFilter !== "all" && (r.branchId ?? "all") !== branchFilter) return false;
+    if (dateFrom && r.createdAt < dateFrom) return false;
+    if (dateTo && r.createdAt > dateTo + "T23:59:59") return false;
+    return true;
+  });
 
   const handleSaveEdit = async () => {
     if (!view) return;
@@ -139,18 +163,19 @@ function Rules() {
     }
   };
 
-  const handleDelete = async (r: ComplianceRule) => {
-    if (!confirm(`Delete rule "${r.ruleName}"? This cannot be undone.`)) return;
-    setBusyId(r.id);
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.deleteComplianceRule(r.id);
+      await api.deleteComplianceRule(deleteTarget.id);
       toast.success("Rule deleted");
-      if (view?.id === r.id) setView(null);
+      if (view?.id === deleteTarget.id) setView(null);
+      setDeleteTarget(null);
       reload();
     } catch (e: any) {
       toast.error(e?.message || "Failed to delete rule.");
     } finally {
-      setBusyId(null);
+      setDeleting(false);
     }
   };
 
@@ -161,17 +186,57 @@ function Rules() {
       actions={canCreate ? <NewRule branches={branches} createdBy={user?.id} onCreated={reload} /> : undefined}
     >
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <MetricCard label="Active Rules" value={loading ? "—" : String(active)} icon={Workflow} accent="primary" />
+        <MetricCard label="Inactive Rules" value={loading ? "—" : String(inactive)} icon={ToggleLeft} />
         <MetricCard label="Approval Rules" value={loading ? "—" : String(approvalCount)} icon={ShieldCheck} accent="success" />
         <MetricCard label="Discount Rules" value={loading ? "—" : String(discountCount)} icon={Percent} />
         <MetricCard label="Fee / Tax Rules" value={loading ? "—" : String(feeCount)} icon={BadgeDollarSign} accent="warning" />
       </div>
 
+      {!loading && rules.length > 0 && (
+        <div className="flex flex-wrap items-end gap-3">
+          <FilterField label="Search" className="w-48">
+            <Input placeholder="Rule name…" className="h-9" value={search} onChange={e => setSearch(e.target.value)} />
+          </FilterField>
+          <FilterField label="Rule Type" className="w-40">
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                {distinctTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Branch" className="w-40">
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="From">
+            <Input type="date" className="h-9" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          </FilterField>
+          <FilterField label="To">
+            <Input type="date" className="h-9" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          </FilterField>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>
       ) : rules.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center">No rules configured yet.</p>
+      ) : filteredRules.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">No rules match the current filters.</p>
       ) : (
         <DataTable
           columns={[
@@ -213,32 +278,22 @@ function Rules() {
               render: r => <StatusBadge status={r.isActive ? "active" : "inactive"} />,
             },
             {
-              key: "a", label: "",
+              key: "a", label: "Actions",
               render: r => (
                 <div className="flex gap-1 justify-end">
-                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openView(r)}>
+                  <Button size="icon" variant="ghost" className="h-8 w-8" title="View" onClick={() => openView(r)}>
                     <Eye className="h-4 w-4" />
                   </Button>
                   {canEdit && (
-                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openView(r)}>
+                    <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit" onClick={() => openEdit(r)}>
                       <Pencil className="h-4 w-4" />
-                    </Button>
-                  )}
-                  {canEdit && (
-                    <Button
-                      size="icon" variant="ghost" className="h-8 w-8"
-                      title={r.isActive ? "Deactivate" : "Activate"}
-                      disabled={busyId === r.id}
-                      onClick={() => handleToggle(r)}
-                    >
-                      {busyId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
                     </Button>
                   )}
                   {canDelete && (
                     <Button
                       size="icon" variant="ghost" className="h-8 w-8 text-destructive"
                       disabled={busyId === r.id}
-                      onClick={() => handleDelete(r)}
+                      onClick={() => setDeleteTarget(r)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -247,19 +302,19 @@ function Rules() {
               ),
             },
           ]}
-          rows={rules}
+          rows={filteredRules}
         />
       )}
 
       <Sheet open={!!view} onOpenChange={v => !v && setView(null)}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader><SheetTitle>{view?.ruleName}</SheetTitle></SheetHeader>
+          <SheetHeader><SheetTitle>{viewOnly ? "View rule — " : "Edit rule — "}{view?.ruleName}</SheetTitle></SheetHeader>
           {view && (
             <div className="space-y-3 mt-4">
-              <Field label="Rule name" value={editForm.ruleName} onChange={v => setEditForm(f => ({ ...f, ruleName: v }))} disabled={!canEdit} />
+              <Field label="Rule name" value={editForm.ruleName} onChange={v => setEditForm(f => ({ ...f, ruleName: v }))} disabled={viewOnly || !canEdit} />
               <div className="space-y-1">
                 <Label className="text-xs">Rule type</Label>
-                <Select value={editForm.ruleType} onValueChange={v => setEditForm(f => ({ ...f, ruleType: v }))} disabled={!canEdit}>
+                <Select value={editForm.ruleType} onValueChange={v => setEditForm(f => ({ ...f, ruleType: v }))} disabled={viewOnly || !canEdit}>
                   <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {RULE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
@@ -269,7 +324,7 @@ function Rules() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Branch</Label>
-                  <Select value={editForm.branchId} onValueChange={v => setEditForm(f => ({ ...f, branchId: v }))} disabled={!canEdit}>
+                  <Select value={editForm.branchId} onValueChange={v => setEditForm(f => ({ ...f, branchId: v }))} disabled={viewOnly || !canEdit}>
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={ALL_BRANCHES}>All branches</SelectItem>
@@ -277,22 +332,22 @@ function Rules() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Field label="Applies to" value={editForm.appliesTo} onChange={v => setEditForm(f => ({ ...f, appliesTo: v }))} disabled={!canEdit} />
+                <Field label="Applies to" value={editForm.appliesTo} onChange={v => setEditForm(f => ({ ...f, appliesTo: v }))} disabled={viewOnly || !canEdit} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Condition</Label>
-                <Textarea rows={2} value={editForm.condition} onChange={e => setEditForm(f => ({ ...f, condition: e.target.value }))} disabled={!canEdit} />
+                <Textarea rows={2} value={editForm.condition} onChange={e => setEditForm(f => ({ ...f, condition: e.target.value }))} disabled={viewOnly || !canEdit} />
               </div>
-              <Field label="Action" value={editForm.action} onChange={v => setEditForm(f => ({ ...f, action: v }))} disabled={!canEdit} />
+              <Field label="Action" value={editForm.action} onChange={v => setEditForm(f => ({ ...f, action: v }))} disabled={viewOnly || !canEdit} />
             </div>
           )}
           <SheetFooter className="mt-4 gap-2">
-            {canEdit && view && (
+            {!viewOnly && canEdit && view && (
               <Button variant="outline" disabled={busyId === view.id} onClick={() => handleToggle(view)}>
-                {view.isActive ? "Deactivate" : "Activate"}
+                {busyId === view.id ? <Loader2 className="h-4 w-4 animate-spin" /> : (view.isActive ? "Deactivate" : "Activate")}
               </Button>
             )}
-            {canEdit && (
+            {!viewOnly && canEdit && (
               <Button className="gradient-primary text-primary-foreground border-0" disabled={saving} onClick={handleSaveEdit}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save rule"}
               </Button>
@@ -300,6 +355,22 @@ function Rules() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Delete rule?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-semibold text-foreground">{deleteTarget?.ruleName}</span>? This cannot be undone.
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

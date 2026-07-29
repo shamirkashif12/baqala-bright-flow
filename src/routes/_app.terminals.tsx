@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
@@ -241,6 +242,8 @@ function Terminals() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<TerminalForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [deactivateTarget, setDeactivateTarget] = useState<Terminal | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
   const [kioskTerm, setKioskTerm] = useState<Terminal | null>(null);
   const [kioskSecret, setKioskSecret] = useState<{ terminalCode: string; pairingSecret: string } | null>(null);
   const [kioskGenerating, setKioskGenerating] = useState(false);
@@ -327,6 +330,8 @@ function Terminals() {
   };
 
   const handleSave = async () => {
+    if (!form.name.trim()) { toast.error("Terminal name is required."); return; }
+    if (!form.branchId) { toast.error("Branch is required."); return; }
     setSaving(true);
     try {
       if (editTerm) {
@@ -340,13 +345,17 @@ function Terminals() {
     } catch (e: any) { console.error(e); toast.error(e?.message || "Failed to save terminal."); } finally { setSaving(false); }
   };
 
-  const handleDeactivate = async (t: Terminal) => {
-    if (!confirm(`Deactivate terminal "${t.name}"?`)) return;
+  const handleDeactivate = async () => {
+    if (!deactivateTarget) return;
+    setDeactivating(true);
     try {
-      await api.updateTerminalStatus(t.id, "inactive");
+      await api.updateTerminalStatus(deactivateTarget.id, "inactive");
+      setDeactivateTarget(null);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to deactivate terminal.");
+    } finally {
+      setDeactivating(false);
     }
   };
 
@@ -529,7 +538,7 @@ function Terminals() {
                               </Button>
                             )}
                             {canEdit && t.status === "active" && (
-                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => handleDeactivate(t)}><X className="h-3.5 w-3.5" /></Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => setDeactivateTarget(t)}><X className="h-3.5 w-3.5" /></Button>
                             )}
                           </div>
                         </td>
@@ -840,6 +849,23 @@ function Terminals() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!deactivateTarget} onOpenChange={v => !v && setDeactivateTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Deactivate Terminal</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground mt-1">
+            Deactivate terminal <span className="font-semibold text-foreground">{deactivateTarget?.name}</span>?
+          </p>
+          <div className="flex gap-2 pt-3">
+            <Button variant="outline" className="flex-1" onClick={() => setDeactivateTarget(null)} disabled={deactivating}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handleDeactivate} disabled={deactivating}>
+              {deactivating ? "Deactivating…" : "Deactivate"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

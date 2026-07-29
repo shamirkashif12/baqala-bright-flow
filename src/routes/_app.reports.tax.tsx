@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -14,7 +15,7 @@ import { api, type TaxReport as TaxReportData, type TaxReportRow, type ReportExp
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Coins, Percent, Ban, Wallet } from "lucide-react";
+import { Coins, Percent, Ban, Wallet, X } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/tax")({ component: TaxReportPage });
@@ -76,30 +77,44 @@ function TaxReportPage() {
     }, {})
   );
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchId !== (lockedBranchId ?? "all") || cashierId !== "all";
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchId(lockedBranchId ?? "all"); setCashierId("all");
+  };
+
   return (
     <PageShell title="Tax Report" subtitle="Tax breakdown by branch, cashier and tax code">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
+          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         </div>
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+          <FilterField label="Branch">
+            <Select value={branchId} onValueChange={setBranchId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        )}
+        <FilterField label="Cashier">
+          <Select value={cashierId} onValueChange={setCashierId}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Cashier" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              <SelectItem value="all">All Cashiers</SelectItem>
+              {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
             </SelectContent>
           </Select>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
         )}
-        <Select value={cashierId} onValueChange={setCashierId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Cashier" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Cashiers</SelectItem>
-            {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

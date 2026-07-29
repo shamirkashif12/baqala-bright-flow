@@ -26,6 +26,13 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
     private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
         userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
+    private static string? ValidateTerminal(Terminal terminal)
+    {
+        if (string.IsNullOrWhiteSpace(terminal.Name)) return "Terminal name is required.";
+        if (terminal.BranchId == Guid.Empty) return "Branch is required.";
+        return null;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid[]? branchId, [FromQuery] string[]? status)
     {
@@ -74,6 +81,7 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Terminal terminal)
     {
+        if (ValidateTerminal(terminal) is { } validationError) return BadRequest(new { message = validationError });
         terminal.Id = Guid.NewGuid();
         terminal.CreatedAt = terminal.UpdatedAt = DateTime.UtcNow;
         db.Terminals.Add(terminal);
@@ -87,6 +95,7 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
     {
         var terminal = await db.Terminals.FindAsync(id);
         if (terminal is null) return NotFound();
+        if (ValidateTerminal(updated) is { } validationError) return BadRequest(new { message = validationError });
         terminal.Name = updated.Name;
         terminal.BranchId = updated.BranchId;
         terminal.AssignedCashierId = updated.AssignedCashierId;

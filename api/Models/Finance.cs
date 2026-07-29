@@ -69,6 +69,9 @@ public class Expense
     [Column("paid_amount")]
     public decimal? PaidAmount { get; set; }
 
+    [MaxLength(4), Column("card_last_four")]
+    public string? CardLastFour { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -122,11 +125,23 @@ public class Coupon
     [Column("applicable_id")]
     public Guid? ApplicableId { get; set; }
 
+    // Null means valid at every branch — same convention as Discount.BranchId/Offer.BranchId.
+    [Column("branch_id")]
+    public Guid? BranchId { get; set; }
+
     [Required, Column("start_date")]
     public DateTime StartDate { get; set; }
 
     [Required, Column("end_date")]
     public DateTime EndDate { get; set; }
+
+    // Optional daily time-of-day window (e.g. 18:00–21:00) on top of the StartDate/EndDate date
+    // range above — null in either means no time-of-day restriction, valid all day.
+    [Column("start_time")]
+    public TimeSpan? StartTime { get; set; }
+
+    [Column("end_time")]
+    public TimeSpan? EndTime { get; set; }
 
     [Required, MaxLength(20), Column("status")]
     public string Status { get; set; } = "active"; // active | inactive | expired

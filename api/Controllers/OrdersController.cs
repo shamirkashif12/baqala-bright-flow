@@ -67,6 +67,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         [FromQuery] Guid[]? branchId,
         [FromQuery] string[]? status,
         [FromQuery] string[]? paymentStatus,
+        [FromQuery] string[]? paymentMethod,
+        [FromQuery] Guid? customerId,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] int? page,
@@ -78,6 +80,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var query = db.Orders
             .Include(o => o.Branch)
             .Include(o => o.Cashier)
+            .Include(o => o.Customer)
             .Include(o => o.Payments)
             .Include(o => o.Items)
             .AsQueryable();
@@ -88,6 +91,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // array filters are applied in-memory after materializing.
         if (from.HasValue) query = query.Where(o => o.CreatedAt >= from);
         if (to.HasValue) query = query.Where(o => o.CreatedAt <= to);
+        if (customerId.HasValue) query = query.Where(o => o.CustomerId == customerId);
 
         // MIMONY-PII-ORDERS-CROSSBRANCH-001: id+fullName alone (the fix below) still named a
         // cashier who has since transferred to another branch — a branch-scoped viewer could see
@@ -105,6 +109,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 Cashier = o.Cashier == null || (!isAdmin && callerBranchId.HasValue && o.Cashier.BranchId != callerBranchId)
                     ? null
                     : new { o.Cashier.Id, o.Cashier.FullName },
+                Customer = o.Customer == null ? null : new { o.Customer.Id, o.Customer.FullName, o.Customer.Phone },
                 Items = o.Items.Select(i => new { i.Id, i.ProductId, i.Quantity, i.UnitPrice, i.TotalPrice, i.DiscountAmount, i.TaxAmount, i.TobaccoFeeAmount }),
                 Payments = o.Payments.Select(p => new { p.Id, p.PaymentMethod, p.Amount, p.ReferenceNumber, p.Status }),
                 Discounts = o.Discounts.Select(d => new { d.Id, d.DiscountId, d.Name, d.Amount }),
@@ -116,6 +121,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         if (branchId is { Length: > 0 }) scoped = scoped.Where(o => branchId.Contains(o.BranchId));
         if (status is { Length: > 0 }) scoped = scoped.Where(o => status.Contains(o.OrderStatus));
         if (paymentStatus is { Length: > 0 }) scoped = scoped.Where(o => paymentStatus.Contains(o.PaymentStatus));
+        if (paymentMethod is { Length: > 0 }) scoped = scoped.Where(o => o.Payments.Any(p => paymentMethod.Contains(p.PaymentMethod)));
         var filtered = scoped.ToList();
 
         var totalCount = filtered.Count;
@@ -145,7 +151,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             o.Id, o.OrderNumber, o.Source, o.BranchId, o.CustomerId, o.CashierId, o.TerminalId, o.ShiftId, o.CouponId,
             o.Subtotal, o.DiscountAmount, o.LoyaltyPointsRedeemed, o.LoyaltyDiscountAmount, o.TaxAmount, o.CustomFeeAmount, o.TobaccoFeeAmount, o.TotalAmount,
             o.PaymentStatus, o.OrderStatus, o.Notes, o.ClientRequestId, o.VoidReason, o.CreatedAt, o.UpdatedAt,
-            o.Branch, o.Cashier, o.Items, o.Payments, o.Discounts, o.ServiceCharges,
+            o.Branch, o.Cashier, o.Customer, o.Items, o.Payments, o.Discounts, o.ServiceCharges,
             PendingApproval = pendingByOrder.TryGetValue(o.Id, out var pa)
                 ? new
                 {
@@ -483,6 +489,16 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 return BadRequest(new { message = "This coupon is no longer valid." });
             if (appliedCoupon.StartDate > nowUtc || appliedCoupon.EndDate < nowUtc)
                 return BadRequest(new { message = "This coupon has expired or isn't active yet." });
+            // Null BranchId means valid at every branch — same convention as Discount/Offer.
+            if (appliedCoupon.BranchId.HasValue && appliedCoupon.BranchId != order.BranchId)
+                return BadRequest(new { message = "This coupon is not valid at this branch." });
+            // Riyadh is UTC+3, no DST (see ValidateCoupon/OperationalAlertsService for the same offset).
+            if (appliedCoupon.StartTime.HasValue && appliedCoupon.EndTime.HasValue)
+            {
+                var localTimeOfDay = nowUtc.AddHours(3).TimeOfDay;
+                if (localTimeOfDay < appliedCoupon.StartTime.Value || localTimeOfDay > appliedCoupon.EndTime.Value)
+                    return BadRequest(new { message = "This coupon is only valid during specific hours." });
+            }
             if (appliedCoupon.UsageLimit.HasValue && appliedCoupon.UsedCount >= appliedCoupon.UsageLimit.Value)
                 return BadRequest(new { message = "This coupon has reached its usage limit." });
             if (appliedCoupon.MinOrderAmount.HasValue && order.Subtotal < appliedCoupon.MinOrderAmount.Value)
@@ -523,6 +539,8 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
         var validatedDiscountTotal = 0m;
         var anyRuleReference = appliedCoupon != null;
+        var referencedRuleCount = appliedCoupon != null ? 1 : 0;
+        var nonCombinableRuleNames = new List<string>();
         foreach (var d in order.Discounts)
         {
             // No DiscountId means this line represents an Offer's effect — there's no OfferId
@@ -530,6 +548,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             // stays client-computed-and-trusted.
             if (d.DiscountId is null) { validatedDiscountTotal += d.Amount; continue; }
             anyRuleReference = true;
+            referencedRuleCount++;
             var rule = await db.Discounts.FindAsync(d.DiscountId.Value);
             if (rule is null || !rule.IsActive)
                 return BadRequest(new { message = $"The discount \"{d.Name}\" is no longer active." });
@@ -547,6 +566,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             }
             if (tobaccoProductIds.Count > 0 && DiscountCoversTobacco(rule.AppliesTo, rule.ProductId, rule.CategoryId))
                 return BadRequest(new { message = $"The discount \"{d.Name}\" cannot be applied — tobacco items are not eligible for discounts." });
+            if (!rule.Combinable) nonCombinableRuleNames.Add(d.Name);
 
             var basis = rule.AppliesTo switch
             {
@@ -555,9 +575,16 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 _ => order.Subtotal, // "all" or "branch" — applies to the whole order
             };
             var computed = rule.DiscountType == "fixed" ? Math.Min(rule.Value, basis) : Math.Round(basis * rule.Value / 100m, 2);
+            if (rule.MaxDiscountAmount.HasValue) computed = Math.Min(computed, rule.MaxDiscountAmount.Value);
             d.Amount = computed;
             validatedDiscountTotal += computed;
         }
+
+        // A discount marked non-combinable can't ride alongside any other discount or a coupon —
+        // the cashier has to pick one or the other. Checked here (not per-item above) since it's
+        // only a conflict once a SECOND discount/coupon is also present on the same order.
+        if (nonCombinableRuleNames.Count > 0 && referencedRuleCount > 1)
+            return BadRequest(new { message = $"\"{nonCombinableRuleNames[0]}\" cannot be combined with other discounts or coupons — remove the others first." });
 
         if (appliedCoupon != null)
         {

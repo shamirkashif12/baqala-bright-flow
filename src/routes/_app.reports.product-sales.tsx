@@ -3,9 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -14,7 +15,7 @@ import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow,
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Tag, Boxes, Wallet, Percent, PackageX, RotateCcw, Cigarette } from "lucide-react";
+import { Tag, Boxes, Wallet, Percent, PackageX, RotateCcw, Cigarette, X } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
@@ -106,49 +107,77 @@ function ProductSales() {
   const fmt = (n: number) => fmtSAR(n);
   const chartData = (data?.rows ?? []).slice(0, 10).map((r) => ({ name: r.productName, sales: r.netSales }));
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchId !== (lockedBranchId ?? "all")
+    || categoryId !== "all" || productId !== "all" || cashierId !== "all" || search !== "" || hasTobaccoFee;
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchId(lockedBranchId ?? "all");
+    setCategoryId("all"); setProductId("all"); setCashierId("all"); setSearch(""); setHasTobaccoFee(false);
+  };
+
   return (
     <PageShell title="Product Sales" subtitle="SKU-level sales, velocity, dead stock and returns">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
-        </div>
+      <div className="flex flex-wrap items-end gap-2">
+        {/* This report already covers "Top Selling Items (Daily/Monthly)" — Top SKU card, Top
+            Products chart, and a sortable table with product name/units sold/net sales — it just
+            needed a one-click way to switch the range instead of hand-picking dates every time. */}
+        <FilterField label="Period">
+          <div className="flex gap-1">
+            <Button type="button" size="sm" variant="outline" className="h-9 text-xs" onClick={() => { setFrom(todayStr()); setTo(todayStr()); }}>Today</Button>
+            <Button type="button" size="sm" variant="outline" className="h-9 text-xs" onClick={() => { setFrom(firstOfMonthStr()); setTo(todayStr()); }}>This Month</Button>
+          </div>
+        </FilterField>
+        <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+          <FilterField label="Branch">
+            <Select value={branchId} onValueChange={setBranchId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        )}
+        <FilterField label="Category">
+          <Select value={categoryId} onValueChange={setCategoryId}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Category" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              <SelectItem value="all">All Categories</SelectItem>
+              {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
             </SelectContent>
           </Select>
-        )}
-        <Select value={categoryId} onValueChange={setCategoryId}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={productId} onValueChange={setProductId}>
-          <SelectTrigger className="h-9 w-52"><SelectValue placeholder="Product" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Products</SelectItem>
-            {productOptions.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={cashierId} onValueChange={setCashierId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Employees</SelectItem>
-            {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Input placeholder="Search SKU, barcode or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />
+        </FilterField>
+        <FilterField label="Product">
+          <Select value={productId} onValueChange={setProductId}>
+            <SelectTrigger className="h-9 w-52"><SelectValue placeholder="Product" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Products</SelectItem>
+              {productOptions.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Employee">
+          <Select value={cashierId} onValueChange={setCashierId}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Employees</SelectItem>
+              {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Search">
+          <Input placeholder="Search SKU, barcode or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />
+        </FilterField>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
           Tobacco fee only
         </label>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

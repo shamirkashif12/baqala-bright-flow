@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
+import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -14,7 +15,7 @@ import { api, type ReturnsRefundsReport as ReturnsRefundsData, type ReturnRefund
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { RotateCcw, Wallet, Receipt, Clock } from "lucide-react";
+import { RotateCcw, Wallet, Receipt, Clock, X } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/returns-refunds")({ component: ReturnsRefunds });
@@ -63,6 +64,16 @@ function ReturnsRefunds() {
     processedBy: processedBy !== "all" ? processedBy : undefined,
   };
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || (!lockedBranchId && branchId !== "all")
+    || refundMethod !== "all" || status !== "all" || customerType !== "all" || reason !== "all"
+    || productId !== "all" || processedBy !== "all";
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr());
+    if (!lockedBranchId) setBranchId("all");
+    setRefundMethod("all"); setStatus("all"); setCustomerType("all"); setReason("all");
+    setProductId("all"); setProcessedBy("all");
+  };
+
   const load = useCallback(() => {
     setLoading(true);
     api.getReturnsRefundsReport(filterParams)
@@ -95,75 +106,94 @@ function ReturnsRefunds() {
 
   return (
     <PageShell title="Return / Refund Report" subtitle="Customer returns, refunds and VAT reversal">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
+          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         </div>
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+          <FilterField label="Branch">
+            <Select value={branchId} onValueChange={setBranchId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        )}
+        <FilterField label="Refund Method">
+          <Select value={refundMethod} onValueChange={setRefundMethod}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Refund Method" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              <SelectItem value="all">All Methods</SelectItem>
+              <SelectItem value="cash">Cash</SelectItem>
+              <SelectItem value="store_credit">Store Credit</SelectItem>
+              <SelectItem value="original_payment">Original Payment</SelectItem>
             </SelectContent>
           </Select>
+        </FilterField>
+        <FilterField label="Status">
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Customer Type">
+          <Select value={customerType} onValueChange={setCustomerType}>
+            <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Customer Type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Customers</SelectItem>
+              <SelectItem value="registered">Registered</SelectItem>
+              <SelectItem value="walk-in">Walk-in</SelectItem>
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Reason">
+          <Select value={reason} onValueChange={setReason}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Reason" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Reasons</SelectItem>
+              <SelectItem value="Damaged packaging">Damaged packaging</SelectItem>
+              <SelectItem value="Wrong item received">Wrong item received</SelectItem>
+              <SelectItem value="Expired product">Expired product</SelectItem>
+              <SelectItem value="Quality issue">Quality issue</SelectItem>
+              <SelectItem value="Customer changed mind">Customer changed mind</SelectItem>
+              <SelectItem value="Duplicate purchase">Duplicate purchase</SelectItem>
+              <SelectItem value="Other">Other</SelectItem>
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Product">
+          <Select value={productId} onValueChange={setProductId}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Products</SelectItem>
+              {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Employee">
+          <Select value={processedBy} onValueChange={setProcessedBy}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Employees</SelectItem>
+              {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
         )}
-        <Select value={refundMethod} onValueChange={setRefundMethod}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Refund Method" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Methods</SelectItem>
-            <SelectItem value="cash">Cash</SelectItem>
-            <SelectItem value="store_credit">Store Credit</SelectItem>
-            <SelectItem value="original_payment">Original Payment</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={customerType} onValueChange={setCustomerType}>
-          <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Customer Type" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Customers</SelectItem>
-            <SelectItem value="registered">Registered</SelectItem>
-            <SelectItem value="walk-in">Walk-in</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={reason} onValueChange={setReason}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Reason" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Reasons</SelectItem>
-            <SelectItem value="Damaged packaging">Damaged packaging</SelectItem>
-            <SelectItem value="Wrong item received">Wrong item received</SelectItem>
-            <SelectItem value="Expired product">Expired product</SelectItem>
-            <SelectItem value="Quality issue">Quality issue</SelectItem>
-            <SelectItem value="Customer changed mind">Customer changed mind</SelectItem>
-            <SelectItem value="Duplicate purchase">Duplicate purchase</SelectItem>
-            <SelectItem value="Other">Other</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={productId} onValueChange={setProductId}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Products</SelectItem>
-            {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={processedBy} onValueChange={setProcessedBy}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Employees</SelectItem>
-            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

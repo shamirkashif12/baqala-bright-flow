@@ -121,13 +121,12 @@ const navGroups: NavGroup[] = [
       // { title: "MPOS App Preview",    url: "/mpos-app",      icon: Smartphone,
       //   roles: ["tenant_admin"] },
       { title: "Orders",              url: "/orders",        icon: ShoppingBag,    module: "Orders" },
-      // One child per destination — "Customer Rewards" and "Promotions" used to sit here too but
-      // pointed at these same two routes, so both entries of each pair lit up as active at once.
-      { title: "Customers & Loyalty", url: "/customers",     icon: Users,          module: "Customers",
-        children: [
-          { title: "Discount Coupons",  url: "/coupons" },
-          { title: "Loyalty Programs",  url: "/loyalty-program" },
-        ] },
+      // No longer a children/dropdown item — it was the only sidebar entry using that nested
+      // pattern, its children bypassed canSee's permission gating entirely (NavItem.children has
+      // no module/roles field), and both children pointed at routes that already have their own
+      // standalone Finance-group entries below ("Coupons, Discounts & Offers", "Loyalty Program"),
+      // so every role saw each of those two pages listed twice under two different labels.
+      { title: "Customers & Loyalty", url: "/customers",     icon: Users,          module: "Customers" },
       { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
       { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
       { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower" },
@@ -196,8 +195,11 @@ const navGroups: NavGroup[] = [
       { title: "Departments",  url: "/departments",  icon: Building,     module: "HR Master Data" },
       { title: "Designations", url: "/designations", icon: IdCard,       module: "HR Master Data" },
       { title: "Holidays",     url: "/holidays",      icon: CalendarDays,module: "HR Master Data" },
-      { title: "Attendance Report",     url: "/reports/hrm-attendance",     icon: CalendarCheck2, module: "Reports" },
-      { title: "Shift Closing Report",  url: "/reports/shift-closing",      icon: AlarmClockOff,  module: "Reports" },
+      // Gated on their own HR module (not "Reports") so a Branch Manager/Supervisor who already
+      // manages attendance/shifts day-to-day can reach these reports without a separate Reports
+      // grant — mirrors the backend gate on HrReportsController.
+      { title: "Attendance Report",     url: "/reports/hrm-attendance",     icon: CalendarCheck2, module: "HR Attendance" },
+      { title: "Shift Closing Report",  url: "/reports/shift-closing",      icon: AlarmClockOff,  module: "HR Shifts" },
       // Deliberately gated on "Audit Logs", not "Reports" like its siblings above — FRD 3/16
       // scope this report's user stories to admin/auditor only (EAR-01..05), unlike Attendance/
       // Shift Closing Report which Branch Manager and Supervisor are explicitly entitled to.

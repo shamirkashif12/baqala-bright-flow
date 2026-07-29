@@ -53,6 +53,8 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IStockAlertService, StockAlertService>();
 builder.Services.AddScoped<IBatchConsumptionService, BatchConsumptionService>();
 builder.Services.AddScoped<IPriceResolutionService, PriceResolutionService>();
+builder.Services.AddScoped<IOnlineOrderPricingService, OnlineOrderPricingService>();
+builder.Services.AddScoped<IOfferResolutionService, OfferResolutionService>();
 builder.Services.AddScoped<IStockMovementService, StockMovementService>();
 builder.Services.AddScoped<IOrderVoidService, OrderVoidService>();
 builder.Services.AddScoped<IOrderEditService, OrderEditService>();
@@ -244,6 +246,9 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.PatchSeedHrmPayrollDataAsync(db);
     await DataSeeder.PatchEnsureFreshDemoDataAsync(db);
     await DataSeeder.PatchSeedComplianceRulesAsync(db);
+    await DataSeeder.PatchClampNegativeStockAsync(db);
+    await DataSeeder.PatchReconcileBatchStockDriftAsync(db);
+    await DataSeeder.PatchBackfillTransferApprovedQuantityAsync(db);
     app.MapOpenApi();
 }
 

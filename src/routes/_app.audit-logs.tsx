@@ -11,7 +11,7 @@ import { MetricCard } from "@/components/metric-card";
 import {
   LogIn, LogOut, ShieldAlert, Undo2, Edit3, Trash2, ScanBarcode,
   Settings as SettingsIcon, CreditCard, BadgePercent, ShoppingCart, RefreshCw,
-  Boxes, ChevronRight, ArrowRight, type LucideIcon,
+  Boxes, ChevronRight, ArrowRight, X, type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -206,6 +206,18 @@ function AuditLogs() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-refresh replaces the manual Refresh button — keeps the trail current without a click,
+  // same pattern as _app.zatca.tsx / _app.control-tower.tsx's polling.
+  useEffect(() => {
+    const interval = setInterval(() => load(true), 30_000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  const hasFilters = !!(query || sevFilter.length || userId.length || activity !== "all" || from || to);
+  const clearFilters = () => {
+    setQuery(""); setSevFilter([]); setUserId([]); setActivity("all"); setFrom(""); setTo("");
+  };
+
   const productName = useCallback((id: string) => productMap.get(id)?.name ?? `${id.slice(0, 8)}…`, [productMap]);
 
   const changesByLog = useMemo(() => {
@@ -272,17 +284,18 @@ function AuditLogs() {
             {ACTIVITY_GROUPS.map((g) => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
           </SelectContent>
         </Select>
-        <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-36" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-36" />
-        </div>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search action, user, reference…"
           className="h-9 w-56 flex-shrink-0"
         />
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
+          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-36" />
+          <span className="text-xs text-muted-foreground">–</span>
+          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-36" />
+        </div>
         <div className="w-36">
           <SearchableMultiSelect
             placeholder="All Severity"
@@ -295,11 +308,13 @@ function AuditLogs() {
             onChange={setSevFilter}
           />
         </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <span className="text-xs text-muted-foreground self-center ml-auto">{filtered.length} event{filtered.length !== 1 ? "s" : ""}</span>
-        <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => load(true)} disabled={refreshing}>
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </Button>
+        {refreshing && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       </div>
 
       {loading ? (

@@ -3,9 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
+import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -17,7 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Boxes, Package, PackageCheck, PackageX, AlertTriangle } from "lucide-react";
+import { Boxes, Package, PackageCheck, PackageX, AlertTriangle, X } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/inventory-snapshot")({ component: InventorySnapshot });
@@ -84,6 +85,13 @@ function InventorySnapshot() {
     }
   };
 
+  const hasFilters = branchIds.length !== (lockedBranchId ? 1 : 0) || categoryIds.length > 0 || productIds.length > 0
+    || warehouseIds.length > 0 || locationType !== "all" || isTobacco !== false;
+  const clearFilters = () => {
+    setBranchIds(lockedBranchId ? [lockedBranchId] : []); setCategoryIds([]); setProductIds([]);
+    setWarehouseIds([]); setLocationType("all"); setIsTobacco(false);
+  };
+
   const kpis = data?.kpis;
   const fmt = (n: number) => fmtSAR(n);
   // Keyed by locationId, not name — two locations can share a display name, and merging them
@@ -101,56 +109,66 @@ function InventorySnapshot() {
       title="Inventory Reports"
       subtitle="Current stock snapshot, stock value and reserved quantity across branches and warehouses"
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         {/* Branch and Warehouse are shown per the caller's stock pool, resolved server-side: a
             branch user (e.g. cashier) sees no warehouse control because they hold no warehouse
             stock, and a warehouse user sees no branch control for the mirror reason. */}
         {!lockedBranchId && scope?.canFilterBranch && (
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={branchIds}
-              onChange={setBranchIds}
-            />
-          </div>
+          <FilterField label="Branch">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+          </FilterField>
         )}
         {scope?.canFilterWarehouse && (
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Warehouses"
-              options={scope.warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              selected={warehouseIds}
-              onChange={setWarehouseIds}
-            />
-          </div>
+          <FilterField label="Warehouse">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Warehouses"
+                options={scope.warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={warehouseIds}
+                onChange={setWarehouseIds}
+              />
+            </div>
+          </FilterField>
         )}
         {showLocationType && (
-          <Select value={locationType} onValueChange={setLocationType}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Locations" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Branches & Warehouses</SelectItem>
-              <SelectItem value="branch">Branches only</SelectItem>
-              <SelectItem value="warehouse">Warehouses only</SelectItem>
-            </SelectContent>
-          </Select>
+          <FilterField label="Location Type">
+            <Select value={locationType} onValueChange={setLocationType}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Locations" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Branches & Warehouses</SelectItem>
+                <SelectItem value="branch">Branches only</SelectItem>
+                <SelectItem value="warehouse">Warehouses only</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
         )}
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Categories"
-            options={categories.map((c) => ({ id: c.id, label: c.name }))}
-            selected={categoryIds}
-            onChange={setCategoryIds}
-          />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={products.map((p) => ({ id: p.id, label: p.name }))}
-            selected={productIds}
-            onChange={setProductIds}
-          />
-        </div>
+        <FilterField label="Category">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Categories"
+              options={categories.map((c) => ({ id: c.id, label: c.name }))}
+              selected={categoryIds}
+              onChange={setCategoryIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Product">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
+        </FilterField>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
           Tobacco only
@@ -159,6 +177,11 @@ function InventorySnapshot() {
           <span className="text-xs text-muted-foreground">
             Snapshot as of {new Date(data.snapshotAt).toLocaleString("en-SA", { dateStyle: "medium", timeStyle: "short" })}
           </span>
+        )}
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
         )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>

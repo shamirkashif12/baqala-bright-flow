@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -15,6 +15,9 @@ import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
 import { LoadErrorBanner } from "@/components/load-error-banner";
+import { exportRowsAsCsv } from "@/lib/csv-export";
+import { useCompanyHeader } from "@/lib/use-company-header";
+import { localDateStr } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/compliance")({ component: Compliance });
 
@@ -61,6 +64,10 @@ function Compliance() {
   const [saving, setSaving] = useState(false);
   const [rulesLoadError, setRulesLoadError] = useState(false);
   const [togglesLoadError, setTogglesLoadError] = useState(false);
+  const [search, setSearch] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const companyHeader = useCompanyHeader();
 
   const loadRules = useCallback(() => {
     api.getTaxRules()
@@ -109,6 +116,30 @@ function Compliance() {
 
   const activeCount = rules.filter((r) => r.status === "active").length;
   const inactiveCount = rules.filter((r) => r.status === "inactive").length;
+  const ruleStatuses = useMemo(() => [...new Set(rules.map(r => r.status))], [rules]);
+
+  const filteredRules = useMemo(() => rules.filter(r => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q
+      || r.ruleName?.toLowerCase().includes(q)
+      || r.ruleType?.toLowerCase().includes(q)
+      || r.applicableTo?.toLowerCase().includes(q);
+    const matchesStatus = statusFilter.length === 0 || statusFilter.includes(r.status);
+    return matchesSearch && matchesStatus;
+  }), [rules, search, statusFilter]);
+
+  function toggleStatusFilter(status: string) {
+    setStatusFilter(prev => prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]);
+  }
+
+  function handleExport() {
+    exportRowsAsCsv(
+      ["Rule Name", "Rule Type", "VAT %", "Custom Fee", "Applicable To", "Status"],
+      filteredRules.map(r => [r.ruleName, r.ruleType, r.vatPercentage, r.customFeeAmount, r.applicableTo, r.status]),
+      `compliance-rules-${localDateStr(new Date())}.csv`,
+      companyHeader
+    );
+  }
 
   return (
     <PageShell title="Compliance — Permissible Items" subtitle="Rules that the POS enforces in real time">
@@ -186,7 +217,34 @@ function Compliance() {
         </div>
       </Card>
 
-      <Toolbar placeholder="Search SKU / rule…" primaryLabel={canCreateComplianceRule ? "Add Rule" : undefined} />
+      <Toolbar
+        placeholder="Search SKU / rule…"
+        primaryLabel={canCreateComplianceRule ? "Add Rule" : undefined}
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        onFilterClick={() => setShowFilters(v => !v)}
+        filtersActive={statusFilter.length > 0}
+        onExport={handleExport}
+      />
+      {showFilters && ruleStatuses.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 -mt-2">
+          <span className="text-xs text-muted-foreground">Status:</span>
+          {ruleStatuses.map(s => (
+            <button
+              key={s}
+              onClick={() => toggleStatusFilter(s)}
+              className={`text-xs px-2.5 py-1 rounded-full border capitalize transition-colors ${
+                statusFilter.includes(s) ? "bg-primary text-primary-foreground border-primary" : "border-border/60 text-muted-foreground hover:bg-muted/40"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+          {statusFilter.length > 0 && (
+            <button onClick={() => setStatusFilter([])} className="text-xs text-primary hover:underline ml-1">Clear</button>
+          )}
+        </div>
+      )}
       <DataTable
         columns={[
           { key: "ruleName", label: "Rule Name" },
@@ -196,7 +254,7 @@ function Compliance() {
           { key: "applicableTo", label: "Applicable To" },
           { key: "status", label: "Status", render: (r: TaxFeeRule) => <StatusBadge status={r.status} /> },
         ]}
-        rows={rules}
+        rows={filteredRules}
       />
     </PageShell>
   );

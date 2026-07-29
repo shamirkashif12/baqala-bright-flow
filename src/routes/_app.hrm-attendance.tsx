@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Pencil, Plus, Download } from "lucide-react";
+import { Pencil, Plus, Download, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type StaffAttendance, type Employee, type WorkShift, type Department } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -26,8 +26,14 @@ export const Route = createFileRoute("/_app/hrm-attendance")({ component: HrmAtt
 
 const todayStr = localDateStr();
 
-function FieldRow({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return <div className="space-y-1"><Label className="text-xs">{label}{required && <span className="text-destructive"> *</span>}</Label>{children}</div>;
+function FieldRow({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}{required && <span className="text-destructive"> *</span>}</Label>
+      {children}
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
+    </div>
+  );
 }
 
 function totalHours(row: StaffAttendance): string {
@@ -59,6 +65,7 @@ function MarkAttendanceFields({ form, setForm, onSave, saving, employees, shifts
   const setS = (k: keyof MarkForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
   const set = (k: keyof MarkForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
   const needsCheckIn = form.status === "present" || form.status === "late";
+  const checkOutInvalid = !!form.checkInTime && !!form.checkOutTime && form.checkOutTime <= form.checkInTime;
   return (
     <div className="mt-4 space-y-3">
       <FieldRow label="Employee" required>
@@ -93,11 +100,13 @@ function MarkAttendanceFields({ form, setForm, onSave, saving, employees, shifts
       {needsCheckIn && (
         <div className="grid grid-cols-2 gap-3">
           <FieldRow label="Check-In Time"><Input type="time" value={form.checkInTime} onChange={set("checkInTime")} className="h-9" /></FieldRow>
-          <FieldRow label="Check-Out Time"><Input type="time" value={form.checkOutTime} onChange={set("checkOutTime")} className="h-9" /></FieldRow>
+          <FieldRow label="Check-Out Time" error={checkOutInvalid ? "Must be after check-in time." : undefined}>
+            <Input type="time" value={form.checkOutTime} onChange={set("checkOutTime")} className="h-9" />
+          </FieldRow>
         </div>
       )}
       <FieldRow label="Remarks"><Textarea value={form.remarks} onChange={set("remarks")} className="min-h-16" /></FieldRow>
-      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving || !form.employeeId || !form.date}>
+      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving || !form.employeeId || !form.date || checkOutInvalid}>
         {saving ? "Saving…" : "Mark Attendance"}
       </Button>
     </div>
@@ -113,6 +122,7 @@ function CorrectionFields({ row, form, setForm, onSave, saving, shifts }: {
   const { user } = useAuth();
   const setS = (k: keyof CorrectionForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
   const set = (k: keyof CorrectionForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
+  const checkOutInvalid = !!form.checkInTime && !!form.checkOutTime && form.checkOutTime <= form.checkInTime;
   return (
     <div className="mt-4 space-y-3">
       <div className="rounded-xl bg-muted/40 p-3 text-xs space-y-1">
@@ -128,7 +138,9 @@ function CorrectionFields({ row, form, setForm, onSave, saving, shifts }: {
       </FieldRow>
       <div className="grid grid-cols-2 gap-3">
         <FieldRow label="Corrected Check-In"><Input type="time" value={form.checkInTime} onChange={set("checkInTime")} className="h-9" /></FieldRow>
-        <FieldRow label="Corrected Check-Out"><Input type="time" value={form.checkOutTime} onChange={set("checkOutTime")} className="h-9" /></FieldRow>
+        <FieldRow label="Corrected Check-Out" error={checkOutInvalid ? "Must be after check-in time." : undefined}>
+          <Input type="time" value={form.checkOutTime} onChange={set("checkOutTime")} className="h-9" />
+        </FieldRow>
       </div>
       <FieldRow label="Attendance Status" required>
         <Select value={form.status} onValueChange={setS("status")}>
@@ -147,7 +159,7 @@ function CorrectionFields({ row, form, setForm, onSave, saving, shifts }: {
       <FieldRow label="Correction Reason" required><Textarea value={form.correctionReason} onChange={set("correctionReason")} className="min-h-16" placeholder="Why is this record being corrected?" /></FieldRow>
       <FieldRow label="Correction Note"><Textarea value={form.correctionNote} onChange={set("correctionNote")} className="min-h-14" /></FieldRow>
       <FieldRow label="Corrected By"><Input value={user?.name ?? ""} disabled className="h-9" /></FieldRow>
-      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving || !form.correctionReason.trim()}>
+      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving || !form.correctionReason.trim() || checkOutInvalid}>
         {saving ? "Saving…" : "Save Correction"}
       </Button>
     </div>
@@ -282,8 +294,6 @@ function HrmAttendanceTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, ID or phone…" className="h-9 w-48" />
-        <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
-        <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
         {!branchLocked && canViewAll && (
           <div className="w-40">
             <SearchableMultiSelect
@@ -345,6 +355,21 @@ function HrmAttendanceTab() {
             <SelectItem value="corrected">Corrected Only</SelectItem>
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">From</span>
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
+          <span className="text-xs text-muted-foreground">To</span>
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
+        </div>
+        {(q || branchFilter.length > 0 || departmentFilter.length > 0 || employeeFilter.length > 0 || shiftFilter.length > 0 || statusFilter.length > 0 || correctionFilter !== "all" || dateFrom !== todayStr || dateTo !== todayStr) && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={() => {
+            setQ(""); setBranchFilter([]); setDepartmentFilter([]); setEmployeeFilter([]);
+            setShiftFilter([]); setStatusFilter([]); setCorrectionFilter("all");
+            setDateFrom(todayStr); setDateTo(todayStr);
+          }}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export

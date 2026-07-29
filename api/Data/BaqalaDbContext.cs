@@ -30,6 +30,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<Category> Categories { get; set; }
     public DbSet<Product> Products { get; set; }
     public DbSet<ProductPriceList> ProductPriceLists { get; set; }
+    public DbSet<ProductImage> ProductImages { get; set; }
 
     // Inventory
     public DbSet<InventoryStock> InventoryStocks { get; set; }
@@ -46,12 +47,14 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<OrderPayment> OrderPayments { get; set; }
     public DbSet<OrderDiscount> OrderDiscounts { get; set; }
     public DbSet<OrderServiceCharge> OrderServiceCharges { get; set; }
+    public DbSet<OrderDeliveryDetail> OrderDeliveryDetails { get; set; }
     public DbSet<CustomerReturn> CustomerReturns { get; set; }
     public DbSet<CustomerReturnItem> CustomerReturnItems { get; set; }
 
     // POS Operations
     public DbSet<Terminal> Terminals { get; set; }
     public DbSet<Device> Devices { get; set; }
+    public DbSet<MaintenanceTicket> MaintenanceTickets { get; set; }
     public DbSet<CashierShift> CashierShifts { get; set; }
     public DbSet<ShiftCashMovement> ShiftCashMovements { get; set; }
     public DbSet<PosSettings> PosSettings { get; set; }
@@ -249,6 +252,13 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasForeignKey(o => o.CashierId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ─── OrderDeliveryDetail: 1:1 with Order via shared PK ───────────────
+        modelBuilder.Entity<OrderDeliveryDetail>()
+            .HasOne(d => d.Order)
+            .WithOne(o => o.DeliveryDetail)
+            .HasForeignKey<OrderDeliveryDetail>(d => d.OrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         // ─── InventoryAdjustment: adjusted_by / approved_by ──────────────────
         modelBuilder.Entity<InventoryAdjustment>()
             .HasOne(a => a.AdjustedByUser)
@@ -322,6 +332,19 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
         // IPriceResolutionService always filters (product, price_type, is_active) first.
         modelBuilder.Entity<ProductPriceList>()
             .HasIndex(p => new { p.ProductId, p.PriceType, p.IsActive });
+
+        // ─── ProductImage: gallery cascades with its product; UploadedBy restricted ──
+        modelBuilder.Entity<ProductImage>()
+            .HasOne(i => i.Product)
+            .WithMany()
+            .HasForeignKey(i => i.ProductId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProductImage>()
+            .HasOne(i => i.UploadedByUser)
+            .WithMany()
+            .HasForeignKey(i => i.UploadedBy)
+            .OnDelete(DeleteBehavior.Restrict);
 
         // ─── WarehouseRequest: two Branch FKs ────────────────────────────────
         modelBuilder.Entity<WarehouseRequest>()

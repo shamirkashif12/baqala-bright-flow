@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
@@ -10,10 +10,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Building2, MapPin, Phone, Plus, Search, Pencil, Trash2, ShoppingBag, Terminal } from "lucide-react";
+import { Building2, MapPin, Phone, Plus, Search, Pencil, Trash2, ShoppingBag, Terminal, Copy, Check, Printer, Download, QrCode } from "lucide-react";
+import { QRCodeCanvas } from "qrcode.react";
 import { api, type Branch } from "@/lib/api";
 import { toast } from "sonner";
 import { usePermission } from "@/lib/use-permission";
+import { isValidSaudiPhone } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/branches")({ component: Branches });
 
@@ -22,8 +24,14 @@ type BranchForm = { name: string; nameAr: string; city: string; address: string;
 
 const emptyForm: BranchForm = { name: "", nameAr: "", city: "", address: "", contactNumber: "", status: "active" };
 
-function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>;
+function FieldRow({ label, children, error }: { label: string; children: React.ReactNode; error?: string }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      {children}
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -40,6 +48,67 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ─── View Sheet ───────────────────────────────────────────────────────────────
+// Per-branch public ordering link + QR — every branch's ordering page is scoped to its own
+// stock (see OnlineOrdersController's public catalog endpoint), so each needs its own code to
+// print/post in-store, unlike the single tenant-wide QR the Loyalty Program page generates.
+// Uses QRCodeCanvas (not the QRCodeSVG the loyalty page uses) specifically so "Download" can
+// export a real PNG via canvas.toBlob() rather than only supporting copy/print.
+function OnlineOrderingQrPanel({ branchId }: { branchId: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [copied, setCopied] = useState(false);
+  const url = `${window.location.origin}/order/${branchId}`;
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const download = () => {
+    canvasRef.current?.toBlob(blob => {
+      if (!blob) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `online-ordering-qr-${branchId}.png`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  };
+
+  return (
+    <Card className="p-4 border-border/60 shadow-card space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+        <QrCode className="h-3.5 w-3.5" /> Online Ordering QR
+      </p>
+      {/* Stacked, not side-by-side like the Loyalty Program page's panel — this one lives inside
+          a max-w-md Sheet, not an unconstrained page column, and the QR + Download/Print row
+          together don't fit next to each other at that width without overflowing the card. */}
+      <div className="flex justify-center">
+        <div className="bg-white p-2 rounded-lg border border-border/60 print:shadow-none">
+          <QRCodeCanvas ref={canvasRef} value={url} size={140} level="M" />
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground text-center">
+        Print or display this QR at the branch — scanning it opens this branch's public ordering page.
+      </p>
+      <div className="flex items-center gap-2">
+        <Input value={url} readOnly className="h-8 text-xs font-mono" />
+        <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={copy}>
+          {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={download}>
+          <Download className="h-3.5 w-3.5" /> Download
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => window.print()}>
+          <Printer className="h-3.5 w-3.5" /> Print
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function ViewSheet({ branch, stats, onClose, onEdit }: {
   branch: Branch | null; stats?: BranchStats; onClose: () => void; onEdit: () => void;
 }) {
@@ -92,6 +161,10 @@ function ViewSheet({ branch, stats, onClose, onEdit }: {
           ))}
         </div>
 
+        <div className="mt-5">
+          <OnlineOrderingQrPanel branchId={branch.id} />
+        </div>
+
         {canEdit && (
           <Button className="w-full mt-5 gradient-primary text-primary-foreground border-0 gap-2" onClick={() => { onClose(); onEdit(); }}>
             <Pencil className="h-4 w-4" /> Edit Branch
@@ -108,6 +181,7 @@ function BranchDialog({ open, branch, onClose, onDone }: {
 }) {
   const [form, setForm] = useState<BranchForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [phoneError, setPhoneError] = useState("");
 
   useEffect(() => {
     if (branch) {
@@ -119,6 +193,7 @@ function BranchDialog({ open, branch, onClose, onDone }: {
     } else {
       setForm(emptyForm);
     }
+    setPhoneError("");
   }, [branch, open]);
 
   const set = (k: keyof BranchForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -126,6 +201,11 @@ function BranchDialog({ open, branch, onClose, onDone }: {
 
   const handleSave = async () => {
     if (!form.name) { toast.error("Branch name is required."); return; }
+    if (form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber)) {
+      setPhoneError("Enter a valid Saudi mobile number (05XXXXXXXX).");
+      return;
+    }
+    setPhoneError("");
     setSaving(true);
     try {
       if (branch) {
@@ -160,8 +240,8 @@ function BranchDialog({ open, branch, onClose, onDone }: {
             <FieldRow label="City">
               <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Riyadh" />
             </FieldRow>
-            <FieldRow label="Phone">
-              <Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" placeholder="+966501001010" />
+            <FieldRow label="Phone" error={phoneError}>
+              <Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" maxLength={17} placeholder="05XXXXXXXX" />
             </FieldRow>
           </div>
           <FieldRow label="Address">

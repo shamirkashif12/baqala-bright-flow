@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
@@ -13,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/module-placeholder";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
-import { Plus, Receipt, Tags, CheckCircle, XCircle, X, Pencil, Trash2 } from "lucide-react";
+import { MetricCard } from "@/components/metric-card";
+import { Plus, Receipt, Tags, CheckCircle, XCircle, X, Pencil, Trash2, Clock, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api, excludeDisabledBranches, type Expense, type ExpenseType, type Branch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -32,11 +33,12 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 type ExpenseForm = {
   expenseTypeId: string; branchId: string; amount: string; paidAmount: string;
   description: string; expenseDate: string; referenceNumber: string; paymentMethod: string;
+  cardLastFour: string;
 };
 const emptyForm: ExpenseForm = {
   expenseTypeId: "", branchId: "", amount: "", paidAmount: "",
   description: "", expenseDate: localDateStr(),
-  referenceNumber: "", paymentMethod: "Cash",
+  referenceNumber: "", paymentMethod: "Cash", cardLastFour: "",
 };
 
 function EntriesTab() {
@@ -90,6 +92,14 @@ function EntriesTab() {
     return matchQ && mdf && mdt;
   });
 
+  const stats = useMemo(() => {
+    const total = filtered.reduce((s, e) => s + e.amount, 0);
+    const pendingCount = filtered.filter(e => e.status === "pending").length;
+    const approvedTotal = filtered.filter(e => e.status === "approved").reduce((s, e) => s + e.amount, 0);
+    const outstanding = filtered.reduce((s, e) => s + Math.max(0, e.amount - (e.paidAmount ?? e.amount)), 0);
+    return { total, pendingCount, approvedTotal, outstanding };
+  }, [filtered]);
+
   const openAdd = () => {
     setEditExpense(null);
     // Branch Managers (and anyone else scoped to a single branch) can only ever
@@ -110,6 +120,7 @@ function EntriesTab() {
       paymentMethod: e.paymentMethod
         ? e.paymentMethod.charAt(0).toUpperCase() + e.paymentMethod.slice(1).replace("_", " ")
         : "Cash",
+      cardLastFour: e.cardLastFour ?? "",
     });
     setSheetOpen(true);
   };
@@ -132,6 +143,7 @@ function EntriesTab() {
       referenceNumber: form.referenceNumber || undefined,
       expenseDate: form.expenseDate,
       paymentMethod: form.paymentMethod.toLowerCase().replace(" ", "_"),
+      cardLastFour: form.paymentMethod === "Card" ? form.cardLastFour || undefined : undefined,
     };
     try {
       if (editExpense) {
@@ -175,6 +187,13 @@ function EntriesTab() {
   return (
     <div className="space-y-4">
       {loadError && <LoadErrorBanner onRetry={load} />}
+      {/* ─── Summary ─── */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Total Expenses" value={<><SARIcon />{stats.total.toFixed(2)}</>} icon={Receipt} accent="primary" />
+        <MetricCard label="Pending Approval" value={String(stats.pendingCount)} icon={Clock} accent="warning" />
+        <MetricCard label="Approved" value={<><SARIcon />{stats.approvedTotal.toFixed(2)}</>} icon={CheckCircle} accent="success" />
+        <MetricCard label="Outstanding" value={<><SARIcon />{stats.outstanding.toFixed(2)}</>} icon={AlertCircle} accent="destructive" />
+      </div>
       {/* ─── Toolbar ─── */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search ref or description…" className="h-9 w-52 flex-shrink-0" />
@@ -248,10 +267,20 @@ function EntriesTab() {
                     <td className="px-3 py-3 max-w-[200px] truncate">{e.description ?? "—"}</td>
                     <td className="px-3 py-3"><Badge variant="outline" className="text-xs">{e.expenseType?.name ?? "—"}</Badge></td>
                     <td className="px-3 py-3 text-xs">{branches.find(b => b.id === e.branchId)?.name ?? "—"}</td>
-                    <td className="px-3 py-3 text-xs">{methodLabel(e.paymentMethod)}</td>
+                    <td className="px-3 py-3 text-xs">
+                      {methodLabel(e.paymentMethod)}
+                      {e.paymentMethod === "card" && e.cardLastFour && <span className="text-muted-foreground"> •••{e.cardLastFour}</span>}
+                    </td>
                     <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{e.amount.toFixed(2)}</td>
                     <td className="px-3 py-3 tabular-nums text-xs text-muted-foreground">
-                      {e.paidAmount != null ? <><SARIcon />{e.paidAmount.toFixed(2)}</> : "—"}
+                      {e.paidAmount != null ? (
+                        <>
+                          <div><SARIcon />{e.paidAmount.toFixed(2)}</div>
+                          {e.paidAmount < e.amount && (
+                            <div className="text-[10px] text-warning-foreground font-medium">Remaining <SARIcon />{(e.amount - e.paidAmount).toFixed(2)}</div>
+                          )}
+                        </>
+                      ) : "—"}
                     </td>
                     <td className="px-3 py-3 text-xs">{e.expenseDate ? new Date(e.expenseDate).toLocaleDateString("en-SA") : "—"}</td>
                     <td className="px-3 py-3"><StatusBadge status={e.status} /></td>
@@ -326,6 +355,12 @@ function EntriesTab() {
                 </SelectContent>
               </Select>
             </FieldRow>
+            {form.paymentMethod === "Card" && (
+              <FieldRow label="Card Last 4 Digits">
+                <Input value={form.cardLastFour} onChange={e => setForm(p => ({ ...p, cardLastFour: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                  className="h-9" maxLength={4} placeholder="1234" />
+              </FieldRow>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <FieldRow label="Amount (SAR) *">
                 <Input type="number" min="0.01" step="0.01" value={form.amount} onChange={set("amount")}
@@ -335,6 +370,9 @@ function EntriesTab() {
               </FieldRow>
               <FieldRow label="Paid Amount">
                 <Input type="number" value={form.paidAmount} onChange={set("paidAmount")} className="h-9" placeholder="450.00" />
+                {form.paidAmount !== "" && Number(form.paidAmount) < amountValue && (
+                  <p className="text-[11px] text-warning-foreground">Remaining: <SARIcon />{(amountValue - Number(form.paidAmount)).toFixed(2)}</p>
+                )}
               </FieldRow>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -380,6 +418,7 @@ function TypesTab() {
   const [form, setForm] = useState<TypeForm>(emptyTypeForm);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const loadTypes = () => {
     setLoading(true);
@@ -419,6 +458,16 @@ function TypesTab() {
     } finally { setDeleting(null); }
   };
 
+  const handleToggleActive = async (t: ExpenseType) => {
+    setTogglingId(t.id);
+    try {
+      await api.updateExpenseType(t.id, { name: t.name, nameAr: t.nameAr, description: t.description, isActive: !t.isActive });
+      loadTypes();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update status.");
+    } finally { setTogglingId(null); }
+  };
+
   const set = (k: keyof TypeForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
 
@@ -455,9 +504,17 @@ function TypesTab() {
                     <td className="px-3 py-3 text-muted-foreground" dir="rtl">{t.nameAr ?? "—"}</td>
                     <td className="px-3 py-3 text-xs text-muted-foreground max-w-[200px] truncate">{t.description ?? "—"}</td>
                     <td className="px-3 py-3">
-                      <Badge variant="outline" className={`text-xs ${t.isActive ? "bg-green-100 text-green-700 border-green-200" : "bg-gray-100 text-gray-500"}`}>
-                        {t.isActive ? "Active" : "Inactive"}
-                      </Badge>
+                      <button
+                        type="button"
+                        disabled={!canEdit || togglingId === t.id}
+                        title={canEdit ? "Click to toggle status" : undefined}
+                        onClick={() => handleToggleActive(t)}
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-60 ${
+                          t.isActive ? "bg-green-100 text-green-700 border-green-200" : "bg-gray-100 text-gray-500 border-gray-200"
+                        } ${canEdit ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
+                      >
+                        {togglingId === t.id ? "…" : t.isActive ? "Active" : "Inactive"}
+                      </button>
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex gap-1 justify-end">
@@ -493,17 +550,15 @@ function TypesTab() {
             <FieldRow label="Description">
               <Input value={form.description} onChange={set("description")} className="h-9" placeholder="Optional description" />
             </FieldRow>
-            {editType && (
-              <FieldRow label="Status">
-                <Select value={form.isActive ? "active" : "inactive"} onValueChange={v => setForm(p => ({ ...p, isActive: v === "active" }))}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                  </SelectContent>
-                </Select>
-              </FieldRow>
-            )}
+            <FieldRow label="Status">
+              <Select value={form.isActive ? "active" : "inactive"} onValueChange={v => setForm(p => ({ ...p, isActive: v === "active" }))}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldRow>
             <Button className="w-full gradient-primary text-primary-foreground border-0 mt-2" onClick={handleSave} disabled={saving || !form.name.trim()}>
               {saving ? "Saving…" : editType ? "Save Changes" : "Add Type"}
             </Button>

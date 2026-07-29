@@ -25,7 +25,9 @@ public class HolidaysController(BaqalaDbContext db, IAuditService audit) : Contr
         [FromQuery] int? pageSize)
     {
         var query = db.Holidays.Include(h => h.Branch).AsQueryable();
-        if (branchId.HasValue) query = query.Where(h => h.BranchId == branchId);
+        // A null BranchId means "applies to all branches" — it must match any branchId filter,
+        // not get silently excluded (mirrors the frontend's own filter fix in _app.holidays.tsx).
+        if (branchId.HasValue) query = query.Where(h => h.BranchId == branchId || h.BranchId == null);
         if (year.HasValue) query = query.Where(h => h.Date >= new DateOnly(year.Value, 1, 1) && h.Date <= new DateOnly(year.Value, 12, 31));
         if (!string.IsNullOrEmpty(holidayType)) query = query.Where(h => h.HolidayType == holidayType);
         if (!string.IsNullOrEmpty(status)) query = query.Where(h => h.Status == status);

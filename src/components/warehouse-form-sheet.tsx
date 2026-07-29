@@ -7,9 +7,17 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Warehouse as WarehouseIcon } from "lucide-react";
 import { api, type Warehouse as WarehouseType } from "@/lib/api";
+import { isValidSaudiPhone } from "@/lib/validation";
 
 type WHForm = { name: string; code: string; address: string; city: string; contactPerson: string; contactNumber: string; capacity: string; status: string };
 const emptyWHForm = (): WHForm => ({ name: "", code: "", address: "", city: "", contactPerson: "", contactNumber: "", capacity: "", status: "active" });
+
+// Major Saudi cities — was a free-text field with no list to pick from.
+const SAUDI_CITIES = [
+  "Riyadh", "Jeddah", "Makkah", "Madinah", "Dammam", "Khobar", "Dhahran",
+  "Taif", "Tabuk", "Buraidah", "Khamis Mushait", "Abha", "Najran", "Jazan",
+  "Hail", "Al Ahsa", "Yanbu", "Jubail", "Qatif", "Sakaka",
+];
 
 export function WarehouseFormSheet({
   open, onOpenChange, warehouse, onSaved,
@@ -21,12 +29,18 @@ export function WarehouseFormSheet({
   const [form, setForm] = useState<WHForm>(emptyWHForm());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Tracks whether the City field is showing the free-text "Other" input — separate from
+  // form.city itself so picking "Other…" (which has no city name yet) doesn't collapse back to
+  // the dropdown before the user has typed anything.
+  const [otherCity, setOtherCity] = useState(false);
 
   useEffect(() => {
     if (open) {
+      const city = warehouse?.city ?? "";
       setForm(warehouse
-        ? { name: warehouse.name, code: warehouse.code, address: warehouse.address ?? "", city: warehouse.city ?? "", contactPerson: warehouse.contactPerson ?? "", contactNumber: warehouse.contactNumber ?? "", capacity: String(warehouse.capacity ?? ""), status: warehouse.status }
+        ? { name: warehouse.name, code: warehouse.code, address: warehouse.address ?? "", city, contactPerson: warehouse.contactPerson ?? "", contactNumber: warehouse.contactNumber ?? "", capacity: String(warehouse.capacity ?? ""), status: warehouse.status }
         : emptyWHForm());
+      setOtherCity(!!city && !SAUDI_CITIES.includes(city));
       setError("");
     }
   }, [open, warehouse]);
@@ -37,6 +51,10 @@ export function WarehouseFormSheet({
   const handleSave = async () => {
     if (!form.name.trim()) { setError("Warehouse name is required."); return; }
     if (!form.code.trim()) { setError("Warehouse code is required."); return; }
+    if (form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber)) {
+      setError("Enter a valid Saudi mobile number (05XXXXXXXX).");
+      return;
+    }
     setSaving(true); setError("");
     try {
       const payload = { name: form.name, code: form.code, address: form.address || undefined, city: form.city || undefined, contactPerson: form.contactPerson || undefined, contactNumber: form.contactNumber || undefined, capacity: form.capacity ? Number(form.capacity) : undefined, status: form.status };
@@ -75,7 +93,25 @@ export function WarehouseFormSheet({
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">City</Label>
-              <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Riyadh" />
+              {otherCity ? (
+                <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Enter city name" autoFocus />
+              ) : (
+                <Select
+                  value={form.city}
+                  onValueChange={v => { if (v === "__other") { setOtherCity(true); setS("city")(""); } else setS("city")(v); }}
+                >
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select city" /></SelectTrigger>
+                  <SelectContent>
+                    {SAUDI_CITIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    <SelectItem value="__other">Other…</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              {otherCity && (
+                <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherCity(false); setS("city")(""); }}>
+                  Choose from list instead
+                </button>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Contact Person</Label>
@@ -83,7 +119,10 @@ export function WarehouseFormSheet({
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Contact Number</Label>
-              <Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" />
+              <Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" maxLength={17} placeholder="05XXXXXXXX" />
+              {form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber) && (
+                <p className="text-[11px] text-destructive">Enter a valid Saudi mobile number (05XXXXXXXX).</p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Status</Label>

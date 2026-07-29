@@ -14,8 +14,9 @@ import {
   Plus, Search, Star, Phone, Mail, ShoppingBag, TrendingUp,
   ChevronRight, Loader2, ArrowUpCircle, ArrowDownCircle, Gift, X, Clock, RefreshCcw,
 } from "lucide-react";
-import { api, type Customer, type LoyaltyTransaction, type LoyaltyProgram } from "@/lib/api";
-import { SARIcon } from "@/lib/currency";
+import { api, type Customer, type LoyaltyTransaction, type LoyaltyProgram, type Order } from "@/lib/api";
+import { StatusBadge } from "@/components/module-placeholder";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
 
 export const Route = createFileRoute("/_app/customers")({ component: Customers });
@@ -82,6 +83,8 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
   const [history, setHistory] = useState<LoyaltyTransaction[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [program, setProgram] = useState<LoyaltyProgram | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(true);
 
   useEffect(() => {
     setLoadingHistory(true);
@@ -89,6 +92,14 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
       .then(setHistory)
       .catch(() => setHistory([]))
       .finally(() => setLoadingHistory(false));
+  }, [customer.id]);
+
+  useEffect(() => {
+    setLoadingOrders(true);
+    api.getOrders({ customerId: customer.id })
+      .then(setOrders)
+      .catch(() => setOrders([]))
+      .finally(() => setLoadingOrders(false));
   }, [customer.id]);
 
   useEffect(() => {
@@ -202,6 +213,43 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
                       <SARIcon />{tx.monetaryValue.toFixed(2)}
                     </span>
                   )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Separator />
+
+      {/* Order history */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          Orders ({orders.length})
+        </p>
+        {loadingOrders ? (
+          <div className="flex justify-center py-4">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : orders.length === 0 ? (
+          <p className="text-sm text-muted-foreground italic text-center py-4">
+            No orders yet for this customer.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {orders.map(o => (
+              <div key={o.id} className="flex items-center gap-3 text-sm bg-muted/30 rounded-lg px-3 py-2.5">
+                <ShoppingBag className="h-4 w-4 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-mono font-medium text-xs truncate">{o.orderNumber}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(o.createdAt).toLocaleDateString("en-SA", { dateStyle: "medium" })}
+                    {o.branch?.name ? ` · ${o.branch.name}` : ""}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="font-bold tabular-nums text-sm block"><SARIcon />{fmtSAR(o.totalAmount)}</span>
+                  <StatusBadge status={o.orderStatus} />
                 </div>
               </div>
             ))}

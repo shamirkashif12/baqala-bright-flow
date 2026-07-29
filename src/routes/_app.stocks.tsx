@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
@@ -1091,6 +1091,7 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
 
 function Stocks() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
 
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -1139,7 +1140,10 @@ function Stocks() {
     setLoading(true);
     // Fetched unfiltered — Branch/Category are applied client-side (see filteredStock) so both
     // support multi-select without needing server-side array support on this shared endpoint.
-    const sk = await api.getStock({}).catch(() => null);
+    // includeDiscontinued: true so a product that's been discontinued since its last sale still
+    // has a row here — otherwise it vanishes from Overview while its sale is still visible on
+    // the Movement tab, which read as "movement with no matching stock."
+    const sk = await api.getStock({ includeDiscontinued: true }).catch(() => null);
     if (sk) {
       setStock(sk);
       const seen = new Map<string, string>();
@@ -1315,7 +1319,6 @@ function Stocks() {
           <TabsTrigger value="delivery" className="gap-1.5"><Truck className="h-3.5 w-3.5" />Store Delivery</TabsTrigger>
           <TabsTrigger value="wastage" className="gap-1.5"><Trash2 className="h-3.5 w-3.5" />Wastage</TabsTrigger>
           <TabsTrigger value="movement" className="gap-1.5"><History className="h-3.5 w-3.5" />Movement</TabsTrigger>
-          <TabsTrigger value="stocking-review" className="gap-1.5"><ClipboardCheck className="h-3.5 w-3.5" />Stocktaking</TabsTrigger>
           <TabsTrigger value="reports" className="gap-1.5"><FileBarChart className="h-3.5 w-3.5" />Reports</TabsTrigger>
         </TabsList>
 
@@ -1346,6 +1349,14 @@ function Stocks() {
                   />
                 </div>
                 <Input className="w-52 h-8" placeholder="Search product…" value={search} onChange={e => setSearch(e.target.value)} />
+                {(search || categoryFilterIds.length > 0 || (!lockedBranchId && overviewBranchIds.length > 0)) && (
+                  <Button
+                    variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
+                    onClick={() => { setSearch(""); setCategoryFilterIds([]); if (!lockedBranchId) setOverviewBranchIds([]); }}
+                  >
+                    <X className="h-3.5 w-3.5" />Clear Filters
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -1420,6 +1431,14 @@ function Stocks() {
                     onChange={setSiStatus}
                   />
                 </div>
+                {((!lockedBranchId && siBranch.length > 0) || siStatus.length > 0) && (
+                  <Button
+                    variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
+                    onClick={() => { if (!lockedBranchId) setSiBranch([]); setSiStatus([]); }}
+                  >
+                    <X className="h-3.5 w-3.5" />Clear Filters
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -1499,6 +1518,14 @@ function Stocks() {
                 </div>
                 <Input type="date" className="h-8 w-36 text-xs" value={grnDateFrom} onChange={e => setGrnDateFrom(e.target.value)} title="From" />
                 <Input type="date" className="h-8 w-36 text-xs" value={grnDateTo} onChange={e => setGrnDateTo(e.target.value)} title="To" />
+                {(grnStatus.length > 0 || grnDateFrom || grnDateTo) && (
+                  <Button
+                    variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
+                    onClick={() => { setGrnStatus([]); setGrnDateFrom(""); setGrnDateTo(""); }}
+                  >
+                    <X className="h-3.5 w-3.5" />Clear Filters
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -1565,6 +1592,14 @@ function Stocks() {
                 </div>
                 <Input type="date" className="h-8 w-36 text-xs" value={dlDateFrom} onChange={e => setDlDateFrom(e.target.value)} title="From" />
                 <Input type="date" className="h-8 w-36 text-xs" value={dlDateTo} onChange={e => setDlDateTo(e.target.value)} title="To" />
+                {(dlStatus.length > 0 || dlDateFrom || dlDateTo) && (
+                  <Button
+                    variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
+                    onClick={() => { setDlStatus([]); setDlDateFrom(""); setDlDateTo(""); }}
+                  >
+                    <X className="h-3.5 w-3.5" />Clear Filters
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -1609,6 +1644,14 @@ function Stocks() {
                     {MOVEMENT_TYPES.map(t => <SelectItem key={t} value={t}>{movementMeta(t).label}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {((!lockedBranchId && mvBranch.length > 0) || mvType !== "all") && (
+                  <Button
+                    variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
+                    onClick={() => { if (!lockedBranchId) setMvBranch([]); setMvType("all"); }}
+                  >
+                    <X className="h-3.5 w-3.5" />Clear Filters
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -1662,24 +1705,19 @@ function Stocks() {
           </Card>
         </TabsContent>
 
-        {/* ── Stocktaking / Inventory Count (live count → reconciliation) ── */}
-        <TabsContent value="stocking-review">
-          <StocktakingPanel branches={branches} warehouses={warehouses} />
-        </TabsContent>
-
         {/* ── Reports ── */}
         <TabsContent value="reports">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { title: "Stock Valuation Report", desc: "Current stock value by product and branch", icon: <BarChart3 className="h-8 w-8 text-blue-500" /> },
-              { title: "Stock Movement Report", desc: "In/out movements over a date range", icon: <History className="h-8 w-8 text-green-500" /> },
-              { title: "Low Stock Report", desc: "Products below reorder level", icon: <AlertTriangle className="h-8 w-8 text-yellow-500" /> },
-              { title: "Expiry Report", desc: "Batches expiring within 30/60/90 days", icon: <TrendingUp className="h-8 w-8 text-red-500" /> },
-              { title: "GRN Summary", desc: "Goods received against purchase orders", icon: <ClipboardCheck className="h-8 w-8 text-purple-500" /> },
-              { title: "Wastage Report", desc: "Damage and wastage records by period", icon: <Trash2 className="h-8 w-8 text-red-400" /> },
-              { title: "Supplier Return Report", desc: "Returns sent back to suppliers", icon: <Undo2 className="h-8 w-8 text-orange-500" /> },
-              { title: "Store Delivery Report", desc: "Warehouse-to-branch transfers", icon: <Truck className="h-8 w-8 text-indigo-500" /> },
-              { title: "Stock Count Variance", desc: "Physical count vs system count differences", icon: <Boxes className="h-8 w-8 text-teal-500" /> },
+              { title: "Stock Valuation Report", desc: "Current stock value by product and branch", icon: <BarChart3 className="h-8 w-8 text-blue-500" />, to: "/reports/inventory-snapshot" },
+              { title: "Stock Movement Report", desc: "In/out movements over a date range", icon: <History className="h-8 w-8 text-green-500" />, tab: "movement" },
+              { title: "Low Stock Report", desc: "Products below reorder level", icon: <AlertTriangle className="h-8 w-8 text-yellow-500" />, to: "/reports/low-stock" },
+              { title: "Expiry Report", desc: "Batches expiring within 30/60/90 days", icon: <TrendingUp className="h-8 w-8 text-red-500" />, to: "/batches" },
+              { title: "GRN Summary", desc: "Goods received against purchase orders", icon: <ClipboardCheck className="h-8 w-8 text-purple-500" />, to: "/reports/purchase-orders" },
+              { title: "Wastage Report", desc: "Damage and wastage records by period", icon: <Trash2 className="h-8 w-8 text-red-400" />, to: "/reports/waste-spoilage" },
+              { title: "Supplier Return Report", desc: "Returns sent back to suppliers", icon: <Undo2 className="h-8 w-8 text-orange-500" />, to: "/reports/supplier-returns" },
+              { title: "Store Delivery Report", desc: "Warehouse-to-branch transfers", icon: <Truck className="h-8 w-8 text-indigo-500" />, to: "/reports/stock-transfer" },
+              { title: "Stock Count Variance", desc: "Physical count vs system count differences", icon: <Boxes className="h-8 w-8 text-teal-500" />, to: "/reports/stock-reconciliation" },
             ].map(r => (
               <Card key={r.title} className="cursor-pointer hover:shadow-md transition-shadow">
                 <CardContent className="p-4 flex items-start gap-4">
@@ -1687,8 +1725,11 @@ function Stocks() {
                   <div>
                     <p className="font-semibold text-sm">{r.title}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{r.desc}</p>
-                    <Button size="sm" variant="outline" className="mt-3 gap-1.5 h-7 text-xs" onClick={() => toast.info("Report export coming soon")}>
-                      <Download className="h-3 w-3" /> Export
+                    <Button
+                      size="sm" variant="outline" className="mt-3 gap-1.5 h-7 text-xs"
+                      onClick={() => r.tab ? setTab(r.tab) : navigate({ to: r.to as any })}
+                    >
+                      <FileBarChart className="h-3 w-3" /> Open Report
                     </Button>
                   </div>
                 </CardContent>

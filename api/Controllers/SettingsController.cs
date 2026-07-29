@@ -114,6 +114,10 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
         settings.RequireReasonForAdjustments         = updated.RequireReasonForAdjustments       ?? settings.RequireReasonForAdjustments;
         settings.AdjustmentCapPerDayUnits            = updated.AdjustmentCapPerDayUnits          ?? settings.AdjustmentCapPerDayUnits;
         settings.ManagerApprovalForDamagedItems      = updated.ManagerApprovalForDamagedItems    ?? settings.ManagerApprovalForDamagedItems;
+        // Online Ordering tab
+        settings.OnlineOrderingEnabled                = updated.OnlineOrderingEnabled             ?? settings.OnlineOrderingEnabled;
+        settings.OnlineOrderingMinOrderAmountSar      = updated.OnlineOrderingMinOrderAmountSar   ?? settings.OnlineOrderingMinOrderAmountSar;
+        settings.OnlineOrderingMaxOrderValueSar       = updated.OnlineOrderingMaxOrderValueSar    ?? settings.OnlineOrderingMaxOrderValueSar;
 
         settings.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
@@ -290,5 +294,8 @@ public record PosSettingsPatchRequest(
     bool? RequireManagerApprovalAboveCashThreshold,
     bool? RequireReasonForAdjustments,
     int? AdjustmentCapPerDayUnits,
-    bool? ManagerApprovalForDamagedItems
+    bool? ManagerApprovalForDamagedItems,
+    bool? OnlineOrderingEnabled,
+    decimal? OnlineOrderingMinOrderAmountSar,
+    decimal? OnlineOrderingMaxOrderValueSar
 );

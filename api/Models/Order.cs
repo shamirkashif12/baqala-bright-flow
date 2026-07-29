@@ -87,6 +87,19 @@ public class Order
     [Column("void_reason")]
     public string? VoidReason { get; set; }
 
+    // Online-order approval trail (Source == "online" only — see OnlineOrdersController). Kept
+    // distinct from VoidReason above: that column's semantics are tied to the Void workflow's own
+    // reason-required gate, and reusing it here would conflate "voided after completion" with
+    // "an online order was never accepted in the first place".
+    [Column("approved_by")]
+    public Guid? ApprovedBy { get; set; }
+
+    [Column("approved_at")]
+    public DateTime? ApprovedAt { get; set; }
+
+    [MaxLength(500), Column("rejection_reason")]
+    public string? RejectionReason { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -114,6 +127,7 @@ public class Order
     // those rather than dropping the amount.
     public ICollection<OrderServiceCharge> ServiceCharges { get; set; } = [];
     [JsonIgnore] public ICollection<CustomerReturn> Returns { get; set; } = [];
+    public OrderDeliveryDetail? DeliveryDetail { get; set; }
 
     // Populated only on the Create response (not persisted) so the receipt can render the real
     // ZATCA-signed QR instead of a client-reconstructed approximation. Null when Phase 2 isn't

@@ -85,6 +85,9 @@ public class DiscountsController(BaqalaDbContext db, IDiscountCreationService di
         d.EndDate = req.EndDate;
         d.RequiresCustomer = req.RequiresCustomer ?? d.RequiresCustomer;
         d.ExcludedProductIdsJson = SerializeExclusions(req.ExcludedProductIds);
+        d.MaxDiscountAmount = req.MaxDiscountAmount;
+        d.Combinable = req.Combinable ?? d.Combinable;
+        d.AutoApply = req.AutoApply ?? d.AutoApply;
         d.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(d);
@@ -136,5 +139,8 @@ public record DiscountRequest(
     DateTime? StartDate,
     DateTime? EndDate,
     bool? RequiresCustomer,
-    List<Guid>? ExcludedProductIds
+    List<Guid>? ExcludedProductIds,
+    decimal? MaxDiscountAmount,
+    bool? Combinable,
+    bool? AutoApply
 );

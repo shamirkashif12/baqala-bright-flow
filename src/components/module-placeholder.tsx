@@ -9,6 +9,18 @@ import { cn } from "@/lib/utils";
 
 export type Column = { key: string; label: string; className?: string; render?: (row: any) => React.ReactNode };
 
+/** Small visible label above a filter control — several report filter bars rendered bare
+ * Input/Select controls with no label at all (just a placeholder, or nothing), so the filter
+ * row was unreadable at a glance. Shared here so every report filter bar looks consistent. */
+export function FilterField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={cn("space-y-1", className)}>
+      <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
+      {children}
+    </div>
+  );
+}
+
 export function DataTable({ columns, rows, emptyMessage = "No records match the current filters." }: { columns: Column[]; rows: any[]; emptyMessage?: string }) {
   return (
     <Card className="overflow-hidden border-border/60 shadow-card">
@@ -17,7 +29,12 @@ export function DataTable({ columns, rows, emptyMessage = "No records match the 
           <thead>
             <tr className="bg-muted/40 border-b border-border/60">
               {columns.map((c) => (
-                <th key={c.key} className={cn("text-left font-semibold text-xs uppercase tracking-wider text-muted-foreground px-4 py-3", c.className)}>
+                // whitespace-nowrap: a wide table with many narrow columns (e.g. attendance/shift
+                // reports) otherwise wraps some header labels to 2 lines while others stay on 1,
+                // so with the table's default middle vertical-align the labels visibly stagger
+                // above/below each other — the container already scrolls horizontally, so a
+                // single-line header that overflows just extends the scroll range instead.
+                <th key={c.key} className={cn("text-left font-semibold text-xs uppercase tracking-wider text-muted-foreground px-4 py-3 whitespace-nowrap", c.className)}>
                   {c.label}
                 </th>
               ))}
@@ -147,9 +164,17 @@ export function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export function Toolbar({ placeholder = "Search…", primaryLabel, primaryIcon: PIcon = Plus, extra, value, onChange }: {
+export function Toolbar({
+  placeholder = "Search…", primaryLabel, primaryIcon: PIcon = Plus, extra, value, onChange,
+  onFilterClick, filtersActive, onExport, onPrimaryClick,
+}: {
   placeholder?: string; primaryLabel?: string; primaryIcon?: LucideIcon; extra?: React.ReactNode;
   value?: string; onChange?: React.ChangeEventHandler<HTMLInputElement>;
+  // Each button only renders when the caller actually wires it up — a "Filters"/"Export"/primary
+  // button with no handler looks clickable but silently does nothing, which is worse than not
+  // showing it at all.
+  onFilterClick?: () => void; filtersActive?: boolean;
+  onExport?: () => void; onPrimaryClick?: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -157,11 +182,17 @@ export function Toolbar({ placeholder = "Search…", primaryLabel, primaryIcon: 
         <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <Input placeholder={placeholder} className="pl-9 h-10 bg-card" value={value} onChange={onChange} />
       </div>
-      <Button variant="outline" size="sm" className="h-10 gap-1.5"><Filter className="h-4 w-4" /> Filters</Button>
-      <Button variant="outline" size="sm" className="h-10 gap-1.5"><Download className="h-4 w-4" /> Export</Button>
+      {onFilterClick && (
+        <Button variant="outline" size="sm" className={cn("h-10 gap-1.5", filtersActive && "border-primary text-primary bg-primary/5")} onClick={onFilterClick}>
+          <Filter className="h-4 w-4" /> Filters
+        </Button>
+      )}
+      {onExport && (
+        <Button variant="outline" size="sm" className="h-10 gap-1.5" onClick={onExport}><Download className="h-4 w-4" /> Export</Button>
+      )}
       {extra}
       {primaryLabel && (
-        <Button size="sm" className="h-10 gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow">
+        <Button size="sm" className="h-10 gap-1.5 gradient-primary text-primary-foreground border-0 shadow-glow" onClick={onPrimaryClick}>
           <PIcon className="h-4 w-4" /> {primaryLabel}
         </Button>
       )}

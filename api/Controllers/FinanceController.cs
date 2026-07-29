@@ -83,6 +83,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
         expense.ReferenceNumber = updated.ReferenceNumber;
         expense.ExpenseDate = updated.ExpenseDate;
         expense.PaymentMethod = updated.PaymentMethod;
+        expense.CardLastFour = updated.CardLastFour;
         expense.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(expense);
@@ -185,7 +186,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     }
 
     [HttpGet("coupons/validate/{code}")]
-    public async Task<IActionResult> ValidateCoupon(string code, [FromQuery] Guid? customerId)
+    public async Task<IActionResult> ValidateCoupon(string code, [FromQuery] Guid? customerId, [FromQuery] Guid? branchId)
     {
         var now = DateTime.UtcNow;
         // Codes are always stored uppercase (CreateCoupon/UpdateCoupon UI uppercases on save) —
@@ -198,6 +199,20 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
             c.EndDate >= now &&
             (c.UsageLimit == null || c.UsedCount < c.UsageLimit));
         if (coupon is null) return NotFound("Coupon invalid or expired.");
+
+        // Null BranchId means valid at every branch — same convention as Discount/Offer.
+        if (coupon.BranchId.HasValue && coupon.BranchId != branchId)
+            return NotFound("This coupon is not valid at this branch.");
+
+        // Riyadh is UTC+3 with no DST — same offset used for the tenant's daily digest cutoff
+        // (see OperationalAlertsService.DigestHourUtc). Null StartTime/EndTime means no
+        // time-of-day restriction, valid all day within the StartDate/EndDate range above.
+        if (coupon.StartTime.HasValue && coupon.EndTime.HasValue)
+        {
+            var localTimeOfDay = now.AddHours(3).TimeOfDay;
+            if (localTimeOfDay < coupon.StartTime.Value || localTimeOfDay > coupon.EndTime.Value)
+                return NotFound("This coupon is only valid during specific hours.");
+        }
 
         // A coupon with zero assignment rows stays open to everyone (every coupon that existed
         // before this table did, plus any new one nobody deliberately restricted). One or more
@@ -296,9 +311,16 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
         coupon.Code = updated.Code;
         coupon.Type = updated.Type;
         coupon.Value = updated.Value;
+        coupon.MinOrderAmount = updated.MinOrderAmount;
+        coupon.MaxDiscountAmount = updated.MaxDiscountAmount;
         coupon.UsageLimit = updated.UsageLimit;
+        coupon.ApplicableTo = updated.ApplicableTo;
+        coupon.ApplicableId = updated.ApplicableId;
+        coupon.BranchId = updated.BranchId;
         coupon.StartDate = updated.StartDate;
         coupon.EndDate = updated.EndDate;
+        coupon.StartTime = updated.StartTime;
+        coupon.EndTime = updated.EndTime;
         coupon.Status = updated.Status;
         coupon.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();

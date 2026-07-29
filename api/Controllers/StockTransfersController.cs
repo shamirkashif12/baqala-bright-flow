@@ -459,6 +459,20 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             if (err is not null) return BadRequest(new { message = err });
         }
 
+        // A supplier return (RTS) against a given PO could previously be created any number of
+        // times — nothing stopped a second return being drafted, submitted, or even approved while
+        // an earlier one for the same PO was still open. Block a new one while any prior return for
+        // this PO hasn't reached a terminal state (completed/rejected/cancelled) yet.
+        if (req.TransferType == "warehouse_to_supplier" && req.PurchaseOrderId.HasValue)
+        {
+            var hasOpenReturn = await db.StockTransfers.AnyAsync(t =>
+                t.PurchaseOrderId == req.PurchaseOrderId
+                && t.TransferType == "warehouse_to_supplier"
+                && t.Status != "completed" && t.Status != "rejected" && t.Status != "cancelled");
+            if (hasOpenReturn)
+                return BadRequest(new { message = "A return for this purchase order is already in progress. Wait for it to complete, or cancel/reject it first." });
+        }
+
         var transferId = Guid.NewGuid();
         var items = (req.Items ?? []).Select(i => new StockTransferItem
         {
@@ -738,6 +752,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         var prev = transfer.Status;
         transfer.Status = req.Status;
         if (req.ApprovedBy.HasValue) transfer.ApprovedBy = req.ApprovedBy;
+        if (req.Status == "cancelled" && !string.IsNullOrWhiteSpace(req.CancelReason)) transfer.CancelReason = req.CancelReason;
         transfer.UpdatedAt = DateTime.UtcNow;
 
         // Approval previously waved through any requested quantity unchecked — nothing stopped an
@@ -751,6 +766,13 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             var lines = transfer.Items.Select(item => (item.ProductId, Quantity: item.RequestedQuantity));
             var stockError = await ValidateSourceStockAsync(transfer, lines);
             if (stockError != null) return BadRequest(new { message = stockError });
+
+            // There's no partial-approval UI — approving accepts the request as-is — but
+            // ApprovedQuantity was never actually written here, so the "Approved Qty" column
+            // stayed blank forever even on fully completed transfers, despite every downstream
+            // calculation already falling back to it ahead of RequestedQuantity.
+            foreach (var item in transfer.Items)
+                item.ApprovedQuantity = item.RequestedQuantity;
         }
 
         // Shipped: the goods physically leave the source right now — deduct immediately rather
@@ -908,7 +930,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     }
 }
 
-public record UpdateTransferStatusRequest(string Status, Guid? ApprovedBy);
+public record UpdateTransferStatusRequest(string Status, Guid? ApprovedBy, string? CancelReason = null);
 public record ReceiveTransferItemRequest(Guid ItemId, decimal ReceivedQuantity, string? Notes, string? DamagedOrReturnReason = null);
 public record ReceiveTransferRequest(List<ReceiveTransferItemRequest>? Items, Guid? ApprovedBy);
 

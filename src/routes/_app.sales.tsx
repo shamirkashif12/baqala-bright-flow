@@ -15,8 +15,6 @@ import { SARIcon, fmtSAR } from "@/lib/currency";
 
 export const Route = createFileRoute("/_app/sales")({ component: Sales });
 
-const bars = [42, 58, 36, 72, 64, 88, 92, 76, 58, 64, 82, 70];
-
 function Sales() {
   const { user } = useAuth();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
@@ -65,7 +63,20 @@ function Sales() {
   const totalDiscount = filtered.reduce((s, o) => s + o.discountAmount, 0);
   const avgDiscountPct = totalRevenue > 0 ? ((totalDiscount / totalRevenue) * 100).toFixed(1) + "%" : "0%";
   const fmt = (n: number) => fmtSAR(n);
-  const max = Math.max(...bars);
+
+  // Real hourly revenue for today (8am-8pm), computed from paid orders — was a hardcoded mock
+  // array with no connection to actual data at all.
+  const HOUR_START = 8, HOUR_END = 20;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const todaysPaidOrders = orders.filter(o => o.paymentStatus === "paid" && o.createdAt.slice(0, 10) === todayKey);
+  const bars = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => {
+    const hour = HOUR_START + i;
+    return todaysPaidOrders
+      .filter(o => new Date(o.createdAt).getHours() === hour)
+      .reduce((s, o) => s + o.totalAmount, 0);
+  });
+  const max = Math.max(1, ...bars);
+  const hasSalesToday = bars.some(v => v > 0);
 
   return (
     <PageShell title="Sales" subtitle="Live transactions across all terminals">
@@ -78,14 +89,18 @@ function Sales() {
 
       <Card className="p-6 border-border/60 shadow-card">
         <h3 className="font-semibold mb-4">Hourly Sales — Today</h3>
-        <div className="flex items-end gap-2 h-48">
-          {bars.map((v, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center gap-1">
-              <div className="w-full rounded-t-lg gradient-primary hover:opacity-80 transition-opacity" style={{ height: `${(v / max) * 100}%` }} />
-              <span className="text-[10px] text-muted-foreground">{8 + i}h</span>
-            </div>
-          ))}
-        </div>
+        {hasSalesToday ? (
+          <div className="flex items-end gap-2 h-48">
+            {bars.map((v, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center gap-1" title={`${fmt(v)} SAR`}>
+                <div className="w-full rounded-t-lg gradient-primary hover:opacity-80 transition-opacity" style={{ height: `${Math.max(2, (v / max) * 100)}%` }} />
+                <span className="text-[10px] text-muted-foreground">{HOUR_START + i}h</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground py-14 text-center">No sales recorded yet today.</p>
+        )}
       </Card>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -108,22 +123,25 @@ function Sales() {
               { id: "pending", label: "Pending" },
               { id: "refunded", label: "Refunded" },
               { id: "partial", label: "Partial" },
+              { id: "cancelled", label: "Cancelled" },
             ]}
             selected={payFilter}
             onChange={setPayFilter}
           />
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">From</span>
           <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-xs text-muted-foreground">–</span>
+          <span className="text-xs text-muted-foreground">To</span>
           <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          {(dateFrom || dateTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
         </div>
+        {(q || branchIds.length > (lockedBranchId ? 1 : 0) || payFilter.length > 0 || dateFrom || dateTo) && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => {
+            setQ(""); setBranchIds(lockedBranchId ? [lockedBranchId] : []); setPayFilter([]); setDateFrom(""); setDateTo("");
+          }}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
       </div>
 
       {loading ? (

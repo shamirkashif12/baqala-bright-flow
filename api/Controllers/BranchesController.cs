@@ -57,6 +57,9 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Branch branch)
     {
+        if (!ContactValidation.IsValidSaudiPhone(branch.ContactNumber))
+            return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
+
         branch.Id = Guid.NewGuid();
         branch.CreatedAt = branch.UpdatedAt = DateTime.UtcNow;
 
@@ -89,6 +92,8 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
     {
         var branch = await db.Branches.FindAsync(id);
         if (branch is null) return NotFound();
+        if (!ContactValidation.IsValidSaudiPhone(updated.ContactNumber))
+            return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
         branch.Name = updated.Name;
         branch.NameAr = updated.NameAr;
         branch.Address = updated.Address;

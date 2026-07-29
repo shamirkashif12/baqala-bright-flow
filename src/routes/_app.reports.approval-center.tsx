@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,7 @@ import { useBranch } from "@/lib/branch-context";
 import { useAuth } from "@/lib/auth";
 import { api, type ApprovalRow } from "@/lib/api";
 import { toast } from "sonner";
-import { Clock, CheckCircle2, XCircle } from "lucide-react";
+import { Clock, CheckCircle2, XCircle, X } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/approval-center")({ component: ApprovalCenter });
 
@@ -175,25 +175,30 @@ function ApprovalCenter() {
 
   const isPending = (status: string) => status === "pending" || status === "pending_review" || status === "pending_approval";
 
+  const defaultBranchIds = lockedBranchId ? [lockedBranchId] : [];
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchIds.join(",") !== defaultBranchIds.join(",")
+    || statuses.join(",") !== "pending" || types.length !== 0;
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchIds(defaultBranchIds);
+    setStatuses(["pending"]); setTypes([]);
+  };
+
   return (
     <PageShell title="Approval Center" subtitle="Every manager approval in one place — discounts, cancellations, deletions, refunds & more">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
-        </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         {!lockedBranchId && (
-          <div className="w-44">
+          <FilterField label="Branch" className="w-44">
             <SearchableMultiSelect
               placeholder="All Branches"
               options={branches.map((b) => ({ id: b.id, label: b.name }))}
               selected={branchIds}
               onChange={setBranchIds}
             />
-          </div>
+          </FilterField>
         )}
-        <div className="w-44">
+        <FilterField label="Status" className="w-44">
           <SearchableMultiSelect
             placeholder="All Statuses"
             options={[
@@ -207,15 +212,20 @@ function ApprovalCenter() {
             selected={statuses}
             onChange={setStatuses}
           />
-        </div>
-        <div className="w-52">
+        </FilterField>
+        <FilterField label="Type" className="w-52">
           <SearchableMultiSelect
             placeholder="All Types"
             options={Object.entries(REQUEST_TYPE_LABELS).map(([id, label]) => ({ id, label }))}
             selected={types}
             onChange={setTypes}
           />
-        </div>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">

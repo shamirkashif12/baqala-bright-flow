@@ -411,21 +411,21 @@ function WorkShiftsTab() {
       )}
 
       <Sheet open={!!editShift} onOpenChange={v => !v && setEditShift(null)}>
-        <SheetContent>
+        <SheetContent className="overflow-y-auto">
           <SheetHeader><SheetTitle>Edit Shift</SheetTitle></SheetHeader>
           <ShiftFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches} departments={departments} branchLocked={branchLocked} />
         </SheetContent>
       </Sheet>
 
       <Sheet open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
-        <SheetContent>
+        <SheetContent className="overflow-y-auto">
           <SheetHeader><SheetTitle>Create Shift</SheetTitle></SheetHeader>
           <ShiftFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches} departments={departments} branchLocked={branchLocked} />
         </SheetContent>
       </Sheet>
 
       <Sheet open={!!assignShift} onOpenChange={v => !v && setAssignShift(null)}>
-        <SheetContent>
+        <SheetContent className="overflow-y-auto">
           <SheetHeader><SheetTitle>Assign "{assignShift?.name}" to Employees</SheetTitle></SheetHeader>
           {assignShift && <AssignShiftFields shift={assignShift} employees={employees} onAssign={handleAssign} saving={saving} />}
         </SheetContent>

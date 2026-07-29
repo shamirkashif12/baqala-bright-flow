@@ -64,6 +64,28 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
         return customer is null ? NotFound() : Ok(customer);
     }
 
+    // POS's actual customer search — GetByPhone above only ever matches phone, silently returns
+    // an arbitrary customer via FirstOrDefaultAsync with no ordering when several phone numbers
+    // share the typed suffix, and has no way to search by name at all. This returns a small ranked
+    // candidate list (exact phone match first, then name/phone substring matches) instead of one
+    // unexplained guess, so the cashier picks the right person when there's more than one match.
+    // Same "not gated" reasoning as GetByPhone — Cashier/kiosk roles hold no Customers permission.
+    [HttpGet("lookup")]
+    public async Task<IActionResult> Lookup([FromQuery] string query, [FromQuery] int limit = 8)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return Ok(Array.Empty<Customer>());
+        var q = query.Trim();
+        var matches = await db.Customers
+            .Where(c => c.FullName.Contains(q) || c.Phone.Contains(q) || q.Contains(c.Phone))
+            .ToListAsync();
+        var ranked = matches
+            .OrderByDescending(c => c.Phone == q)
+            .ThenBy(c => c.FullName)
+            .Take(Math.Clamp(limit, 1, 25))
+            .ToList();
+        return Ok(ranked);
+    }
+
     [RequirePermission("Customers", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Customer customer)

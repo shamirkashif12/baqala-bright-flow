@@ -31,13 +31,13 @@ type FeeForm = {
 };
 const emptyFeeForm: FeeForm = { ruleName: "", feeType: "fixed", value: "0.00", applicableTo: "all_products", status: "active" };
 
-// Checkout (_app.pos.tsx's allOrderFees) only ever honors "all_products"/"all_orders" — the
-// other applicableTo values used to be offered here but silently never charged at checkout.
-// Kept in the label map for any existing rule rows created with one of them (so they still
-// display sensibly), but no longer offered when creating/editing a rule below.
+// Checkout (_app.pos.tsx's allOrderFees + cardOnlyFees) now honors "all_products"/"all_orders"
+// (every order) and "card_payments" (added only once the customer pays by card, at PaymentDialog).
+// "delivery_orders"/"per_bag" still aren't wired to anything at checkout — kept in the label map
+// for any existing rule rows created with one of them, but not offered when creating/editing below.
 function applicableToLabel(v: string): string {
   if (v === "all_products" || v === "all_orders") return "Per order";
-  if (v === "card_payments") return "Card payments (not applied at checkout)";
+  if (v === "card_payments") return "Card payments only";
   if (v === "delivery_orders") return "Delivery orders (not applied at checkout)";
   if (v === "per_bag") return "Per bag (not applied at checkout)";
   return v;
@@ -76,9 +76,10 @@ function ServiceCharges() {
     setFeeDialogOpen(true);
   };
 
-  // Checkout only ever honors "all_products"/"all_orders" (see applicableToLabel above) — marking
-  // a charge with any other applicableTo as Active is misleading since it's never actually applied.
-  const checkoutHonors = (applicableTo: string) => applicableTo === "all_products" || applicableTo === "all_orders";
+  // Checkout only honors "all_products"/"all_orders"/"card_payments" (see applicableToLabel above)
+  // — marking a charge with any other applicableTo as Active is misleading since it's never applied.
+  const checkoutHonors = (applicableTo: string) =>
+    applicableTo === "all_products" || applicableTo === "all_orders" || applicableTo === "card_payments";
 
   const toggleStatus = async (r: TaxFeeRule) => {
     const newStatus = r.status === "active" ? "inactive" : "active";
@@ -239,13 +240,14 @@ function ServiceCharges() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Applies to</Label>
-              {/* Only "Every order" is actually honored at checkout (_app.pos.tsx) — other scopes
-                  (per-bag, card payments, delivery orders) used to be offered here but were
-                  silently never charged, so they're not offered for new/edited rules anymore. */}
-              <Select value={form.applicableTo} onValueChange={() => {}} disabled>
+              {/* "Every order" and "Card payments only" are the two scopes checkout (_app.pos.tsx)
+                  actually charges — per-bag/delivery-orders aren't wired to anything there, so
+                  they're not offered here. */}
+              <Select value={form.applicableTo} onValueChange={v => setForm(p => ({ ...p, applicableTo: v }))}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all_products">Every order</SelectItem>
+                  <SelectItem value="card_payments">Card payments only</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -34,7 +34,7 @@ const PERM_LABELS: Record<PermFlag, string> = {
 const ALL_MODULES = [
   "Dashboard",
   "POS", "Cashier Workspace", "Cashier Shifts",
-  "Orders", "Coupons", "Loyalty Program", "Customers", "Returns",
+  "Orders", "Online Orders", "Coupons", "Loyalty Program", "Customers", "Returns",
   "Inventory", "Stocks", "Batches",
   "Warehouses", "Stock Transfers",
   "Suppliers", "Purchase Orders", "Supplier Returns",
@@ -62,6 +62,7 @@ const RECOMMENDED: Record<string, RecommendedEntry[]> = {
     { module: "Cashier Workspace",   flags: ["canView", "canCreate", "canEdit", "canApprove"] },
     { module: "Cashier Shifts",      flags: ["canView", "canApprove", "canExport"] },
     { module: "Orders",              flags: ["canView", "canCreate", "canEdit", "canApprove", "canExport"] },
+    { module: "Online Orders",       flags: ["canView", "canCreate", "canEdit", "canApprove", "canExport"] },
     { module: "Coupons",             flags: ["canView", "canCreate", "canEdit", "canDelete", "canApprove"] },
     { module: "Loyalty Program",     flags: ["canView", "canCreate", "canEdit", "canDelete", "canApprove"] },
     { module: "Customers",           flags: ["canView", "canCreate", "canEdit"] },
@@ -111,6 +112,7 @@ const RECOMMENDED: Record<string, RecommendedEntry[]> = {
     { module: "Cashier Workspace", flags: ["canView", "canCreate", "canEdit", "canApprove"] },
     { module: "Cashier Shifts",    flags: ["canView", "canApprove", "canExport"] },
     { module: "Orders",            flags: ["canView", "canCreate", "canEdit", "canApprove", "canExport"] },
+    { module: "Online Orders",     flags: ["canView"] },
     { module: "Coupons",           flags: ["canView", "canApprove"] },
     { module: "Loyalty Program",   flags: ["canView", "canApprove"] },
     { module: "Customers",         flags: ["canView", "canCreate", "canEdit"] },
@@ -141,6 +143,7 @@ const RECOMMENDED: Record<string, RecommendedEntry[]> = {
   "Accountant": [
     { module: "Dashboard",           flags: ["canView"] },
     { module: "Orders",              flags: ["canView", "canExport"] },
+    { module: "Online Orders",       flags: ["canView", "canExport"] },
     { module: "Coupons",             flags: ["canView", "canExport"] },
     { module: "Loyalty Program",     flags: ["canView", "canExport"] },
     { module: "Stocks",              flags: ["canView"] },
@@ -162,6 +165,7 @@ const RECOMMENDED: Record<string, RecommendedEntry[]> = {
   "Auditor": [
     { module: "Dashboard",           flags: ["canView"] },
     { module: "Orders",              flags: ["canView", "canExport"] },
+    { module: "Online Orders",       flags: ["canView", "canExport"] },
     { module: "Coupons",             flags: ["canView"] },
     { module: "Loyalty Program",     flags: ["canView"] },
     { module: "Inventory",           flags: ["canView", "canExport"] },
@@ -231,6 +235,7 @@ const RECOMMENDED: Record<string, RecommendedEntry[]> = {
   "Finance User": [
     { module: "Dashboard",            flags: ["canView"] },
     { module: "Orders",               flags: ["canView", "canExport"] },
+    { module: "Online Orders",        flags: ["canView", "canExport"] },
     { module: "Coupons",              flags: ["canView", "canExport"] },
     { module: "Loyalty Program",      flags: ["canView", "canExport"] },
     { module: "Stocks",               flags: ["canView"] },
@@ -253,6 +258,7 @@ const RECOMMENDED: Record<string, RecommendedEntry[]> = {
     { module: "Cashier Workspace",   flags: ["canView", "canCreate", "canEdit", "canApprove"] },
     { module: "Cashier Shifts",      flags: ["canView", "canCreate", "canApprove", "canExport"] },
     { module: "Orders",              flags: ["canView", "canCreate", "canEdit", "canApprove", "canExport"] },
+    { module: "Online Orders",       flags: ["canView", "canCreate", "canEdit", "canApprove", "canExport"] },
     { module: "Coupons",             flags: ["canView", "canCreate", "canEdit", "canDelete", "canApprove"] },
     { module: "Loyalty Program",     flags: ["canView", "canCreate", "canEdit", "canDelete", "canApprove"] },
     { module: "Customers",           flags: ["canView", "canCreate", "canEdit", "canExport"] },
@@ -312,29 +318,48 @@ function mergeOverrides(rolePerms: PermRow[], overrides: UserPermissionOverride[
 }
 
 // ── Permission matrix (shared by role defaults + user override dialog) ─────────
-function PermMatrix({ perms, onChange }: { perms: PermRow[]; onChange: (mod: string, flag: PermFlag, val: boolean) => void }) {
+function PermMatrix({ perms, onChange, onBulkChange }: {
+  perms: PermRow[];
+  onChange: (mod: string, flag: PermFlag, val: boolean) => void;
+  // Sets every flag on every module at once — "Select All"/"Clear All" above the table.
+  // Optional since some (currently no) callers might want the matrix without it.
+  onBulkChange?: (val: boolean) => void;
+}) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-muted/40 border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-            <th className="px-4 py-3 font-semibold w-44">Module</th>
-            {PERM_FLAGS.map(f => <th key={f} className="px-3 py-3 font-semibold text-center">{PERM_LABELS[f]}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {perms.map(p => (
-            <tr key={p.module} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
-              <td className="px-4 py-3 font-medium text-sm">{p.module}</td>
-              {PERM_FLAGS.map(flag => (
-                <td key={flag} className="px-3 py-3 text-center">
-                  <Checkbox checked={p[flag]} onCheckedChange={v => onChange(p.module, flag, !!v)} />
-                </td>
-              ))}
+    <div className="space-y-2">
+      {onBulkChange && (
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => onBulkChange(true)}>Select All</Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => onBulkChange(false)}>Clear All</Button>
+        </div>
+      )}
+      {/* max-h + overflow-y-auto bounds the scroll so the sticky header has something to stick
+          within — this table can run to 20+ module rows and previously scrolled the header
+          straight out of view with it, losing which column meant what partway down. */}
+      <div className="overflow-x-auto overflow-y-auto max-h-[60vh] rounded-lg border border-border/60">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 z-10 bg-background">
+            <tr className="bg-muted/40 border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+              <th className="px-4 py-3 font-semibold w-44">Module</th>
+              {PERM_FLAGS.map(f => <th key={f} className="px-3 py-3 font-semibold text-center">{PERM_LABELS[f]}</th>)}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {perms.map(p => (
+              <tr key={p.module} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
+                <td className="px-4 py-3 font-medium text-sm">{p.module}</td>
+                {PERM_FLAGS.map(flag => (
+                  <td key={flag} className="px-3 py-3">
+                    <div className="flex items-center justify-center">
+                      <Checkbox checked={p[flag]} onCheckedChange={v => onChange(p.module, flag, !!v)} />
+                    </div>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -356,6 +381,8 @@ function UserPermDialog({ user, rolePerms, onClose, onSaved }: { user: User; rol
 
   const toggle = (mod: string, flag: PermFlag, val: boolean) =>
     setPerms(prev => prev.map(p => p.module === mod ? { ...p, [flag]: val } : p));
+  const bulkToggle = (val: boolean) =>
+    setPerms(prev => prev.map(p => ({ ...p, ...Object.fromEntries(PERM_FLAGS.map(f => [f, val])) })));
 
   const handleSave = async () => {
     setSaving(true);
@@ -406,10 +433,10 @@ function UserPermDialog({ user, rolePerms, onClose, onSaved }: { user: User; rol
       {loading ? (
         <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
       ) : (
-        <PermMatrix perms={perms} onChange={toggle} />
+        <PermMatrix perms={perms} onChange={toggle} onBulkChange={bulkToggle} />
       )}
       <DialogFooter className="gap-2 mt-2">
-        <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting || loading}>
+        <Button variant="outline" onClick={handleReset} disabled={resetting || loading}>
           {resetting && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
           Reset to Role Defaults
         </Button>
@@ -434,6 +461,8 @@ function Roles() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [permUser, setPermUser] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
+  const [roleSearch, setRoleSearch] = useState("");
 
   const loadAll = useCallback(async () => {
     // Each call is isolated with .catch() so one endpoint failing doesn't discard
@@ -463,6 +492,11 @@ function Roles() {
     setDirty(true);
   };
 
+  const bulkTogglePerm = (value: boolean) => {
+    setLocalPerms(prev => prev.map(p => ({ ...p, ...Object.fromEntries(PERM_FLAGS.map(f => [f, value])) })));
+    setDirty(true);
+  };
+
   const handleSave = async () => {
     if (!active || !dirty) return;
     setSaving(true);
@@ -471,6 +505,7 @@ function Roles() {
       const data = await loadAll();
       setActive(data.find(r => r.id === active.id) ?? null);
       setDirty(false);
+      toast.success("Permissions saved.");
     } catch (e: any) {
       console.error("Save failed", e);
       toast.error(e?.message || "Failed to save role.");
@@ -478,13 +513,27 @@ function Roles() {
     finally { setSaving(false); }
   };
 
-  const handleDelete = async (roleId: string) => {
-    if (!confirm("Delete this role? Users assigned to it must be reassigned.")) return;
+  // `dirty` already gated the Save button, but a manager could still tab away/close the browser
+  // with unsaved permission edits and lose them silently — warn via the standard browser prompt.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const roleId = deleteTarget.id;
     setDeleting(roleId);
     try {
       await api.deleteRole(roleId);
       const data = await loadAll();
       if (active?.id === roleId) setActive(data[0] ?? null);
+      setDeleteTarget(null);
     } catch (e: any) {
       console.error("Delete failed", e);
       toast.error(e?.message || "Failed to delete role — it may still have users assigned to it.");
@@ -502,6 +551,7 @@ function Roles() {
 
   const roleMembers = users.filter(u => u.roleId === active?.id);
   const initials = (name: string) => name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
+  const filteredRoles = roles.filter(r => !roleSearch || r.name.toLowerCase().includes(roleSearch.toLowerCase()));
 
   return (
     <PageShell title="Roles & Permissions" subtitle="Access control · permission matrix · custom roles">
@@ -515,8 +565,19 @@ function Roles() {
               <h3 className="text-sm font-semibold flex items-center gap-2"><Shield className="h-4 w-4 text-primary" />Roles</h3>
               <AddRoleDialog onCreated={handleCreateRole} />
             </div>
+            <div className="px-2 mb-2">
+              <Input
+                placeholder="Search roles…"
+                className="h-8 text-xs"
+                value={roleSearch}
+                onChange={e => setRoleSearch(e.target.value)}
+              />
+            </div>
             <div className="space-y-1">
-              {roles.map((r) => {
+              {filteredRoles.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-4">No roles match "{roleSearch}".</p>
+              )}
+              {filteredRoles.map((r) => {
                 const isActive = active?.id === r.id;
                 return (
                   <div key={r.id} className={`flex items-center rounded-lg transition-colors ${isActive ? "bg-primary text-primary-foreground shadow-glow" : "hover:bg-muted/60"}`}>
@@ -530,7 +591,7 @@ function Roles() {
                       </Badge>
                     </button>
                     {!r.isSystem && (
-                      <button title="Delete role" onClick={() => handleDelete(r.id)} disabled={deleting === r.id}
+                      <button title="Delete role" onClick={() => setDeleteTarget(r)} disabled={deleting === r.id}
                         className={`pr-2.5 transition-opacity ${isActive ? "text-primary-foreground/70 hover:text-primary-foreground" : "text-muted-foreground hover:text-destructive"}`}>
                         {deleting === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                       </button>
@@ -564,9 +625,9 @@ function Roles() {
                       </Button>
                     </div>
                   </div>
-                  <TabsList className="h-8">
-                    <TabsTrigger value="permissions" className="text-xs h-7">Role Permissions</TabsTrigger>
-                    <TabsTrigger value="members" className="text-xs h-7">
+                  <TabsList className="h-10">
+                    <TabsTrigger value="permissions" className="text-sm font-semibold px-4">Role Permissions</TabsTrigger>
+                    <TabsTrigger value="members" className="text-sm font-semibold px-4">
                       Members ({roleMembers.length})
                     </TabsTrigger>
                   </TabsList>
@@ -577,7 +638,7 @@ function Roles() {
                   {localPerms.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground text-sm">No permissions configured.</div>
                   ) : (
-                    <PermMatrix perms={localPerms} onChange={togglePerm} />
+                    <PermMatrix perms={localPerms} onChange={togglePerm} onBulkChange={bulkTogglePerm} />
                   )}
                 </TabsContent>
 
@@ -622,6 +683,22 @@ function Roles() {
           </Card>
         </div>
       )}
+
+      <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Delete role?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-semibold text-foreground">{deleteTarget?.name}</span>? Users assigned to it must be reassigned.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={!!deleting}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={!!deleting}>
+              {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }
@@ -645,7 +722,7 @@ function AddRoleDialog({ onCreated }: { onCreated: (name: string, description: s
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="gap-1"><Plus className="h-3.5 w-3.5" />Add</Button>
+        <Button size="sm" className="gap-1 gradient-primary text-primary-foreground border-0 shadow-glow"><Plus className="h-3.5 w-3.5" />Add</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>Create New Role</DialogTitle></DialogHeader>

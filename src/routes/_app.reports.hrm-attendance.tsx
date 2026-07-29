@@ -5,10 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { StatusBadge } from "@/components/module-placeholder";
+import { StatusBadge, FilterField } from "@/components/module-placeholder";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
-import { Eye } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
 import { api, type StaffAttendance, type Employee, type Department, type WorkShift, type ReportExportFormat } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -79,7 +79,7 @@ function AttendanceHistoryDrawer({ row, onClose }: { row: StaffAttendance | null
 function HrmAttendanceReport() {
   const { user } = useAuth();
   const { branches } = useBranch();
-  const { canExport } = usePermission("Reports");
+  const { canExport } = usePermission("HR Attendance");
   const branchLocked = user?.role !== "tenant_admin";
 
   const [rows, setRows] = useState<StaffAttendance[]>([]);
@@ -143,7 +143,7 @@ function HrmAttendanceReport() {
     { key: "correction", label: "Correction Status", render: r => r.isCorrected ? "Corrected" : "Original" },
     { key: "remarks", label: "Remarks", render: r => r.remarks ?? "—" },
     {
-      key: "actions", label: "", render: r => (
+      key: "actions", label: "Action", render: r => (
         <Button size="icon" variant="ghost" className="h-7 w-7" title="View correction history" onClick={() => setHistoryRow(r)}>
           <Eye className="h-3.5 w-3.5" />
         </Button>
@@ -151,61 +151,85 @@ function HrmAttendanceReport() {
     },
   ];
 
+  const hasFilters = dateFrom !== todayStr || dateTo !== todayStr || branchId !== "all" || departmentId !== "all"
+    || employeeId !== "all" || shiftId !== "all" || status !== "all" || correctionStatus !== "all";
+  const clearFilters = () => {
+    setDateFrom(todayStr); setDateTo(todayStr); setBranchId("all"); setDepartmentId("all");
+    setEmployeeId("all"); setShiftId("all"); setStatus("all"); setCorrectionStatus("all");
+  };
+
   return (
     <PageShell title="Attendance Report" subtitle="Filter and export employee attendance across dates and branches" breadcrumb={["Human Resources", "Attendance Report"]}>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
+        <div className="flex flex-wrap items-end gap-2">
+          <FilterField label="From"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+          <FilterField label="To"><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" /></FilterField>
           {!branchLocked && (
-            <Select value={branchId} onValueChange={setBranchId}>
+            <FilterField label="Branch">
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+          <FilterField label="Department">
+            <Select value={departmentId} onValueChange={setDepartmentId}>
               <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="all">All Departments</SelectItem>
+                {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
               </SelectContent>
             </Select>
+          </FilterField>
+          <FilterField label="Employee">
+            <Select value={employeeId} onValueChange={setEmployeeId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Shift">
+            <Select value={shiftId} onValueChange={setShiftId}>
+              <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Shifts</SelectItem>
+                {shifts.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Status">
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="present">Present</SelectItem>
+                <SelectItem value="late">Late</SelectItem>
+                <SelectItem value="absent">Absent</SelectItem>
+                <SelectItem value="on_leave">On Leave</SelectItem>
+                <SelectItem value="checkout_missing">Checkout Missing</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Record Type">
+            <Select value={correctionStatus} onValueChange={setCorrectionStatus}>
+              <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Original &amp; Corrected</SelectItem>
+                <SelectItem value="original">Original Only</SelectItem>
+                <SelectItem value="corrected">Corrected Only</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
           )}
-          <Select value={departmentId} onValueChange={setDepartmentId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={employeeId} onValueChange={setEmployeeId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={shiftId} onValueChange={setShiftId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Shifts</SelectItem>
-              {shifts.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="present">Present</SelectItem>
-              <SelectItem value="late">Late</SelectItem>
-              <SelectItem value="absent">Absent</SelectItem>
-              <SelectItem value="on_leave">On Leave</SelectItem>
-              <SelectItem value="checkout_missing">Checkout Missing</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={correctionStatus} onValueChange={setCorrectionStatus}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Original &amp; Corrected</SelectItem>
-              <SelectItem value="original">Original Only</SelectItem>
-              <SelectItem value="corrected">Corrected Only</SelectItem>
-            </SelectContent>
-          </Select>
           <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
         </div>
 

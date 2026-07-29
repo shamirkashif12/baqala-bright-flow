@@ -507,6 +507,26 @@ function ItemsStep({
     .filter(i => i.productId)
     .reduce((s, i) => s + i.requestedQuantity * (parseFloat(i.unitCost || "0") || 0), 0);
 
+  // A hardware scanner just types the barcode + Enter — matching that here (same pattern as
+  // POS/Warehouse's item picker) adds a new row for the scanned product directly, instead of
+  // manually opening the product Select and scrolling/typing to find it.
+  const [scanBuf, setScanBuf] = useState("");
+  const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const code = scanBuf.trim();
+    if (!code) return;
+    const match = products.find(p => p.barcode === code);
+    if (!match) return;
+    if (poItems && !poItems.some(pi => pi.productId === match.id)) return; // not available at this source
+    const existingEmpty = items.findIndex(it => !it.productId);
+    if (existingEmpty >= 0) {
+      handleProductChange(existingEmpty, match.id);
+    } else {
+      onChange([...items, { productId: match.id, requestedQuantity: 1, unitCost: String(match.costPrice ?? ""), expiryDate: "" }]);
+    }
+    setScanBuf("");
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -515,6 +535,13 @@ function ItemsStep({
           <Plus className="h-3.5 w-3.5" /> Add Item
         </Button>
       </div>
+      <Input
+        value={scanBuf}
+        onChange={e => setScanBuf(e.target.value)}
+        onKeyDown={handleScanKeyDown}
+        placeholder="Scan a barcode to add an item…"
+        className="h-8 text-xs"
+      />
       {poItems && (
         <p className="text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1">
           Only items available at the source location are shown. Quantity cannot exceed available stock.

@@ -65,6 +65,11 @@ public class StockTransfer
     [MaxLength(30), Column("return_reason")]
     public string? ReturnReason { get; set; }
 
+    // Free-text reason captured when a transfer is cancelled — distinct from ReturnReason,
+    // which is the reason the return was created in the first place.
+    [MaxLength(255), Column("cancel_reason")]
+    public string? CancelReason { get; set; }
+
     [Column("notes")]
     public string? Notes { get; set; }
 

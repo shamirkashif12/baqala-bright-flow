@@ -27,7 +27,12 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ring-offset-background cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow",
+      // --primary is the brand purple in light mode, but a near-white neutral in dark mode (used
+      // for light-on-dark buttons there) — so a plain data-[state=active]:bg-primary alone would
+      // look purple in light mode and washed-out white in dark mode. Pinned to the same violet in
+      // both themes instead, so the active tab is unambiguous everywhere, on pages with many tabs
+      // (7-9) especially.
+      "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ring-offset-background cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow data-[state=active]:font-semibold",
       className,
     )}
     {...props}

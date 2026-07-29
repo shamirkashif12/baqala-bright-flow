@@ -133,6 +133,9 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
         var exists = await db.StaffAttendances.AnyAsync(a => a.EmployeeId == req.EmployeeId && a.Date == req.Date);
         if (exists) return Conflict(new { message = "Attendance already recorded for this employee on this date. Use Manual Correction to update it." });
 
+        if (req.CheckInTime.HasValue && req.CheckOutTime.HasValue && req.CheckOutTime <= req.CheckInTime)
+            return BadRequest(new { message = "Check-out time must be after check-in time." });
+
         WorkShift? shift = req.ShiftId.HasValue ? await db.WorkShifts.FindAsync(req.ShiftId.Value) : null;
         var (late, early) = AttendanceStatusHelper.ComputeLateEarlyMinutes(shift, req.CheckInTime, req.CheckOutTime);
         var status = req.Status;
@@ -172,6 +175,11 @@ public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : C
         var attendance = await db.StaffAttendances.Include(a => a.Employee).FirstOrDefaultAsync(a => a.Id == id);
         if (attendance is null) return NotFound();
         if (string.IsNullOrWhiteSpace(req.CorrectionReason)) return BadRequest(new { message = "Correction reason is required." });
+
+        var effectiveCheckIn = req.CheckInTime ?? attendance.CheckIn;
+        var effectiveCheckOut = req.CheckOutTime ?? attendance.CheckOut;
+        if (effectiveCheckIn.HasValue && effectiveCheckOut.HasValue && effectiveCheckOut <= effectiveCheckIn)
+            return BadRequest(new { message = "Check-out time must be after check-in time." });
 
         var before = $"CheckIn: {attendance.CheckIn:HH:mm}, CheckOut: {attendance.CheckOut:HH:mm}, Status: {attendance.Status}, Shift: {attendance.ShiftId}, Late: {attendance.LateMinutes}m, Early: {attendance.EarlyLeaveMinutes}m";
 

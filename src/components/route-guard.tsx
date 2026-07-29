@@ -94,8 +94,8 @@ const ROUTE_RULES: RouteRule[] = [
   // HRM reports carry their own permission gates on the backend (HrReportsController) —
   // these specific entries must come before the generic "/reports" rule below since
   // ROUTE_RULES.find() returns the first prefix match.
-  { url: "/reports/hrm-attendance",      module: "Reports" },
-  { url: "/reports/shift-closing",       module: "Reports" },
+  { url: "/reports/hrm-attendance",      module: "HR Attendance" },
+  { url: "/reports/shift-closing",       module: "HR Shifts" },
   { url: "/reports/employee-activity",   module: "Audit Logs" },
   { url: "/reports",             module: "Reports" },
   { url: "/kpi",                 module: "Reports" },

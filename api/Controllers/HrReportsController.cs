@@ -84,7 +84,10 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         return rows;
     }
 
-    [RequirePermission("Reports", PermAction.View)]
+    // Gated on "HR Attendance" (not "Reports") so Branch Manager/Supervisor — who already manage
+    // attendance day-to-day — can reach this report without a separate Reports grant. Matches the
+    // audit-log module used when exporting it below ("HR Attendance").
+    [RequirePermission("HR Attendance", PermAction.View)]
     [HttpGet("attendance")]
     public async Task<IActionResult> GetAttendanceReport(
         [FromQuery] Guid? branchId, [FromQuery] Guid? departmentId, [FromQuery] Guid? employeeId, [FromQuery] Guid? shiftId,
@@ -98,7 +101,7 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         return Ok(new { items = rows.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize), totalCount = rows.Count });
     }
 
-    [RequirePermission("Reports", PermAction.Export)]
+    [RequirePermission("HR Attendance", PermAction.Export)]
     [HttpGet("attendance/export")]
     public async Task<IActionResult> ExportAttendanceReport(
         [FromQuery] Guid? branchId, [FromQuery] Guid? departmentId, [FromQuery] Guid? employeeId, [FromQuery] Guid? shiftId,
@@ -122,7 +125,7 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
 
     // FRD AR-02 — read-only correction-history drilldown: original vs corrected values + reason,
     // sourced straight from the audit trail HrAttendanceController.Correct already writes.
-    [RequirePermission("Reports", PermAction.View)]
+    [RequirePermission("HR Attendance", PermAction.View)]
     [HttpGet("attendance/{id:guid}/history")]
     public async Task<IActionResult> GetAttendanceCorrectionHistory(Guid id)
     {
@@ -178,7 +181,8 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         return rows;
     }
 
-    [RequirePermission("Reports", PermAction.View)]
+    // Gated on "HR Shifts" (not "Reports"), same rationale as the Attendance Report above.
+    [RequirePermission("HR Shifts", PermAction.View)]
     [HttpGet("shift-closing")]
     public async Task<IActionResult> GetShiftClosingReport(
         [FromQuery] Guid? branchId, [FromQuery] Guid? departmentId, [FromQuery] Guid? employeeId, [FromQuery] Guid? shiftId,
@@ -209,7 +213,7 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
         return Ok(new { items = projected.Skip((effectivePage - 1) * effectivePageSize).Take(effectivePageSize), totalCount = projected.Count });
     }
 
-    [RequirePermission("Reports", PermAction.Export)]
+    [RequirePermission("HR Shifts", PermAction.Export)]
     [HttpGet("shift-closing/export")]
     public async Task<IActionResult> ExportShiftClosingReport(
         [FromQuery] Guid? branchId, [FromQuery] Guid? departmentId, [FromQuery] Guid? employeeId, [FromQuery] Guid? shiftId,

@@ -176,20 +176,23 @@ function CategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editItem, setEditItem] = useState<Category | null>(null);
   const [deleteItem, setDeleteItem] = useState<Category | null>(null);
 
   const load = () => {
     setLoading(true);
-    api.getCategories()
+    // includeInactive so the Inactive metric card reflects reality — the visible
+    // table below still filters back down to active-only rows.
+    api.getCategories({ includeInactive: true })
       .then((cats) => { setCategories(cats); setLoadError(false); })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
-  const filtered = categories.filter(c =>
+  const filtered = categories.filter(c => showInactive || c.isActive).filter(c =>
     !q || c.name.toLowerCase().includes(q.toLowerCase()) || (c.nameAr ?? "").includes(q),
   );
 
@@ -240,10 +243,20 @@ function CategoriesPage() {
       </div>
 
       {/* ── Search ── */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input className="h-9 pl-9 bg-muted/40" placeholder="Search categories…"
-          value={q} onChange={e => setQ(e.target.value)} />
+      <div className="flex items-center gap-2">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input className="h-9 pl-9 bg-muted/40" placeholder="Search categories…"
+            value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+        <Button
+          size="sm" variant={showInactive ? "default" : "outline"}
+          className={`h-9 gap-1.5 text-xs ${showInactive ? "gradient-primary text-primary-foreground border-0" : ""}`}
+          onClick={() => setShowInactive(v => !v)}
+        >
+          {showInactive ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
+          {showInactive ? "Hide Inactive" : `Show Inactive (${inactive})`}
+        </Button>
       </div>
 
       {/* ── Table ── */}
@@ -267,8 +280,8 @@ function CategoriesPage() {
               <tbody>
                 {filtered.map(c => (
                   <tr key={c.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
-                    <td className="px-4 py-3 font-semibold">{c.name}</td>
-                    <td className="px-4 py-3 text-sm" dir="rtl">{c.nameAr || <span className="text-muted-foreground">—</span>}</td>
+                    <td className="px-4 py-3 font-semibold" data-no-i18n>{c.name}</td>
+                    <td className="px-4 py-3 text-sm" dir="rtl" data-no-i18n>{c.nameAr || <span className="text-muted-foreground">—</span>}</td>
                     <td className="px-4 py-3 tabular-nums text-muted-foreground">{c.sortOrder}</td>
                     <td className="px-4 py-3">
                       {c.isActive

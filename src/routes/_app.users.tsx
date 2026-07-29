@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
-import { StatusBadge } from "@/components/module-placeholder";
+import { StatusBadge, PaginatedDataTable } from "@/components/module-placeholder";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mail, Phone, Pencil, ShieldCheck, Power, Search, Calendar, X } from "lucide-react";
+import { Mail, Phone, Pencil, ShieldCheck, Power, Search, Calendar, X, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
 import { api, excludeDisabledBranches, type User, type Branch, type Role } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
@@ -40,6 +40,9 @@ function RegisteredUsers() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [form, setForm] = useState<UserForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useState<"card" | "list">("card");
+  const [toggleTarget, setToggleTarget] = useState<User | null>(null);
+  const [togglingStatus, setTogglingStatus] = useState(false);
 
   // Filters
   const [q, setQ] = useState("");
@@ -112,9 +115,19 @@ function RegisteredUsers() {
     }
   };
 
-  const toggleStatus = async (u: User) => {
-    await api.updateUser(u.id, { status: u.status === "active" ? "inactive" : "active" });
-    load();
+  const confirmToggleStatus = async () => {
+    if (!toggleTarget) return;
+    setTogglingStatus(true);
+    try {
+      await api.updateUser(toggleTarget.id, { status: toggleTarget.status === "active" ? "inactive" : "active" });
+      toast.success(toggleTarget.status === "active" ? "User deactivated." : "User activated.");
+      setToggleTarget(null);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update user status.");
+    } finally {
+      setTogglingStatus(false);
+    }
   };
 
   const set = (k: keyof UserForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -184,10 +197,56 @@ function RegisteredUsers() {
         )}
       </div>
 
-      <p className="text-xs text-muted-foreground mb-4">{filtered.length} of {users.length} users</p>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-muted-foreground">{filtered.length} of {users.length} users</p>
+        <div className="flex items-center gap-1 rounded-lg border border-border/60 p-0.5">
+          <Button size="icon" variant={viewMode === "card" ? "default" : "ghost"} className={`h-7 w-7 ${viewMode === "card" ? "gradient-primary text-primary-foreground" : ""}`} title="Card view" onClick={() => setViewMode("card")}>
+            <LayoutGrid className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="icon" variant={viewMode === "list" ? "default" : "ghost"} className={`h-7 w-7 ${viewMode === "list" ? "gradient-primary text-primary-foreground" : ""}`} title="List view" onClick={() => setViewMode("list")}>
+            <List className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
 
       {loading ? (
         <div className="text-muted-foreground text-sm">Loading…</div>
+      ) : viewMode === "list" ? (
+        <PaginatedDataTable
+          columns={[
+            { key: "fullName", label: "Name", render: u => (
+              <div className="flex items-center gap-2">
+                <Avatar className="h-7 w-7 shrink-0">
+                  <AvatarFallback className={`bg-gradient-to-br ${avatarColor(u.fullName)} text-white font-bold text-[10px]`}>{initials(u.fullName)}</AvatarFallback>
+                </Avatar>
+                <span className="font-medium">{u.fullName}</span>
+              </div>
+            ) },
+            { key: "email", label: "Email" },
+            { key: "roleName", label: "Role" },
+            { key: "branchName", label: "Branch", render: u => u.branchName ?? "All branches" },
+            { key: "status", label: "Status", render: u => <StatusBadge status={u.status} /> },
+            { key: "actions", label: "Actions", render: u => (
+              <div className="flex gap-1 justify-end">
+                {canEdit && (
+                  <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={() => openEdit(u)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+                <Button size="icon" variant="ghost" className="h-7 w-7" title="Manage Permissions" onClick={() => window.location.href = "/roles"}>
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                </Button>
+                {canEdit && currentUser && canManageUser(currentUser, u.roleName, u.id) && (
+                  <Button size="icon" variant="ghost" className={`h-7 w-7 ${u.status === "active" ? "text-destructive hover:text-destructive" : "text-success hover:text-success"}`} title={u.status === "active" ? "Deactivate" : "Activate"} onClick={() => setToggleTarget(u)}>
+                    <Power className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ) },
+          ]}
+          rows={filtered}
+          emptyMessage="No users match the current filters."
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((u) => (
@@ -219,7 +278,7 @@ function RegisteredUsers() {
                   <ShieldCheck className="h-3.5 w-3.5" />
                 </Button>
                 {canEdit && currentUser && canManageUser(currentUser, u.roleName, u.id) && (
-                  <Button size="sm" variant="outline" className={`h-8 px-2.5 ${u.status === "active" ? "text-destructive hover:text-destructive" : "text-success hover:text-success"}`} title={u.status === "active" ? "Deactivate" : "Activate"} onClick={() => toggleStatus(u)}>
+                  <Button size="sm" variant="outline" className={`h-8 px-2.5 ${u.status === "active" ? "text-destructive hover:text-destructive" : "text-success hover:text-success"}`} title={u.status === "active" ? "Deactivate" : "Activate"} onClick={() => setToggleTarget(u)}>
                     <Power className="h-3.5 w-3.5" />
                   </Button>
                 )}
@@ -298,6 +357,28 @@ function RegisteredUsers() {
               {saving ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!toggleTarget} onOpenChange={v => !v && setToggleTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{toggleTarget?.status === "active" ? "Deactivate User" : "Activate User"}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground mt-1">
+            {toggleTarget?.status === "active" ? "Deactivate" : "Activate"} <span className="font-semibold text-foreground">{toggleTarget?.fullName}</span>?
+            {toggleTarget?.status === "active" && " They won't be able to log in until reactivated."}
+          </p>
+          <div className="flex gap-2 pt-3">
+            <Button variant="outline" className="flex-1" onClick={() => setToggleTarget(null)} disabled={togglingStatus}>Cancel</Button>
+            <Button
+              variant={toggleTarget?.status === "active" ? "destructive" : "default"}
+              className={`flex-1 ${toggleTarget?.status !== "active" ? "gradient-primary text-primary-foreground border-0" : ""}`}
+              onClick={confirmToggleStatus} disabled={togglingStatus}
+            >
+              {togglingStatus ? "Saving…" : toggleTarget?.status === "active" ? "Deactivate" : "Activate"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </PageShell>

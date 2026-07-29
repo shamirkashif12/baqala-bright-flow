@@ -1,6 +1,5 @@
-import { Bell, Search, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass } from "lucide-react";
+import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useI18n } from "@/lib/i18n";
@@ -124,6 +123,7 @@ function relativeTime(iso: string): string {
 function NotificationsPopover() {
   const [open, setOpen] = useState(false);
   const [persisted, setPersisted] = useState<NotifItem[]>([]);
+  const [showAll, setShowAll] = useState(false);
   const navigate = useNavigate();
 
   const loadPersisted = () => {
@@ -158,10 +158,10 @@ function NotificationsPopover() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Read notifications drop out of the list entirely rather than staying dimmed — once you've
-  // acted on/dismissed something, there's no reason for it to keep taking up space here.
-  const notifications = persisted.filter(n => !n.isRead);
-  const unread = notifications.length;
+  // "Unread" is the default view — once you've acted on/dismissed something, there's no reason
+  // for it to keep taking up space here — but "All" still shows the full history on request.
+  const unread = persisted.filter(n => !n.isRead).length;
+  const notifications = showAll ? persisted : persisted.filter(n => !n.isRead);
 
   const markAllRead = () => {
     api.markAllNotificationsRead().then(loadPersisted).catch(() => {});
@@ -202,16 +202,32 @@ function NotificationsPopover() {
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-border/40">
+          <button
+            onClick={() => setShowAll(false)}
+            className={`text-[11px] font-medium px-2 py-0.5 rounded-full transition-colors ${!showAll ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted"}`}
+          >
+            Unread
+          </button>
+          <button
+            onClick={() => setShowAll(true)}
+            className={`text-[11px] font-medium px-2 py-0.5 rounded-full transition-colors ${showAll ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted"}`}
+          >
+            All (History)
+          </button>
+        </div>
         <div className="divide-y divide-border/40 max-h-80 overflow-y-auto">
           {notifications.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">All clear — no alerts right now</div>
+            <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+              {showAll ? "No notifications yet" : "All clear — no alerts right now"}
+            </div>
           ) : (
             notifications.map(n => (
               <button
                 key={n.id}
                 onClick={() => handleClick(n)}
                 title={routeForNotification(n) ? "Click to open" : "Click to mark as read"}
-                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                className={`w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors ${n.isRead ? "opacity-60" : ""}`}
               >
                 <div className={`h-2 w-2 rounded-full mt-2 shrink-0 ${TONE_DOT[n.tone]}`} />
                 <div className="flex-1 min-w-0">
@@ -337,8 +353,7 @@ function BranchDropdown() {
 
 // ── Topbar ─────────────────────────────────────────────────────────────────────
 export function AppTopbar({ title, subtitle, breadcrumb }: { title: string; subtitle?: string; breadcrumb?: string[] }) {
-  const { dir, t } = useI18n();
-  const rtl = dir === "rtl";
+  const { t } = useI18n();
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/80 backdrop-blur-xl px-4 md:px-6">
@@ -349,13 +364,6 @@ export function AppTopbar({ title, subtitle, breadcrumb }: { title: string; subt
         )}
         <h1 className="text-lg md:text-xl font-bold tracking-tight truncate">{t(title)}</h1>
         {subtitle && <p className="text-xs text-muted-foreground truncate">{t(subtitle)}</p>}
-      </div>
-      <div className="hidden md:flex items-center gap-2 relative w-72">
-        <Search className={`h-4 w-4 absolute ${rtl ? "right-3" : "left-3"} text-muted-foreground pointer-events-none`} />
-        <Input
-          placeholder={t("Search products, SKU, invoices…")}
-          className={`h-9 bg-muted/50 border-transparent focus-visible:bg-card focus-visible:border-border/60 ${rtl ? "pr-9 text-right" : "pl-9"}`}
-        />
       </div>
       <LanguageSwitcher />
       <NotificationsPopover />

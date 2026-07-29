@@ -177,12 +177,25 @@ function OfferTypeBadge({ type }: { type: string }) {
 
 // ─── Coupons Tab ─────────────────────────────────────────────────────────────
 
-type CouponForm = { name: string; code: string; type: string; value: string; startDate: string; endDate: string; usageLimit: string; status: string; };
-const emptyCoupon: CouponForm = { name: "", code: "", type: "percentage", value: "", startDate: today, endDate: nextMonth, usageLimit: "", status: "active" };
+type CouponForm = {
+  name: string; code: string; type: string; value: string; startDate: string; endDate: string; usageLimit: string; status: string;
+  appliesTo: string; productId: string; categoryId: string; branchId: string;
+  minOrderAmount: string; maxDiscountAmount: string;
+  startTime: string; endTime: string;
+};
+const emptyCoupon: CouponForm = {
+  name: "", code: "", type: "percentage", value: "", startDate: today, endDate: nextMonth, usageLimit: "", status: "active",
+  appliesTo: "all", productId: "", categoryId: "", branchId: "",
+  minOrderAmount: "", maxDiscountAmount: "",
+  startTime: "", endTime: "",
+};
 
 function CouponsTab() {
   const { canCreate, canEdit, canDelete } = usePermission("Coupons");
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -197,12 +210,28 @@ function CouponsTab() {
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    api.getProducts().then(setProducts).catch(() => {});
+    api.getCategories().then(setCategories).catch(() => {});
+    api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
+  }, []);
 
   const openCreate = () => { setEditItem(null); setForm(emptyCoupon); setSheetOpen(true); };
   const openEdit = (c: Coupon) => {
     setEditItem(c);
-    setForm({ name: c.name, code: c.code, type: c.type, value: String(c.value), startDate: c.startDate?.slice(0, 10) ?? today, endDate: c.endDate?.slice(0, 10) ?? nextMonth, usageLimit: c.usageLimit != null ? String(c.usageLimit) : "", status: c.status });
+    setForm({
+      name: c.name, code: c.code, type: c.type, value: String(c.value),
+      startDate: c.startDate?.slice(0, 10) ?? today, endDate: c.endDate?.slice(0, 10) ?? nextMonth,
+      usageLimit: c.usageLimit != null ? String(c.usageLimit) : "", status: c.status,
+      appliesTo: c.applicableTo ?? "all",
+      productId: c.applicableTo === "product" ? (c.applicableId ?? "") : "",
+      categoryId: c.applicableTo === "category" ? (c.applicableId ?? "") : "",
+      branchId: c.branchId ?? "",
+      minOrderAmount: c.minOrderAmount != null ? String(c.minOrderAmount) : "",
+      maxDiscountAmount: c.maxDiscountAmount != null ? String(c.maxDiscountAmount) : "",
+      startTime: c.startTime?.slice(0, 5) ?? "", endTime: c.endTime?.slice(0, 5) ?? "",
+    });
     setSheetOpen(true);
   };
 
@@ -210,9 +239,22 @@ function CouponsTab() {
     if (!form.name || !form.code) { toast.error("Name and code are required"); return; }
     const rangeError = validityRangeError(form.startDate, form.endDate);
     if (rangeError) { toast.error(rangeError); return; }
+    if (form.appliesTo === "product" && !form.productId) { toast.error("Select a product"); return; }
+    if (form.appliesTo === "category" && !form.categoryId) { toast.error("Select a category"); return; }
     setSaving(true);
     try {
-      const payload = { name: form.name, code: form.code.toUpperCase(), type: form.type, value: Number(form.value), startDate: form.startDate, endDate: form.endDate, usageLimit: form.usageLimit ? Number(form.usageLimit) : undefined, status: form.status };
+      const payload = {
+        name: form.name, code: form.code.toUpperCase(), type: form.type, value: Number(form.value),
+        startDate: form.startDate, endDate: form.endDate,
+        usageLimit: form.usageLimit ? Number(form.usageLimit) : undefined, status: form.status,
+        applicableTo: form.appliesTo,
+        applicableId: form.appliesTo === "product" ? form.productId : form.appliesTo === "category" ? form.categoryId : undefined,
+        branchId: form.branchId || undefined,
+        minOrderAmount: form.minOrderAmount ? Number(form.minOrderAmount) : undefined,
+        maxDiscountAmount: form.maxDiscountAmount ? Number(form.maxDiscountAmount) : undefined,
+        startTime: form.startTime ? `${form.startTime}:00` : undefined,
+        endTime: form.endTime ? `${form.endTime}:00` : undefined,
+      };
       editItem ? await api.updateCoupon(editItem.id, payload) : await api.createCoupon(payload);
       toast.success(editItem ? "Coupon updated" : "Coupon created");
       setSheetOpen(false); load();
@@ -317,9 +359,59 @@ function CouponsTab() {
               </FL>
               <FL label="Value"><Input type="number" value={form.value} onChange={set("value")} className="h-9" placeholder="25" /></FL>
             </div>
+
+            <FL label="Applies To">
+              <Select value={form.appliesTo} onValueChange={setS("appliesTo")}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Items</SelectItem>
+                  <SelectItem value="product">Specific Product</SelectItem>
+                  <SelectItem value="category">Specific Category</SelectItem>
+                </SelectContent>
+              </Select>
+            </FL>
+            {form.appliesTo === "product" && (
+              <FL label="Product">
+                <Select value={form.productId} onValueChange={setS("productId")}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select product" /></SelectTrigger>
+                  <SelectContent>
+                    {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} — {p.sku}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FL>
+            )}
+            {form.appliesTo === "category" && (
+              <FL label="Category">
+                <Select value={form.categoryId} onValueChange={setS("categoryId")}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>
+                    {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FL>
+            )}
+            <FL label="Branch (blank = all branches)">
+              <Select value={form.branchId || "all"} onValueChange={v => setS("branchId")(v === "all" ? "" : v)}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FL>
+
+            <div className="grid grid-cols-2 gap-3">
+              <FL label="Min Order Amount (optional)"><Input type="number" value={form.minOrderAmount} onChange={set("minOrderAmount")} className="h-9" placeholder="e.g. 50" /></FL>
+              <FL label="Max Discount Cap (optional)"><Input type="number" value={form.maxDiscountAmount} onChange={set("maxDiscountAmount")} className="h-9" placeholder="e.g. 100" /></FL>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <FL label="Start Date"><Input type="date" value={form.startDate} onChange={set("startDate")} className="h-9" /></FL>
               <FL label="End Date"><Input type="date" value={form.endDate} onChange={set("endDate")} min={form.startDate || today} className="h-9" /></FL>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <FL label="Valid From (time, optional)"><Input type="time" value={form.startTime} onChange={set("startTime")} className="h-9" /></FL>
+              <FL label="Valid Until (time, optional)"><Input type="time" value={form.endTime} onChange={set("endTime")} className="h-9" /></FL>
             </div>
             <FL label="Usage Limit (blank = unlimited)"><Input type="number" value={form.usageLimit} onChange={set("usageLimit")} className="h-9" placeholder="∞" /></FL>
             {editItem && (
@@ -350,11 +442,13 @@ type DiscountForm = {
   name: string; appliesTo: string; productId: string; categoryId: string; branchIds: string[];
   discountType: string; value: string; isActive: boolean; startDate: string; endDate: string;
   excludedProductIds: string[]; requiresCustomer: boolean;
+  maxDiscountAmount: string; combinable: boolean; autoApply: boolean;
 };
 const emptyDiscount: DiscountForm = {
   name: "", appliesTo: "all", productId: "", categoryId: "", branchIds: [],
   discountType: "percentage", value: "", isActive: true, startDate: today, endDate: nextMonth,
   excludedProductIds: [], requiresCustomer: false,
+  maxDiscountAmount: "", combinable: true, autoApply: false,
 };
 
 function DiscountsTab() {
@@ -395,6 +489,9 @@ function DiscountsTab() {
       isActive: d.isActive, startDate: d.startDate?.slice(0, 10) ?? today, endDate: d.endDate?.slice(0, 10) ?? nextMonth,
       excludedProductIds,
       requiresCustomer: d.requiresCustomer ?? false,
+      maxDiscountAmount: d.maxDiscountAmount != null ? String(d.maxDiscountAmount) : "",
+      combinable: d.combinable ?? true,
+      autoApply: d.autoApply ?? false,
     });
     setSheetOpen(true);
   };
@@ -415,6 +512,9 @@ function DiscountsTab() {
         startDate: form.startDate || undefined, endDate: form.endDate || undefined,
         excludedProductIds: form.excludedProductIds.length > 0 ? form.excludedProductIds : undefined,
         requiresCustomer: form.requiresCustomer,
+        maxDiscountAmount: form.maxDiscountAmount ? Number(form.maxDiscountAmount) : undefined,
+        combinable: form.combinable,
+        autoApply: form.autoApply,
       };
       if (editItem) {
         const branchId = form.appliesTo === "branch" ? (form.branchIds[0] || undefined) : undefined;
@@ -577,9 +677,28 @@ function DiscountsTab() {
               </FL>
               <FL label="Value"><Input type="number" value={form.value} onChange={set("value")} className="h-9" placeholder={form.discountType === "percentage" ? "10" : "5.00"} /></FL>
             </div>
+            {form.discountType === "percentage" && (
+              <FL label="Max Discount Cap (optional)"><Input type="number" value={form.maxDiscountAmount} onChange={set("maxDiscountAmount")} className="h-9" placeholder="e.g. 100" /></FL>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <FL label="Start Date"><Input type="date" value={form.startDate} onChange={set("startDate")} className="h-9" /></FL>
               <FL label="End Date"><Input type="date" value={form.endDate} onChange={set("endDate")} min={form.startDate || today} className="h-9" /></FL>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox" id="autoApply" checked={form.autoApply}
+                onChange={e => setForm(p => ({ ...p, autoApply: e.target.checked }))}
+                className="h-4 w-4 accent-primary"
+              />
+              <label htmlFor="autoApply" className="text-sm cursor-pointer">Auto-apply at POS (skip manual selection)</label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox" id="combinable" checked={form.combinable}
+                onChange={e => setForm(p => ({ ...p, combinable: e.target.checked }))}
+                className="h-4 w-4 accent-primary"
+              />
+              <label htmlFor="combinable" className="text-sm cursor-pointer">Can be combined with other coupons/discounts</label>
             </div>
             <div className="flex items-center gap-2">
               <input type="checkbox" id="isActive" checked={form.isActive} onChange={e => setForm(p => ({ ...p, isActive: e.target.checked }))} className="h-4 w-4 accent-primary" />

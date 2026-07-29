@@ -2,9 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
+import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -16,7 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Boxes, AlertTriangle, XCircle, DollarSign, Building2, Truck } from "lucide-react";
+import { Boxes, AlertTriangle, XCircle, DollarSign, Building2, Truck, X } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/low-stock")({ component: LowStock });
@@ -82,42 +83,59 @@ function LowStock() {
     count: (data?.rows ?? []).filter((r) => r.urgency === u).length,
   })).filter((u) => u.count > 0);
 
+  const hasFilters = branchIds.length > (lockedBranchId ? 1 : 0) || categoryIds.length > 0
+    || productIds.length > 0 || isTobacco;
+  const clearFilters = () => {
+    setBranchIds(lockedBranchId ? [lockedBranchId] : []); setCategoryIds([]); setProductIds([]); setIsTobacco(false);
+  };
+
   return (
     <PageShell
       title="Low Stock Report"
       subtitle="Items below reorder thresholds, with recommended reorder quantities"
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         {!lockedBranchId && (
-          <div className="w-44">
+          <FilterField label="Branch">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+          </FilterField>
+        )}
+        <FilterField label="Category">
+          <div className="w-40">
             <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={branchIds}
-              onChange={setBranchIds}
+              placeholder="All Categories"
+              options={categories.map((c) => ({ id: c.id, label: c.name }))}
+              selected={categoryIds}
+              onChange={setCategoryIds}
             />
           </div>
-        )}
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Categories"
-            options={categories.map((c) => ({ id: c.id, label: c.name }))}
-            selected={categoryIds}
-            onChange={setCategoryIds}
-          />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={products.map((p) => ({ id: p.id, label: p.name }))}
-            selected={productIds}
-            onChange={setProductIds}
-          />
-        </div>
+        </FilterField>
+        <FilterField label="Product">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
+        </FilterField>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
           Tobacco only
         </label>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

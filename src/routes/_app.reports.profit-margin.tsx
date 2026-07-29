@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -14,7 +15,7 @@ import { api, type ProfitMarginReport as ProfitMarginData, type ProfitMarginRow,
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { TrendingUp, Percent, AlertTriangle, ShieldAlert } from "lucide-react";
+import { TrendingUp, Percent, AlertTriangle, ShieldAlert, X } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/profit-margin")({ component: ProfitMargin });
@@ -79,31 +80,42 @@ function ProfitMargin() {
   const fmt = (n: number) => fmtSAR(n);
   const chartData = (data?.rows ?? []).slice(0, 10).map((r) => ({ name: r.groupName, margin: r.marginPct ?? 0 }));
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchId !== (lockedBranchId ?? "all") || groupBy !== "product";
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchId(lockedBranchId ?? "all"); setGroupBy("product");
+  };
+
   return (
     <PageShell title="Profit Margin" subtitle="Gross and net margin by product, category and branch">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
-        </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+          <FilterField label="Branch">
+            <Select value={branchId} onValueChange={setBranchId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        )}
+        <FilterField label="Group By">
+          <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Group By" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              <SelectItem value="product">Group by Product</SelectItem>
+              <SelectItem value="category">Group by Category</SelectItem>
+              <SelectItem value="branch">Group by Branch</SelectItem>
             </SelectContent>
           </Select>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
         )}
-        <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Group By" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="product">Group by Product</SelectItem>
-            <SelectItem value="category">Group by Category</SelectItem>
-            <SelectItem value="branch">Group by Branch</SelectItem>
-          </SelectContent>
-        </Select>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

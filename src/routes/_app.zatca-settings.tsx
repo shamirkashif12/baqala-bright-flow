@@ -15,7 +15,7 @@ import {
   ShieldCheck, FileText, Building2, Receipt, RefreshCw, CheckCircle2,
   AlertTriangle, Activity, QrCode, FileWarning, Loader2, KeyRound,
 } from "lucide-react";
-import { FilterBar } from "@/components/filter-bar";
+import { FilterBar, type FilterState } from "@/components/filter-bar";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -49,6 +49,18 @@ const errorLogs = [
   { id: "ERR-439", invoice: "INV-20260601-3331", code: "VR-118", reason: "Invalid invoice timestamp format", branch: "Jeddah", time: "Yesterday", status: "retry required" },
 ];
 
+// Shared by the Integration Logs / Error Logs tabs — each row's searchable text fields vs. the
+// FilterBar's query, plus a loose branch match ("Olaya" from the mock rows vs. "Olaya — Riyadh"
+// from the filter's branch list, which don't share an exact string).
+function matchesLogFilter(row: Record<string, string | number>, searchFields: string[], filter: FilterState | null): boolean {
+  if (!filter) return true;
+  const q = filter.query.trim().toLowerCase();
+  const matchesQuery = !q || searchFields.some(f => String(row[f] ?? "").toLowerCase().includes(q));
+  const branch = String(row.branch ?? "").toLowerCase();
+  const matchesBranch = filter.branch === "All Branches" || filter.branch.toLowerCase().includes(branch);
+  return matchesQuery && matchesBranch;
+}
+
 function onboardingLabel(status?: string) {
   switch (status) {
     case "csr_generated": return "CSR generated";
@@ -71,6 +83,8 @@ function ZatcaSettings() {
   const isAdmin = user?.role === "tenant_admin";
   const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
   const [branchId, setBranchId] = useState(lockedBranchId ?? "");
+  const [logsFilter, setLogsFilter] = useState<FilterState | null>(null);
+  const [errorsFilter, setErrorsFilter] = useState<FilterState | null>(null);
   useEffect(() => {
     if (lockedBranchId) setBranchId(lockedBranchId);
   }, [lockedBranchId]);
@@ -473,7 +487,7 @@ function ZatcaSettings() {
         </TabsContent>
 
         <TabsContent value="logs" className="mt-4 space-y-3">
-          <FilterBar placeholder="Search by invoice, branch, status…" />
+          <FilterBar placeholder="Search by invoice, branch, status…" onChange={setLogsFilter} />
           <DataTable
             columns={[
               { key: "id", label: "Log ID", render: r => <span className="font-mono text-xs">{r.id}</span> },
@@ -483,14 +497,14 @@ function ZatcaSettings() {
               { key: "attempt", label: "Attempt", render: r => <span className="tabular-nums">×{r.attempt}</span> },
               { key: "time", label: "Time" },
               { key: "status", label: "Status", render: r => <StatusBadge status={r.status} /> },
-              { key: "_a", label: "", render: r => r.status !== "connected" ? <Button size="sm" variant="outline" className="h-7 gap-1"><RefreshCw className="h-3 w-3" />Retry</Button> : <CheckCircle2 className="h-4 w-4 text-success" /> },
+              { key: "_a", label: "Action", render: r => r.status !== "connected" ? <Button size="sm" variant="outline" className="h-7 gap-1"><RefreshCw className="h-3 w-3" />Retry</Button> : <span className="text-xs text-muted-foreground">—</span> },
             ]}
-            rows={integrationLogs}
+            rows={integrationLogs.filter(r => matchesLogFilter(r, ["id", "invoice", "type", "branch", "status"], logsFilter))}
           />
         </TabsContent>
 
         <TabsContent value="errors" className="mt-4 space-y-3">
-          <FilterBar placeholder="Search by invoice, error code…" />
+          <FilterBar placeholder="Search by invoice, error code…" onChange={setErrorsFilter} />
           <DataTable
             columns={[
               { key: "id", label: "Error ID", render: r => <span className="font-mono text-xs">{r.id}</span> },
@@ -500,9 +514,9 @@ function ZatcaSettings() {
               { key: "branch", label: "Branch" },
               { key: "time", label: "Time" },
               { key: "status", label: "Status", render: r => <StatusBadge status={r.status} /> },
-              { key: "_a", label: "", render: () => <Button size="sm" variant="outline" className="h-7 gap-1"><RefreshCw className="h-3 w-3" />Retry submission</Button> },
+              { key: "_a", label: "Action", render: () => <Button size="sm" variant="outline" className="h-7 gap-1"><RefreshCw className="h-3 w-3" />Retry submission</Button> },
             ]}
-            rows={errorLogs}
+            rows={errorLogs.filter(r => matchesLogFilter(r, ["id", "invoice", "code", "reason", "branch", "status"], errorsFilter))}
           />
         </TabsContent>
       </Tabs>

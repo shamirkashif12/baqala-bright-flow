@@ -35,6 +35,22 @@ public class Discount
     [Column("value")]
     public decimal Value { get; set; }
 
+    // Caps the SAR amount a percentage-type discount can take off, same convention as
+    // Coupon.MaxDiscountAmount — null means uncapped.
+    [Column("max_discount_amount")]
+    public decimal? MaxDiscountAmount { get; set; }
+
+    // When false, this discount can't be applied at checkout alongside any other discount or a
+    // coupon — the cashier must pick between them. Default true preserves existing behavior
+    // (every discount always stacked with everything else, unconditionally).
+    [Column("combinable")]
+    public bool Combinable { get; set; } = true;
+
+    // When true, POS applies this discount automatically as soon as the cart becomes eligible,
+    // instead of the cashier having to pick it from the discount dropdown.
+    [Column("auto_apply")]
+    public bool AutoApply { get; set; } = false;
+
     [Column("is_active")]
     public bool IsActive { get; set; } = true;
 

@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { api, excludeDisabledBranches, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Product, type SupplierCreditNote, type StockTransfer, type User } from "@/lib/api";
+import { api, excludeDisabledBranches, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Branch, type Product, type SupplierCreditNote, type StockTransfer, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon, fmtSAR } from "@/lib/currency";
@@ -147,17 +147,16 @@ function StepBar({ step }: { step: number }) {
 }
 
 function CreatePOWizard({
-  open, onClose, suppliers, warehouses, products, onCreated,
+  open, onClose, suppliers, warehouses, branches, products, onCreated,
 }: {
   open: boolean; onClose: () => void;
-  suppliers: Supplier[]; warehouses: Warehouse[]; products: Product[];
+  suppliers: Supplier[]; warehouses: Warehouse[]; branches: Branch[]; products: Product[];
   onCreated: () => void;
 }) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   // Step 1
   const [supplierId, setSupplierId] = useState("");
-  const [supplierType, setSupplierType] = useState("Direct Supplier");
   const [paymentTerms, setPaymentTerms] = useState("Net 30");
   // Step 2
   const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
@@ -170,7 +169,7 @@ function CreatePOWizard({
   const [error, setError] = useState("");
 
   const reset = () => {
-    setStep(1); setSupplierId(""); setSupplierType("Direct Supplier"); setPaymentTerms("Net 30");
+    setStep(1); setSupplierId(""); setPaymentTerms("Net 30");
     setWarehouseIds([]); setExpectedDeliveryDate(""); setItems([emptyItem([])]); setNotes(""); setError("");
   };
 
@@ -210,7 +209,31 @@ function CreatePOWizard({
   const subtotalForWarehouse = (whId: string) => items.reduce((s, it) => s + (it.qtyByWarehouse[whId] || 0) * it.unitCost, 0);
 
   const selectedSupplier = suppliers.find(s => s.id === supplierId);
-  const selectedWarehouses = warehouses.filter(w => warehouseIds.includes(w.id));
+
+  // Payment terms are already set on the supplier record itself — previously this always started
+  // at a hardcoded "Net 30" regardless of supplier, so every PO needed the same manual re-pick.
+  useEffect(() => {
+    if (selectedSupplier?.paymentTerms) setPaymentTerms(selectedSupplier.paymentTerms);
+  }, [selectedSupplier?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- only re-derive on supplier change, not every keystroke on paymentTerms itself
+
+  // A supplier's Supply Channel says where it's actually able to deliver — "mart_to_mart" suppliers
+  // ship directly to a branch, not a warehouse, but Step 2 previously only ever offered warehouses
+  // as a destination regardless of this, so a mart-to-mart supplier had no valid delivery location
+  // to pick at all. Filter the destination list by that supply channel instead of hardcoding
+  // warehouses; "both"/unset still offers everything so existing warehouse-only flows don't change.
+  const destinationOptions = useMemo(() => {
+    const supplyType = selectedSupplier?.supplyType;
+    const whOpts = warehouses.map(w => ({ id: w.id, label: w.name }));
+    const brOpts = branches.map(b => ({ id: b.id, label: b.name }));
+    if (supplyType === "mart_to_mart") return brOpts;
+    if (supplyType === "warehouse") return whOpts;
+    return [...whOpts, ...brOpts];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSupplier?.supplyType, warehouses, branches]);
+  const isBranchDestination = (id: string) => branches.some(b => b.id === id);
+  const destinationName = (id: string) => destinationOptions.find(o => o.id === id)?.label ?? id;
+
+  const selectedWarehouses = destinationOptions.filter(o => warehouseIds.includes(o.id)).map(o => ({ id: o.id, name: o.label }));
   const grandTotal = items.reduce((s, it) => s + totalQty(it) * it.unitCost, 0);
   // Warehouses that will actually receive a PO — one with zero units allocated across every
   // item is skipped rather than sent an empty order.
@@ -224,7 +247,7 @@ function CreatePOWizard({
       if (!valid.length) { setError("Add at least one item with a product selected."); return false; }
       const emptyWarehouse = warehouseIds.find(whId => !valid.some(it => (it.qtyByWarehouse[whId] || 0) > 0));
       if (emptyWarehouse) {
-        const name = warehouses.find(w => w.id === emptyWarehouse)?.name ?? "a selected warehouse";
+        const name = destinationName(emptyWarehouse) || "a selected location";
         setError(`${name} has no quantity allocated. Click the Qty field on any item above to open its per-warehouse split and enter a quantity for ${name}, or remove ${name} from Step 2.`);
         return false;
       }
@@ -246,9 +269,11 @@ function CreatePOWizard({
         const whItems = validItems
           .map(it => ({ productId: it.productId, orderedQuantity: it.qtyByWarehouse[whId] || 0, unitCost: it.unitCost }))
           .filter(it => it.orderedQuantity > 0);
+        const toBranch = isBranchDestination(whId);
         await api.createPurchaseOrder({
           supplierId,
-          warehouseId: whId,
+          warehouseId: toBranch ? undefined : whId,
+          branchId: toBranch ? whId : undefined,
           paymentTerms: paymentTerms.toLowerCase().replace(/ /g, "_"),
           expectedDeliveryDate: expectedDeliveryDate || undefined,
           notes: notes || undefined,
@@ -288,25 +313,16 @@ function CreatePOWizard({
                   </SelectContent>
                 </Select>
               </FieldRow>
-              <FieldRow label="Supplier Type">
-                <Select value={supplierType} onValueChange={setSupplierType}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Direct Supplier">Direct Supplier</SelectItem>
-                    <SelectItem value="Distributor">Distributor</SelectItem>
-                    <SelectItem value="Local Supplier">Local Supplier</SelectItem>
-                    <SelectItem value="Manufacturer">Manufacturer</SelectItem>
-                  </SelectContent>
-                </Select>
-              </FieldRow>
               {selectedSupplier && (
-                <FieldRow label="Supplier Phone">
-                  <Input className="h-9" value={selectedSupplier.contactNumber ?? ""} readOnly />
-                </FieldRow>
+                <>
+                  <FieldRow label="Supplier Phone">
+                    <Input className="h-9" value={selectedSupplier.contactNumber ?? ""} readOnly />
+                  </FieldRow>
+                  <FieldRow label="VAT / CR">
+                    <Input className="h-9" value={[selectedSupplier.vatNumber, selectedSupplier.crNumber].filter(Boolean).join(" / ") || "Not on file for this supplier"} readOnly />
+                  </FieldRow>
+                </>
               )}
-              <FieldRow label="VAT / CR (optional)">
-                <Input className="h-9" placeholder="e.g. 310122393500003" />
-              </FieldRow>
               <FieldRow label="Payment Terms">
                 <Select value={paymentTerms} onValueChange={setPaymentTerms}>
                   <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
@@ -315,6 +331,8 @@ function CreatePOWizard({
                     <SelectItem value="Net 60">Net 60</SelectItem>
                     <SelectItem value="On Delivery">On Delivery</SelectItem>
                     <SelectItem value="Immediate">Immediate</SelectItem>
+                    <SelectItem value="COD">COD</SelectItem>
+                    <SelectItem value="Advance Payment">Advance Payment</SelectItem>
                   </SelectContent>
                 </Select>
               </FieldRow>
@@ -326,15 +344,18 @@ function CreatePOWizard({
             <>
               <FieldRow label={`Delivery Location(s) * ${warehouseIds.length > 0 ? `— ${warehouseIds.length} selected` : ""}`}>
                 <MultiSelect
-                  options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                  options={destinationOptions}
                   value={warehouseIds}
                   onChange={setWarehouseIds}
-                  placeholder="Select warehouse(s)…"
+                  placeholder="Select delivery location(s)…"
                 />
+                {selectedSupplier?.supplyType === "mart_to_mart" && (
+                  <p className="text-[11px] text-muted-foreground mt-1">This supplier delivers directly to branches only.</p>
+                )}
                 {warehouseIds.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {warehouseIds.map(id => {
-                      const lbl = warehouses.find(w => w.id === id)?.name ?? id;
+                      const lbl = destinationName(id);
                       return (
                         <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
                           {lbl}
@@ -406,7 +427,7 @@ function CreatePOWizard({
                         </div>
                         {warehouseIds.map(whId => (
                           <div key={whId} className="flex items-center justify-between gap-2">
-                            <span className="text-xs truncate">{warehouses.find(w => w.id === whId)?.name ?? whId}</span>
+                            <span className="text-xs truncate">{destinationName(whId)}</span>
                             <Input
                               type="number" min={0}
                               className="h-7 w-16 text-xs text-right"
@@ -468,7 +489,6 @@ function CreatePOWizard({
             <div className="space-y-2 text-sm">
               {[
                 ["Supplier",       selectedSupplier?.name ?? "—"],
-                ["Type",           supplierType],
                 ["ETA",            expectedDeliveryDate ? formatDate(expectedDeliveryDate) : "—"],
                 ["Payment terms",  paymentTerms],
               ].map(([k, v]) => (
@@ -542,7 +562,7 @@ function CreatePOWizard({
               </div>
               <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Supplier</span><span className="font-medium">{selectedSupplier?.name ?? "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Warehouses</span><span className="font-medium text-right">{selectedWarehouses.map(w => w.name).join(", ") || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Delivery to</span><span className="font-medium text-right">{selectedWarehouses.map(w => w.name).join(", ") || "—"}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Items</span><span className="font-medium">{items.filter(it => it.productId).length} product(s)</span></div>
                 {plannedWarehouseIds.length > 1 && selectedWarehouses.map(w => (
                   <div key={w.id} className="flex justify-between text-xs"><span className="text-muted-foreground">{w.name}</span><span className="font-medium flex items-center gap-0.5"><SARIcon />{fmt(subtotalForWarehouse(w.id))}</span></div>
@@ -996,7 +1016,7 @@ function PurchaseOrders() {
   const [loading, setLoading] = useState(true);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [, setBranches] = useState<unknown[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -1465,7 +1485,7 @@ function PurchaseOrders() {
 
       <CreatePOWizard
         open={createOpen} onClose={() => setCreateOpen(false)}
-        suppliers={suppliers} warehouses={warehouses} products={products}
+        suppliers={suppliers} warehouses={warehouses} branches={branches} products={products}
         onCreated={load}
       />
 

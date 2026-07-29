@@ -362,6 +362,24 @@ public class ReturnsController(
         var order = await db.Orders.FindAsync(ret.OrderId);
         if (order is not null) order.OrderStatus = "refunded";
 
+        // A completed refund never touched the original order's shift — "Cash in Drawer"
+        // (CashierWorkspace: openingAmount + CashSales) stayed permanently overstated by every
+        // cash refund forever, since the cash physically leaves the drawer here but nothing ever
+        // reversed it (mirrors OrderVoidService.VoidAsync's reversal, which already does this
+        // correctly for a full void). Only "cash" and "card_reversal" have a knowable effect on
+        // the drawer/card terminal; "store_credit" never touches either, and "original_payment"
+        // is deliberately left alone rather than guessing which tender(s) the original sale used.
+        if ((ret.RefundMethod == "cash" || ret.RefundMethod == "card_reversal") && order?.ShiftId is { } shiftId)
+        {
+            var shift = await db.CashierShifts.FindAsync(shiftId);
+            if (shift is not null)
+            {
+                if (ret.RefundMethod == "cash") shift.CashSales -= ret.RefundAmount;
+                else shift.CardSales -= ret.RefundAmount;
+                shift.TotalSales -= ret.RefundAmount;
+            }
+        }
+
         // Reverse a proportional share of this order's loyalty activity — mirrors the full
         // reversal in OrderVoidService.VoidAsync, scaled by how much of the order this
         // return refunds, so several independent partial returns against the same order each

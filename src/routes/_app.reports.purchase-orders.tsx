@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -17,7 +17,7 @@ import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Receipt, ClipboardCheck, Boxes, DollarSign, Eye } from "lucide-react";
+import { Receipt, ClipboardCheck, Boxes, DollarSign, Eye, X } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/purchase-orders")({ component: PurchaseReports });
 
@@ -135,6 +135,15 @@ function PurchaseReports() {
     productId: productIds.length ? productIds : undefined,
   };
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || supplierIds.length > 0
+    || (!lockedBranchId && branchIds.length > 0) || warehouseIds.length > 0 || statuses.length > 0
+    || createdByIds.length > 0 || approvedByIds.length > 0 || productIds.length > 0;
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setSupplierIds([]);
+    if (!lockedBranchId) setBranchIds([]);
+    setWarehouseIds([]); setStatuses([]); setCreatedByIds([]); setApprovedByIds([]); setProductIds([]);
+  };
+
   const load = useCallback(() => {
     setLoading(true);
     api.getPurchaseOrderReport(filterParams)
@@ -161,70 +170,86 @@ function PurchaseReports() {
 
   return (
     <PageShell title="Purchase Reports" subtitle="Complete purchase order detail — click a row to see every product">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
-        </div>
-        <div className="w-48">
-          <SearchableMultiSelect
-            placeholder="All Suppliers"
-            options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
-            selected={supplierIds}
-            onChange={setSupplierIds}
-          />
-        </div>
-        {!lockedBranchId && (
-          <div className="w-40">
+      <div className="flex flex-wrap items-end gap-2">
+        <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="Supplier">
+          <div className="w-48">
             <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={branchIds}
-              onChange={setBranchIds}
+              placeholder="All Suppliers"
+              options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+              selected={supplierIds}
+              onChange={setSupplierIds}
             />
           </div>
+        </FilterField>
+        {!lockedBranchId && (
+          <FilterField label="Branch">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+          </FilterField>
         )}
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Warehouses"
-            options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-            selected={warehouseIds}
-            onChange={setWarehouseIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Statuses"
-            options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
-            selected={statuses}
-            onChange={setStatuses}
-          />
-        </div>
-        <div className="w-48">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={products.map((p) => ({ id: p.id, label: p.name }))}
-            selected={productIds}
-            onChange={setProductIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="Created By: Anyone"
-            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-            selected={createdByIds}
-            onChange={setCreatedByIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="Approved By: Anyone"
-            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-            selected={approvedByIds}
-            onChange={setApprovedByIds}
-          />
-        </div>
+        <FilterField label="Warehouse">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Warehouses"
+              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+              selected={warehouseIds}
+              onChange={setWarehouseIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Status">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Statuses"
+              options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
+              selected={statuses}
+              onChange={setStatuses}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Product">
+          <div className="w-48">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Created By">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Created By: Anyone"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={createdByIds}
+              onChange={setCreatedByIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Approved By">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Approved By: Anyone"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={approvedByIds}
+              onChange={setApprovedByIds}
+            />
+          </div>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

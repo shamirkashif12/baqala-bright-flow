@@ -20,7 +20,9 @@ public class DepartmentsController(BaqalaDbContext db, IAuditService audit) : Co
         [FromQuery] int? page, [FromQuery] int? pageSize)
     {
         var query = db.Departments.Include(d => d.Branch).Include(d => d.ManagerEmployee).AsQueryable();
-        if (branchId.HasValue) query = query.Where(d => d.BranchId == branchId);
+        // A null BranchId means "all branches" — it must match any branchId filter, not just get
+        // silently excluded (mirrors the frontend's own filter fix in _app.departments.tsx).
+        if (branchId.HasValue) query = query.Where(d => d.BranchId == branchId || d.BranchId == null);
         if (!string.IsNullOrEmpty(status)) query = query.Where(d => d.Status == status);
         if (!string.IsNullOrEmpty(search)) query = query.Where(d => d.Name.Contains(search));
 

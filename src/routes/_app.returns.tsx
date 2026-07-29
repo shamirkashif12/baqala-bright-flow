@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, ScanLine, Loader2 } from "lucide-react";
+import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, Loader2 } from "lucide-react";
 import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type OrderItem } from "@/lib/api";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { useBranch } from "@/lib/branch-context";
@@ -234,6 +234,7 @@ function Returns() {
   const [invoiceError, setInvoiceError] = useState("");
   const [matchedOrder, setMatchedOrder] = useState<Order | null>(null);
   const [matchedBranchName, setMatchedBranchName] = useState<string>("");
+  const [showInvoiceResults, setShowInvoiceResults] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -325,6 +326,53 @@ function Returns() {
   const selectedItems = itemRows.filter(r => r.selected);
   const totalRefund = selectedItems.reduce((s, r) => s + r.qty * r.refundPerUnit, 0);
 
+  // Shared by both the live-search dropdown (already has the order id) and the Enter/exact-match
+  // fallback below (only has a typed number) — both end up needing the same full order + item rows.
+  const loadOrderDetail = (order: Order) => {
+    setMatchedOrder(order);
+    // Resolve branch name from the order (use embedded branch object, or look up from context list)
+    const branchName =
+      order.branch?.name ??
+      allBranches.find(b => b.id === order.branchId)?.name ??
+      "Unknown branch";
+    setMatchedBranchName(branchName);
+    // Same fix as the orderId-select path above — always take this order's own customerId.
+    setForm(p => ({ ...p, orderId: order.id, branchId: order.branchId, customerId: order.customerId ?? "" }));
+    const rows: ItemRow[] = (order.items ?? []).map((oi: OrderItem) => ({
+      orderItemId: oi.id ?? "",
+      productId: oi.productId,
+      productName: oi.product?.name ?? oi.productId,
+      unitPrice: oi.unitPrice,
+      refundPerUnit: refundPerUnit(order, oi),
+      maxQty: Number(oi.quantity),
+      qty: 1,
+      condition: "good",
+      restock: true,
+      selected: false,
+    }));
+    setItemRows(rows);
+  };
+
+  // Live/partial search as you type, mirroring the product search box in POS — no more having to
+  // type the exact invoice number and press Enter/Scan.
+  const invoiceMatches = !matchedOrder && invoiceNumber.trim()
+    ? orders.filter(o => o.orderNumber.toLowerCase().includes(invoiceNumber.trim().toLowerCase())).slice(0, 8)
+    : [];
+
+  const selectInvoiceMatch = async (order: Order) => {
+    setShowInvoiceResults(false);
+    setInvoiceNumber(order.orderNumber);
+    setInvoiceError("");
+    setLoadingItems(true);
+    setItemRows([]);
+    try {
+      const full = await api.getOrder(order.id);
+      loadOrderDetail(full);
+    } catch {
+      setInvoiceError("Failed to look up invoice. Try again.");
+    } finally { setLoadingItems(false); }
+  };
+
   const lookupInvoice = async () => {
     const num = invoiceNumber.trim();
     if (!num) return;
@@ -343,28 +391,7 @@ function Returns() {
         order = await api.getOrderByNumber(num).catch(() => null);
       }
       if (!order) { setInvoiceError("Invoice not found. Check the number and try again."); return; }
-      setMatchedOrder(order);
-      // Resolve branch name from the order (use embedded branch object, or look up from context list)
-      const branchName =
-        order.branch?.name ??
-        allBranches.find(b => b.id === order!.branchId)?.name ??
-        "Unknown branch";
-      setMatchedBranchName(branchName);
-      // Same fix as the orderId-select path above — always take this order's own customerId.
-      setForm(p => ({ ...p, orderId: order!.id, branchId: order!.branchId, customerId: order!.customerId ?? "" }));
-      const rows: ItemRow[] = (order.items ?? []).map((oi: OrderItem) => ({
-        orderItemId: oi.id ?? "",
-        productId: oi.productId,
-        productName: oi.product?.name ?? oi.productId,
-        unitPrice: oi.unitPrice,
-        refundPerUnit: refundPerUnit(order, oi),
-        maxQty: Number(oi.quantity),
-        qty: 1,
-        condition: "good",
-        restock: true,
-        selected: false,
-      }));
-      setItemRows(rows);
+      loadOrderDetail(order);
     } catch {
       setInvoiceError("Failed to look up invoice. Try again.");
     } finally { setLoadingItems(false); }
@@ -420,12 +447,22 @@ function Returns() {
     <PageShell title="Returns" subtitle="Customer return requests and refund processing">
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-3 mb-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
         {[
-          { label: "Pending Review", value: returns.filter(r => r.status === "pending").length, color: "text-amber-600" },
-          { label: "Approved", value: returns.filter(r => r.status === "approved").length, color: "text-blue-600" },
-          { label: "Completed", value: returns.filter(r => r.status === "completed").length, color: "text-green-600" },
-          { label: "Rejected", value: returns.filter(r => r.status === "rejected").length, color: "text-red-500" },
+          { label: "Pending Review", value: String(returns.filter(r => r.status === "pending").length), color: "text-amber-600" },
+          { label: "Approved", value: String(returns.filter(r => r.status === "approved").length), color: "text-blue-600" },
+          { label: "Completed", value: String(returns.filter(r => r.status === "completed").length), color: "text-green-600" },
+          { label: "Rejected", value: String(returns.filter(r => r.status === "rejected").length), color: "text-red-500" },
+          {
+            label: "Total Refunds",
+            value: <><SARIcon />{returns.filter(r => r.status === "completed").reduce((s, r) => s + (r.refundAmount ?? 0), 0).toFixed(2)}</>,
+            color: "text-green-600",
+          },
+          {
+            label: "Pending Refunds",
+            value: <><SARIcon />{returns.filter(r => r.status === "pending").reduce((s, r) => s + (r.refundAmount ?? 0), 0).toFixed(2)}</>,
+            color: "text-amber-600",
+          },
         ].map(s => (
           <Card key={s.label} className="p-3 border-border/60">
             <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
@@ -482,25 +519,54 @@ function Returns() {
             <SheetHeader><SheetTitle className="text-lg">Process customer return</SheetTitle></SheetHeader>
             <div className="mt-6 space-y-5">
 
-              {/* Original Invoice */}
+              {/* Original Invoice — active search as you type, no Scan button/Enter needed */}
               <FieldRow label="Original invoice">
-                <div className="flex gap-2">
+                <div className="relative">
                   <Input
                     ref={invoiceInputRef}
                     value={invoiceNumber}
-                    onChange={e => setInvoiceNumber(e.target.value)}
+                    onChange={e => { setInvoiceNumber(e.target.value); setShowInvoiceResults(true); setInvoiceError(""); }}
+                    onFocus={() => setShowInvoiceResults(true)}
+                    onBlur={() => setTimeout(() => setShowInvoiceResults(false), 150)}
                     onKeyDown={e => e.key === "Enter" && lookupInvoice()}
-                    placeholder="ORD-20260623-ABCDEF"
-                    className="h-11 text-sm flex-1"
+                    placeholder="Search invoice / order number…"
+                    className="h-11 text-sm pr-9"
                   />
-                  <Button variant="outline" className="h-11 px-4 gap-2 shrink-0" onClick={loadingItems ? undefined : lookupInvoice} disabled={loadingItems}>
-                    {loadingItems ? <Loader2 className="h-4 w-4 animate-spin" /> : <><ScanLine className="h-4 w-4" />Scan</>}
-                  </Button>
+                  {loadingItems && <Loader2 className="h-4 w-4 absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
+                  {!matchedOrder && showInvoiceResults && invoiceMatches.length > 0 && (
+                    <div className="absolute z-10 top-full mt-1 w-full rounded-lg border border-border/70 bg-card shadow-lg overflow-hidden">
+                      {invoiceMatches.map(o => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onMouseDown={e => { e.preventDefault(); selectInvoiceMatch(o); }}
+                          className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left border-b last:border-0 border-border/40 hover:bg-muted/60"
+                        >
+                          <span className="font-mono text-xs font-semibold">{o.orderNumber}</span>
+                          <span className="text-xs text-muted-foreground">SAR {o.totalAmount.toFixed(2)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!matchedOrder && showInvoiceResults && invoiceNumber.trim() && invoiceMatches.length === 0 && (
+                    <p className="absolute z-10 top-full mt-1 w-full rounded-lg border border-border/70 bg-card shadow-lg px-3 py-2 text-xs text-muted-foreground">
+                      No matching invoice found.
+                    </p>
+                  )}
                 </div>
                 {invoiceError && <p className="text-xs text-destructive mt-1">{invoiceError}</p>}
                 {matchedOrder && (
                   <div className="mt-1 space-y-1">
-                    <p className="text-xs text-success">✓ {matchedOrder.orderNumber} · SAR {matchedOrder.totalAmount.toFixed(2)} · {matchedOrder.items?.length ?? 0} item(s)</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-success">✓ {matchedOrder.orderNumber} · SAR {matchedOrder.totalAmount.toFixed(2)} · {matchedOrder.items?.length ?? 0} item(s)</p>
+                      <button
+                        type="button"
+                        className="text-[11px] text-primary hover:underline shrink-0"
+                        onClick={() => { setMatchedOrder(null); setItemRows([]); setInvoiceNumber(""); setShowInvoiceResults(false); invoiceInputRef.current?.focus(); }}
+                      >
+                        Change
+                      </button>
+                    </div>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
                       Branch: <span className="font-medium text-foreground">{matchedBranchName}</span>
@@ -509,36 +575,73 @@ function Returns() {
                 )}
               </FieldRow>
 
-              {/* Items — multi-select with per-item quantity */}
+              {/* Items — multi-select with per-item quantity, condition and restock */}
               {itemRows.length > 0 && (
                 <FieldRow label={`Select items to return (${selectedItems.length} selected)`}>
+                  <button
+                    type="button"
+                    className="text-[11px] text-primary hover:underline mb-1.5"
+                    onClick={() => {
+                      const allSelected = itemRows.every(r => r.selected);
+                      setItemRows(prev => prev.map(r => ({ ...r, selected: !allSelected })));
+                    }}
+                  >
+                    {itemRows.every(r => r.selected) ? "Deselect all" : "Select all"}
+                  </button>
                   <div className="space-y-2 mt-1">
                     {itemRows.map((row, i) => (
                       <div
                         key={i}
-                        className={`flex items-center gap-3 rounded-lg border p-2.5 cursor-pointer transition-colors ${row.selected ? "border-primary/50 bg-primary/5" : "border-border/60 hover:border-border"}`}
-                        onClick={() => updateRow(i, { selected: !row.selected })}
+                        className={`rounded-lg border p-2.5 transition-colors ${row.selected ? "border-primary/50 bg-primary/5" : "border-border/60 hover:border-border"}`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={row.selected}
-                          readOnly
-                          className="h-4 w-4 accent-primary shrink-0 pointer-events-none"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{row.productName}</p>
-                          <p className="text-xs text-muted-foreground"><SARIcon />{row.refundPerUnit.toFixed(2)}/unit refund · max {row.maxQty}</p>
-                        </div>
-                        {row.selected && (
-                          <Input
-                            type="number"
-                            min={1}
-                            max={row.maxQty}
-                            value={row.qty}
-                            onClick={e => e.stopPropagation()}
-                            onChange={e => updateRow(i, { qty: Math.min(Math.max(1, Number(e.target.value) || 1), row.maxQty) })}
-                            className="h-8 w-20 text-center text-sm shrink-0"
+                        <div className="flex items-center gap-3 cursor-pointer" onClick={() => updateRow(i, { selected: !row.selected })}>
+                          <input
+                            type="checkbox"
+                            checked={row.selected}
+                            readOnly
+                            className="h-4 w-4 accent-primary shrink-0 pointer-events-none"
                           />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{row.productName}</p>
+                            <p className="text-xs text-muted-foreground"><SARIcon />{row.refundPerUnit.toFixed(2)}/unit refund · max {row.maxQty}</p>
+                          </div>
+                          {row.selected && (
+                            <Input
+                              type="number"
+                              min={1}
+                              max={row.maxQty}
+                              value={row.qty}
+                              onClick={e => e.stopPropagation()}
+                              onChange={e => updateRow(i, { qty: Math.min(Math.max(1, Number(e.target.value) || 1), row.maxQty) })}
+                              className="h-8 w-20 text-center text-sm shrink-0"
+                            />
+                          )}
+                        </div>
+                        {/* Per-item condition/restock — each item in a multi-item return can have a
+                            different disposition (one damaged, one just changed-mind), so this can't
+                            be a single all-or-nothing toggle for the whole return. */}
+                        {row.selected && (
+                          <div className="flex items-center gap-2 mt-2 pl-7">
+                            <Select value={row.condition} onValueChange={v => updateRow(i, { condition: v })}>
+                              <SelectTrigger className="h-8 text-xs w-28" onClick={e => e.stopPropagation()}><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="good">Good</SelectItem>
+                                <SelectItem value="damaged">Damaged</SelectItem>
+                                <SelectItem value="expired">Expired</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); updateRow(i, { restock: !row.restock }); }}
+                              className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                                row.restock
+                                  ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                                  : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
+                              }`}
+                            >
+                              Restock: {row.restock ? "Yes" : "No"}
+                            </button>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -579,27 +682,6 @@ function Returns() {
               <FieldRow label="Notes">
                 <Textarea value={form.notes} onChange={setF("notes")} placeholder="Optional notes for audit…" rows={3} className="resize-none text-sm" />
               </FieldRow>
-
-              {/* Restock toggle — applies to all selected items */}
-              {selectedItems.length > 0 && (
-                <div className="flex items-center justify-between rounded-xl border border-border/60 px-4 py-3">
-                  <span className="text-sm text-muted-foreground">Restock selected items to inventory</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextRestock = !(selectedItems[0]?.restock ?? true);
-                      setItemRows(prev => prev.map(r => r.selected ? { ...r, restock: nextRestock } : r));
-                    }}
-                    className={`px-4 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer select-none ${
-                      selectedItems[0]?.restock ?? true
-                        ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
-                        : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
-                    }`}
-                  >
-                    {selectedItems[0]?.restock ?? true ? "Yes" : "No"}
-                  </button>
-                </div>
-              )}
 
               {/* Refund preview */}
               {selectedItems.length > 0 && (

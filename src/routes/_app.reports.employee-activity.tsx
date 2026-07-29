@@ -5,10 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { AuditDetailDrawer } from "@/components/audit-detail-drawer";
-import { Eye } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
 import { api, type EmployeeActivityRow, type Employee, type User, type ReportExportFormat } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -110,7 +110,7 @@ function EmployeeActivityReport() {
     // The one-line Old/New Value summaries above deliberately drop line items — this opens the
     // full record: every affected product, its quantity and price, and the field-level diff.
     {
-      key: "details", label: "Details",
+      key: "details", label: "Action",
       render: r => (
         <Button size="icon" variant="ghost" className="h-7 w-7" title="View full detail" onClick={() => setDetailId(r.id)}>
           <Eye className="h-3.5 w-3.5" />
@@ -119,51 +119,73 @@ function EmployeeActivityReport() {
     },
   ];
 
+  const hasFilters = dateFrom !== firstOfMonthStr() || dateTo !== todayStr() || branchId !== "all" || module !== "all"
+    || employeeId !== "all" || performedBy !== "all" || activityType !== "all" || !!referenceId || !!ipOrDevice;
+  const clearFilters = () => {
+    setDateFrom(firstOfMonthStr()); setDateTo(todayStr()); setBranchId("all"); setModule("all");
+    setEmployeeId("all"); setPerformedBy("all"); setActivityType("all"); setReferenceId(""); setIpOrDevice("");
+  };
+
   return (
     <PageShell title="Employee Activity Report" subtitle="Audit trail of employee actions across HRM and POS modules" breadcrumb={["Human Resources", "Employee Activity Report"]}>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
+        <div className="flex flex-wrap items-end gap-2">
+          <FilterField label="From"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+          <FilterField label="To"><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" /></FilterField>
           {!branchLocked && (
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+            <FilterField label="Branch">
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+          <FilterField label="Module">
+            <Select value={module} onValueChange={setModule}>
+              <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="all">All Modules</SelectItem>
+                {MODULES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
               </SelectContent>
             </Select>
+          </FilterField>
+          <FilterField label="Employee">
+            <Select value={employeeId} onValueChange={setEmployeeId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Performed By">
+            <Select value={performedBy} onValueChange={setPerformedBy}>
+              <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Performed By</SelectItem>
+                {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Activity Type">
+            <Select value={activityType} onValueChange={setActivityType}>
+              <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Activity Types</SelectItem>
+                {ACTIVITY_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Reference ID"><Input value={referenceId} onChange={e => setReferenceId(e.target.value)} placeholder="Reference ID…" className="h-9 w-40" /></FilterField>
+          <FilterField label="IP / Device"><Input value={ipOrDevice} onChange={e => setIpOrDevice(e.target.value)} placeholder="IP / Device…" className="h-9 w-36" /></FilterField>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
           )}
-          <Select value={module} onValueChange={setModule}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Modules</SelectItem>
-              {MODULES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={employeeId} onValueChange={setEmployeeId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={performedBy} onValueChange={setPerformedBy}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Performed By</SelectItem>
-              {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={activityType} onValueChange={setActivityType}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Activity Types</SelectItem>
-              {ACTIVITY_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input value={referenceId} onChange={e => setReferenceId(e.target.value)} placeholder="Reference ID…" className="h-9 w-40" />
-          <Input value={ipOrDevice} onChange={e => setIpOrDevice(e.target.value)} placeholder="IP / Device…" className="h-9 w-36" />
           <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
         </div>
 

@@ -49,11 +49,25 @@ public class SuppliersController(BaqalaDbContext db, IAuditService audit) : Cont
         return null;
     }
 
+    // CR/VAT/phone were only checked for presence, never format — a supplier could be saved with
+    // e.g. a 4-digit "CR number" and nothing downstream (ZATCA invoicing, PO display) would catch
+    // it until it silently failed somewhere else. Checked on both Create and Update (unlike the
+    // presence check above, format applies even when editing a legacy supplier that already has a
+    // value — an existing value should still be a valid one).
+    private static string? ValidateFormats(Supplier supplier)
+    {
+        if (!ContactValidation.IsValidSaudiPhone(supplier.ContactNumber)) return "Enter a valid Saudi mobile number (05XXXXXXXX).";
+        if (!ContactValidation.IsValidSaudiCr(supplier.CrNumber)) return "Enter a valid CR number (10 digits).";
+        if (!ContactValidation.IsValidSaudiVat(supplier.VatNumber)) return "Enter a valid VAT number (15 digits, starting and ending with 3).";
+        return null;
+    }
+
     [RequirePermission("Suppliers", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Supplier supplier)
     {
         if (ValidateRequiredForCreate(supplier) is { } validationError) return BadRequest(new { message = validationError });
+        if (ValidateFormats(supplier) is { } formatError) return BadRequest(new { message = formatError });
 
         supplier.Id = Guid.NewGuid();
         supplier.CreatedAt = supplier.UpdatedAt = DateTime.UtcNow;
@@ -79,6 +93,7 @@ public class SuppliersController(BaqalaDbContext db, IAuditService audit) : Cont
     {
         var supplier = await db.Suppliers.FindAsync(id);
         if (supplier is null) return NotFound();
+        if (ValidateFormats(updated) is { } formatError) return BadRequest(new { message = formatError });
         supplier.Name = updated.Name;
         supplier.WarehouseName = updated.WarehouseName;
         supplier.ContactPerson = updated.ContactPerson;

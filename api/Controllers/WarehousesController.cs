@@ -42,6 +42,8 @@ public class WarehousesController(BaqalaDbContext db, IAuditService audit) : Con
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Warehouse warehouse)
     {
+        if (!ContactValidation.IsValidSaudiPhone(warehouse.ContactNumber))
+            return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
         warehouse.Id = Guid.NewGuid();
         warehouse.CreatedAt = warehouse.UpdatedAt = DateTime.UtcNow;
         db.Warehouses.Add(warehouse);
@@ -53,6 +55,8 @@ public class WarehousesController(BaqalaDbContext db, IAuditService audit) : Con
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Warehouse updated)
     {
+        if (!ContactValidation.IsValidSaudiPhone(updated.ContactNumber))
+            return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
         var w = await db.Warehouses.FindAsync(id);
         if (w is null) return NotFound();
         w.Name = updated.Name; w.NameAr = updated.NameAr; w.Address = updated.Address;

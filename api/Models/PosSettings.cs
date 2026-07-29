@@ -200,6 +200,20 @@ public class PosSettings
     [Column("require_manager_approval_above_cash_threshold")]
     public bool RequireManagerApprovalAboveCashThreshold { get; set; } = true;
 
+    // ── Online Ordering tab ──────────────────────────────────────────────────
+    /// Real gate: read by `OnlineOrdersController`'s public endpoints — a branch's public
+    /// ordering page/QR 404s until this is explicitly turned on, same posture as every other
+    /// customer-facing surface added to this codebase.
+    [Column("online_ordering_enabled")]
+    public bool OnlineOrderingEnabled { get; set; } = false;
+
+    [Column("online_ordering_min_order_amount_sar")]
+    public decimal OnlineOrderingMinOrderAmountSar { get; set; } = 0m;
+
+    /// Anti-abuse ceiling on a fully anonymous endpoint — mirrors SelfCheckoutMaxOrderValueSar.
+    [Column("online_ordering_max_order_value_sar")]
+    public decimal OnlineOrderingMaxOrderValueSar { get; set; } = 1000m;
+
     // ── Inventory adjustment policy tab ──────────────────────────────────────
     [Column("require_reason_for_adjustments")]
     public bool RequireReasonForAdjustments { get; set; } = true;

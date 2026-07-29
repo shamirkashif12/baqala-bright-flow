@@ -244,6 +244,31 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .Select(g => new PaymentSplitRow { Method = g.Key, Amount = g.Sum(p => p.Amount) })
             .ToListAsync();
 
+        // Sales per item — same day/branch/terminal/cashier/status/customerType/tobacco scope as
+        // ordersQ above, just at OrderItem granularity instead of order granularity. The report
+        // previously showed hourly totals only, with no way to see which products made up a day.
+        var itemsQ = db.OrderItems.Include(i => i.Product)
+            .Where(i => i.Order != null && i.Order.CreatedAt >= day && i.Order.CreatedAt < dayEnd);
+        if (branchId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.BranchId == branchId);
+        if (terminalId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.TerminalId == terminalId);
+        if (cashierId.HasValue) itemsQ = itemsQ.Where(i => i.Order!.CashierId == cashierId);
+        if (!string.IsNullOrEmpty(orderStatus)) itemsQ = itemsQ.Where(i => i.Order!.OrderStatus == orderStatus);
+        if (customerType == "registered") itemsQ = itemsQ.Where(i => i.Order!.CustomerId != null);
+        else if (customerType == "walk-in") itemsQ = itemsQ.Where(i => i.Order!.CustomerId == null);
+        if (hasTobaccoFee) itemsQ = itemsQ.Where(i => i.Order!.TobaccoFeeAmount > 0);
+
+        var items = await itemsQ
+            .GroupBy(i => new { i.ProductId, Name = i.Product != null ? i.Product.Name : "Unknown", Sku = i.Product != null ? i.Product.Sku : "—" })
+            .Select(g => new DailySalesItemRow
+            {
+                ProductName = g.Key.Name,
+                Sku = g.Key.Sku,
+                QuantitySold = g.Sum(i => i.Quantity),
+                GrossSales = g.Sum(i => i.UnitPrice * i.Quantity),
+            })
+            .OrderByDescending(r => r.GrossSales)
+            .ToListAsync();
+
         var kpiTransactions = hourly.Sum(h => h.Transactions);
         var kpiGrossSales = hourly.Sum(h => h.GrossSales);
         var kpiNetSales = hourly.Sum(h => h.NetSales);
@@ -262,6 +287,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             },
             Hourly = hourly,
             PaymentSplit = paymentSplit,
+            Items = items,
         };
     }
 
@@ -2576,7 +2602,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             var rts = rtsBySupplier.GetValueOrDefault(g.Key, (Qty: 0m, Value: 0m));
             return new SupplierPerformanceRow
             {
-                SupplierId = s?.SupplierCode ?? "—", SupplierName = s?.Name ?? "Unknown", PoCount = g.Count(),
+                SupplierId = s?.SupplierCode ?? "—", SupplierName = s?.Name ?? "Unknown", SupplierStatus = s?.Status ?? "—", PoCount = g.Count(),
                 OrderedQty = orderedQty, ReceivedQty = receivedQty,
                 FillRatePct = orderedQty > 0 ? Math.Round(receivedQty / orderedQty * 100, 1) : 0m,
                 AverageLeadTimeDays = leadTimes.Count > 0 ? Math.Round((decimal)leadTimes.Average(), 1) : 0m,
@@ -5266,11 +5292,20 @@ public sealed class PaymentSplitRow
     public decimal Amount { get; init; }
 }
 
+public sealed class DailySalesItemRow
+{
+    public string ProductName { get; init; } = "";
+    public string Sku { get; init; } = "";
+    public decimal QuantitySold { get; init; }
+    public decimal GrossSales { get; init; }
+}
+
 public sealed class DailySalesResult
 {
     public DailySalesKpis Kpis { get; init; } = new();
     public List<DailySalesHour> Hourly { get; init; } = [];
     public List<PaymentSplitRow> PaymentSplit { get; init; } = [];
+    public List<DailySalesItemRow> Items { get; init; } = [];
 }
 
 public sealed class DailyLineAgg
@@ -5807,6 +5842,7 @@ public sealed class SupplierPerformanceRow
 {
     public string SupplierId { get; init; } = "";
     public string SupplierName { get; init; } = "";
+    public string SupplierStatus { get; init; } = "";
     public int PoCount { get; init; }
     public decimal OrderedQty { get; init; }
     public decimal ReceivedQty { get; init; }

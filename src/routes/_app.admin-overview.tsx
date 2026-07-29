@@ -78,6 +78,7 @@ function AdminOverview() {
   const [loading, setLoading] = useState(true);
   const [branchFilter, setBranchFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [warehouseFilter, setWarehouseFilter] = useState<string[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -119,6 +120,20 @@ function AdminOverview() {
   const expiringSoon = filteredStock.filter(s => { const d = daysLeft(s.expiryDate); return d !== null && d >= 0 && d <= 7; }).length;
   const inventoryValue = filteredStock.reduce((sum, s) => sum + s.quantity * (s.product?.costPrice ?? 0), 0);
 
+  // ── Warehouse filter + per-warehouse stock summary ───────────────────────
+  const filteredWarehouses = useMemo(
+    () => warehouseFilter.length === 0 ? warehouses : warehouses.filter(w => warehouseFilter.includes(w.id)),
+    [warehouses, warehouseFilter],
+  );
+  const warehouseSummaries = useMemo(() => filteredWarehouses.map(w => {
+    const items = w.stock ?? [];
+    const skus = items.length;
+    const value = items.reduce((sum, s) => sum + s.quantity * (s.product?.costPrice ?? 0), 0);
+    const oos = items.filter(s => s.quantity === 0).length;
+    const low = items.filter(s => s.quantity > 0 && s.quantity <= s.reorderLevel).length;
+    return { warehouse: w, skus, value, oos, low };
+  }), [filteredWarehouses]);
+
   // ── Per-branch summary ────────────────────────────────────────────────────
   const branchSummaries = useMemo(() => {
     const displayBranches = branchFilter.length === 0 ? branches : branches.filter(b => branchFilter.includes(b.id));
@@ -159,6 +174,14 @@ function AdminOverview() {
             onChange={setCategoryFilter}
           />
         </div>
+        <div className="w-48">
+          <SearchableMultiSelect
+            placeholder="All Warehouses"
+            options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+            selected={warehouseFilter}
+            onChange={setWarehouseFilter}
+          />
+        </div>
       </div>
 
       {loading ? (
@@ -186,13 +209,13 @@ function AdminOverview() {
           {/* ── Warehouses ── */}
           <section>
             <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
-              <Warehouse className="h-4 w-4" />Warehouses ({warehouses.length})
+              <Warehouse className="h-4 w-4" />Warehouses ({filteredWarehouses.length}{warehouseFilter.length > 0 ? ` of ${warehouses.length}` : ""})
             </h2>
-            {warehouses.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4">No warehouses configured.</p>
+            {filteredWarehouses.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">No warehouses match the current filter.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {warehouses.map(w => (
+                {filteredWarehouses.map(w => (
                   <div key={w.id} className="rounded-2xl border border-border/60 bg-card p-4 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -213,6 +236,40 @@ function AdminOverview() {
                 ))}
               </div>
             )}
+          </section>
+
+          {/* ── Inventory by Warehouse ── */}
+          <section>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
+              <Warehouse className="h-4 w-4" />Inventory by Warehouse
+            </h2>
+            <Card className="overflow-hidden border-border/60 shadow-card">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="px-4 py-3 font-semibold">Warehouse</th>
+                      <th className="px-4 py-3 font-semibold text-center">SKUs</th>
+                      <th className="px-4 py-3 font-semibold text-center">Low / OOS</th>
+                      <th className="px-4 py-3 font-semibold text-right">Value (SAR)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {warehouseSummaries.map(({ warehouse, skus, value, oos, low }) => (
+                      <tr key={warehouse.id} className="border-b border-border/40 last:border-0">
+                        <td className="px-4 py-3 font-medium">{warehouse.name}</td>
+                        <td className="px-4 py-3 text-center tabular-nums">{skus}</td>
+                        <td className="px-4 py-3 text-center tabular-nums">{low} / {oos}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">{fmtSAR(value)}</td>
+                      </tr>
+                    ))}
+                    {warehouseSummaries.length === 0 && (
+                      <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">No warehouse stock data.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
           </section>
 
           {/* ── Inventory by Branch ── */}

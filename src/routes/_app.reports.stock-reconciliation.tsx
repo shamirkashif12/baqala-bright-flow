@@ -2,9 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
+import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { usePermission } from "@/lib/use-permission";
@@ -17,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { ClipboardCheck, ListChecks, Scale, Target, TrendingDown } from "lucide-react";
+import { ClipboardCheck, ListChecks, Scale, Target, TrendingDown, X } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/stock-reconciliation")({ component: StockReconciliation });
 
@@ -94,6 +95,17 @@ function StockReconciliation() {
 
   useEffect(() => { load(); }, [load]);
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr()
+    || (!lockedBranchId && branchIds.length > 0) || (!lockedBranchId && warehouseIds.length > 0)
+    || categoryIds.length > 0 || productIds.length > 0 || countedByIds.length > 0
+    || countType !== "all" || statuses.length > 0 || varianceOnly;
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr());
+    if (!lockedBranchId) { setBranchIds([]); setWarehouseIds([]); }
+    setCategoryIds([]); setProductIds([]); setCountedByIds([]);
+    setCountType("all"); setStatuses([]); setVarianceOnly(false);
+  };
+
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportStockReconciliationReport({ from, to, ...filters, exportedBy: user?.id, format });
@@ -112,80 +124,99 @@ function StockReconciliation() {
       title="Stocktaking Report (Inventory Count)"
       subtitle="Stock review, audit and reconciliation — system vs counted quantity by count session"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} />
-        <Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} />
+      <div className="flex flex-wrap items-end gap-2">
+        <FilterField label="From"><Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} /></FilterField>
+        <FilterField label="To"><Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} /></FilterField>
         {!lockedBranchId && (
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={branchIds}
-              onChange={setBranchIds}
-            />
-          </div>
+          <FilterField label="Branch">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+          </FilterField>
         )}
         {/* Warehouse stock-takes are reviewed/approved by tenant_admin only (no warehouse-scoped
             role exists yet), so this filter is only meaningful for the same admin view as Branch. */}
         {!lockedBranchId && (
-          <div className="w-44">
+          <FilterField label="Warehouse">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Warehouses"
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={warehouseIds}
+                onChange={setWarehouseIds}
+              />
+            </div>
+          </FilterField>
+        )}
+        <FilterField label="Category">
+          <div className="w-40">
             <SearchableMultiSelect
-              placeholder="All Warehouses"
-              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              selected={warehouseIds}
-              onChange={setWarehouseIds}
+              placeholder="All Categories"
+              options={categories.map((c) => ({ id: c.id, label: c.name }))}
+              selected={categoryIds}
+              onChange={setCategoryIds}
             />
           </div>
-        )}
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Categories"
-            options={categories.map((c) => ({ id: c.id, label: c.name }))}
-            selected={categoryIds}
-            onChange={setCategoryIds}
-          />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={products.map((p) => ({ id: p.id, label: p.name }))}
-            selected={productIds}
-            onChange={setProductIds}
-          />
-        </div>
+        </FilterField>
+        <FilterField label="Product">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
+        </FilterField>
         {/* Matches either end of a session — whoever started the count or performed/signed it off. */}
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Employees"
-            options={employees.map((u) => ({ id: u.id, label: u.fullName }))}
-            selected={countedByIds}
-            onChange={setCountedByIds}
-          />
-        </div>
+        <FilterField label="Employee">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Employees"
+              options={employees.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={countedByIds}
+              onChange={setCountedByIds}
+            />
+          </div>
+        </FilterField>
         {/* The FRD's three named filters — Stock Review / Stock Audit / Inventory Reconciliation.
             They all describe a StockCount session; count_type is what tells them apart. Kept
             single-select — it's a fixed 3-value intent field, not a location/entity list. */}
-        <Select value={countType} onValueChange={setCountType}>
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Count Type" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Count Types</SelectItem>
-            <SelectItem value="review">Stock Review</SelectItem>
-            <SelectItem value="audit">Stock Audit</SelectItem>
-            <SelectItem value="reconciliation">Inventory Reconciliation</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Statuses"
-            options={STATUS_OPTIONS}
-            selected={statuses}
-            onChange={setStatuses}
-          />
-        </div>
+        <FilterField label="Count Type">
+          <Select value={countType} onValueChange={setCountType}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Count Type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Count Types</SelectItem>
+              <SelectItem value="review">Stock Review</SelectItem>
+              <SelectItem value="audit">Stock Audit</SelectItem>
+              <SelectItem value="reconciliation">Inventory Reconciliation</SelectItem>
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Status">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Statuses"
+              options={STATUS_OPTIONS}
+              selected={statuses}
+              onChange={setStatuses}
+            />
+          </div>
+        </FilterField>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={varianceOnly} onCheckedChange={(v) => setVarianceOnly(v === true)} />
           Variance only
         </label>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

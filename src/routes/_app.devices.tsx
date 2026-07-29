@@ -33,6 +33,11 @@ const emptyForm: DeviceForm = { deviceName: "", deviceType: "Receipt Printer", s
 
 const DEVICE_TYPES = ["Receipt Printer", "Barcode Scanner", "Cash Drawer", "Card Machine", "Kiosk Display", "Tablet (mPOS)"];
 
+const BEHAVIOR_PROFILES = [
+  "Alert on idle > 10m", "Alert on idle > 20m", "Alert on idle > 30m",
+  "Alert on offline", "Alert on low battery", "Alert on paper low", "Silent (no alerts)",
+];
+
 function DeviceFormFields({ form, set, branches, terminals }: {
   form: DeviceForm;
   set: (k: keyof DeviceForm) => (v: string) => void;
@@ -82,7 +87,24 @@ function DeviceFormFields({ form, set, branches, terminals }: {
           </SelectContent>
         </Select>
       </div>
-      <Field label="Behavior Profile" value={form.behaviourProfile} placeholder="Alert on idle > 10m" onChange={set("behaviourProfile")} />
+      <div className="space-y-1">
+        <Label className="text-xs">Behavior Profile</Label>
+        <Select
+          value={BEHAVIOR_PROFILES.includes(form.behaviourProfile) ? form.behaviourProfile : ""}
+          onValueChange={set("behaviourProfile")}
+        >
+          <SelectTrigger className="h-9"><SelectValue placeholder="Select a profile" /></SelectTrigger>
+          <SelectContent>
+            {BEHAVIOR_PROFILES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Input
+          className="h-8 text-xs"
+          value={BEHAVIOR_PROFILES.includes(form.behaviourProfile) ? "" : form.behaviourProfile}
+          onChange={e => set("behaviourProfile")(e.target.value)}
+          placeholder="Or type a custom profile…"
+        />
+      </div>
     </div>
   );
 }

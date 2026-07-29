@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
-import { DataTable, StatusBadge } from "@/components/module-placeholder";
+import { DataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,9 +12,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Wrench, Monitor, WifiOff, AlertOctagon, Search, RefreshCw, Ticket } from "lucide-react";
-import { api, type DeviceRecord } from "@/lib/api";
-import { uuid } from "@/lib/utils";
+import { Wrench, Monitor, WifiOff, AlertOctagon, Search, RefreshCw, Ticket, X } from "lucide-react";
+import { api, type DeviceRecord, type MaintenanceTicketRecord } from "@/lib/api";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/maintenance")({ component: Maintenance });
 
@@ -38,7 +38,6 @@ type TicketForm = { deviceId: string; issueType: string; priority: string; descr
 const emptyTicket: TicketForm = { deviceId: "", issueType: "", priority: "medium", description: "", reportedBy: "" };
 
 type TicketStatus = "open" | "in_progress" | "resolved";
-type Ticket = TicketForm & { id: string; status: TicketStatus; createdAt: string; deviceName: string; };
 
 const TICKET_STATUSES: { value: TicketStatus; label: string }[] = [
   { value: "open",        label: "Open" },
@@ -143,8 +142,12 @@ function Maintenance() {
   const [dlgOpen, setDlgOpen]   = useState(false);
   const [form, setForm]         = useState<TicketForm>(emptyTicket);
   const [saving, setSaving]     = useState(false);
-  const [tickets, setTickets]   = useState<Ticket[]>([]);
+  const [tickets, setTickets]   = useState<MaintenanceTicketRecord[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(true);
   const [viewTab, setViewTab]   = useState<"devices" | "tickets">("devices");
+  const [ticketSearch, setTicketSearch] = useState("");
+  const [ticketStatusFilter, setTicketStatusFilter] = useState("all");
+  const [ticketBranchFilter, setTicketBranchFilter] = useState("all");
 
   const reload = () => {
     setLoading(true);
@@ -154,7 +157,15 @@ function Maintenance() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { reload(); }, []);
+  const reloadTickets = () => {
+    setTicketsLoading(true);
+    api.getMaintenanceTickets()
+      .then(setTickets)
+      .catch(() => toast.error("Failed to load tickets."))
+      .finally(() => setTicketsLoading(false));
+  };
+
+  useEffect(() => { reload(); reloadTickets(); }, []);
 
   const filtered = devices.filter(d =>
     !q
@@ -167,6 +178,31 @@ function Maintenance() {
   const offline    = devices.filter(d => d.status !== "active").length;
   const syncIssues = devices.filter(d => d.syncStatus !== "synced").length;
 
+  const ticketBranches = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of tickets) if (t.device?.branch) map.set(t.device.branch.id, t.device.branch.name);
+    return [...map.entries()];
+  }, [tickets]);
+
+  const hasTicketFilters = !!ticketSearch || ticketStatusFilter !== "all" || ticketBranchFilter !== "all";
+  const clearTicketFilters = () => { setTicketSearch(""); setTicketStatusFilter("all"); setTicketBranchFilter("all"); };
+
+  const filteredTickets = tickets.filter(t => {
+    const matchSearch = !ticketSearch || t.id.toLowerCase().includes(ticketSearch.toLowerCase().replace(/^#/, ""));
+    const matchStatus = ticketStatusFilter === "all" || t.status === ticketStatusFilter;
+    const matchBranch = ticketBranchFilter === "all" || t.device?.branch?.id === ticketBranchFilter;
+    return matchSearch && matchStatus && matchBranch;
+  });
+
+  const openIssuesByDevice = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of tickets) {
+      if (t.status === "resolved") continue;
+      map.set(t.deviceId, (map.get(t.deviceId) ?? 0) + 1);
+    }
+    return map;
+  }, [tickets]);
+
   const onChange = (k: keyof TicketForm) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm(p => ({ ...p, [k]: e.target.value }));
@@ -174,26 +210,33 @@ function Maintenance() {
   const onSelectChange = (k: keyof TicketForm) => (v: string) =>
     setForm(p => ({ ...p, [k]: v }));
 
-  const updateTicketStatus = (id: string, status: TicketStatus) =>
+  const updateTicketStatus = (id: string, status: TicketStatus) => {
+    // Optimistic update — reconciled by reload() below, which also picks up the device-status
+    // side effect (e.g. resolving the last open ticket brings the device back to "active").
     setTickets(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+    api.updateMaintenanceTicketStatus(id, status)
+      .then(() => { reload(); reloadTickets(); })
+      .catch(() => { toast.error("Failed to update ticket status."); reloadTickets(); });
+  };
 
   const handleSubmit = () => {
     setSaving(true);
-    const device = devices.find(d => d.id === form.deviceId);
-    const ticket: Ticket = {
-      ...form,
-      id: uuid(),
-      status: "open",
-      createdAt: new Date().toISOString(),
-      deviceName: device?.deviceName ?? "Unknown",
-    };
-    setTimeout(() => {
-      setTickets(prev => [ticket, ...prev]);
-      setForm(emptyTicket);
-      setDlgOpen(false);
-      setSaving(false);
-      setViewTab("tickets");
-    }, 600);
+    api.createMaintenanceTicket({
+      deviceId: form.deviceId,
+      issueType: form.issueType,
+      priority: form.priority,
+      description: form.description,
+      reportedBy: form.reportedBy || undefined,
+    })
+      .then(() => {
+        setForm(emptyTicket);
+        setDlgOpen(false);
+        setViewTab("tickets");
+        reloadTickets();
+        reload(); // device status flips to "maintenance" server-side
+      })
+      .catch((e: any) => toast.error(e?.message || "Failed to submit ticket."))
+      .finally(() => setSaving(false));
   };
 
   return (
@@ -267,6 +310,15 @@ function Maintenance() {
                 { key: "terminal",   label: "Terminal", render: d => d.terminal?.terminalCode ?? "—" },
                 { key: "status",     label: "Status",   render: d => <StatusBadge status={d.status} /> },
                 {
+                  key: "openIssues", label: "Open Issues",
+                  render: d => {
+                    const count = openIssuesByDevice.get(d.id) ?? 0;
+                    return count > 0
+                      ? <Badge variant="outline" className="text-xs bg-destructive/15 text-destructive border-destructive/30">{count}</Badge>
+                      : <span className="text-xs text-muted-foreground">—</span>;
+                  },
+                },
+                {
                   key: "syncStatus", label: "Sync",
                   render: d => (
                     <Badge variant="outline" className={`text-xs ${SYNC_CLASS[d.syncStatus] ?? "bg-muted text-muted-foreground border-border"}`}>
@@ -299,11 +351,45 @@ function Maintenance() {
       )}
 
       {viewTab === "tickets" && (
-        tickets.length === 0 ? (
+        ticketsLoading ? (
+          <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>
+        ) : tickets.length === 0 ? (
           <div className="text-center py-16 text-muted-foreground text-sm">
             No tickets yet. Click <strong>New Ticket</strong> to report a device issue.
           </div>
         ) : (
+          <>
+            <div className="flex flex-wrap items-end gap-3 mb-4">
+              <FilterField label="Ticket Number" className="w-40">
+                <Input placeholder="#A1B2C3D4" className="h-9" value={ticketSearch} onChange={e => setTicketSearch(e.target.value)} />
+              </FilterField>
+              <FilterField label="Status" className="w-40">
+                <Select value={ticketStatusFilter} onValueChange={setTicketStatusFilter}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    {TICKET_STATUSES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Branch" className="w-40">
+                <Select value={ticketBranchFilter} onValueChange={setTicketBranchFilter}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branches</SelectItem>
+                    {ticketBranches.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              {hasTicketFilters && (
+                <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearTicketFilters}>
+                  <X className="h-3.5 w-3.5" /> Clear Filters
+                </Button>
+              )}
+            </div>
+            {filteredTickets.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center">No tickets match the current filters.</p>
+            ) : (
           <DataTable
             columns={[
               {
@@ -315,7 +401,7 @@ function Maintenance() {
                   </div>
                 ),
               },
-              { key: "deviceName", label: "Device",     render: t => t.deviceName },
+              { key: "deviceName", label: "Device",     render: t => t.device?.deviceName ?? "Unknown" },
               { key: "issueType",  label: "Issue",      render: t => t.issueType },
               {
                 key: "priority", label: "Priority",
@@ -341,8 +427,10 @@ function Maintenance() {
               { key: "reportedBy",  label: "Reported By",  render: t => t.reportedBy || "—" },
               { key: "description", label: "Description",  render: t => <span className="text-xs text-muted-foreground line-clamp-1">{t.description}</span> },
             ]}
-            rows={tickets}
+            rows={filteredTickets}
           />
+            )}
+          </>
         )
       )}
 

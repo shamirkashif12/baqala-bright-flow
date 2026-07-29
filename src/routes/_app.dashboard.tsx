@@ -220,7 +220,7 @@ function AlertCard({ tone, icon: Icon, label, value, hint, href }: {
   }[tone];
   return (
     <Link to={href as any}>
-      <Card className={cn("p-4 border-2 hover:shadow-elegant transition-all flex items-center gap-3", toneMap)}>
+      <Card className={cn("p-5 border-2 hover:shadow-elegant transition-all flex items-center gap-3 h-full", toneMap)}>
         <div className="h-11 w-11 rounded-xl bg-background/70 flex items-center justify-center shrink-0">
           <Icon className="h-5 w-5" />
         </div>
@@ -544,28 +544,39 @@ function Dashboard() {
           )}
 
           <div className="ml-auto flex items-center gap-2">
+            {updatedLabel && (
+              <span className="text-xs text-muted-foreground hidden sm:inline">Updated {updatedLabel}</span>
+            )}
+            <Button size="icon" variant="outline" className="h-9 w-9" disabled={loading} title="Refresh" onClick={loadDashboard}>
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+            </Button>
             <Badge variant="outline" className="text-xs hidden sm:inline-flex">
               {new Date().toLocaleDateString("en-SA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
             </Badge>
-            <Button data-tour="customize-dashboard" size="sm" variant="outline" className="h-9 gap-1.5 text-xs" onClick={() => setCustomizeOpen(true)}>
-              <Settings2 className="h-3.5 w-3.5" /> Customize Dashboard
-            </Button>
           </div>
         </div>
       </Card>
 
       {/* Alert cards row */}
-      <div data-tour="alerts-row" className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="alerts-row" className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {loading ? (
-          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[84px] rounded-xl" />)
+          Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[92px] rounded-xl" />)
         ) : (
           <>
             <AlertCard tone="warning" icon={CalendarClock} label="Near Expiry Items"
               value={String(dashData?.inventory.expiringCount ?? 0)}
-              hint="Next 7 days · review now" href="/batches" />
-            <AlertCard tone="destructive" icon={PackageX} label="Low Stock Items"
+              hint={dashData?.inventory.expiringBranchCount
+                ? `Next 7 days · across ${dashData.inventory.expiringBranchCount} location${dashData.inventory.expiringBranchCount === 1 ? "" : "s"}`
+                : "Next 7 days · review now"} href="/batches" />
+            <AlertCard tone="destructive" icon={Ban} label="Expired Stock"
+              value={String(dashData?.inventory.alreadyExpiredCount ?? 0)}
+              hint="Still in stock · remove now" href="/batches" />
+            <AlertCard tone="warning" icon={PackageX} label="Low Stock Items"
               value={String(dashData?.inventory.lowStockCount ?? 0)}
-              hint={`${dashData?.inventory.outOfStockCount ?? 0} critical · reorder`} href="/inventory" />
+              hint="Below reorder level" href="/inventory" />
+            <AlertCard tone="destructive" icon={Package} label="Out of Stock Items"
+              value={String(dashData?.inventory.outOfStockCount ?? 0)}
+              hint="Zero quantity · reorder" href="/inventory" />
             {canViewShifts && <AlertCard tone={shiftIsStale ? "destructive" : "primary"} icon={Timer} label="Active Shift Timer"
               value={shiftTimerValue} hint={shiftHint} href="/cashier-shift" />}
             {canViewWarehouses && <AlertCard tone="warning" icon={Warehouse} label="Pending Warehouse Approvals"
@@ -590,6 +601,12 @@ function Dashboard() {
             No cards selected. <button className="text-primary underline ml-1" onClick={() => setCustomizeOpen(true)}>Customize Dashboard</button>
           </Card>
         )}
+      </div>
+
+      <div className="flex justify-end">
+        <Button data-tour="customize-dashboard" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => setCustomizeOpen(true)}>
+          <Settings2 className="h-3.5 w-3.5" /> Customize Dashboard
+        </Button>
       </div>
 
       {/* Tabs */}

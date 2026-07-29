@@ -9,10 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Pencil, Plus, Trash2, Download } from "lucide-react";
+import { Pencil, Plus, Trash2, Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Holiday } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -102,6 +103,8 @@ function HolidaysTab() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<HolidayForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Holiday | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -148,13 +151,18 @@ function HolidaysTab() {
     }
   };
 
-  const handleDelete = async (h: Holiday) => {
-    if (!confirm(`Deactivate holiday "${h.name}"?`)) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.deleteHoliday(h.id);
+      await api.deleteHoliday(deleteTarget.id);
+      toast.success(`"${deleteTarget.name}" deactivated.`);
+      setDeleteTarget(null);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to delete holiday.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -162,7 +170,10 @@ function HolidaysTab() {
 
   const filtered = holidays.filter(h => {
     const mq = !q || h.name.toLowerCase().includes(q.toLowerCase());
-    const mb = branchFilter.length === 0 || branchFilter.includes(h.branchId ?? "");
+    // A holiday with no branchId applies company-wide — must always match, or every
+    // all-branches holiday (the common case, e.g. national holidays) disappears the instant
+    // any specific branch filter is applied.
+    const mb = branchFilter.length === 0 || h.branchId == null || branchFilter.includes(h.branchId);
     const mt = typeFilter === "all" || h.holidayType === typeFilter;
     const ms = statusFilter.length === 0 || statusFilter.includes(h.status);
     const my = yearFilter === "all" || String(new Date(h.date).getFullYear()) === yearFilter;
@@ -255,7 +266,7 @@ function HolidaysTab() {
                     <td className="px-3 py-3">
                       <div className="flex gap-1 justify-end">
                         {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(h)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(h)}><Trash2 className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(h)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                       </div>
                     </td>
                   </tr>
@@ -282,6 +293,22 @@ function HolidaysTab() {
           <HolidayFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches} branchLocked={branchLocked} />
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Deactivate holiday?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Deactivate <span className="font-semibold text-foreground">{deleteTarget?.name}</span>?
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Deactivate
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

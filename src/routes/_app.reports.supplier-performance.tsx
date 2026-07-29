@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField, StatusBadge } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -14,7 +15,7 @@ import { useBranch } from "@/lib/branch-context";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Gauge, Clock, Wallet, DollarSign } from "lucide-react";
+import { Gauge, Clock, Wallet, DollarSign, X } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -68,6 +69,15 @@ function SupplierPerformance() {
 
   useEffect(() => { load(); }, [load]);
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || supplierIds.length > 0
+    || (!lockedBranchId && branchIds.length > 0) || productIds.length > 0
+    || createdByIds.length > 0 || approvedByIds.length > 0;
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setSupplierIds([]);
+    if (!lockedBranchId) setBranchIds([]);
+    setProductIds([]); setCreatedByIds([]); setApprovedByIds([]);
+  };
+
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportSupplierPerformanceReport({
@@ -89,54 +99,69 @@ function SupplierPerformance() {
 
   return (
     <PageShell title="Supplier Performance" subtitle="Lead time, fill rate, purchase value and dues">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
+          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         </div>
-        <div className="w-48">
-          <SearchableMultiSelect
-            placeholder="All Suppliers"
-            options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
-            selected={supplierIds}
-            onChange={setSupplierIds}
-          />
-        </div>
-        {!lockedBranchId && (
-          <div className="w-40">
+        <FilterField label="Supplier">
+          <div className="w-48">
             <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={branchIds}
-              onChange={setBranchIds}
+              placeholder="All Suppliers"
+              options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+              selected={supplierIds}
+              onChange={setSupplierIds}
             />
           </div>
+        </FilterField>
+        {!lockedBranchId && (
+          <FilterField label="Branch">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+          </FilterField>
         )}
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={products.map((p) => ({ id: p.id, label: p.name }))}
-            selected={productIds}
-            onChange={setProductIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="Created By: Anyone"
-            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-            selected={createdByIds}
-            onChange={setCreatedByIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="Approved By: Anyone"
-            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-            selected={approvedByIds}
-            onChange={setApprovedByIds}
-          />
-        </div>
+        <FilterField label="Product">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Created By">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Created By: Anyone"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={createdByIds}
+              onChange={setCreatedByIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Approved By">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Approved By: Anyone"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={approvedByIds}
+              onChange={setApprovedByIds}
+            />
+          </div>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
@@ -170,6 +195,7 @@ function SupplierPerformance() {
           columns={[
             { key: "supplierId", label: "Supplier ID" },
             { key: "supplierName", label: "Supplier Name" },
+            { key: "supplierStatus", label: "Status", render: (r: SupplierPerformanceRow) => <StatusBadge status={r.supplierStatus} /> },
             { key: "poCount", label: "PO Count" },
             { key: "orderedQty", label: "Ordered Qty" },
             { key: "receivedQty", label: "Received Qty" },

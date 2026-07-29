@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { PerformanceTierBadge } from "@/components/report-filters/performance-tier-badge";
@@ -16,7 +17,7 @@ import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Sparkles, TrendingUp, Minus, TrendingDown, PackageX, Boxes } from "lucide-react";
+import { Sparkles, TrendingUp, Minus, TrendingDown, PackageX, Boxes, X } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/inventory-aging-performance")({ component: InventoryAgingPerformance });
 
@@ -98,6 +99,14 @@ function InventoryAgingPerformance() {
     }
   };
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchIds.length !== (lockedBranchId ? 1 : 0)
+    || warehouseIds.length > 0 || categoryIds.length > 0 || productIds.length > 0
+    || productStatuses.length > 0 || classifications.length > 0;
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchIds(lockedBranchId ? [lockedBranchId] : []);
+    setWarehouseIds([]); setCategoryIds([]); setProductIds([]); setProductStatuses([]); setClassifications([]);
+  };
+
   const kpis = data?.kpis;
   const fmt = (n: number) => fmtSAR(n);
 
@@ -106,61 +115,78 @@ function InventoryAgingPerformance() {
       title="Inventory Aging & Product Performance"
       subtitle="What's selling fast, what's slow, and what's dead stock — by sales velocity, turnover, days since last sale and profitability"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} />
-        <Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} />
+      <div className="flex flex-wrap items-end gap-2">
+        <FilterField label="From"><Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} /></FilterField>
+        <FilterField label="To"><Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} /></FilterField>
         {!lockedBranchId && (
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={branchIds}
-              onChange={setBranchIds}
-            />
-          </div>
+          <FilterField label="Branch">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+          </FilterField>
         )}
         {!lockedBranchId && (
-          <div className="w-44">
+          <FilterField label="Warehouse">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Warehouses"
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={warehouseIds}
+                onChange={setWarehouseIds}
+              />
+            </div>
+          </FilterField>
+        )}
+        <FilterField label="Category">
+          <div className="w-40">
             <SearchableMultiSelect
-              placeholder="All Warehouses"
-              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              selected={warehouseIds}
-              onChange={setWarehouseIds}
+              placeholder="All Categories"
+              options={categories.map((c) => ({ id: c.id, label: c.name }))}
+              selected={categoryIds}
+              onChange={setCategoryIds}
             />
           </div>
+        </FilterField>
+        <FilterField label="Product">
+          <div className="w-52">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Product Status">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Product Statuses"
+              options={PRODUCT_STATUSES}
+              selected={productStatuses}
+              onChange={setProductStatuses}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Classification">
+          <div className="w-48">
+            <SearchableMultiSelect
+              placeholder="All Classifications"
+              options={CLASSIFICATIONS}
+              selected={classifications}
+              onChange={setClassifications}
+            />
+          </div>
+        </FilterField>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
         )}
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Categories"
-            options={categories.map((c) => ({ id: c.id, label: c.name }))}
-            selected={categoryIds}
-            onChange={setCategoryIds}
-          />
-        </div>
-        <div className="w-52">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={products.map((p) => ({ id: p.id, label: p.name }))}
-            selected={productIds}
-            onChange={setProductIds}
-          />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Product Statuses"
-            options={PRODUCT_STATUSES}
-            selected={productStatuses}
-            onChange={setProductStatuses}
-          />
-        </div>
-        <div className="w-48">
-          <SearchableMultiSelect
-            placeholder="All Classifications"
-            options={CLASSIFICATIONS}
-            selected={classifications}
-            onChange={setClassifications}
-          />
-        </div>
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

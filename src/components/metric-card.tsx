@@ -48,7 +48,13 @@ export function MetricCard({
       <div className="relative flex items-start justify-between">
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
-          <p className="mt-2 text-2xl md:text-3xl font-bold tracking-tight">{value}</p>
+          {/* A short numeric KPI ("13", "SAR 47") reads well big and bold; a longer status
+              phrase ("Production ready") at the same size wraps across two lines and dwarfs the
+              card — step the size down once the value stops looking like a number. */}
+          <p className={cn(
+            "mt-2 font-bold tracking-tight",
+            typeof value === "string" && value.length > 12 ? "text-base md:text-lg" : "text-2xl md:text-3xl"
+          )}>{value}</p>
           {delta && (
             <div className="mt-2 flex items-center gap-1.5 text-xs">
               <span className={cn(

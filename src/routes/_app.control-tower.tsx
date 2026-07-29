@@ -133,9 +133,13 @@ function ControlTower() {
     activeTerminals:  terminals.filter(t => t.status === "active").length,
     staffOnShift:     activeShifts.length,
     alerts:           terminals.filter(t => t.status === "offline").length,
+    // Any terminal with no cashier assigned, regardless of status — an empty terminal sitting
+    // idle/in-maintenance with nobody assigned was previously invisible unless it was also
+    // "active" (see AlertsPanel's unassigned filter, which had the same active-only gap).
+    unassignedTerminals: terminals.filter(t => !t.assignedCashierId).length,
   }), [branches, terminals, activeShifts]);
 
-  const ALL_CARDS = ["Active Branches", "Active Terminals", "Staff on Shift", "Alerts"];
+  const ALL_CARDS = ["Active Branches", "Active Terminals", "Staff on Shift", "Alerts", "Unassigned Terminals"];
   const cards = useCustomizableCards("baqala_control_tower_cards", ALL_CARDS);
 
   const cardMap: Record<string, ReactElement> = {
@@ -143,6 +147,7 @@ function ControlTower() {
     "Active Terminals": <MetricCard label="Active Terminals" value={String(totals.activeTerminals)} icon={Activity}   accent="success"     editing={cards.editing} onRemove={() => cards.remove("Active Terminals")} />,
     "Staff on Shift":   <MetricCard label="Staff on Shift"   value={String(totals.staffOnShift)}    icon={UserCheck}  accent="primary"     editing={cards.editing} onRemove={() => cards.remove("Staff on Shift")} />,
     "Alerts":           <MetricCard label="Alerts"           value={String(totals.alerts)}          icon={WifiOff}    accent="destructive" editing={cards.editing} onRemove={() => cards.remove("Alerts")} />,
+    "Unassigned Terminals": <MetricCard label="Unassigned Terminals" value={String(totals.unassignedTerminals)} icon={AlertTriangle} accent="warning" editing={cards.editing} onRemove={() => cards.remove("Unassigned Terminals")} />,
   };
 
   const filteredBranches = useMemo(() => branches.filter(b => {
@@ -203,26 +208,21 @@ function ControlTower() {
         <div className="absolute inset-0 opacity-[0.15] pointer-events-none"
           style={{ backgroundImage: "radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0)", backgroundSize: "22px 22px" }} />
         <div className="absolute -top-10 -right-10 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
-        <div className="relative flex flex-wrap items-center justify-between gap-6">
-          <div className="flex items-center gap-4">
-            <div className="h-14 w-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center ring-1 ring-white/30">
-              <Radio className="h-7 w-7 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/80">
-                <Sparkles className="h-3.5 w-3.5" /> Live Control Tower
-              </div>
-              <h2 className="mt-1 text-2xl md:text-3xl font-bold tracking-tight">All systems in view</h2>
-              <p className="text-sm text-white/80 mt-0.5">
-                {branches.length} branches · {totals.activeTerminals} live terminals · {totals.staffOnShift} staff on shift
-              </p>
-            </div>
+        {/* The hero pills that used to sit here duplicated the KPI card row immediately below —
+            same numbers, two different visual styles, back to back. Dropped in favor of the one
+            line of context text below; the KPI cards are the single place to read the numbers. */}
+        <div className="relative flex items-center gap-4">
+          <div className="h-14 w-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center ring-1 ring-white/30">
+            <Radio className="h-7 w-7 animate-pulse" />
           </div>
-          <div className="flex flex-wrap gap-2">
-            <HeroPill icon={ShieldCheck} label="Branches Active"   value={String(totals.activeBranches)} />
-            <HeroPill icon={Activity}    label="Terminals Active"  value={String(totals.activeTerminals)} />
-            <HeroPill icon={WifiOff}     label="Terminals Offline" value={String(totals.alerts)} tone="danger" />
-            <HeroPill icon={UserCheck}   label="Staff On Shift"    value={String(totals.staffOnShift)} />
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/80">
+              <Sparkles className="h-3.5 w-3.5" /> Live Control Tower
+            </div>
+            <h2 className="mt-1 text-2xl md:text-3xl font-bold tracking-tight">All systems in view</h2>
+            <p className="text-sm text-white/80 mt-0.5">
+              {branches.length} branches · {totals.activeTerminals} live terminals · {totals.staffOnShift} staff on shift
+            </p>
           </div>
         </div>
       </div>
@@ -233,7 +233,7 @@ function ControlTower() {
           <p className="text-sm text-muted-foreground">No KPI cards visible. Click <span className="font-semibold">Add / Remove</span> to add some back.</p>
         </Card>
       ) : (
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           {ALL_CARDS.filter(cards.isVisible).map(label => <div key={label}>{cardMap[label]}</div>)}
         </div>
       )}
@@ -654,19 +654,6 @@ function ControlTower() {
   );
 }
 
-// ─── Hero pill ────────────────────────────────────────────────────────────────
-function HeroPill({ icon: Icon, label, value, tone }: { icon: typeof Radio; label: string; value: string; tone?: "danger" }) {
-  return (
-    <div className={`flex items-center gap-2.5 rounded-xl px-3 py-2 backdrop-blur ring-1 ${tone === "danger" ? "bg-destructive/30 ring-destructive/50" : "bg-white/15 ring-white/30"}`}>
-      <Icon className="h-4 w-4" />
-      <div className="leading-tight">
-        <div className="text-[10px] uppercase tracking-wider opacity-80">{label}</div>
-        <div className="text-sm font-bold tabular-nums">{value}</div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Branch diagram (live map) ─────────────────────────────────────────────────
 function BranchDiagram({ branch, terminals, users, activeShifts }: {
   branch: Branch; terminals: Terminal[]; users: User[]; activeShifts: CashierShift[];
@@ -854,7 +841,10 @@ function MiniInsights({ branches, terminals, activeShifts }: { branches: Branch[
 // ─── Alerts panel ─────────────────────────────────────────────────────────────
 function AlertsPanel({ terminals, branches }: { terminals: Terminal[]; branches: Branch[] }) {
   const offline     = terminals.filter(t => t.status === "offline");
-  const unassigned  = terminals.filter(t => t.status === "active" && !t.assignedCashierId);
+  // Any non-offline terminal with no cashier — offline-and-unassigned is already covered by the
+  // "Terminal Offline" card above, so excluding it here avoids showing the same terminal twice
+  // under two different alert types.
+  const unassigned  = terminals.filter(t => t.status !== "offline" && !t.assignedCashierId);
 
   if (offline.length === 0 && unassigned.length === 0) {
     return (
@@ -885,7 +875,7 @@ function AlertsPanel({ terminals, branches }: { terminals: Terminal[]; branches:
       {unassigned.map(t => (
         <div key={t.id} className="rounded-2xl border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/10 p-4">
           <div className="flex items-center gap-2 font-semibold text-sm text-yellow-700 dark:text-yellow-400">
-            <AlertTriangle className="h-4 w-4" /> Unassigned Active Terminal
+            <AlertTriangle className="h-4 w-4" /> Unassigned Terminal{t.status === "maintenance" ? " (Maintenance)" : ""}
           </div>
           <div className="mt-2 text-xs text-foreground/80 space-y-0.5">
             <div><span className="text-muted-foreground">Terminal:</span> <span className="tabular-nums font-mono">{t.terminalCode}</span></div>

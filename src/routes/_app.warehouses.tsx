@@ -46,10 +46,11 @@ const APPROVAL_CLASS: Record<string, string> = {
   approved: "bg-success/15 text-success border-success/30",
   unapproved: "bg-destructive/15 text-destructive border-destructive/30",
 };
-const DELIVERY_LABEL: Record<string, string> = { pending: "Pending", in_transit: "On Way", delivered: "Delivered", failed: "Failed" };
+// Canonical values per Warehouse.cs's DeliveryStatus comment: pending | on_way | delivered.
+const DELIVERY_LABEL: Record<string, string> = { pending: "Pending", on_way: "On Way", delivered: "Delivered", failed: "Failed" };
 const DELIVERY_CLASS: Record<string, string> = {
   pending: "bg-muted text-muted-foreground border-border",
-  in_transit: "bg-primary/15 text-primary border-primary/20",
+  on_way: "bg-primary/15 text-primary border-primary/20",
   delivered: "bg-success/15 text-success border-success/30",
   failed: "bg-destructive/15 text-destructive border-destructive/30",
 };
@@ -380,19 +381,54 @@ function NewRequestSheet({
   };
 
   const filteredProducts = products.filter(p =>
-    !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku?.toLowerCase().includes(productSearch.toLowerCase())
+    !productSearch
+    || p.name.toLowerCase().includes(productSearch.toLowerCase())
+    || p.sku?.toLowerCase().includes(productSearch.toLowerCase())
+    || p.barcode?.toLowerCase().includes(productSearch.toLowerCase())
   );
 
-  const addItem = () => {
-    const product = products.find(p => p.id === pickProductId);
+  // WarehouseRequest has no real SourceWarehouseId column — a warehouse-to-branch request is sent
+  // as a plain branch-to-branch one (using the warehouse's first linked branch as a stand-in), so
+  // the backend's on-hand check runs against that branch's own InventoryStock, never the actual
+  // warehouse's WarehouseStock. That let a request go through for a product the warehouse doesn't
+  // actually hold. Checked here client-side against the warehouse's real stock list (already
+  // loaded on the Warehouse row from GetAll's Include(w => w.Stock)).
+  const warehouseStockFor = (productId: string) => {
+    if (txType !== "warehouse_to_branches" || !sourceWarehouseId) return null;
+    const wh = warehouses.find(w => w.id === sourceWarehouseId);
+    return wh?.stock?.find(s => s.productId === productId)?.quantity ?? 0;
+  };
+
+  const addItem = (productIdOverride?: string) => {
+    const targetId = productIdOverride ?? pickProductId;
+    const product = products.find(p => p.id === targetId);
     if (!product) return;
     const qty = parseInt(pickQty) || 1;
+    const whQty = warehouseStockFor(product.id);
+    if (whQty !== null && qty > whQty) {
+      setError(whQty === 0
+        ? `"${product.name}" is not in this warehouse's stock — cannot request it from here.`
+        : `Only ${whQty} unit(s) of "${product.name}" available in this warehouse.`);
+      return;
+    }
+    setError(null);
     setItems(prev => {
-      const ex = prev.findIndex(i => i.productId === pickProductId);
+      const ex = prev.findIndex(i => i.productId === targetId);
       if (ex >= 0) return prev.map((i, idx) => idx === ex ? { ...i, requestedQuantity: i.requestedQuantity + qty } : i);
       return [...prev, { productId: product.id, product, requestedQuantity: qty }];
     });
     setPickProductId(""); setPickQty("1"); setProductSearch("");
+  };
+
+  // A hardware scanner just types the barcode fast + Enter — matching that on the search field
+  // itself (same pattern as POS/QuickStockInDialog) means "scan an item" works with no separate
+  // scan button: an exact barcode match adds it immediately at qty 1.
+  const handleProductSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const code = productSearch.trim();
+    if (!code) return;
+    const match = products.find(p => p.barcode === code);
+    if (match) addItem(match.id);
   };
   const removeItem = (pid: string) => setItems(prev => prev.filter(i => i.productId !== pid));
   const updateQty = (pid: string, qty: number) =>
@@ -460,7 +496,7 @@ function NewRequestSheet({
           {/* Transfer type selector */}
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Transfer Type</Label>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="flex flex-col gap-1.5">
               {([
                 { v: "warehouse_to_branches" as TxType, label: "Warehouse → Branches" },
                 { v: "supplier_to_warehouses" as TxType, label: "Supplier → Warehouses" },
@@ -474,7 +510,7 @@ function NewRequestSheet({
                     setDestinationIds([]); setSourceWarehouseId(""); setSourceSupplierId("");
                     setReturnNumber(""); setLookupError("");
                   }}
-                  className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors text-center leading-snug ${txType === v ? "border-primary bg-primary/10 text-primary" : "border-border/60 text-muted-foreground hover:border-primary/40 hover:text-foreground"}`}
+                  className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors text-left whitespace-nowrap ${txType === v ? "border-primary bg-primary/10 text-primary" : "border-border/60 text-muted-foreground hover:border-primary/40 hover:text-foreground"}`}
                 >
                   {label}
                 </button>
@@ -577,7 +613,31 @@ function NewRequestSheet({
           <div className="space-y-3">
             <Label className="text-xs font-medium">Items <span className="text-destructive">*</span></Label>
             <div className="rounded-xl border border-border/60 p-3 space-y-2 bg-muted/20">
-              <Input value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="Search product name or SKU…" className="h-8 text-xs" />
+              <Input
+                value={productSearch}
+                onChange={e => { setProductSearch(e.target.value); setPickProductId(""); }}
+                onKeyDown={handleProductSearchKeyDown}
+                placeholder="Scan barcode, or search product name / SKU…"
+                className="h-8 text-xs"
+              />
+              {/* Matches shown inline as soon as you type — previously the only way to see what
+                  the search matched was to open the (separate) Select dropdown below. */}
+              {productSearch && !pickProductId && (
+                <div className="max-h-32 overflow-y-auto rounded-lg border border-border/40 divide-y divide-border/30">
+                  {filteredProducts.length === 0 ? (
+                    <p className="px-2 py-1.5 text-xs text-muted-foreground">No products match "{productSearch}".</p>
+                  ) : filteredProducts.slice(0, 20).map(p => (
+                    <button
+                      key={p.id} type="button"
+                      className="w-full flex items-center justify-between px-2 py-1.5 text-xs hover:bg-muted/60 text-left"
+                      onClick={() => { setPickProductId(p.id); setProductSearch(p.name); }}
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      <span className="text-muted-foreground font-mono">{p.sku}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex gap-2">
                 <Select value={pickProductId} onValueChange={setPickProductId}>
                   <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue placeholder="Select product…" /></SelectTrigger>
@@ -592,13 +652,13 @@ function NewRequestSheet({
                   </SelectContent>
                 </Select>
                 <Input type="number" min={1} value={pickQty} onChange={e => setPickQty(e.target.value)} className="h-8 w-20 text-xs" placeholder="Qty" />
-                <Button size="sm" variant="outline" className="h-8 px-3 gap-1" onClick={addItem} disabled={!pickProductId}>
+                <Button size="sm" variant="outline" className="h-8 px-3 gap-1" onClick={() => addItem()} disabled={!pickProductId}>
                   <Plus className="h-3.5 w-3.5" />Add
                 </Button>
               </div>
             </div>
             {items.length > 0 ? (
-              <div className="space-y-1.5">
+              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
                 {items.map(item => (
                   <div key={item.productId} className="flex items-center justify-between rounded-xl border border-border/40 px-3 py-2.5 bg-background">
                     <div className="min-w-0 flex-1">
@@ -667,7 +727,7 @@ function StockRequestsTab() {
   // Enforced server-side under "Stock Transfers" (WarehouseController.Approve/CreateRequest/
   // UpdateDelivery), not "Warehouses" — gate the actions here to match, so a view-only user
   // doesn't see interactive-looking buttons that just 403 with no explanation.
-  const { canCreate, canApprove } = usePermission("Stock Transfers");
+  const { canCreate, canApprove, canEdit: canEditTransfer } = usePermission("Stock Transfers");
   const [requests, setRequests] = useState<WarehouseRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -678,6 +738,15 @@ function StockRequestsTab() {
   const [dateTo, setDateTo] = useState("");
   const [viewReq, setViewReq] = useState<WarehouseRequest | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+
+  // The list row (`r`) never carries line items — GetRequests doesn't eager-load them, only
+  // GetRequestById does — so opening a request showed no detail on what was actually requested.
+  // Open immediately with what we have so the sheet doesn't feel laggy, then upgrade in place
+  // once the full detail (with items) arrives.
+  const openView = (r: WarehouseRequest) => {
+    setViewReq(r);
+    api.getWarehouseRequestById(r.id).then(setViewReq).catch(() => {});
+  };
 
   const load = () => {
     setLoading(true);
@@ -702,7 +771,7 @@ function StockRequestsTab() {
 
   const pendingCount = requests.filter(r => r.approvalStatus === "request_generated").length;
   const approvedCount = requests.filter(r => r.approvalStatus === "approved").length;
-  const onWayCount = requests.filter(r => r.deliveryStatus === "in_transit").length;
+  const onWayCount = requests.filter(r => r.deliveryStatus === "on_way").length;
   const deliveredCount = requests.filter(r => r.deliveryStatus === "delivered").length;
 
   const handleApprove = async (id: string, approved: boolean) => {
@@ -711,6 +780,19 @@ function StockRequestsTab() {
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to update request.");
+    }
+  };
+
+  // The backend endpoint (and this api.ts helper) already existed but nothing in the UI ever
+  // called it — the Tracking tab showed "On Way"/"Delivered" as a read-only timeline with no way
+  // to actually move a request through those states.
+  const handleUpdateDelivery = async (id: string, status: string) => {
+    try {
+      await api.updateWarehouseDelivery(id, status);
+      toast.success(status === "on_way" ? "Marked as on the way." : "Marked as delivered.");
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update delivery status.");
     }
   };
 
@@ -743,7 +825,7 @@ function StockRequestsTab() {
             placeholder="All Delivery"
             options={[
               { id: "pending", label: "Pending" },
-              { id: "in_transit", label: "On Way" },
+              { id: "on_way", label: "On Way" },
               { id: "delivered", label: "Delivered" },
             ]}
             selected={deliveryFilter}
@@ -751,16 +833,18 @@ function StockRequestsTab() {
           />
         </div>
         <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
+          <span className="text-xs text-muted-foreground whitespace-nowrap">From</span>
           <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-xs text-muted-foreground">–</span>
+          <span className="text-xs text-muted-foreground">To</span>
           <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          {(dateFrom || dateTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
         </div>
+        {(q || approvalFilter.length > 0 || deliveryFilter.length > 0 || dateFrom || dateTo) && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => {
+            setQ(""); setApprovalFilter([]); setDeliveryFilter([]); setDateFrom(""); setDateTo("");
+          }}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setNewOpen(true)}>
@@ -805,13 +889,16 @@ function StockRequestsTab() {
                     <td className="px-3 py-3 text-xs max-w-[120px] truncate text-muted-foreground">{r.notes ?? "—"}</td>
                     <td className="px-3 py-3">
                       <div className="flex gap-1 justify-end">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewReq(r)}>
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openView(r)}>
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
                         {r.approvalStatus === "request_generated" && canApprove && (
                           <>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-success" onClick={() => handleApprove(r.id, true)}><CheckCircle className="h-3.5 w-3.5" /></Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleApprove(r.id, false)}><XCircle className="h-3.5 w-3.5" /></Button>
+                            {/* Labeled pill buttons, matching Stock Transfer's row-inline Approve/Reject
+                                style — this row previously used unlabeled icon-only ghost buttons for
+                                the same action, an inconsistent look across the two modules. */}
+                            <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => handleApprove(r.id, true)}>Approve</Button>
+                            <Button size="sm" variant="outline" className="h-7 text-xs px-2 border-destructive/50 text-destructive" onClick={() => handleApprove(r.id, false)}>Reject</Button>
                           </>
                         )}
                       </div>
@@ -880,7 +967,7 @@ function StockRequestsTab() {
                   {[
                     { label: "Request Generated", done: true },
                     { label: "Approved", done: viewReq.approvalStatus === "approved" },
-                    { label: "On Way", done: viewReq.deliveryStatus === "in_transit" || viewReq.deliveryStatus === "delivered" },
+                    { label: "On Way", done: viewReq.deliveryStatus === "on_way" || viewReq.deliveryStatus === "delivered" },
                     { label: "Delivered", done: viewReq.deliveryStatus === "delivered" },
                   ].map((step, i) => (
                     <div key={i} className="flex items-center gap-3 text-sm">
@@ -898,6 +985,20 @@ function StockRequestsTab() {
                       <Button size="sm" variant="outline" className="text-destructive flex-1" onClick={() => { handleApprove(viewReq.id, false); setViewReq(null); }}>
                         <XCircle className="h-3.5 w-3.5 mr-1.5" />Reject
                       </Button>
+                    </div>
+                  )}
+                  {viewReq.approvalStatus === "approved" && viewReq.deliveryStatus !== "delivered" && canEditTransfer && (
+                    <div className="flex gap-2 pt-4 border-t border-border/40">
+                      {(viewReq.deliveryStatus ?? "pending") === "pending" && (
+                        <Button size="sm" className="gradient-primary text-primary-foreground border-0 flex-1" onClick={() => { handleUpdateDelivery(viewReq.id, "on_way"); setViewReq(null); }}>
+                          <Truck className="h-3.5 w-3.5 mr-1.5" />Mark On Way
+                        </Button>
+                      )}
+                      {viewReq.deliveryStatus === "on_way" && (
+                        <Button size="sm" className="gradient-primary text-primary-foreground border-0 flex-1" onClick={() => { handleUpdateDelivery(viewReq.id, "delivered"); setViewReq(null); }}>
+                          <CheckCircle className="h-3.5 w-3.5 mr-1.5" />Mark Delivered
+                        </Button>
+                      )}
                     </div>
                   )}
                 </TabsContent>

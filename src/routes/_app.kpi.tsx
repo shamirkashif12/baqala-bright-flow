@@ -52,11 +52,11 @@ function KPI() {
       </div>
 
       <Tabs defaultValue="cashier">
-        <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="cashier">Cashier KPI</TabsTrigger>
-          <TabsTrigger value="terminal">Terminal KPI</TabsTrigger>
-          <TabsTrigger value="scan">Product Scan KPI</TabsTrigger>
-          <TabsTrigger value="branch">Branch KPI</TabsTrigger>
+        <TabsList className="flex-wrap h-auto p-1.5 gap-1">
+          <TabsTrigger value="cashier" className="text-sm font-semibold px-4 py-2">Cashier KPI</TabsTrigger>
+          <TabsTrigger value="terminal" className="text-sm font-semibold px-4 py-2">Terminal KPI</TabsTrigger>
+          <TabsTrigger value="scan" className="text-sm font-semibold px-4 py-2">Product Scan KPI</TabsTrigger>
+          <TabsTrigger value="branch" className="text-sm font-semibold px-4 py-2">Branch KPI</TabsTrigger>
         </TabsList>
 
         <TabsContent value="cashier" className="mt-4">

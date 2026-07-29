@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable, StatusBadge } from "@/components/module-placeholder";
+import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Ban, AlertTriangle, Tag, Percent, Clock, CheckCircle2, XCircle, Eye } from "lucide-react";
+import { Ban, AlertTriangle, Tag, Percent, Clock, CheckCircle2, XCircle, Eye, X } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/waste-spoilage")({ component: WasteSpoilage });
@@ -152,83 +152,111 @@ function WasteSpoilage() {
     reason: r, count: (data?.rows ?? []).filter((row) => row.reason === r).length,
   })).filter((r) => r.count > 0);
 
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchIds.length > (lockedBranchId ? 1 : 0)
+    || warehouseIds.length > 0 || reason !== "all" || categoryIds.length > 0 || productIds.length > 0
+    || adjustedByIds.length > 0 || approvalStatuses.length > 0 || isTobacco;
+  const clearFilters = () => {
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchIds(lockedBranchId ? [lockedBranchId] : []);
+    setWarehouseIds([]); setReason("all"); setCategoryIds([]); setProductIds([]); setAdjustedByIds([]);
+    setApprovalStatuses([]); setIsTobacco(false);
+  };
+
   return (
     <PageShell title="Waste / Spoilage Report" subtitle="Expired, damaged and written-off stock">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
+          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         </div>
         {!lockedBranchId && (
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={branchIds}
-              onChange={setBranchIds}
-            />
-          </div>
+          <FilterField label="Branch">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+          </FilterField>
         )}
         {!lockedBranchId && (
-          <div className="w-44">
+          <FilterField label="Warehouse">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Warehouses"
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={warehouseIds}
+                onChange={setWarehouseIds}
+              />
+            </div>
+          </FilterField>
+        )}
+        <FilterField label="Reason">
+          <Select value={reason} onValueChange={setReason}>
+            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Reason" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Reasons</SelectItem>
+              <SelectItem value="waste">Waste</SelectItem>
+              <SelectItem value="damage">Damage</SelectItem>
+              <SelectItem value="expired">Expired</SelectItem>
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Category">
+          <div className="w-40">
             <SearchableMultiSelect
-              placeholder="All Warehouses"
-              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              selected={warehouseIds}
-              onChange={setWarehouseIds}
+              placeholder="All Categories"
+              options={categories.map((c) => ({ id: c.id, label: c.name }))}
+              selected={categoryIds}
+              onChange={setCategoryIds}
             />
           </div>
-        )}
-        <Select value={reason} onValueChange={setReason}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Reason" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Reasons</SelectItem>
-            <SelectItem value="waste">Waste</SelectItem>
-            <SelectItem value="damage">Damage</SelectItem>
-            <SelectItem value="expired">Expired</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Categories"
-            options={categories.map((c) => ({ id: c.id, label: c.name }))}
-            selected={categoryIds}
-            onChange={setCategoryIds}
-          />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={products.map((p) => ({ id: p.id, label: p.name }))}
-            selected={productIds}
-            onChange={setProductIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Employees"
-            options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-            selected={adjustedByIds}
-            onChange={setAdjustedByIds}
-          />
-        </div>
-        <div className="w-40">
-          <SearchableMultiSelect
-            placeholder="All Approvals"
-            options={[
-              { id: "pending", label: "Pending" },
-              { id: "approved", label: "Approved" },
-              { id: "rejected", label: "Rejected" },
-            ]}
-            selected={approvalStatuses}
-            onChange={setApprovalStatuses}
-          />
-        </div>
+        </FilterField>
+        <FilterField label="Product">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Employee">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Employees"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={adjustedByIds}
+              onChange={setAdjustedByIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Approval">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Approvals"
+              options={[
+                { id: "pending", label: "Pending" },
+                { id: "approved", label: "Approved" },
+                { id: "rejected", label: "Rejected" },
+              ]}
+              selected={approvalStatuses}
+              onChange={setApprovalStatuses}
+            />
+          </div>
+        </FilterField>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
           Tobacco only
         </label>
+        {hasFilters && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { TierMultiSelect } from "@/components/tier-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Plus, Loader2, Trash2, Pencil, Power, Tag, Boxes } from "lucide-react";
 import {
@@ -23,7 +24,6 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/_app/pricing")({ component: Pricing });
 
 const PRICE_TYPES: PriceType[] = ["standard", "online", "aggregator", "wholesale"];
-const TIERS: CustomerTier[] = ["standard", "silver", "gold", "platinum"];
 
 // Mirrors PriceResolutionService.SourceOf — the same precedence, spelled for a human. Kept in sync
 // by eye; the server is the authority and the Effective price column below shows what it decided.
@@ -56,15 +56,17 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [productSearch, setProductSearch] = useState("");
   const [form, setForm] = useState({
     productId: "", branchId: "", priceType: "standard" as PriceType, price: "",
-    effectiveFrom: "", effectiveTo: "", minCustomerTier: "" as "" | CustomerTier,
+    effectiveFrom: "", effectiveTo: "", minCustomerTiers: [] as CustomerTier[],
     unitType: "unit" as "unit" | "pack", packSize: "", packBarcode: "", label: "", priority: "0",
   });
 
   useEffect(() => {
     if (!open) return;
     setError("");
+    setProductSearch("");
     setForm(rule ? {
       productId: rule.productId,
       branchId: rule.branchId ?? "",
@@ -72,7 +74,7 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
       price: String(rule.price),
       effectiveFrom: rule.effectiveFrom ? rule.effectiveFrom.slice(0, 10) : "",
       effectiveTo: rule.effectiveTo ? rule.effectiveTo.slice(0, 10) : "",
-      minCustomerTier: rule.minCustomerTier ?? "",
+      minCustomerTiers: rule.minCustomerTier ? [rule.minCustomerTier] : [],
       unitType: rule.unitType,
       packSize: rule.packSize != null ? String(rule.packSize) : "",
       packBarcode: rule.packBarcode ?? "",
@@ -80,10 +82,24 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
       priority: String(rule.priority),
     } : {
       productId: "", branchId: "", priceType: "standard", price: "",
-      effectiveFrom: "", effectiveTo: "", minCustomerTier: "",
+      effectiveFrom: "", effectiveTo: "", minCustomerTiers: [],
       unitType: "unit", packSize: "", packBarcode: "", label: "", priority: "0",
     });
   }, [open, rule]);
+
+  const toggleTier = (tier: CustomerTier) => setForm(p => ({
+    ...p,
+    // Editing one existing rule can only ever carry one tier (it's a single row) — picking a
+    // second tier here replaces the choice instead of accumulating, since there's nothing to
+    // fan out into multiple rules once the row already exists.
+    minCustomerTiers: rule
+      ? (p.minCustomerTiers.includes(tier) ? [] : [tier])
+      : (p.minCustomerTiers.includes(tier) ? p.minCustomerTiers.filter(t => t !== tier) : [...p.minCustomerTiers, tier]),
+  }));
+
+  const filteredProducts = productSearch.trim()
+    ? products.filter(p => p.name.toLowerCase().includes(productSearch.trim().toLowerCase()) || p.sku.toLowerCase().includes(productSearch.trim().toLowerCase()))
+    : products;
 
   const isPack = form.unitType === "pack";
   const derivedUnitPrice = isPack && Number(form.packSize) > 0 && form.price !== ""
@@ -99,15 +115,13 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
     if (form.effectiveFrom && form.effectiveTo && form.effectiveTo <= form.effectiveFrom)
       return setError("'Until' must be after 'From'.");
 
-    const payload: PriceListPayload = {
-      id: rule?.id,
+    const basePayload = {
       productId: form.productId,
       branchId: form.branchId || undefined,
       priceType: form.priceType,
       price: Number(form.price),
       effectiveFrom: form.effectiveFrom ? new Date(form.effectiveFrom).toISOString() : undefined,
       effectiveTo: form.effectiveTo ? new Date(form.effectiveTo).toISOString() : undefined,
-      minCustomerTier: form.minCustomerTier || undefined,
       unitType: form.unitType,
       packSize: isPack ? Number(form.packSize) : undefined,
       packBarcode: isPack && form.packBarcode ? form.packBarcode : undefined,
@@ -117,9 +131,20 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
 
     setSaving(true); setError("");
     try {
-      if (rule) await api.updatePriceList(rule.id, payload);
-      else await api.createPriceList(payload);
-      toast.success(rule ? "Price rule updated" : "Price rule created");
+      if (rule) {
+        // A single existing row — at most one tier, same shape as before.
+        const payload: PriceListPayload = { id: rule.id, ...basePayload, minCustomerTier: form.minCustomerTiers[0] || undefined };
+        await api.updatePriceList(rule.id, payload);
+        toast.success("Price rule updated");
+      } else if (form.minCustomerTiers.length > 1) {
+        // Several tiers picked at once — one rule per tier, all sharing this same price/scope,
+        // mirroring the Inventory "Add Product" tier-price shortcut's own bulk-create behavior.
+        await api.createPriceListsBulk(form.minCustomerTiers.map(tier => ({ ...basePayload, minCustomerTier: tier })));
+        toast.success(`${form.minCustomerTiers.length} price rules created`);
+      } else {
+        await api.createPriceList({ ...basePayload, minCustomerTier: form.minCustomerTiers[0] || undefined });
+        toast.success("Price rule created");
+      }
       onDone(); onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save the price rule.");
@@ -133,10 +158,18 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
         <div className="space-y-3 mt-2">
           <div>
             <Label className="text-xs">Product *</Label>
+            {!rule && (
+              <Input
+                className="h-9 mt-1 mb-1.5" placeholder="Search product name or SKU…"
+                value={productSearch} onChange={e => setProductSearch(e.target.value)}
+              />
+            )}
             <Select value={form.productId} onValueChange={v => setForm(p => ({ ...p, productId: v }))} disabled={!!rule}>
               <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select product" /></SelectTrigger>
               <SelectContent>
-                {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} · {p.sku}</SelectItem>)}
+                {filteredProducts.length === 0
+                  ? <p className="px-2 py-1.5 text-xs text-muted-foreground">No products match "{productSearch}".</p>
+                  : filteredProducts.map(p => <SelectItem key={p.id} value={p.id}>{p.name} · {p.sku}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -170,6 +203,11 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
               </Select>
             </div>
           </div>
+          <p className="text-[10px] text-muted-foreground -mt-1.5">
+            Which sales channel this price applies to — "Standard" is regular in-store/POS sales;
+            pick "Online"/"Aggregator"/"Wholesale" only if this product is priced differently on
+            that channel. Most rules should stay on Standard.
+          </p>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -226,18 +264,14 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
             Friday, then that one".
           </p>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs">Customer tier</Label>
-              <Select value={form.minCustomerTier || "all"}
-                onValueChange={v => setForm(p => ({ ...p, minCustomerTier: v === "all" ? "" : (v as CustomerTier) }))}>
-                <SelectTrigger className="h-9 mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All customers</SelectItem>
-                  {TIERS.map(t => <SelectItem key={t} value={t} className="capitalize">{t} and above</SelectItem>)}
-                </SelectContent>
-              </Select>
+          <div>
+            <Label className="text-xs">Customer tier{!rule && " (pick several to create one rule per tier)"}</Label>
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
+              <TierMultiSelect selected={form.minCustomerTiers} onToggle={toggleTier} />
+              {form.minCustomerTiers.length === 0 && <span className="text-xs text-muted-foreground">All customers</span>}
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
             <div>
               <Label className="text-xs">Priority</Label>
               <Input type="number" className="h-9 mt-1" value={form.priority}
@@ -245,8 +279,8 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
             </div>
           </div>
           <p className="text-[10px] text-muted-foreground -mt-1.5">
-            A tier-gated price never applies to an anonymous walk-in. Priority only breaks ties between
-            equally specific rules — higher wins.
+            A tier is matched exactly (never "and above") and never applies to an anonymous walk-in.
+            Priority only breaks ties between equally specific rules — higher wins.
           </p>
 
           {error && <p className="text-xs text-destructive">{error}</p>}

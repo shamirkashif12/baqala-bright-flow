@@ -4,18 +4,95 @@ import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/lib/auth";
 import {
   LogIn, ScanBarcode, Pause, ShoppingBag, Undo2, LogOut,
-  Clock, Loader2, CheckCircle2, AlertCircle, RefreshCw,
+  Clock, Loader2, CheckCircle2, AlertCircle, RefreshCw, Settings2, Wallet,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type CashierShift, type Order } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { SARIcon, fmtSAR } from "@/lib/currency";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/cashier")({ component: CashierWorkspace });
+
+// ─── Customizable cards (hero stats + shift summary) ──────────────────────────
+// Same "which KPI cards to show" pattern as _app.dashboard.tsx's CustomizeDialog/STORAGE_KEY —
+// this workspace's cards were hardcoded with no way to hide any of them at all.
+type CardDef = { id: string; label: string; icon: LucideIcon };
+const CARD_DEFS: CardDef[] = [
+  { id: "today_orders", label: "Today's Orders", icon: ShoppingBag },
+  { id: "today_revenue", label: "Today's Revenue", icon: Wallet },
+  { id: "cash_drawer", label: "Cash in Drawer", icon: Wallet },
+  { id: "opening_amount", label: "Opening Amount", icon: Wallet },
+  { id: "cash_sales", label: "Cash Sales", icon: Wallet },
+  { id: "card_sales", label: "Card Sales", icon: Wallet },
+  { id: "wallet_sales", label: "Wallet Sales", icon: Wallet },
+];
+const ALL_CARD_IDS = CARD_DEFS.map(c => c.id);
+const CARD_STORAGE_KEY = "cashier_workspace_visible_cards";
+
+function CustomizeCardsDialog({ open, onClose, visible, onChange }: {
+  open: boolean; onClose: () => void;
+  visible: Set<string>; onChange: (ids: Set<string>) => void;
+}) {
+  const [local, setLocal] = useState<Set<string>>(new Set(visible));
+  useEffect(() => { if (open) setLocal(new Set(visible)); }, [open, visible]);
+
+  const toggle = (id: string) =>
+    setLocal(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Customize Cards</DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Choose which cards to show. {local.size} of {CARD_DEFS.length} selected.
+          </p>
+        </DialogHeader>
+        <div className="space-y-2 max-h-[55vh] overflow-y-auto py-1 pr-1">
+          {CARD_DEFS.map(c => {
+            const CardIcon = c.icon;
+            const checked = local.has(c.id);
+            return (
+              <div
+                key={c.id}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border p-3 cursor-pointer transition-colors",
+                  checked ? "border-primary/40 bg-primary/5" : "border-border/40 hover:bg-muted/40"
+                )}
+                onClick={() => toggle(c.id)}
+              >
+                <Checkbox checked={checked} onCheckedChange={() => toggle(c.id)} className="shrink-0" />
+                <div className="h-8 w-8 rounded-lg bg-muted/60 flex items-center justify-center shrink-0">
+                  <CardIcon className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium">{c.label}</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex gap-2 pt-2 border-t border-border/60">
+          <Button variant="outline" className="gap-1.5" onClick={() => setLocal(new Set(ALL_CARD_IDS))}>
+            Reset
+          </Button>
+          <Button className="flex-1 gradient-primary text-primary-foreground border-0" onClick={() => { onChange(local); onClose(); }}>
+            Done
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function elapsed(openedAt: string) {
@@ -66,7 +143,7 @@ function buildTiles(shift: CashierShift | null, todayOrders: Order[], heldCount:
       icon: Pause,
       title: "Held Orders",
       desc: heldCount > 0 ? `${heldCount} order${heldCount > 1 ? "s" : ""} waiting` : "No orders on hold",
-      href: "/pos",
+      href: "/held-orders",
       accent: heldCount > 0 ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30" : "bg-muted text-muted-foreground",
       badge: heldCount > 0 ? heldCount : undefined,
     },
@@ -102,6 +179,19 @@ function CashierWorkspace() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { branches } = useBranch();
+
+  const [visibleCards, setVisibleCards] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(CARD_STORAGE_KEY);
+      if (saved) return new Set(JSON.parse(saved) as string[]);
+    } catch { /* ignore malformed storage */ }
+    return new Set(ALL_CARD_IDS);
+  });
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const saveVisibleCards = (ids: Set<string>) => {
+    setVisibleCards(ids);
+    localStorage.setItem(CARD_STORAGE_KEY, JSON.stringify([...ids]));
+  };
 
   const [shift, setShift] = useState<CashierShift | null>(null);
   const [todayOrders, setTodayOrders] = useState<Order[]>([]);
@@ -190,15 +280,22 @@ function CashierWorkspace() {
           </div>
           <div className="flex gap-2 flex-wrap">
             {[
-              { label: "Today's Orders", value: todayOrders.length },
-              { label: "Today's Revenue", value: <><SARIcon />{fmtMoney(todayRevenue)}</> },
-              { label: "Cash in Drawer", value: shift ? <><SARIcon />{fmtMoney(cashInDrawer)}</> : "—" },
-            ].map(stat => (
+              { id: "today_orders", label: "Today's Orders", value: todayOrders.length },
+              { id: "today_revenue", label: "Today's Revenue", value: <><SARIcon />{fmtMoney(todayRevenue)}</> },
+              { id: "cash_drawer", label: "Cash in Drawer", value: shift ? <><SARIcon />{fmtMoney(cashInDrawer)}</> : "—" },
+            ].filter(stat => visibleCards.has(stat.id)).map(stat => (
               <div key={stat.label} className="rounded-xl bg-white/15 backdrop-blur border border-white/20 px-4 py-2 min-w-[100px]">
                 <p className="text-[10px] uppercase opacity-80">{stat.label}</p>
                 <p className="text-lg font-bold tabular-nums">{stat.value}</p>
               </div>
             ))}
+            <button
+              onClick={() => setCustomizeOpen(true)}
+              className="rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-2 transition-colors"
+              title="Customize cards"
+            >
+              <Settings2 className="h-4 w-4" />
+            </button>
             <button
               onClick={load}
               className="rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-2 transition-colors"
@@ -214,11 +311,11 @@ function CashierWorkspace() {
       {shift && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Opening Amount", value: <><SARIcon />{fmtMoney(shift.openingAmount)}</> },
-            { label: "Cash Sales", value: <><SARIcon />{fmtMoney(shift.cashSales)}</> },
-            { label: "Card Sales", value: <><SARIcon />{fmtMoney(shift.cardSales)}</> },
-            { label: "Wallet Sales", value: <><SARIcon />{fmtMoney(shift.digitalSales)}</> },
-          ].map(m => (
+            { id: "opening_amount", label: "Opening Amount", value: <><SARIcon />{fmtMoney(shift.openingAmount)}</> },
+            { id: "cash_sales", label: "Cash Sales", value: <><SARIcon />{fmtMoney(shift.cashSales)}</> },
+            { id: "card_sales", label: "Card Sales", value: <><SARIcon />{fmtMoney(shift.cardSales)}</> },
+            { id: "wallet_sales", label: "Wallet Sales", value: <><SARIcon />{fmtMoney(shift.digitalSales)}</> },
+          ].filter(m => visibleCards.has(m.id)).map(m => (
             <Card key={m.label} className="px-4 py-3 border-border/60 shadow-card">
               <p className="text-xs text-muted-foreground">{m.label}</p>
               <p className="text-base font-bold tabular-nums mt-0.5">{m.value}</p>
@@ -305,6 +402,13 @@ function CashierWorkspace() {
           </div>
         </Card>
       )}
+
+      <CustomizeCardsDialog
+        open={customizeOpen}
+        onClose={() => setCustomizeOpen(false)}
+        visible={visibleCards}
+        onChange={saveVisibleCards}
+      />
     </PageShell>
   );
 }

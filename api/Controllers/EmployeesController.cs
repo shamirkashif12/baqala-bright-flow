@@ -265,6 +265,24 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         return await ExportFileBuilder.BuildAsync(this, db, format, "Employees", $"Records: {employees.Count}", headers, rows, $"employees-{DateTime.UtcNow:yyyy-MM-dd}", exportedBy);
     }
 
+    // Mirrors the Add/Edit Employee form's own isValidSaudiPhone/isValidNationalId checks — the
+    // client already blocks these, but nothing enforced it server-side, so a direct API call
+    // could still store garbage in fields regulators/HR expect to be well-formed.
+    private static readonly System.Text.RegularExpressions.Regex SaudiPhoneRegex =
+        new(@"^(05\d{8}|9665\d{8})$", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex NationalIdRegex =
+        new(@"^\d{10}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string? ValidateIdentifierFormats(Employee e)
+    {
+        var digitsOnly = new string((e.Phone ?? "").Where(char.IsDigit).ToArray());
+        if (!SaudiPhoneRegex.IsMatch(digitsOnly))
+            return "Enter a valid Saudi mobile number (05XXXXXXXX).";
+        if (!NationalIdRegex.IsMatch((e.NationalId ?? "").Trim()))
+            return "National ID / Iqama must be exactly 10 digits.";
+        return null;
+    }
+
     // FRD 4.1 — duplicate check must cover identifier/mobile/email, not just National ID.
     private async Task<string?> FindDuplicateFieldAsync(Employee e, Guid? excludeId)
     {
@@ -299,6 +317,8 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Employee employee)
     {
+        var formatError = ValidateIdentifierFormats(employee);
+        if (formatError is not null) return BadRequest(new { message = formatError });
         var duplicateMessage = await FindDuplicateFieldAsync(employee, null);
         if (duplicateMessage is not null) return Conflict(new { message = duplicateMessage });
         var masterDataError = await ValidateActiveMasterDataAsync(employee);
@@ -340,6 +360,8 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         var employee = await db.Employees.FindAsync(id);
         if (employee is null) return NotFound();
 
+        var formatError = ValidateIdentifierFormats(updated);
+        if (formatError is not null) return BadRequest(new { message = formatError });
         var duplicateMessage = await FindDuplicateFieldAsync(updated, id);
         if (duplicateMessage is not null) return Conflict(new { message = duplicateMessage });
         var masterDataError = await ValidateActiveMasterDataAsync(updated);

@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Download, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { Download, Pencil, Plus, Trash2, Users, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Designation, type Department } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
@@ -84,6 +85,8 @@ function DesignationsTab() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<DesignationForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Designation | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -119,13 +122,18 @@ function DesignationsTab() {
     }
   };
 
-  const handleDelete = async (d: Designation) => {
-    if (!confirm(`Deactivate designation "${d.name}"?`)) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.deleteDesignation(d.id);
+      await api.deleteDesignation(deleteTarget.id);
+      toast.success(`"${deleteTarget.name}" deactivated.`);
+      setDeleteTarget(null);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to delete designation.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -165,6 +173,11 @@ function DesignationsTab() {
             onChange={setStatusFilter}
           />
         </div>
+        {(q || departmentFilter.length > 0 || statusFilter.length > 0) && (
+          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={() => { setQ(""); setDepartmentFilter([]); setStatusFilter([]); }}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export
@@ -202,7 +215,7 @@ function DesignationsTab() {
                       <div className="flex gap-1 justify-end">
                         <Button size="icon" variant="ghost" className="h-7 w-7" title="View Employees" onClick={() => navigate({ to: "/employees", search: { departmentId: undefined, designationId: d.id } })}><Users className="h-3.5 w-3.5" /></Button>
                         {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(d)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(d)}><Trash2 className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(d)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                       </div>
                     </td>
                   </tr>
@@ -229,6 +242,22 @@ function DesignationsTab() {
           <DesignationFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} departments={departments} />
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Deactivate designation?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Deactivate <span className="font-semibold text-foreground">{deleteTarget?.name}</span>?
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Deactivate
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

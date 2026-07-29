@@ -174,6 +174,16 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
             .Select(b => new { name = b.name, daysLeft = (int)((b.expiryDate - now).TotalDays), branch = b.branch })
             .ToList();
 
+        var expiringBranchCount = await batchesQ
+            .Where(b => b.ExpiryDate != null && b.ExpiryDate >= now && b.ExpiryDate <= cutoff7 && b.RemainingQuantity > 0)
+            .Select(b => b.BranchId)
+            .Distinct()
+            .CountAsync();
+
+        // ─── Already expired (still sitting in stock, past expiry) ────────
+        var alreadyExpiredCount = await batchesQ
+            .CountAsync(b => b.ExpiryDate != null && b.ExpiryDate < now && b.RemainingQuantity > 0);
+
         // ─── Cashier performance (in period) ───────────────────────────────
         var cashierPerf = await shiftsQ
             .Include(s => s.Cashier)
@@ -227,7 +237,7 @@ public class DashboardController(BaqalaDbContext db) : ControllerBase
             sales = new { totalToday = totalSalesToday, totalTodayDeltaPct = DeltaPct(totalSalesToday, prevTotalSales), paymentBreakdown },
             shifts    = new { active = activeShifts, totalCashiers },
             terminals = new { active = activeTerminals, total = totalTerminals },
-            inventory = new { lowStockCount, outOfStockCount, lowStockItems, expiringCount, expiringItems },
+            inventory = new { lowStockCount, outOfStockCount, lowStockItems, expiringCount, expiringItems, expiringBranchCount, alreadyExpiredCount },
             cashierPerformance = cashierPerf,
             branchPerformance  = branchPerf,
             returns = new { count = returnsCount, refundedAmount }

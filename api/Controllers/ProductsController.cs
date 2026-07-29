@@ -103,10 +103,12 @@ public class ProductsController(
             return BadRequest(new { message = "Purchase price must be greater than zero, or left blank." });
         if (await db.Products.AnyAsync(p => p.Sku == product.Sku))
             return Conflict(new { message = $"SKU \"{product.Sku}\" is already used by another product." });
+        // Discontinued products are excluded — that barcode is free to reuse once its old product
+        // was soft-deleted, otherwise a re-added item is permanently blocked by its own predecessor.
         if (!string.IsNullOrWhiteSpace(product.Barcode) &&
-            await db.Products.AnyAsync(p => p.Barcode == product.Barcode))
+            await db.Products.AnyAsync(p => p.Barcode == product.Barcode && p.Status != "discontinued"))
         {
-            var existing = await db.Products.FirstAsync(p => p.Barcode == product.Barcode);
+            var existing = await db.Products.FirstAsync(p => p.Barcode == product.Barcode && p.Status != "discontinued");
             return Conflict(new { message = $"Barcode {product.Barcode} is already assigned to \"{existing.Name}\". Edit that product instead." });
         }
         product.Id = Guid.NewGuid();
@@ -143,9 +145,9 @@ public class ProductsController(
             return Conflict(new { message = $"SKU \"{updated.Sku}\" is already used by another product." });
         if (!string.IsNullOrWhiteSpace(updated.Barcode) &&
             !string.Equals(product.Barcode, updated.Barcode, StringComparison.Ordinal) &&
-            await db.Products.AnyAsync(p => p.Id != id && p.Barcode == updated.Barcode))
+            await db.Products.AnyAsync(p => p.Id != id && p.Barcode == updated.Barcode && p.Status != "discontinued"))
         {
-            var existing = await db.Products.FirstAsync(p => p.Barcode == updated.Barcode);
+            var existing = await db.Products.FirstAsync(p => p.Barcode == updated.Barcode && p.Status != "discontinued");
             return Conflict(new { message = $"Barcode {updated.Barcode} is already assigned to \"{existing.Name}\". Edit that product instead." });
         }
         var previousPrice = product.BasePrice;
@@ -168,6 +170,7 @@ public class ProductsController(
         product.Discount = updated.Discount;
         product.DiscountType = updated.DiscountType;
         product.ImageUrl = updated.ImageUrl;
+        product.Description = updated.Description;
         // Pack & unit pricing (FRD §12). Normalised so a "single" product never carries a stray
         // pack size and a "pack" always has one — the same guard the create path applies.
         product.SaleUnitType = updated.SaleUnitType == "pack" ? "pack" : "single";
@@ -243,9 +246,11 @@ public class ProductsController(
 
     // ─── Categories ──────────────────────────────────────────────────────────
     [HttpGet("/api/categories")]
-    public async Task<IActionResult> GetCategories()
+    public async Task<IActionResult> GetCategories(bool includeInactive = false)
     {
-        return Ok(await db.Categories.Where(c => c.IsActive).OrderBy(c => c.SortOrder).ToListAsync());
+        var query = db.Categories.AsQueryable();
+        if (!includeInactive) query = query.Where(c => c.IsActive);
+        return Ok(await query.OrderBy(c => c.SortOrder).ToListAsync());
     }
 
     [RequirePermission("Inventory", PermAction.Create)]
@@ -300,6 +305,55 @@ public class ProductsController(
             "Category deletion awaiting approval",
             $"Category {category.Name} is queued for deletion and needs your approval.");
         return Accepted(new { message = "Deletion request sent for manager approval.", approvalRequestId = pending.Id });
+    }
+
+    // ─── Product Image Gallery ───────────────────────────────────────────────
+    // Product.ImageUrl stays the single "primary" image exactly as before — these are additional,
+    // optional gallery images. Mirrors SupplierDocument/EmployeeDocument's sub-resource shape (the
+    // app's established multi-attachment pattern): base64 data-URL in a longtext column, no disk/
+    // CDN storage anywhere in this codebase.
+    [HttpGet("{id:guid}/images")]
+    public async Task<IActionResult> GetImages(Guid id)
+    {
+        var images = await db.ProductImages.Where(i => i.ProductId == id).OrderBy(i => i.SortOrder).ToListAsync();
+        return Ok(images);
+    }
+
+    [RequirePermission("Inventory", PermAction.Edit)]
+    [HttpPost("{id:guid}/images")]
+    public async Task<IActionResult> UploadImage(Guid id, [FromBody] ProductImage image)
+    {
+        var product = await db.Products.FindAsync(id);
+        if (product is null) return NotFound(new { message = "Product not found." });
+
+        var nextSort = await db.ProductImages.Where(i => i.ProductId == id).Select(i => (int?)i.SortOrder).MaxAsync() ?? -1;
+        image.Id = Guid.NewGuid();
+        image.ProductId = id;
+        image.SortOrder = nextSort + 1;
+        image.UploadedBy = CallerId();
+        image.UploadedAt = DateTime.UtcNow;
+        db.ProductImages.Add(image);
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(action: "Product gallery image uploaded", entityType: "ProductImage", entityId: image.Id,
+            userId: CallerId(), details: product.Name, module: "Inventory");
+
+        return CreatedAtAction(nameof(GetImages), new { id }, image);
+    }
+
+    [RequirePermission("Inventory", PermAction.Edit)]
+    [HttpDelete("{id:guid}/images/{imageId:guid}")]
+    public async Task<IActionResult> DeleteImage(Guid id, Guid imageId)
+    {
+        var image = await db.ProductImages.FirstOrDefaultAsync(i => i.Id == imageId && i.ProductId == id);
+        if (image is null) return NotFound();
+        db.ProductImages.Remove(image);
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(action: "Product gallery image deleted", entityType: "ProductImage", entityId: imageId,
+            userId: CallerId(), severity: "warning", module: "Inventory");
+
+        return NoContent();
     }
 
     // ─── Product Variants ────────────────────────────────────────────────────

@@ -49,6 +49,9 @@ const DEFAULTS: S = {
   allowNearExpirySale: true,
   blockExpiredItems: true,
   blockNonpermissibleItems: true,
+  onlineOrderingEnabled: false,
+  onlineOrderingMinOrderAmountSar: 0,
+  onlineOrderingMaxOrderValueSar: 1000,
 };
 
 function Row({
@@ -73,6 +76,15 @@ function Field({ label, value }: { label: string; value: string }) {
     <div className="space-y-1">
       <Label className="text-xs">{label}</Label>
       <Input className="h-9" defaultValue={value} />
+    </div>
+  );
+}
+
+function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      <Input className="h-9" type="number" step="0.01" min={0} value={value} onChange={e => onChange(Number(e.target.value) || 0)} />
     </div>
   );
 }
@@ -125,6 +137,9 @@ function PosSettings() {
           allowNearExpirySale:            data.allowNearExpirySale           ?? DEFAULTS.allowNearExpirySale,
           blockExpiredItems:              data.blockExpiredItems             ?? DEFAULTS.blockExpiredItems,
           blockNonpermissibleItems:       data.blockNonpermissibleItems      ?? DEFAULTS.blockNonpermissibleItems,
+          onlineOrderingEnabled:          data.onlineOrderingEnabled         ?? DEFAULTS.onlineOrderingEnabled,
+          onlineOrderingMinOrderAmountSar: data.onlineOrderingMinOrderAmountSar ?? DEFAULTS.onlineOrderingMinOrderAmountSar,
+          onlineOrderingMaxOrderValueSar: data.onlineOrderingMaxOrderValueSar ?? DEFAULTS.onlineOrderingMaxOrderValueSar,
         });
         setLoadError(false);
         setLoading(false);
@@ -146,6 +161,10 @@ function PosSettings() {
     return (v: boolean) => setS(prev => ({ ...prev, [key]: v }));
   }
 
+  function n(key: keyof S) {
+    return (v: number) => setS(prev => ({ ...prev, [key]: v }));
+  }
+
   async function handleSave() {
     if (!branchId) return;
     setSaving(true);
@@ -163,7 +182,20 @@ function PosSettings() {
     <PageShell
       title="POS Settings"
       subtitle="Configure cashier, terminal, payments, printing and permissions"
-      actions={<BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />}
+      actions={
+        <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-1.5">
+          <Label className="text-xs text-muted-foreground shrink-0">Branch</Label>
+          <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} className="h-8 border-0 bg-transparent px-1 w-auto" />
+          {!lockedBranchId && (
+            <Button
+              variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground"
+              onClick={() => setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0]?.id ?? "")}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
+      }
     >
       {loadError && (
         <LoadErrorBanner
@@ -186,6 +218,7 @@ function PosSettings() {
           <TabsTrigger value="invoice">Invoice</TabsTrigger>
           <TabsTrigger value="permissions">Permissions</TabsTrigger>
           <TabsTrigger value="scan">Scan & Expiry</TabsTrigger>
+          <TabsTrigger value="online">Online Ordering</TabsTrigger>
           <TabsTrigger value="card">Card Machine</TabsTrigger>
           <TabsTrigger value="printer">Printer</TabsTrigger>
         </TabsList>
@@ -294,6 +327,20 @@ function PosSettings() {
           <Row title="Block non-permissible items (KSA compliance)"
             desc="Prevent scanning of products restricted under Saudi regulations"
             checked={s.blockNonpermissibleItems} onChange={t("blockNonpermissibleItems")} />
+        </TabsContent>
+
+        {/* ── Online Ordering ── */}
+        <TabsContent value="online" className="space-y-3 mt-4">
+          <Row title="Enable online ordering for this branch"
+            desc="Turns on the public ordering page and QR code — off by default until the branch is ready to fulfil delivery orders"
+            checked={s.onlineOrderingEnabled} onChange={t("onlineOrderingEnabled")} />
+          <Card className="p-4 grid sm:grid-cols-2 gap-3">
+            <NumberField label="Minimum order amount (SAR)" value={s.onlineOrderingMinOrderAmountSar} onChange={n("onlineOrderingMinOrderAmountSar")} />
+            <NumberField label="Maximum order amount (SAR)" value={s.onlineOrderingMaxOrderValueSar} onChange={n("onlineOrderingMaxOrderValueSar")} />
+          </Card>
+          <p className="text-xs text-muted-foreground px-1">
+            The maximum is an anti-abuse ceiling on the public, unauthenticated ordering page — orders above it are rejected with a message to contact the branch directly.
+          </p>
         </TabsContent>
 
         {/* ── Card Machine (non-DB config) ── */}
