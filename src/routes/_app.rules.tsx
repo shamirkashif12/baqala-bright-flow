@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetFooter } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -339,14 +340,20 @@ function Rules() {
                 <Textarea rows={2} value={editForm.condition} onChange={e => setEditForm(f => ({ ...f, condition: e.target.value }))} disabled={viewOnly || !canEdit} />
               </div>
               <Field label="Action" value={editForm.action} onChange={v => setEditForm(f => ({ ...f, action: v }))} disabled={viewOnly || !canEdit} />
+              {view && (
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3.5">
+                  <div>
+                    <p className="font-medium text-sm">{view.isActive ? "Active" : "Inactive"}</p>
+                    <p className="text-xs text-muted-foreground">Inactive rules are kept but no longer enforced</p>
+                  </div>
+                  {busyId === view.id
+                    ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    : <Switch checked={view.isActive} disabled={viewOnly || !canEdit} onCheckedChange={() => handleToggle(view)} />}
+                </div>
+              )}
             </div>
           )}
           <SheetFooter className="mt-4 gap-2">
-            {!viewOnly && canEdit && view && (
-              <Button variant="outline" disabled={busyId === view.id} onClick={() => handleToggle(view)}>
-                {busyId === view.id ? <Loader2 className="h-4 w-4 animate-spin" /> : (view.isActive ? "Deactivate" : "Activate")}
-              </Button>
-            )}
             {!viewOnly && canEdit && (
               <Button className="gradient-primary text-primary-foreground border-0" disabled={saving} onClick={handleSaveEdit}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save rule"}

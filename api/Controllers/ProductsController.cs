@@ -250,7 +250,27 @@ public class ProductsController(
     {
         var query = db.Categories.AsQueryable();
         if (!includeInactive) query = query.Where(c => c.IsActive);
-        return Ok(await query.OrderBy(c => c.SortOrder).ToListAsync());
+        var categories = await query.OrderBy(c => c.SortOrder).ToListAsync();
+
+        // A queued deletion request left no trace on the category itself — clicking Delete looked
+        // like it did nothing, since the row stayed exactly as it was until someone dug into the
+        // Approval Center. Same fix as OrdersController's PendingApproval annotation.
+        var pendingByCategory = (await db.ApprovalRequests
+                .Include(a => a.RequestedByUser)
+                .Where(a => a.Status == "pending" && a.EntityType == "Category")
+                .OrderByDescending(a => a.RequestedAt)
+                .ToListAsync())
+            .Where(a => a.EntityId.HasValue)
+            .GroupBy(a => a.EntityId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        return Ok(categories.Select(c => new
+        {
+            c.Id, c.Name, c.NameAr, c.SortOrder, c.IsActive, c.ParentId, c.Description, c.ImageUrl, c.CreatedAt, c.UpdatedAt,
+            PendingApproval = pendingByCategory.TryGetValue(c.Id, out var pa)
+                ? new { pa.Id, pa.RequestType, pa.RequestedAt, RequestedByName = pa.RequestedByUser?.FullName, pa.Reason, Summary = ApprovalsController.EntityLabel(pa) }
+                : null,
+        }));
     }
 
     [RequirePermission("Inventory", PermAction.Create)]

@@ -131,14 +131,6 @@ function Zatca() {
         <MetricCard label="Total" value={String(invoices.length)} icon={QrCode} accent="primary" />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <BranchFilter branches={branches} value={branchFilter} onChange={setBranchFilter} locked={!!lockedBranchId} allowAll />
-        {hasFilters && (
-          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear
-          </Button>
-        )}
-      </div>
       <Toolbar
         placeholder="Search invoice / CR / VAT…"
         value={search}
@@ -146,6 +138,16 @@ function Zatca() {
         onFilterClick={() => setShowFilters(v => !v)}
         filtersActive={statusFilter.length > 0}
         onExport={handleExport}
+        extra={
+          <>
+            <BranchFilter branches={branches} value={branchFilter} onChange={setBranchFilter} locked={!!lockedBranchId} allowAll />
+            {hasFilters && (
+              <Button variant="ghost" size="sm" className="h-10 gap-1.5 text-xs" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5" /> Clear
+              </Button>
+            )}
+          </>
+        }
       />
       {showFilters && (
         <div className="flex flex-wrap items-center gap-2 -mt-2">

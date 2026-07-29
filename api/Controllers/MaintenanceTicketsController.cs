@@ -75,12 +75,16 @@ public class MaintenanceTicketsController(BaqalaDbContext db) : ControllerBase
 
         // Resolving the ticket brings the device back online only if it has no OTHER open ticket —
         // a device with two concurrent issues shouldn't flip back to "active" just because one
-        // of them was closed out.
+        // of them was closed out. Covers both "maintenance" (auto-set when the ticket was opened)
+        // and "offline" (settable independently, e.g. via the device's own manual status override,
+        // but just as often exactly what a reported issue like a sync/network fault looks like) —
+        // previously only "maintenance" cleared, so a device sitting at "offline" when its last
+        // open ticket was resolved stayed stuck there with no further action able to clear it.
         if (req.Status == "resolved" && ticket.Device is not null)
         {
             var hasOtherOpenTickets = await db.MaintenanceTickets
                 .AnyAsync(t => t.DeviceId == ticket.DeviceId && t.Id != id && t.Status != "resolved");
-            if (!hasOtherOpenTickets && ticket.Device.Status == "maintenance")
+            if (!hasOtherOpenTickets && (ticket.Device.Status == "maintenance" || ticket.Device.Status == "offline"))
             {
                 ticket.Device.Status = "active";
                 ticket.Device.UpdatedAt = DateTime.UtcNow;

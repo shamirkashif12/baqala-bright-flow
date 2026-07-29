@@ -96,9 +96,25 @@ type NavGroup = { label: string; items: NavItem[] };
 
 const isActiveUrl = (path: string, url: string) => path === url || path.startsWith(url + "/");
 
-// The group whose page we're currently on — the only one that starts expanded.
-const activeGroupLabel = (path: string) =>
-  navGroups.find((g) => g.items.some((it) => isActiveUrl(path, it.url)))?.label ?? "";
+// The group whose page we're currently on — the only one that starts expanded. Picks the
+// longest (most specific) matching item url across every group, not just the first group
+// declared — otherwise a path like /reports/hrm-attendance matches both Human Resources'
+// "Attendance Report" (/reports/hrm-attendance, exact) and Insights' "Reports" (/reports, a
+// prefix match via isActiveUrl's trailing "/"), and whichever group is declared first in
+// navGroups would always win regardless of which link actually points at this page.
+const activeGroupLabel = (path: string) => {
+  let bestLabel = "";
+  let bestUrlLength = -1;
+  for (const g of navGroups) {
+    for (const it of g.items) {
+      if (isActiveUrl(path, it.url) && it.url.length > bestUrlLength) {
+        bestUrlLength = it.url.length;
+        bestLabel = g.label;
+      }
+    }
+  }
+  return bestLabel;
+};
 
 // A parent item (e.g. Customers & Loyalty) expands only when we're on it or one of its sub-pages.
 const activeParentUrl = (path: string) =>

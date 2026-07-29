@@ -501,7 +501,7 @@ function TypesTab() {
                 {types.map((t) => (
                   <tr key={t.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
                     <td className="px-3 py-3 font-semibold">{t.name}</td>
-                    <td className="px-3 py-3 text-muted-foreground" dir="rtl">{t.nameAr ?? "—"}</td>
+                    <td className="px-3 py-3 text-muted-foreground text-left" dir="rtl">{t.nameAr ?? "—"}</td>
                     <td className="px-3 py-3 text-xs text-muted-foreground max-w-[200px] truncate">{t.description ?? "—"}</td>
                     <td className="px-3 py-3">
                       <button

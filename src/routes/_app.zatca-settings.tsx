@@ -49,6 +49,18 @@ const errorLogs = [
   { id: "ERR-439", invoice: "INV-20260601-3331", code: "VR-118", reason: "Invalid invoice timestamp format", branch: "Jeddah", time: "Yesterday", status: "retry required" },
 ];
 
+const WEEKDAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// Each mock row's `time` field is a display string ("Today 14:42" / "Yesterday") rather than a
+// real timestamp, so the range/day filters below resolve against the actual current date to
+// figure out which real weekday "Today"/"Yesterday" refers to.
+function rowWeekday(time: string): string | null {
+  const now = new Date();
+  if (time.startsWith("Today")) return WEEKDAY_ABBR[now.getDay()];
+  if (time.startsWith("Yesterday")) return WEEKDAY_ABBR[(now.getDay() + 6) % 7];
+  return null;
+}
+
 // Shared by the Integration Logs / Error Logs tabs — each row's searchable text fields vs. the
 // FilterBar's query, plus a loose branch match ("Olaya" from the mock rows vs. "Olaya — Riyadh"
 // from the filter's branch list, which don't share an exact string).
@@ -58,7 +70,21 @@ function matchesLogFilter(row: Record<string, string | number>, searchFields: st
   const matchesQuery = !q || searchFields.some(f => String(row[f] ?? "").toLowerCase().includes(q));
   const branch = String(row.branch ?? "").toLowerCase();
   const matchesBranch = filter.branch === "All Branches" || filter.branch.toLowerCase().includes(branch);
-  return matchesQuery && matchesBranch;
+
+  const time = String(row.time ?? "");
+  // "Custom" has no follow-up date-range picker wired up in FilterBar yet, so it can't meaningfully
+  // narrow anything — treat it the same as no range filter rather than hiding every row.
+  const matchesRange =
+    filter.range === "Custom"
+    || (filter.range === "Today" && time.startsWith("Today"))
+    || (filter.range === "Yesterday" && time.startsWith("Yesterday"))
+    // Every mock row is within the last day or two, so both windows include everything.
+    || filter.range === "Last 7 days"
+    || filter.range === "Last 30 days";
+
+  const matchesDay = filter.day === "Any day" || rowWeekday(time) === filter.day;
+
+  return matchesQuery && matchesBranch && matchesRange && matchesDay;
 }
 
 function onboardingLabel(status?: string) {

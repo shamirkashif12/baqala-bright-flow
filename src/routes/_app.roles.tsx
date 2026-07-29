@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useBlocker } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import { ModuleGate } from "@/components/role-gate";
 import { PageShell } from "@/components/app-topbar";
@@ -513,6 +513,14 @@ function Roles() {
     finally { setSaving(false); }
   };
 
+  // beforeunload only fires for an actual browser-level unload (tab close, refresh, typed URL) —
+  // it never fires for in-app navigation (clicking a sidebar link), since the SPA never actually
+  // unloads for that. useBlocker below covers that other half of "leaving the page".
+  const { status: navBlockStatus, proceed: confirmNavAway, reset: cancelNavAway } = useBlocker({
+    shouldBlockFn: () => dirty,
+    withResolver: true,
+  });
+
   // `dirty` already gated the Save button, but a manager could still tab away/close the browser
   // with unsaved permission edits and lose them silently — warn via the standard browser prompt.
   useEffect(() => {
@@ -696,6 +704,19 @@ function Roles() {
               {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
               Delete
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={navBlockStatus === "blocked"} onOpenChange={v => !v && cancelNavAway?.()}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Leave without saving?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            You have unsaved permission changes. Leaving now will discard them.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => cancelNavAway?.()}>Stay</Button>
+            <Button variant="destructive" onClick={() => confirmNavAway?.()}>Leave without saving</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

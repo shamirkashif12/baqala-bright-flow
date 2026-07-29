@@ -4,6 +4,10 @@ import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
 import { ShieldCheck, Ban, AlertTriangle, Lock, Loader2 } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
@@ -35,6 +39,12 @@ const TOGGLE_DEFAULTS: Toggles = {
   blockNonpermissibleItems: true,
 };
 
+// "Add Rule" creates the same kind of custom-fee rule as Service Charges (_app.service-charges.tsx)
+// — the only TaxFeeRule type the app lets a user define; VAT/tobacco-excise rows are fixed system
+// rules edited on Tax, Fees & Tobacco, not created here.
+type RuleForm = { ruleName: string; feeType: "fixed" | "percent"; value: string; applicableTo: string; status: string };
+const emptyRuleForm: RuleForm = { ruleName: "", feeType: "fixed", value: "0.00", applicableTo: "all_products", status: "active" };
+
 function Compliance() {
   const { user } = useAuth();
   const { branches } = useBranch();
@@ -45,11 +55,18 @@ function Compliance() {
   useEffect(() => {
     if (lockedBranchId) setBranchId(lockedBranchId);
   }, [lockedBranchId]);
+  // Remember the admin's chosen branch across reloads — otherwise this always snaps back to the
+  // first active branch on load, showing that branch's own (usually all-default) toggle values,
+  // which reads as "my save didn't stick" when really a different branch's settings are on screen.
   useEffect(() => {
-    if (!branchId && branches.length) {
-      setBranchId(branches.find((b) => b.status === "active")?.id ?? branches[0].id);
-    }
-  }, [branches, branchId]);
+    if (lockedBranchId || branchId || !branches.length) return;
+    const stored = localStorage.getItem("compliance:branchId");
+    const storedIsValid = stored && branches.some((b) => b.id === stored);
+    setBranchId(storedIsValid ? stored! : (branches.find((b) => b.status === "active")?.id ?? branches[0].id));
+  }, [branches, branchId, lockedBranchId]);
+  useEffect(() => {
+    if (branchId && !lockedBranchId) localStorage.setItem("compliance:branchId", branchId);
+  }, [branchId, lockedBranchId]);
   // Toggles are persisted through SettingsController (RequirePermission("Settings", Edit)),
   // so both that AND Compliance:Edit are required — otherwise a role with Settings:Edit
   // for /pos-settings (e.g. Branch Manager) would also get editable controls here, even
@@ -67,6 +84,9 @@ function Compliance() {
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
+  const [ruleForm, setRuleForm] = useState<RuleForm>(emptyRuleForm);
+  const [savingRule, setSavingRule] = useState(false);
   const companyHeader = useCompanyHeader();
 
   const loadRules = useCallback(() => {
@@ -139,6 +159,35 @@ function Compliance() {
       `compliance-rules-${localDateStr(new Date())}.csv`,
       companyHeader
     );
+  }
+
+  function openCreateRule() {
+    setRuleForm(emptyRuleForm);
+    setRuleDialogOpen(true);
+  }
+
+  async function handleSaveRule() {
+    setSavingRule(true);
+    try {
+      await api.createTaxRule({
+        ruleName: ruleForm.ruleName,
+        ruleType: "custom_fee",
+        customFeeAmount: ruleForm.feeType === "fixed" ? Number(ruleForm.value) : 0,
+        excisePercentage: ruleForm.feeType === "percent" ? Number(ruleForm.value) : 0,
+        vatPercentage: 0,
+        applicableTo: ruleForm.applicableTo,
+        isTobacco: false,
+        status: ruleForm.status,
+        effectiveDate: localDateStr(),
+      });
+      toast.success("Rule created");
+      setRuleDialogOpen(false);
+      loadRules();
+    } catch {
+      toast.error("Failed to create rule");
+    } finally {
+      setSavingRule(false);
+    }
   }
 
   return (
@@ -220,6 +269,7 @@ function Compliance() {
       <Toolbar
         placeholder="Search SKU / rule…"
         primaryLabel={canCreateComplianceRule ? "Add Rule" : undefined}
+        onPrimaryClick={openCreateRule}
         value={search}
         onChange={e => setSearch(e.target.value)}
         onFilterClick={() => setShowFilters(v => !v)}
@@ -256,6 +306,77 @@ function Compliance() {
         ]}
         rows={filteredRules}
       />
+
+      <Dialog open={ruleDialogOpen} onOpenChange={v => !v && setRuleDialogOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Rule</DialogTitle>
+            <DialogDescription>Applied automatically on billing &amp; order checkout.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Rule name</Label>
+              <Input
+                value={ruleForm.ruleName}
+                onChange={e => setRuleForm(p => ({ ...p, ruleName: e.target.value }))}
+                className="h-9"
+                placeholder="e.g. Delivery Service Fee"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Type</Label>
+                <Select value={ruleForm.feeType} onValueChange={v => setRuleForm(p => ({ ...p, feeType: v as "fixed" | "percent" }))}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fixed">Fixed (SAR)</SelectItem>
+                    <SelectItem value="percent">Percent (%)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Value</Label>
+                <Input
+                  type="number"
+                  step={0.01}
+                  value={ruleForm.value}
+                  onChange={e => setRuleForm(p => ({ ...p, value: e.target.value }))}
+                  className="h-9"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Applies to</Label>
+              <Select value={ruleForm.applicableTo} onValueChange={v => setRuleForm(p => ({ ...p, applicableTo: v }))}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all_products">Every order</SelectItem>
+                  <SelectItem value="card_payments">Card payments only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2.5">
+              <div>
+                <p className="text-sm font-medium">Active</p>
+                <p className="text-xs text-muted-foreground">Rule is enforced at checkout when active</p>
+              </div>
+              <Switch
+                checked={ruleForm.status === "active"}
+                onCheckedChange={v => setRuleForm(p => ({ ...p, status: v ? "active" : "inactive" }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              className="w-full gradient-primary text-primary-foreground border-0"
+              onClick={handleSaveRule}
+              disabled={savingRule || !ruleForm.ruleName}
+            >
+              {savingRule ? "Saving…" : "Save rule"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

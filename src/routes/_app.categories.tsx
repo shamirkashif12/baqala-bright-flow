@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Pencil, Trash2, Loader2, Tag, CheckCircle2, Search,
-  ToggleLeft, ToggleRight,
+  ToggleLeft, ToggleRight, Clock,
 } from "lucide-react";
 import { api, type Category } from "@/lib/api";
 import { RoleGate } from "@/components/role-gate";
@@ -237,7 +237,10 @@ function CategoriesPage() {
           </div>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Inactive</p>
-            <p className="text-2xl font-black">{inactive}</p>
+            {/* Hidden inactive categories aren't part of what's currently on screen, so the
+                tile reads 0 to match the table below — the "Show Inactive (N)" button right above
+                is where the true count still surfaces, so nothing is actually hidden from the user. */}
+            <p className="text-2xl font-black">{showInactive ? inactive : 0}</p>
           </div>
         </div>
       </div>
@@ -281,12 +284,21 @@ function CategoriesPage() {
                 {filtered.map(c => (
                   <tr key={c.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
                     <td className="px-4 py-3 font-semibold" data-no-i18n>{c.name}</td>
-                    <td className="px-4 py-3 text-sm" dir="rtl" data-no-i18n>{c.nameAr || <span className="text-muted-foreground">—</span>}</td>
+                    <td className="px-4 py-3 text-sm text-left" dir="rtl" data-no-i18n>{c.nameAr || <span className="text-muted-foreground">—</span>}</td>
                     <td className="px-4 py-3 tabular-nums text-muted-foreground">{c.sortOrder}</td>
                     <td className="px-4 py-3">
-                      {c.isActive
-                        ? <Badge variant="outline" className="bg-success/15 text-success border-success/30 text-xs gap-1"><span className="h-1.5 w-1.5 rounded-full bg-success inline-block" />Active</Badge>
-                        : <Badge variant="outline" className="text-xs gap-1"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground inline-block" />Inactive</Badge>}
+                      <div className="flex flex-col gap-1 items-start">
+                        {c.isActive
+                          ? <Badge variant="outline" className="bg-success/15 text-success border-success/30 text-xs gap-1"><span className="h-1.5 w-1.5 rounded-full bg-success inline-block" />Active</Badge>
+                          : <Badge variant="outline" className="text-xs gap-1"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground inline-block" />Inactive</Badge>}
+                        {/* The Delete action queues a manager-approval request and doesn't touch the
+                            row otherwise — without this, clicking Delete looked like it did nothing. */}
+                        {c.pendingApproval && (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 text-[10px] gap-1" title={`Requested by ${c.pendingApproval.requestedByName ?? "—"}`}>
+                            <Clock className="h-2.5 w-2.5" />Deletion Pending
+                          </Badge>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
@@ -294,7 +306,9 @@ function CategoriesPage() {
                           onClick={() => setEditItem(c)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" title="Delete"
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
+                          title={c.pendingApproval ? "Deletion already pending manager approval" : "Delete"}
+                          disabled={!!c.pendingApproval}
                           onClick={() => setDeleteItem(c)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

@@ -365,6 +365,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     {
         rule.Id = Guid.NewGuid();
         rule.CreatedAt = rule.UpdatedAt = DateTime.UtcNow;
+        rule.CreatedBy = CallerId() ?? rule.CreatedBy;
         db.TaxFeeRules.Add(rule);
         await db.SaveChangesAsync();
         return Created($"/api/finance/tax-rules/{rule.Id}", rule);

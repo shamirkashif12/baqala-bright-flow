@@ -1262,6 +1262,9 @@ export interface CreateUserPayload {
 export interface Category {
   id: string; name: string; nameAr?: string; parentId?: string;
   isActive: boolean; sortOrder: number;
+  // Set only when a deletion request for this category is awaiting manager approval — surfaces
+  // that the Delete action actually did something, since the row otherwise looks untouched.
+  pendingApproval?: { id: string; requestType: string; requestedAt: string; requestedByName?: string; reason?: string; summary?: string } | null;
 }
 
 export interface Product {
