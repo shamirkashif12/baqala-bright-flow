@@ -26,6 +26,7 @@ import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
 import { uuid, POS_ADMIN_BRANCH_KEY } from "@/lib/utils";
+import { isValidSaudiPhone } from "@/lib/validation";
 
 // "Failed to fetch" is the browser's own error when it can't reach anything at all (nothing
 // listening on the local print-agent port) — i.e. no printer/agent has ever been set up on
@@ -1776,6 +1777,10 @@ function POS() {
   // ─── Create new customer from POS ─────────────────────────────────────────────
   const createNewCustomer = async () => {
     if (!newCustomerName.trim() || !customerPhone.trim()) return;
+    if (!isValidSaudiPhone(customerPhone)) {
+      toast.error("Enter a valid Saudi mobile number (05XXXXXXXX or +9665XXXXXXXX).");
+      return;
+    }
     setCreatingCustomer(true);
     try {
       const c = await api.createCustomer({ fullName: newCustomerName.trim(), phone: customerPhone.trim() });
@@ -2406,13 +2411,22 @@ function POS() {
                   <div className="flex gap-1.5">
                     <Input
                       value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      // Digits only, plus a single leading "+" for the country code — filters out
+                      // letters/other characters as they're typed, same as Branches/Warehouses'
+                      // contact number fields, instead of only catching it on Save.
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setCustomerPhone((raw[0] === "+" ? "+" : "") + raw.replace(/[^\d]/g, ""));
+                      }}
                       onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
                       placeholder="Phone number…"
                       className="h-8 text-xs flex-1"
+                      maxLength={13}
+                      inputMode="tel"
                     />
                     <Button size="sm" className="h-8 px-3 text-xs gradient-primary text-primary-foreground border-0"
-                      onClick={createNewCustomer} disabled={creatingCustomer || !newCustomerName.trim() || !customerPhone.trim()}>
+                      onClick={createNewCustomer}
+                      disabled={creatingCustomer || !newCustomerName.trim() || !customerPhone.trim() || !isValidSaudiPhone(customerPhone)}>
                       {creatingCustomer ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
                     </Button>
                     <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
@@ -2420,6 +2434,9 @@ function POS() {
                       Skip
                     </Button>
                   </div>
+                  {customerPhone.trim() && !isValidSaudiPhone(customerPhone) && (
+                    <p className="text-[10px] text-destructive">Enter a valid Saudi mobile number (05XXXXXXXX or +9665XXXXXXXX).</p>
+                  )}
                 </div>
               </div>
             ) : (
