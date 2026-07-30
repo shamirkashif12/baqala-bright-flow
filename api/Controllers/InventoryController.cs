@@ -484,10 +484,15 @@ public class InventoryController(
 
         var isIncrease = req.AdjustmentType is "addition" or "return_to_supplier" or "transfer_in";
 
-        // Batch selection is optional — most cycle-count corrections aren't tied to a specific
-        // lot. When one IS picked, it must actually belong here, and a decrease can't remove
-        // more than that lot has left (mirrors ValidateSourceStockAsync's same check in
-        // StockTransfersController, just against a batch instead of an aggregate row).
+        // Batch selection used to be optional for every adjustment — most cycle-count corrections
+        // aren't tied to a specific lot. But ApplyAdjustmentToStock only touches
+        // InventoryBatch.RemainingQuantity when a batch IS given, so a batch-less adjustment moves
+        // the aggregate InventoryStock.Quantity while every batch's RemainingQuantity sits
+        // unchanged — the two silently drift apart (an on-hand total that doesn't match what any
+        // batch says is left, or the reverse: stock at 0 while a batch still shows units
+        // remaining). Once this product/branch has an active batch to track against, a batch must
+        // be picked — only a product/branch with no batch tracking at all can still adjust in the
+        // aggregate alone.
         InventoryBatch? batch = null;
         if (req.BatchId.HasValue)
         {
@@ -496,6 +501,13 @@ public class InventoryController(
                 return BadRequest(new { message = "Selected batch does not match this product and branch." });
             if (!isIncrease && req.Quantity > batch.RemainingQuantity)
                 return BadRequest(new { message = $"Cannot adjust {req.Quantity} unit(s) — only {batch.RemainingQuantity} remaining in batch {batch.BatchNumber}." });
+        }
+        else
+        {
+            var hasActiveBatches = await db.InventoryBatches.AnyAsync(b =>
+                b.ProductId == req.ProductId && b.BranchId == req.BranchId && b.Status == "active");
+            if (hasActiveBatches)
+                return BadRequest(new { message = "This product has tracked batches at this branch — select which batch the adjustment applies to." });
         }
 
         var stock = await db.InventoryStocks

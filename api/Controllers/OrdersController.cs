@@ -543,10 +543,18 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var nonCombinableRuleNames = new List<string>();
         foreach (var d in order.Discounts)
         {
-            // No DiscountId means this line represents an Offer's effect — there's no OfferId
-            // column anywhere on Order/OrderItem to re-verify it against, so (same as before) it
-            // stays client-computed-and-trusted.
-            if (d.DiscountId is null) { validatedDiscountTotal += d.Amount; continue; }
+            // No DiscountId means this is a POS "Manual discount" line (basket-wide, no
+            // Discount row to re-verify against) — client-computed-and-trusted for the amount
+            // itself, but it still has to honor the tobacco carve-out below, same as a named
+            // "all"/"branch" Discount does. Without this it was a silent bypass: a cashier could
+            // manually discount a tobacco item that a named Discount/Coupon would be refused for.
+            if (d.DiscountId is null)
+            {
+                if (tobaccoProductIds.Count > 0)
+                    return BadRequest(new { message = $"\"{d.Name}\" cannot be applied — tobacco items are not eligible for discounts." });
+                validatedDiscountTotal += d.Amount;
+                continue;
+            }
             anyRuleReference = true;
             referencedRuleCount++;
             var rule = await db.Discounts.FindAsync(d.DiscountId.Value);
