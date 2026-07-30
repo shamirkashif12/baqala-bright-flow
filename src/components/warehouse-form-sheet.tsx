@@ -47,12 +47,19 @@ export function WarehouseFormSheet({
 
   const set = (k: keyof WHForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
   const setS = (k: keyof WHForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
+  // Digits only, plus a single leading "+" for the country code — filters out letters as they're
+  // typed instead of only catching them in the error message after the fact.
+  const setPhone = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const cleaned = (raw[0] === "+" ? "+" : "") + raw.replace(/[^\d]/g, "");
+    setForm(p => ({ ...p, contactNumber: cleaned }));
+  };
 
   const handleSave = async () => {
     if (!form.name.trim()) { setError("Warehouse name is required."); return; }
     if (!form.code.trim()) { setError("Warehouse code is required."); return; }
     if (form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber)) {
-      setError("Enter a valid Saudi mobile number (05XXXXXXXX).");
+      setError("Enter a valid Saudi mobile number, e.g. +966501234567 or 0501234567.");
       return;
     }
     setSaving(true); setError("");
@@ -119,9 +126,9 @@ export function WarehouseFormSheet({
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Contact Number</Label>
-              <Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" maxLength={17} placeholder="05XXXXXXXX" />
+              <Input value={form.contactNumber} onChange={setPhone} className="h-9" maxLength={13} placeholder="+966501234567" inputMode="tel" />
               {form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber) && (
-                <p className="text-[11px] text-destructive">Enter a valid Saudi mobile number (05XXXXXXXX).</p>
+                <p className="text-[11px] text-destructive">Enter a valid Saudi mobile number, e.g. +966501234567 or 0501234567.</p>
               )}
             </div>
             <div className="space-y-1.5">
