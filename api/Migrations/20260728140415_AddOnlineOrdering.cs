@@ -11,71 +11,58 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<bool>(
-                name: "online_ordering_enabled",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "pos_settings",
-                type: "tinyint(1)",
-                nullable: false,
-                defaultValue: false);
+                column: "online_ordering_enabled",
+                columnDefinitionSql: "tinyint(1) NOT NULL DEFAULT 0");
 
-            migrationBuilder.AddColumn<decimal>(
-                name: "online_ordering_max_order_value_sar",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "pos_settings",
-                type: "decimal(18,4)",
-                nullable: false,
-                defaultValue: 1000m);
+                column: "online_ordering_max_order_value_sar",
+                columnDefinitionSql: "decimal(18,4) NOT NULL DEFAULT 1000");
 
-            migrationBuilder.AddColumn<decimal>(
-                name: "online_ordering_min_order_amount_sar",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "pos_settings",
-                type: "decimal(18,4)",
-                nullable: false,
-                defaultValue: 0m);
+                column: "online_ordering_min_order_amount_sar",
+                columnDefinitionSql: "decimal(18,4) NOT NULL DEFAULT 0");
 
-            migrationBuilder.AddColumn<DateTime>(
-                name: "approved_at",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "orders",
-                type: "datetime(6)",
-                nullable: true);
+                column: "approved_at",
+                columnDefinitionSql: "datetime(6) NULL");
 
-            migrationBuilder.AddColumn<Guid>(
-                name: "approved_by",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "orders",
-                type: "char(36)",
-                nullable: true);
+                column: "approved_by",
+                columnDefinitionSql: "char(36) NULL");
 
-            migrationBuilder.AddColumn<string>(
-                name: "rejection_reason",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "orders",
-                type: "varchar(500)",
-                maxLength: 500,
-                nullable: true);
+                column: "rejection_reason",
+                columnDefinitionSql: "varchar(500) NULL");
 
-            migrationBuilder.CreateTable(
-                name: "order_delivery_details",
-                columns: table => new
-                {
-                    order_id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    full_name = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false),
-                    phone = table.Column<string>(type: "varchar(50)", maxLength: 50, nullable: false),
-                    email = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: true),
-                    address_line = table.Column<string>(type: "longtext", nullable: false),
-                    latitude = table.Column<decimal>(type: "decimal(18,4)", nullable: true),
-                    longitude = table.Column<decimal>(type: "decimal(18,4)", nullable: true),
-                    notes = table.Column<string>(type: "longtext", nullable: true),
-                    created_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_order_delivery_details", x => x.order_id);
-                    table.ForeignKey(
-                        name: "FK_order_delivery_details_orders_order_id",
-                        column: x => x.order_id,
-                        principalTable: "orders",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                })
-                .Annotation("MySQL:Charset", "utf8mb4");
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS `order_delivery_details` (
+                    `order_id` char(36) NOT NULL,
+                    `full_name` varchar(255) NOT NULL,
+                    `phone` varchar(50) NOT NULL,
+                    `email` varchar(255) NULL,
+                    `address_line` longtext NOT NULL,
+                    `latitude` decimal(18,4) NULL,
+                    `longitude` decimal(18,4) NULL,
+                    `notes` longtext NULL,
+                    `created_at` datetime(6) NOT NULL,
+                    CONSTRAINT `PK_order_delivery_details` PRIMARY KEY (`order_id`)
+                ) CHARACTER SET utf8mb4;
+            ");
+
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_order_delivery_details_orders_order_id",
+                table: "order_delivery_details",
+                column: "order_id",
+                principalTable: "orders",
+                principalColumn: "id",
+                onDeleteSql: "CASCADE");
         }
 
         /// <inheritdoc />
