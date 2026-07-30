@@ -44,6 +44,8 @@ public class WarehousesController(BaqalaDbContext db, IAuditService audit) : Con
     {
         if (!ContactValidation.IsValidSaudiPhone(warehouse.ContactNumber))
             return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
+        if (!ContactValidation.IsValidContactPersonName(warehouse.ContactPerson))
+            return BadRequest(new { message = "Enter a valid contact person name (letters only)." });
         warehouse.Id = Guid.NewGuid();
         warehouse.CreatedAt = warehouse.UpdatedAt = DateTime.UtcNow;
         db.Warehouses.Add(warehouse);
@@ -57,6 +59,8 @@ public class WarehousesController(BaqalaDbContext db, IAuditService audit) : Con
     {
         if (!ContactValidation.IsValidSaudiPhone(updated.ContactNumber))
             return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
+        if (!ContactValidation.IsValidContactPersonName(updated.ContactPerson))
+            return BadRequest(new { message = "Enter a valid contact person name (letters only)." });
         var w = await db.Warehouses.FindAsync(id);
         if (w is null) return NotFound();
         w.Name = updated.Name; w.NameAr = updated.NameAr; w.Address = updated.Address;

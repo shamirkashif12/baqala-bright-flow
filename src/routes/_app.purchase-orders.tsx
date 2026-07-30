@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { api, excludeDisabledBranches, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Branch, type Product, type SupplierCreditNote, type StockTransfer, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
-import { isValidSaudiPhone, isValidSaudiCr, isValidSaudiVat } from "@/lib/validation";
+import { isValidSaudiPhone, isValidSaudiCr, isValidSaudiVat, sanitizePhoneInput, sanitizeDigitsInput, PHONE_MAX_LENGTH } from "@/lib/validation";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { cn, localDateStr, uuid } from "@/lib/utils";
 
@@ -45,6 +45,7 @@ const STATUS_MAP: Record<string, { label: string; cls: string }> = {
   partial_received: { label: "Partially Received", cls: "bg-warning/20 text-warning-foreground border-warning/40" },
   fully_received:   { label: "Fully Received",     cls: "bg-success/15 text-success border-success/30" },
   cancelled:        { label: "Cancelled",          cls: "bg-destructive/15 text-destructive border-destructive/30" },
+  rejected:         { label: "Rejected",           cls: "bg-destructive/15 text-destructive border-destructive/30" },
 };
 
 const PAY_MAP: Record<string, { label: string; cls: string }> = {
@@ -354,8 +355,8 @@ function CreatePOWizard({
                       <Input className="h-9" value={selectedSupplier.contactNumber} readOnly />
                     ) : (
                       <>
-                        <Input className="h-9" value={newSupplierPhone} onChange={e => setNewSupplierPhone(e.target.value)}
-                          placeholder="Not on file — add it (05XXXXXXXX)" />
+                        <Input className="h-9" value={newSupplierPhone} onChange={e => setNewSupplierPhone(sanitizePhoneInput(e.target.value))}
+                          placeholder="Not on file — add it (05XXXXXXXX)" inputMode="numeric" maxLength={PHONE_MAX_LENGTH} />
                         {newSupplierPhone.trim() && !isValidSaudiPhone(newSupplierPhone) && (
                           <p className="text-[11px] text-destructive mt-1">Enter a valid Saudi mobile number (05XXXXXXXX).</p>
                         )}
@@ -367,8 +368,8 @@ function CreatePOWizard({
                       <Input className="h-9" value={selectedSupplier.crNumber} readOnly />
                     ) : (
                       <>
-                        <Input className="h-9" value={newSupplierCr} onChange={e => setNewSupplierCr(e.target.value)}
-                          placeholder="Not on file — add it (10 digits)" />
+                        <Input className="h-9" value={newSupplierCr} onChange={e => setNewSupplierCr(sanitizeDigitsInput(e.target.value, 10))}
+                          placeholder="Not on file — add it (10 digits)" inputMode="numeric" maxLength={10} />
                         {newSupplierCr.trim() && !isValidSaudiCr(newSupplierCr) && (
                           <p className="text-[11px] text-destructive mt-1">Enter a valid CR number (10 digits).</p>
                         )}
@@ -380,8 +381,8 @@ function CreatePOWizard({
                       <Input className="h-9" value={selectedSupplier.vatNumber} readOnly />
                     ) : (
                       <>
-                        <Input className="h-9" value={newSupplierVat} onChange={e => setNewSupplierVat(e.target.value)}
-                          placeholder="Not on file — add it (15 digits, starts/ends with 3)" />
+                        <Input className="h-9" value={newSupplierVat} onChange={e => setNewSupplierVat(sanitizeDigitsInput(e.target.value, 15))}
+                          placeholder="Not on file — add it (15 digits, starts/ends with 3)" inputMode="numeric" maxLength={15} />
                         {newSupplierVat.trim() && !isValidSaudiVat(newSupplierVat) && (
                           <p className="text-[11px] text-destructive mt-1">Enter a valid VAT number (15 digits, starting and ending with 3).</p>
                         )}
@@ -1178,14 +1179,34 @@ function PurchaseOrders() {
     }).reduce((s, p) => s + p.paidAmount, 0);
   })();
 
-  // Sending a draft PO is the approval step (gated by canApprove below) — record who did it,
-  // not just that it happened, so Approved By is actually populated instead of staying null forever.
+  // A draft PO needs manager Approve/Reject first (mirrors the Stock Transfer flow); only once
+  // approved does Send become available. Record who acted so Approved By is actually populated.
+  const handleApprove = async (group: PurchaseOrder[]) => {
+    setActionLoading(group[0].id + "_approve");
+    try {
+      for (const po of group) if (po.status === "draft") await api.updatePoStatus(po.id, "approved", user?.id);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update purchase order(s).");
+    } finally { setActionLoading(null); }
+  };
+
+  const handleReject = async (group: PurchaseOrder[]) => {
+    setActionLoading(group[0].id + "_reject");
+    try {
+      for (const po of group) if (po.status === "draft") await api.updatePoStatus(po.id, "rejected", user?.id);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update purchase order(s).");
+    } finally { setActionLoading(null); }
+  };
+
   const handleSend = async (group: PurchaseOrder[]) => {
     setActionLoading(group[0].id + "_send");
     try {
-      // Only advance members still in draft — a batch's warehouses can diverge in status once
+      // Only advance members still approved — a batch's warehouses can diverge in status once
       // some have started receiving, and resending them would wrongly reset that progress.
-      for (const po of group) if (po.status === "draft") await api.updatePoStatus(po.id, "sent", user?.id);
+      for (const po of group) if (po.status === "approved") await api.updatePoStatus(po.id, "sent", user?.id);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to update purchase order(s).");
@@ -1200,7 +1221,7 @@ function PurchaseOrders() {
       // Skip members already fully received (or already cancelled) — cancelling a completed
       // delivery for one warehouse just because another warehouse in the batch is still pending
       // would incorrectly wipe out its finished status.
-      for (const po of group) if (po.status !== "fully_received" && po.status !== "cancelled") await api.updatePoStatus(po.id, "cancelled");
+      for (const po of group) if (po.status !== "fully_received" && po.status !== "cancelled" && po.status !== "rejected") await api.updatePoStatus(po.id, "cancelled");
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to update purchase order(s).");
@@ -1325,6 +1346,8 @@ function PurchaseOrders() {
                       : (po.warehouse?.name ?? po.branch?.name ?? "—");
                     const totalAmt = isBatch ? group.reduce((s, p) => s + p.totalAmount, 0) : po.totalAmount;
                     const supplierType = suppliers.find(s => s.id === po.supplierId)?.supplyType ?? "—";
+                    const isApproving = actionLoading === po.id + "_approve";
+                    const isRejecting = actionLoading === po.id + "_reject";
                     const isSending = actionLoading === po.id + "_send";
                     const isCancelling = actionLoading === po.id + "_cancel";
                     return (
@@ -1365,6 +1388,16 @@ function PurchaseOrders() {
                           <div className="flex items-center gap-1">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setViewPO(po); setViewPOGroup(group); }} title="View"><Eye className="h-3.5 w-3.5" /></Button>
                             {group.some(p => p.status === "draft") && canApprove && (
+                              <div className="flex gap-1">
+                                <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => handleApprove(group)} disabled={isApproving || isRejecting}>
+                                  {isApproving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}
+                                </Button>
+                                <Button size="sm" variant="outline" className="h-7 text-xs px-2 border-destructive/50 text-destructive" onClick={() => handleReject(group)} disabled={isApproving || isRejecting}>
+                                  {isRejecting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Reject"}
+                                </Button>
+                              </div>
+                            )}
+                            {group.some(p => p.status === "approved") && canApprove && (
                               <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleSend(group)} disabled={isSending}>
                                 {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Truck className="h-3 w-3" />}Send
                               </Button>
@@ -1383,7 +1416,7 @@ function PurchaseOrders() {
                                 </Button>
                               )
                             )}
-                            {group.some(p => p.status !== "cancelled" && p.status !== "fully_received") && canDelete && (
+                            {group.some(p => p.status !== "cancelled" && p.status !== "fully_received" && p.status !== "rejected") && canDelete && (
                               <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleCancel(group)} disabled={isCancelling}>
                                 {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : null}Cancel
                               </Button>

@@ -11,6 +11,7 @@ import { Warehouse, PackageCheck, Truck, Store, Pencil, Eye } from "lucide-react
 import { api, type Supplier } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
+import { isValidContactPersonName, isValidSaudiPhone, sanitizeNameInput, sanitizePhoneInput, PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/warehouse-suppliers")({ component: WarehouseSuppliers });
 
@@ -27,6 +28,7 @@ function WarehouseSuppliers() {
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [form, setForm] = useState<WarehouseSupplierForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -39,6 +41,7 @@ function WarehouseSuppliers() {
 
   const openCreate = () => {
     setForm(emptyForm);
+    setError("");
     setEdit({} as Supplier);
   };
 
@@ -51,10 +54,20 @@ function WarehouseSuppliers() {
       city: s.city ?? "",
       warehouseName: s.warehouseName ?? "",
     });
+    setError("");
     setEdit(s);
   };
 
   const handleSave = async () => {
+    if (form.contactPerson.trim() && !isValidContactPersonName(form.contactPerson)) {
+      setError("Enter a valid contact person name (letters only).");
+      return;
+    }
+    if (form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber)) {
+      setError("Enter a valid Saudi mobile number (05XXXXXXXX).");
+      return;
+    }
+    setError("");
     setSaving(true);
     try {
       // This page only manages warehouse-type suppliers: default new records to "warehouse",
@@ -130,7 +143,7 @@ function WarehouseSuppliers() {
           rows={filtered}
         />
       )}
-      <Dialog open={!!edit} onOpenChange={(v) => !v && setEdit(null)}>
+      <Dialog open={!!edit} onOpenChange={(v) => { if (!v) { setEdit(null); setError(""); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{edit?.id ? "Edit" : "Add"} Supplier</DialogTitle>
@@ -138,12 +151,13 @@ function WarehouseSuppliers() {
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Name</Label><Input value={form.name} onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))} className="mt-1" /></div>
-            <div><Label>Contact</Label><Input value={form.contactPerson} onChange={(e) => setForm(p => ({ ...p, contactPerson: e.target.value }))} className="mt-1" /></div>
-            <div><Label>Phone</Label><Input value={form.contactNumber} onChange={(e) => setForm(p => ({ ...p, contactNumber: e.target.value }))} className="mt-1" /></div>
+            <div><Label>Contact</Label><Input value={form.contactPerson} onChange={(e) => setForm(p => ({ ...p, contactPerson: sanitizeNameInput(e.target.value) }))} className="mt-1" maxLength={CONTACT_PERSON_MAX_LENGTH} /></div>
+            <div><Label>Phone</Label><Input value={form.contactNumber} onChange={(e) => setForm(p => ({ ...p, contactNumber: sanitizePhoneInput(e.target.value) }))} className="mt-1" maxLength={PHONE_MAX_LENGTH} inputMode="numeric" placeholder="0501234567" /></div>
             <div><Label>Email</Label><Input value={form.email} onChange={(e) => setForm(p => ({ ...p, email: e.target.value }))} className="mt-1" /></div>
             <div><Label>City</Label><Input value={form.city} onChange={(e) => setForm(p => ({ ...p, city: e.target.value }))} className="mt-1" /></div>
             <div><Label>Warehouse Name</Label><Input value={form.warehouseName} onChange={(e) => setForm(p => ({ ...p, warehouseName: e.target.value }))} className="mt-1" /></div>
           </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
             <Button className="gradient-primary text-primary-foreground border-0" onClick={handleSave} disabled={saving}>

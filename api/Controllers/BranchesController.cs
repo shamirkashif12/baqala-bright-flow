@@ -59,6 +59,8 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
     {
         if (!ContactValidation.IsValidSaudiPhone(branch.ContactNumber))
             return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
+        if (!ContactValidation.IsValidSaudiCr(branch.CommercialRegistration))
+            return BadRequest(new { message = "Enter a valid CR number (10 digits)." });
 
         branch.Id = Guid.NewGuid();
         branch.CreatedAt = branch.UpdatedAt = DateTime.UtcNow;
@@ -94,6 +96,8 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
         if (branch is null) return NotFound();
         if (!ContactValidation.IsValidSaudiPhone(updated.ContactNumber))
             return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
+        if (!ContactValidation.IsValidSaudiCr(updated.CommercialRegistration))
+            return BadRequest(new { message = "Enter a valid CR number (10 digits)." });
         branch.Name = updated.Name;
         branch.NameAr = updated.NameAr;
         branch.Address = updated.Address;

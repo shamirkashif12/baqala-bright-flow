@@ -30,6 +30,11 @@ import { fileToCompressedDataUrl, fileToDataUrl } from "@/lib/image";
 import { localDateStr } from "@/lib/utils";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
 import { ReportExportButton } from "@/components/report-export-button";
+import {
+  isValidSaudiPhone, isValidSaudiNationalId, isValidContactPersonName,
+  sanitizePhoneInput, sanitizeNameInput, sanitizeDigitsInput,
+  PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH, NATIONAL_ID_MAX_LENGTH,
+} from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/employees")({
   validateSearch: (search) => ({
@@ -40,16 +45,6 @@ export const Route = createFileRoute("/_app/employees")({
 });
 
 const todayStr = localDateStr();
-
-// Saudi mobile: 05XXXXXXXX (10 digits) or +9665XXXXXXXX/9665XXXXXXXX (12 digits with country code).
-function isValidSaudiPhone(phone: string): boolean {
-  const digits = phone.replace(/\D/g, "");
-  return /^05\d{8}$/.test(digits) || /^9665\d{8}$/.test(digits);
-}
-// Saudi National ID (citizens, starts with 1) / Iqama (residents, starts with 2) — always 10 digits.
-function isValidNationalId(id: string): boolean {
-  return /^\d{10}$/.test(id.trim());
-}
 
 function FieldRow({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
   return (
@@ -122,6 +117,11 @@ function EmployeeFormFields({
   const set = (k: keyof EmployeeForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
   const setS = (k: keyof EmployeeForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
+  // Sanitizes as-typed — strips characters that could never be valid instead of only catching
+  // them in the error message after the fact.
+  const setName = (k: keyof EmployeeForm) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, [k]: sanitizeNameInput(e.target.value) }));
+  const setPhone = (k: keyof EmployeeForm) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, [k]: sanitizePhoneInput(e.target.value) }));
+  const setNationalId = (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, nationalId: sanitizeDigitsInput(e.target.value, NATIONAL_ID_MAX_LENGTH) }));
 
   const departmentOptions = departments.filter(d => !form.branchId || !d.branchId || d.branchId === form.branchId);
   const designationOptions = designations.filter(d => form.departmentId !== "none" && d.departmentId === form.departmentId);
@@ -137,11 +137,13 @@ function EmployeeFormFields({
     }
   };
 
+  const fullNameInvalid = !!form.fullName && !isValidContactPersonName(form.fullName);
   const phoneInvalid = !!form.phone && !isValidSaudiPhone(form.phone);
-  const nationalIdInvalid = !!form.nationalId && !isValidNationalId(form.nationalId);
+  const emergencyContactInvalid = !!form.emergencyContact && !isValidSaudiPhone(form.emergencyContact);
+  const nationalIdInvalid = !!form.nationalId && !isValidSaudiNationalId(form.nationalId);
 
   const missing = !form.fullName || !form.email || !form.phone || !form.nationalId || !form.branchId || !form.hireDate || !form.currentAddress
-    || phoneInvalid || nationalIdInvalid
+    || fullNameInvalid || phoneInvalid || emergencyContactInvalid || nationalIdInvalid
     || (form.hasLogin && !linkedUser && (!form.username.trim() || !form.password.trim() || form.roleId === "none"));
 
   return (
@@ -163,14 +165,18 @@ function EmployeeFormFields({
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Basic Information</p>
         <div className="grid grid-cols-2 gap-3">
-          <FieldRow label="Full Name" required><Input value={form.fullName} onChange={set("fullName")} className="h-9" /></FieldRow>
+          <FieldRow label="Full Name" required error={fullNameInvalid ? "Enter a valid name (letters only)." : undefined}>
+            <Input value={form.fullName} onChange={setName("fullName")} className="h-9" maxLength={CONTACT_PERSON_MAX_LENGTH} />
+          </FieldRow>
           <FieldRow label="Email" required><Input type="email" value={form.email} onChange={set("email")} className="h-9" /></FieldRow>
           <FieldRow label="Phone Number" required error={phoneInvalid ? "Enter a valid Saudi mobile number (05XXXXXXXX)." : undefined}>
-            <Input value={form.phone} onChange={set("phone")} className="h-9" maxLength={17} placeholder="+966 5XX XXX XXX" />
+            <Input value={form.phone} onChange={setPhone("phone")} className="h-9" maxLength={PHONE_MAX_LENGTH} inputMode="numeric" placeholder="0501234567" />
           </FieldRow>
-          <FieldRow label="Emergency Contact"><Input value={form.emergencyContact} onChange={set("emergencyContact")} className="h-9" maxLength={17} /></FieldRow>
+          <FieldRow label="Emergency Contact" error={emergencyContactInvalid ? "Enter a valid Saudi mobile number (05XXXXXXXX)." : undefined}>
+            <Input value={form.emergencyContact} onChange={setPhone("emergencyContact")} className="h-9" maxLength={PHONE_MAX_LENGTH} inputMode="numeric" placeholder="0501234567" />
+          </FieldRow>
           <FieldRow label="National ID / Iqama" required error={nationalIdInvalid ? "Must be exactly 10 digits." : undefined}>
-            <Input value={form.nationalId} onChange={set("nationalId")} className="h-9" maxLength={10} inputMode="numeric" />
+            <Input value={form.nationalId} onChange={setNationalId} className="h-9" maxLength={NATIONAL_ID_MAX_LENGTH} inputMode="numeric" />
           </FieldRow>
           <FieldRow label="ID / Iqama Expiry"><Input type="date" value={form.iqamaExpiry} onChange={set("iqamaExpiry")} className="h-9" /></FieldRow>
           <FieldRow label="Date of Birth"><Input type="date" max={todayStr} value={form.dateOfBirth} onChange={set("dateOfBirth")} className="h-9" /></FieldRow>

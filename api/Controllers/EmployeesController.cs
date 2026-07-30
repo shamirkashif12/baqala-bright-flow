@@ -265,21 +265,20 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         return await ExportFileBuilder.BuildAsync(this, db, format, "Employees", $"Records: {employees.Count}", headers, rows, $"employees-{DateTime.UtcNow:yyyy-MM-dd}", exportedBy);
     }
 
-    // Mirrors the Add/Edit Employee form's own isValidSaudiPhone/isValidNationalId checks — the
-    // client already blocks these, but nothing enforced it server-side, so a direct API call
-    // could still store garbage in fields regulators/HR expect to be well-formed.
-    private static readonly System.Text.RegularExpressions.Regex SaudiPhoneRegex =
-        new(@"^(05\d{8}|9665\d{8})$", System.Text.RegularExpressions.RegexOptions.Compiled);
-    private static readonly System.Text.RegularExpressions.Regex NationalIdRegex =
-        new(@"^\d{10}$", System.Text.RegularExpressions.RegexOptions.Compiled);
-
+    // Mirrors the Add/Edit Employee form's own validation (which itself uses the shared
+    // ContactValidation helpers) — the client already blocks these, but nothing enforced it
+    // server-side, so a direct API call could still store garbage in fields regulators/HR expect
+    // to be well-formed.
     private static string? ValidateIdentifierFormats(Employee e)
     {
-        var digitsOnly = new string((e.Phone ?? "").Where(char.IsDigit).ToArray());
-        if (!SaudiPhoneRegex.IsMatch(digitsOnly))
+        if (!ContactValidation.IsValidSaudiPhone(e.Phone))
             return "Enter a valid Saudi mobile number (05XXXXXXXX).";
-        if (!NationalIdRegex.IsMatch((e.NationalId ?? "").Trim()))
+        if (!ContactValidation.IsValidSaudiPhone(e.EmergencyContact))
+            return "Enter a valid Saudi mobile number (05XXXXXXXX) for the emergency contact.";
+        if (!ContactValidation.IsValidSaudiNationalId(e.NationalId))
             return "National ID / Iqama must be exactly 10 digits.";
+        if (!ContactValidation.IsValidContactPersonName(e.FullName))
+            return "Enter a valid full name (letters only).";
         return null;
     }
 

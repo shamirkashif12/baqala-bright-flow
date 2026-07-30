@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
@@ -17,8 +18,10 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
     private static readonly Regex PhoneRegex = new(@"^(\+[1-9]\d{7,14}|05\d{8})$", RegexOptions.Compiled);
     private static readonly Regex EmailRegex = new(@"^[^\s@]+@[^\s@]+\.[^\s@]+$", RegexOptions.Compiled);
 
-    private static string? ValidateContactFormat(string phone, string? email)
+    private static string? ValidateContactFormat(string fullName, string phone, string? email)
     {
+        if (!ContactValidation.IsValidContactPersonName(fullName))
+            return "Enter a valid full name (letters only).";
         if (string.IsNullOrWhiteSpace(phone) || !PhoneRegex.IsMatch(phone.Trim()))
             return "Enter a valid phone number, e.g. +966501234567 or 0501234567.";
         if (!string.IsNullOrWhiteSpace(email) && !EmailRegex.IsMatch(email.Trim()))
@@ -90,7 +93,7 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Customer customer)
     {
-        if (ValidateContactFormat(customer.Phone, customer.Email) is { } formatError)
+        if (ValidateContactFormat(customer.FullName, customer.Phone, customer.Email) is { } formatError)
             return BadRequest(formatError);
         if (await db.Customers.AnyAsync(c => c.Phone == customer.Phone))
             return Conflict("Phone number already registered.");
@@ -109,7 +112,7 @@ public class CustomersController(BaqalaDbContext db) : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] Customer updated)
     {
-        if (ValidateContactFormat(updated.Phone, updated.Email) is { } formatError)
+        if (ValidateContactFormat(updated.FullName, updated.Phone, updated.Email) is { } formatError)
             return BadRequest(formatError);
         var customer = await db.Customers.FindAsync(id);
         if (customer is null) return NotFound();

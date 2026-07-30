@@ -15,7 +15,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { api, type Branch } from "@/lib/api";
 import { toast } from "sonner";
 import { usePermission } from "@/lib/use-permission";
-import { isValidSaudiPhone } from "@/lib/validation";
+import { isValidSaudiPhone, sanitizePhoneInput, PHONE_MAX_LENGTH } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/branches")({ component: Branches });
 
@@ -199,18 +199,12 @@ function BranchDialog({ open, branch, onClose, onDone }: {
   const set = (k: keyof BranchForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
 
-  // Digits only, plus a single leading "+" for the country code (+966...) — filters out letters
-  // and other characters as the cashier/admin types, instead of only catching it on save.
-  const setPhone = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    const cleaned = (raw[0] === "+" ? "+" : "") + raw.replace(/[^\d]/g, "");
-    setForm(p => ({ ...p, contactNumber: cleaned }));
-  };
+  const setPhone = (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, contactNumber: sanitizePhoneInput(e.target.value) }));
 
   const handleSave = async () => {
     if (!form.name) { toast.error("Branch name is required."); return; }
     if (form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber)) {
-      setPhoneError("Enter a valid Saudi mobile number, e.g. +966501234567 or 0501234567.");
+      setPhoneError("Enter a valid Saudi mobile number, e.g. 966501234567 or 0501234567.");
       return;
     }
     setPhoneError("");
@@ -248,8 +242,8 @@ function BranchDialog({ open, branch, onClose, onDone }: {
             <FieldRow label="City">
               <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Riyadh" />
             </FieldRow>
-            <FieldRow label="Phone (with country code)" error={phoneError}>
-              <Input value={form.contactNumber} onChange={setPhone} className="h-9" maxLength={13} placeholder="+966501234567" inputMode="tel" />
+            <FieldRow label="Phone" error={phoneError}>
+              <Input value={form.contactNumber} onChange={setPhone} className="h-9" maxLength={PHONE_MAX_LENGTH} placeholder="0501234567" inputMode="numeric" />
             </FieldRow>
           </div>
           <FieldRow label="Address">
