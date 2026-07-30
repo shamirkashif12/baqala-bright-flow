@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Pause, RotateCcw, ShoppingCart, Trash2, User } from "lucide-react";
-import { api, type CashierShift } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
+import { getPosBranchId } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/held-orders")({
   component: () => (
@@ -33,24 +33,13 @@ type HeldOrder = {
 function HeldOrders() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [shift, setShift] = useState<CashierShift | null>(null);
-  const [loading, setLoading] = useState(true);
   const [holds, setHolds] = useState<HeldOrder[]>([]);
   const [discardId, setDiscardId] = useState<string | null>(null);
 
-  // Same branch resolution as the Cashier Workspace's "Held Orders" tile badge — the active
-  // shift's branch takes priority since that's the register actually in use, falling back to
-  // the signed-in user's assigned branch for roles without a shift concept (Branch Manager, etc).
-  const branchId = shift?.branchId ?? (user?.role !== "tenant_admin" ? user?.branchId : undefined);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    api.getActiveShifts()
-      .then((shifts) => setShift(shifts.find((s) => s.status === "open" && s.cashierId === user?.id) ?? null))
-      .catch(() => setShift(null))
-      .finally(() => setLoading(false));
-  }, [user?.id]);
-  useEffect(() => { load(); }, [load]);
+  // Must resolve to the exact same branch POS itself is keying `pos_holds_${branchId}` under —
+  // this used to be derived independently from the cashier's own shift, which showed 0 bills here
+  // whenever POS's actual branch (an admin's manual pick, persisted separately) didn't match.
+  const branchId = getPosBranchId(user);
 
   const reloadHolds = useCallback(() => {
     if (!branchId) { setHolds([]); return; }
@@ -73,16 +62,14 @@ function HeldOrders() {
     <PageShell title="Held Orders" subtitle="Parked bills waiting to be resumed at checkout">
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-muted-foreground">
-          {loading ? "Loading…" : `${holds.length} bill${holds.length === 1 ? "" : "s"} on hold`}
+          {holds.length} bill{holds.length === 1 ? "" : "s"} on hold
         </p>
         <Button size="sm" variant="outline" className="gap-1.5" onClick={() => navigate({ to: "/pos", search: { resumeHold: undefined } })}>
           <ShoppingCart className="h-3.5 w-3.5" /> Back to Checkout
         </Button>
       </div>
 
-      {loading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : holds.length === 0 ? (
+      {holds.length === 0 ? (
         <Card className="p-10 border-border/60 text-center">
           <Pause className="h-8 w-8 mx-auto text-muted-foreground/50" />
           <p className="text-sm font-medium mt-3">No orders on hold</p>

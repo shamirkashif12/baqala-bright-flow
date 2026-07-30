@@ -22,6 +22,25 @@ export function wholeUnitQuantityError(product: { weightBased: boolean; name: st
   return `${product.name} is tracked by piece — quantity must be a whole number.`;
 }
 
+// sessionStorage key POS (_app.pos.tsx) persists an admin's manually-picked branch under, and
+// the key every `pos_holds_${branchId}` bill is filed under for that admin. Held Orders and the
+// Cashier Workspace tile must resolve to the exact same branchId POS itself is using, or they
+// show a different (often empty) set of held bills than POS's own badge — this previously
+// happened because each screen re-derived "the current branch" from the cashier's shift instead
+// of reading what POS actually persisted.
+export const POS_ADMIN_BRANCH_KEY = "pos_admin_branch_id";
+
+// Mirrors POS's own branch resolution for other screens that need to know which branch POS is
+// currently keying its cart/holds under: non-admins are always locked to their own assigned
+// branch (POS never lets them switch), while an admin's choice lives in sessionStorage — set as
+// soon as POS resolves a branch for them, which is guaranteed to have happened already if a held
+// bill exists to look up in the first place.
+export function getPosBranchId(user: { role?: string | null; branchId?: string | null } | null | undefined): string | undefined {
+  if (!user) return undefined;
+  if (user.role !== "tenant_admin") return user.branchId ?? undefined;
+  try { return sessionStorage.getItem(POS_ADMIN_BRANCH_KEY) || undefined; } catch { return undefined; }
+}
+
 // crypto.randomUUID() only exists in secure contexts (HTTPS/localhost); on plain-HTTP
 // deployments it's undefined and throws. Fall back to a Math.random-based v4 UUID there.
 export function uuid(): string {

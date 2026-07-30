@@ -498,6 +498,26 @@ public class OnlineOrdersController(
             .Where(s => productIds.Contains(s.ProductId))
             .ToDictionary(s => s.ProductId);
 
+        // Same "block a sale that would take on-hand stock negative" guard OrdersController.Create
+        // applies to POS checkout — this delivery step had no equivalent at all, so an online order
+        // could still be marked delivered (and stock.Quantity driven negative) even after other
+        // sales had already consumed the stock it reserved at placement time. Checked per-product,
+        // summed across duplicate line items, before any stock row is mutated.
+        var posSettings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
+        if (posSettings is not null && !posSettings.AllowNegativeStock)
+        {
+            foreach (var group in order.Items.GroupBy(i => i.ProductId))
+            {
+                var onHand = stocks.TryGetValue(group.Key, out var s) ? s.Quantity : 0;
+                var needed = group.Sum(i => i.Quantity);
+                if (onHand - needed < 0)
+                {
+                    var product = await db.Products.FindAsync(group.Key);
+                    return BadRequest(new { message = $"Cannot deliver — '{product?.Name ?? "an item"}' only has {onHand:0.##} on hand and this branch does not allow negative stock." });
+                }
+            }
+        }
+
         // The ledger-writing step: convert the reservation into a real deduction and append the
         // StockMovement row in the same unit of work, same shape OrdersController.Create uses for
         // POS sales — this is the one place an online order actually leaves the shelf.

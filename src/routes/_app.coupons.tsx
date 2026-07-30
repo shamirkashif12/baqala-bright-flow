@@ -6,7 +6,6 @@ import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +18,14 @@ import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
 import { localDateStr } from "@/lib/utils";
 
-export const Route = createFileRoute("/_app/coupons")({ component: Coupons });
+export const Route = createFileRoute("/_app/coupons")({
+  // Promotions/Coupons/Discounts are one page split into tabs — the sidebar's three entries all
+  // link here with a different `tab`, so the URL (and back/forward) stays in sync with the view.
+  validateSearch: (search) => ({
+    tab: (search.tab as "coupons" | "discounts" | "offers" | undefined) || undefined,
+  }),
+  component: Coupons,
+});
 
 const today = localDateStr();
 const nextMonthDate = new Date();
@@ -1201,19 +1207,20 @@ function OffersTab() {
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
+const PAGE_TITLES = { offers: "Promotions", coupons: "Coupons", discounts: "Discounts" } as const;
+
 function Coupons() {
+  const { tab: tabParam } = Route.useSearch();
+  // Promotions (the sidebar's main-menu entry) is this page's default view — Coupons/Discounts
+  // are its sub-menu items, reached via ?tab=coupons / ?tab=discounts. The sidebar is now the only
+  // way to switch between the three, so this just renders the matching view with no in-page tab bar.
+  const tab = tabParam ?? "offers";
+
   return (
-    <PageShell title="Coupons, Discounts & Offers" subtitle="Promotional codes · discount rules · creative offer types">
-      <Tabs defaultValue="coupons">
-        <TabsList className="mb-4">
-          <TabsTrigger value="coupons" className="gap-1.5"><Tag className="h-3.5 w-3.5" />Coupons</TabsTrigger>
-          <TabsTrigger value="discounts" className="gap-1.5"><PercentCircle className="h-3.5 w-3.5" />Discounts</TabsTrigger>
-          <TabsTrigger value="offers" className="gap-1.5"><Gift className="h-3.5 w-3.5" />Offers</TabsTrigger>
-        </TabsList>
-        <TabsContent value="coupons" className="mt-0"><CouponsTab /></TabsContent>
-        <TabsContent value="discounts" className="mt-0"><DiscountsTab /></TabsContent>
-        <TabsContent value="offers" className="mt-0"><OffersTab /></TabsContent>
-      </Tabs>
+    <PageShell title={PAGE_TITLES[tab]} subtitle="Promotional codes · discount rules · creative offer types">
+      {tab === "coupons" && <CouponsTab />}
+      {tab === "discounts" && <DiscountsTab />}
+      {tab === "offers" && <OffersTab />}
     </PageShell>
   );
 }
