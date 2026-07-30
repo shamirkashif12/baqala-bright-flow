@@ -15,7 +15,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { api, type Branch } from "@/lib/api";
 import { toast } from "sonner";
 import { usePermission } from "@/lib/use-permission";
-import { isValidSaudiPhone } from "@/lib/validation";
+import { isValidSaudiPhone, sanitizePhoneInput, PHONE_MAX_LENGTH } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/branches")({ component: Branches });
 
@@ -199,10 +199,12 @@ function BranchDialog({ open, branch, onClose, onDone }: {
   const set = (k: keyof BranchForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
 
+  const setPhone = (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, contactNumber: sanitizePhoneInput(e.target.value) }));
+
   const handleSave = async () => {
     if (!form.name) { toast.error("Branch name is required."); return; }
     if (form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber)) {
-      setPhoneError("Enter a valid Saudi mobile number (05XXXXXXXX).");
+      setPhoneError("Enter a valid Saudi mobile number, e.g. 966501234567 or 0501234567.");
       return;
     }
     setPhoneError("");
@@ -241,7 +243,7 @@ function BranchDialog({ open, branch, onClose, onDone }: {
               <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Riyadh" />
             </FieldRow>
             <FieldRow label="Phone" error={phoneError}>
-              <Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" maxLength={17} placeholder="05XXXXXXXX" />
+              <Input value={form.contactNumber} onChange={setPhone} className="h-9" maxLength={PHONE_MAX_LENGTH} placeholder="0501234567" inputMode="numeric" />
             </FieldRow>
           </div>
           <FieldRow label="Address">

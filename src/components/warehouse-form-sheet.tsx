@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Warehouse as WarehouseIcon } from "lucide-react";
 import { api, type Warehouse as WarehouseType } from "@/lib/api";
-import { isValidSaudiPhone } from "@/lib/validation";
+import { isValidSaudiPhone, isValidContactPersonName, sanitizePhoneInput, sanitizeNameInput, PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH } from "@/lib/validation";
 
 type WHForm = { name: string; code: string; address: string; city: string; contactPerson: string; contactNumber: string; capacity: string; status: string };
 const emptyWHForm = (): WHForm => ({ name: "", code: "", address: "", city: "", contactPerson: "", contactNumber: "", capacity: "", status: "active" });
@@ -47,12 +47,20 @@ export function WarehouseFormSheet({
 
   const set = (k: keyof WHForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm(p => ({ ...p, [k]: e.target.value }));
   const setS = (k: keyof WHForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
+  // Sanitizes as-typed — strips characters that could never be valid (letters out of a phone
+  // number, digits out of a name) instead of only catching them in the error message afterward.
+  const setPhone = (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, contactNumber: sanitizePhoneInput(e.target.value) }));
+  const setContactPerson = (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, contactPerson: sanitizeNameInput(e.target.value) }));
 
   const handleSave = async () => {
     if (!form.name.trim()) { setError("Warehouse name is required."); return; }
     if (!form.code.trim()) { setError("Warehouse code is required."); return; }
     if (form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber)) {
-      setError("Enter a valid Saudi mobile number (05XXXXXXXX).");
+      setError("Enter a valid Saudi mobile number, e.g. 966501234567 or 0501234567.");
+      return;
+    }
+    if (form.contactPerson.trim() && !isValidContactPersonName(form.contactPerson)) {
+      setError("Enter a valid contact person name (letters only).");
       return;
     }
     setSaving(true); setError("");
@@ -115,13 +123,16 @@ export function WarehouseFormSheet({
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Contact Person</Label>
-              <Input value={form.contactPerson} onChange={set("contactPerson")} className="h-9" />
+              <Input value={form.contactPerson} onChange={setContactPerson} className="h-9" maxLength={CONTACT_PERSON_MAX_LENGTH} />
+              {form.contactPerson.trim() && !isValidContactPersonName(form.contactPerson) && (
+                <p className="text-[11px] text-destructive">Enter a valid contact person name (letters only).</p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Contact Number</Label>
-              <Input value={form.contactNumber} onChange={set("contactNumber")} className="h-9" maxLength={17} placeholder="05XXXXXXXX" />
+              <Input value={form.contactNumber} onChange={setPhone} className="h-9" maxLength={PHONE_MAX_LENGTH} placeholder="0501234567" inputMode="numeric" />
               {form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber) && (
-                <p className="text-[11px] text-destructive">Enter a valid Saudi mobile number (05XXXXXXXX).</p>
+                <p className="text-[11px] text-destructive">Enter a valid Saudi mobile number, e.g. 966501234567 or 0501234567.</p>
               )}
             </div>
             <div className="space-y-1.5">

@@ -176,6 +176,8 @@ public class UsersController(BaqalaDbContext db, IAuditService audit) : Controll
             return Conflict(new { message = "Username already in use." });
         if (req.RoleId == Guid.Empty || !await db.Roles.AnyAsync(r => r.Id == req.RoleId))
             return BadRequest(new { message = "A valid role must be selected." });
+        if (!ContactValidation.IsValidContactPersonName(req.FullName))
+            return BadRequest(new { message = "Enter a valid full name (letters only)." });
 
         // A login must now originate from an existing HRM employee (no more standalone
         // accounts) — the dropdown on the Add User form already only offers employees with no
@@ -214,6 +216,9 @@ public class UsersController(BaqalaDbContext db, IAuditService audit) : Controll
     {
         var user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == id);
         if (user is null) return NotFound();
+
+        if (req.FullName is not null && !ContactValidation.IsValidContactPersonName(req.FullName))
+            return BadRequest(new { message = "Enter a valid full name (letters only)." });
 
         // Changing role or status is privilege-affecting (can self-promote to tenant_admin, or
         // deactivate/reactivate a peer). Mirrors canManageUser (src/lib/role-hierarchy.ts): never
@@ -256,6 +261,11 @@ public class UsersController(BaqalaDbContext db, IAuditService audit) : Controll
 
         var user = await db.Users.FindAsync(id);
         if (user is null) return NotFound();
+
+        if (!ContactValidation.IsValidContactPersonName(req.FullName))
+            return BadRequest(new { message = "Enter a valid full name (letters only)." });
+        if (!ContactValidation.IsValidSaudiPhone(req.Phone))
+            return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
 
         var emailNorm = req.Email.Trim().ToLower();
         if (await db.Users.AnyAsync(u => u.Id != id && u.Email.ToLower() == emailNorm))

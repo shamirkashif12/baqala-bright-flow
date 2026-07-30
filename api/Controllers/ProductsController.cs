@@ -387,6 +387,19 @@ public class ProductsController(
     [HttpPost("{id:guid}/variants")]
     public async Task<IActionResult> AddVariant(Guid id, [FromBody] ProductVariant variant)
     {
+        if (await db.ProductVariants.AnyAsync(v => v.ProductId == id &&
+                v.VariantType == variant.VariantType && v.VariantValue == variant.VariantValue))
+        {
+            return Conflict(new { message = $"This product already has a \"{variant.VariantType}: {variant.VariantValue}\" variant." });
+        }
+        if (!string.IsNullOrWhiteSpace(variant.Barcode))
+        {
+            if (await db.Products.AnyAsync(p => p.Barcode == variant.Barcode && p.Status != "discontinued"))
+                return Conflict(new { message = $"Barcode {variant.Barcode} is already assigned to another product." });
+            if (await db.ProductVariants.AnyAsync(v => v.Barcode == variant.Barcode))
+                return Conflict(new { message = $"Barcode {variant.Barcode} is already used by another variant." });
+        }
+
         variant.Id = Guid.NewGuid();
         variant.ProductId = id;
         variant.CreatedAt = variant.UpdatedAt = DateTime.UtcNow;

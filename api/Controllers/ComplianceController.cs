@@ -241,6 +241,11 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     [HttpPut("company-profile")]
     public async Task<IActionResult> UpdateCompanyProfile([FromBody] CompanyProfileUpdateRequest req)
     {
+        if (!ContactValidation.IsValidSaudiCr(req.CrNumber))
+            return BadRequest(new { message = "Enter a valid CR number (10 digits)." });
+        if (!ContactValidation.IsValidSaudiVat(req.VatNumber))
+            return BadRequest(new { message = "Enter a valid VAT number (15 digits, starting and ending with 3)." });
+
         var profile = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId)
             ?? throw new InvalidOperationException("Company profile row missing — migration seed did not run.");
 

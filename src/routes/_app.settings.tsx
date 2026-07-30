@@ -19,6 +19,7 @@ import { isLang } from "@/locales/languages";
 import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
 import { LoadErrorBanner } from "@/components/load-error-banner";
+import { isValidSaudiCr, isValidSaudiVat, isValidSaudiPhone, sanitizeDigitsInput, sanitizePhoneInput, PHONE_MAX_LENGTH } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/settings")({
   component: () => (
@@ -124,6 +125,12 @@ function Settings() {
   }, [activeSection, loadCompany]);
 
   async function saveCompany() {
+    if (company.crNumber.trim() && !isValidSaudiCr(company.crNumber)) {
+      toast.error("Enter a valid CR number (10 digits)."); return;
+    }
+    if (company.vatNumber.trim() && !isValidSaudiVat(company.vatNumber)) {
+      toast.error("Enter a valid VAT number (15 digits, starting and ending with 3)."); return;
+    }
     setCompanySaving(true);
     try {
       await api.updateCompanyProfile(company);
@@ -153,6 +160,12 @@ function Settings() {
 
   async function saveBiz() {
     if (!branchId) return;
+    if (biz.cr.trim() && !isValidSaudiCr(biz.cr)) {
+      toast.error("Enter a valid CR number (10 digits)."); return;
+    }
+    if (biz.phone.trim() && !isValidSaudiPhone(biz.phone)) {
+      toast.error("Enter a valid Saudi mobile number (05XXXXXXXX)."); return;
+    }
     setBizSaving(true);
     try {
       await api.updateBranch(branchId, {
@@ -298,9 +311,9 @@ function Settings() {
                       <div className="sm:col-span-2"><Label>Legal Name</Label>
                         <Input value={company.legalName} onChange={e => setCompany(p => ({ ...p, legalName: e.target.value }))} placeholder="Baqala Al Faisal Trading Co." className="mt-1.5" /></div>
                       <div><Label>CR Number</Label>
-                        <Input value={company.crNumber} onChange={e => setCompany(p => ({ ...p, crNumber: e.target.value }))} placeholder="1010123456" className="mt-1.5" /></div>
+                        <Input value={company.crNumber} onChange={e => setCompany(p => ({ ...p, crNumber: sanitizeDigitsInput(e.target.value, 10) }))} placeholder="1010123456" className="mt-1.5" inputMode="numeric" maxLength={10} /></div>
                       <div><Label>VAT Number</Label>
-                        <Input value={company.vatNumber} onChange={e => setCompany(p => ({ ...p, vatNumber: e.target.value }))} placeholder="300012345600003" className="mt-1.5" /></div>
+                        <Input value={company.vatNumber} onChange={e => setCompany(p => ({ ...p, vatNumber: sanitizeDigitsInput(e.target.value, 15) }))} placeholder="300012345600003" className="mt-1.5" inputMode="numeric" maxLength={15} /></div>
                     </div>
                     <div className="flex justify-end gap-2 mt-6">
                       <Button variant="outline" onClick={loadCompany}>Cancel</Button>
@@ -321,11 +334,11 @@ function Settings() {
                   <div><Label>اسم النشاط (Arabic)</Label>
                     <Input value={biz.nameAr} onChange={e => setBiz(p => ({ ...p, nameAr: e.target.value }))} className="mt-1.5" dir="rtl" /></div>
                   <div><Label>Commercial Registration (CR)</Label>
-                    <Input value={biz.cr} onChange={e => setBiz(p => ({ ...p, cr: e.target.value }))} className="mt-1.5" /></div>
+                    <Input value={biz.cr} onChange={e => setBiz(p => ({ ...p, cr: sanitizeDigitsInput(e.target.value, 10) }))} className="mt-1.5" inputMode="numeric" maxLength={10} /></div>
                   <div><Label>VAT Number</Label>
-                    <Input value={biz.vat} onChange={e => setBiz(p => ({ ...p, vat: e.target.value }))} className="mt-1.5" /></div>
+                    <Input value={biz.vat} onChange={e => setBiz(p => ({ ...p, vat: sanitizeDigitsInput(e.target.value, 15) }))} className="mt-1.5" inputMode="numeric" maxLength={15} /></div>
                   <div><Label>Phone</Label>
-                    <Input value={biz.phone} onChange={e => setBiz(p => ({ ...p, phone: e.target.value }))} className="mt-1.5" /></div>
+                    <Input value={biz.phone} onChange={e => setBiz(p => ({ ...p, phone: sanitizePhoneInput(e.target.value) }))} className="mt-1.5" inputMode="numeric" maxLength={PHONE_MAX_LENGTH} /></div>
                   <div><Label>Email</Label>
                     <Input value={biz.email} onChange={e => setBiz(p => ({ ...p, email: e.target.value }))} className="mt-1.5" /></div>
                 </div>

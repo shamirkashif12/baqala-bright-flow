@@ -51,6 +51,7 @@ import {
   CalendarCheck2,
   AlarmClockOff,
   Gavel,
+  Percent,
 } from "lucide-react";
 import {
   Sidebar,
@@ -90,7 +91,13 @@ type NavItem = {
   blockRoles?: AppRole[];
   // children: renders a small dropdown next to the item linking to related pages
   // (used for grouping, e.g. Customers & Loyalty → Coupons/Loyalty Program).
-  children?: { title: string; url: string }[];
+  children?: { title: string; url: string; tab?: "coupons" | "discounts" | "offers" }[];
+  // tab: ties this item's own link/highlight to a `?tab=` value on a page whose content is split
+  // into sub-views by a Tabs component (e.g. Promotions/Coupons/Discounts all live on /coupons).
+  // Safe to pair with `children` here specifically because every entry shares the same module gate
+  // ("Coupons") — unlike the old Customers & Loyalty children (see note above), nothing here needs
+  // its own permission check that `children` would bypass.
+  tab?: "coupons" | "discounts" | "offers";
 };
 
 type NavGroup = { label: string; items: NavItem[] };
@@ -172,11 +179,18 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Expenses",                    url: "/expenses",        icon: Wallet,       module: "Accounting & Finance" },
       { title: "Purchase Orders",             url: "/purchase-orders", icon: ClipboardList, module: "Purchase Orders" },
-      { title: "Coupons, Discounts & Offers", url: "/coupons",         icon: TicketPercent,  module: "Coupons" },
+      // No `tab` here — Promotions is just the section's parent link now that Offers has its own
+      // child row below, so it stays highlighted for the whole section instead of only for Offers.
+      { title: "Promotions",                  url: "/coupons",         icon: TicketPercent,  module: "Coupons",
+        children: [
+          { title: "Coupons",   url: "/coupons", tab: "coupons" },
+          { title: "Discounts", url: "/coupons", tab: "discounts" },
+          { title: "Offers",    url: "/coupons", tab: "offers" },
+        ] },
       { title: "Loyalty Program",             url: "/loyalty-program", icon: Gift,           module: "Loyalty Program" },
       { title: "Customer Returns",            url: "/returns",         icon: ReturnIcon,   module: "Returns" },
       { title: "Tax, Fees & Tobacco",         url: "/tax-fees",        icon: Cigarette,    module: "Tax & Fees" },
-      { title: "Service Charges",             url: "/service-charges", icon: Truck,        module: "Tax & Fees" },
+      { title: "Service Charges",             url: "/service-charges", icon: Percent,      module: "Tax & Fees" },
     ],
   },
   {
@@ -249,6 +263,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const currentTab = useRouterState({ select: (s) => (s.location.search as { tab?: string }).tab });
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { t, dir } = useI18n();
@@ -294,7 +309,10 @@ export function AppSidebar() {
           const renderItems = (
             <SidebarMenu>
               {visibleItems.map((item) => {
-                const active = isActiveUrl(path, item.url);
+                // Plain items (no `tab`) match on path alone; tab-bound items (Promotions/Coupons/
+                // Discounts, all on /coupons) also need the current `?tab=` to line up, defaulting
+                // to "offers" so the bare "/coupons" URL still highlights Promotions correctly.
+                const active = isActiveUrl(path, item.url) && (item.tab === undefined || (currentTab ?? "offers") === item.tab);
                 const itemOpen = openItems[item.url] ?? false;
                 const button = (
                   <SidebarMenuButton
@@ -302,7 +320,7 @@ export function AppSidebar() {
                     isActive={active}
                     className="data-[active=true]:bg-sidebar-primary data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-glow data-[active=true]:font-semibold rounded-xl h-9 text-[13px] text-sidebar-foreground/85"
                   >
-                    <Link to={item.url}>
+                    <Link to={item.url} search={item.tab ? { tab: item.tab } : undefined}>
                       <item.icon className="h-4 w-4" />
                       <span>{t(item.title)}</span>
                     </Link>
@@ -337,9 +355,9 @@ export function AppSidebar() {
                               <SidebarMenuSubButton
                                 asChild
                                 size="sm"
-                                isActive={isActiveUrl(path, child.url)}
+                                isActive={isActiveUrl(path, child.url) && (child.tab === undefined || (currentTab ?? "offers") === child.tab)}
                               >
-                                <Link to={child.url}>
+                                <Link to={child.url} search={child.tab ? { tab: child.tab } : undefined}>
                                   <span>{t(child.title)}</span>
                                 </Link>
                               </SidebarMenuSubButton>

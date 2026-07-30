@@ -17,6 +17,7 @@ import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { canManageUser } from "@/lib/role-hierarchy";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { isValidContactPersonName, sanitizeNameInput, CONTACT_PERSON_MAX_LENGTH } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/users")({
   component: () => (
@@ -86,6 +87,10 @@ function RegisteredUsers() {
     if (!editUser) return;
     if (!form.fullName.trim()) {
       toast.error("Full name is required.");
+      return;
+    }
+    if (!isValidContactPersonName(form.fullName)) {
+      toast.error("Enter a valid full name (letters only).");
       return;
     }
     if (!form.email.trim()) {
@@ -301,7 +306,7 @@ function RegisteredUsers() {
           <div className="grid gap-3">
             <div>
               <Label className="text-xs">Full Name</Label>
-              <Input value={form.fullName} onChange={set("fullName")} className="mt-1 h-9" placeholder="Abdullah Al Faisal" />
+              <Input value={form.fullName} onChange={e => setForm(p => ({ ...p, fullName: sanitizeNameInput(e.target.value) }))} className="mt-1 h-9" placeholder="Abdullah Al Faisal" maxLength={CONTACT_PERSON_MAX_LENGTH} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

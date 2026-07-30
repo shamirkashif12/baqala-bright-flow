@@ -477,6 +477,10 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
   async function handleSave() {
     if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
     if (qtyWholeUnitError) { toast.error(qtyWholeUnitError); return; }
+    // A batch-less write-off only moves the aggregate on-hand quantity — every batch's
+    // remaining count is left stale (see InventoryController.Adjust). Once this product/branch
+    // has tracked batches, one must be picked.
+    if (eligibleBatches.length > 0 && !form.batchId) { toast.error("This product has tracked batches — select which one this write-off applies to."); return; }
     setSaving(true);
     try {
       await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: form.type, reason: form.reason || undefined, adjustedBy: user?.id, batchId: form.batchId || undefined });
@@ -538,11 +542,11 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
               {qtyWholeUnitError && <p className="text-[10px] text-destructive leading-tight mt-0.5">Must be a whole number</p>}
             </div>
             <div className="col-span-2">
-              <Label>Batch (optional)</Label>
+              <Label>{eligibleBatches.length > 0 ? "Batch *" : "Batch"}</Label>
               <Select value={form.batchId || "none"} onValueChange={v => set("batchId", v === "none" ? "" : v)} disabled={!form.productId || !form.branchId}>
                 <SelectTrigger><SelectValue placeholder="No specific batch" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No specific batch</SelectItem>
+                  {eligibleBatches.length === 0 && <SelectItem value="none">No specific batch</SelectItem>}
                   {eligibleBatches.map(b => (
                     <SelectItem key={b.id} value={b.id} title={`${b.batchNumber} — ${b.remainingQuantity}/${b.quantity} — ${b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}`}>
                       {b.batchNumber} — {b.remainingQuantity}/{b.quantity} — {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}
@@ -550,6 +554,9 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
                   ))}
                 </SelectContent>
               </Select>
+              {eligibleBatches.length > 0 && !form.batchId && (
+                <p className="text-[11px] text-muted-foreground mt-1">This product has tracked batches — pick which one this write-off applies to.</p>
+              )}
             </div>
             <div className="col-span-2">
               <Label>Reason / Notes</Label>
@@ -561,7 +568,7 @@ function WastageDialog({ branches, products, onDone }: { branches: Branch[]; pro
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving || !!qtyWholeUnitError}>{saving ? "Saving…" : "Save"}</Button>
+            <Button onClick={handleSave} disabled={saving || !!qtyWholeUnitError || (eligibleBatches.length > 0 && !form.batchId)}>{saving ? "Saving…" : "Save"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -580,21 +587,32 @@ function ManualStockOutDialog({ branches, products, onDone }: { branches: Branch
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ productId: "", branchId: lockedBranchId ?? "", quantity: "", reason: "" });
-  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+  const [form, setForm] = useState({ productId: "", branchId: lockedBranchId ?? "", batchId: "", quantity: "", reason: "" });
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v, ...(k === "productId" || k === "branchId" ? { batchId: "" } : {}) })); }
 
   const selectedProduct = products.find(p => p.id === form.productId);
   const qtyWholeUnitError = form.quantity ? wholeUnitQuantityError(selectedProduct, Number(form.quantity)) : null;
 
+  const [batches, setBatches] = useState<InventoryBatch[]>([]);
+  useEffect(() => {
+    if (!form.productId || !form.branchId) { setBatches([]); return; }
+    api.getBatches({ productId: form.productId, branchId: [form.branchId] }).then(setBatches).catch(() => setBatches([]));
+  }, [form.productId, form.branchId]);
+  const eligibleBatches = batches.filter(b => b.status !== "expired").sort((a, b) => (a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity) - (b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity));
+
   async function handleSave() {
     if (!form.productId || !form.branchId || !form.quantity) { toast.error("Product, branch and quantity are required"); return; }
     if (qtyWholeUnitError) { toast.error(qtyWholeUnitError); return; }
+    // A batch-less reduction only moves the aggregate on-hand quantity — every batch's
+    // remaining count is left stale (see InventoryController.Adjust). Once this product/branch
+    // has tracked batches, one must be picked.
+    if (eligibleBatches.length > 0 && !form.batchId) { toast.error("This product has tracked batches — select which one this stock-out applies to."); return; }
     setSaving(true);
     try {
-      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "reduction", reason: form.reason || undefined, adjustedBy: user?.id });
+      await api.adjustInventory({ productId: form.productId, branchId: form.branchId, quantity: Number(form.quantity), adjustmentType: "reduction", reason: form.reason || undefined, adjustedBy: user?.id, batchId: form.batchId || undefined });
       toast.success(`Stock-out recorded — ${selectedProduct?.name ?? "item"} -${form.quantity} units`);
       setOpen(false);
-      setForm({ productId: "", branchId: lockedBranchId ?? "", quantity: "", reason: "" });
+      setForm({ productId: "", branchId: lockedBranchId ?? "", batchId: "", quantity: "", reason: "" });
       onDone();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to record stock-out"); }
     finally { setSaving(false); }
@@ -641,6 +659,23 @@ function ManualStockOutDialog({ branches, products, onDone }: { branches: Branch
               {qtyWholeUnitError && <p className="text-[10px] text-destructive leading-tight mt-0.5">Must be a whole number</p>}
             </div>
             <div className="col-span-2">
+              <Label>{eligibleBatches.length > 0 ? "Batch *" : "Batch"}</Label>
+              <Select value={form.batchId || "none"} onValueChange={v => set("batchId", v === "none" ? "" : v)} disabled={!form.productId || !form.branchId}>
+                <SelectTrigger><SelectValue placeholder="No specific batch" /></SelectTrigger>
+                <SelectContent>
+                  {eligibleBatches.length === 0 && <SelectItem value="none">No specific batch</SelectItem>}
+                  {eligibleBatches.map(b => (
+                    <SelectItem key={b.id} value={b.id} title={`${b.batchNumber} — ${b.remainingQuantity}/${b.quantity} — ${b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}`}>
+                      {b.batchNumber} — {b.remainingQuantity}/{b.quantity} — {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {eligibleBatches.length > 0 && !form.batchId && (
+                <p className="text-[11px] text-muted-foreground mt-1">This product has tracked batches — pick which one this stock-out applies to.</p>
+              )}
+            </div>
+            <div className="col-span-2">
               <Label>Reason / Notes</Label>
               <Textarea rows={2} value={form.reason} onChange={e => set("reason", e.target.value)} placeholder="e.g. cycle-count correction…" />
             </div>
@@ -650,7 +685,7 @@ function ManualStockOutDialog({ branches, products, onDone }: { branches: Branch
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving || !!qtyWholeUnitError}>{saving ? "Saving…" : "Save"}</Button>
+            <Button onClick={handleSave} disabled={saving || !!qtyWholeUnitError || (eligibleBatches.length > 0 && !form.batchId)}>{saving ? "Saving…" : "Save"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -880,7 +915,7 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
           )}
           {isPendingReview && canEdit && (
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setRejectStage("review"); setRejectReason(""); }} disabled={signingOff}>
+              <Button variant="outline" size="sm" className="gap-1.5 border-destructive/50 text-destructive hover:bg-destructive/10" onClick={() => { setRejectStage("review"); setRejectReason(""); }} disabled={signingOff}>
                 <X className="h-3.5 w-3.5" /> Reject
               </Button>
               <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => handleReview(true)} disabled={signingOff}>
@@ -890,7 +925,7 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
           )}
           {isPendingApproval && canApprove && (
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setRejectStage("approve"); setRejectReason(""); }} disabled={signingOff}>
+              <Button variant="outline" size="sm" className="gap-1.5 border-destructive/50 text-destructive hover:bg-destructive/10" onClick={() => { setRejectStage("approve"); setRejectReason(""); }} disabled={signingOff}>
                 <X className="h-3.5 w-3.5" /> Reject
               </Button>
               <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => handleApprove(true)} disabled={signingOff}>
@@ -1090,9 +1125,14 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function Stocks() {
-  const { user } = useAuth();
+  const { user, canViewModule } = useAuth();
   const navigate = useNavigate();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+  // The Reports tab just links out to /reports/* pages, which RouteGuard gates on the separate
+  // "Reports" module permission — a role with Stocks access but no Reports access (e.g. Picker)
+  // could see this tab yet hit "Access Denied" on every card inside it, so hide the tab entirely
+  // for those roles instead.
+  const canViewReports = canViewModule("Reports");
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -1319,7 +1359,7 @@ function Stocks() {
           <TabsTrigger value="delivery" className="gap-1.5"><Truck className="h-3.5 w-3.5" />Store Delivery</TabsTrigger>
           <TabsTrigger value="wastage" className="gap-1.5"><Trash2 className="h-3.5 w-3.5" />Wastage</TabsTrigger>
           <TabsTrigger value="movement" className="gap-1.5"><History className="h-3.5 w-3.5" />Movement</TabsTrigger>
-          <TabsTrigger value="reports" className="gap-1.5"><FileBarChart className="h-3.5 w-3.5" />Reports</TabsTrigger>
+          {canViewReports && <TabsTrigger value="reports" className="gap-1.5"><FileBarChart className="h-3.5 w-3.5" />Reports</TabsTrigger>}
         </TabsList>
 
         {/* ── Overview ── */}
@@ -1823,8 +1863,8 @@ function AdjustmentTable({ rows, branches, loading, onReviewed }: { rows: Invent
                 <td className="px-4 py-2.5 text-right">
                   {pending && canApprove ? (
                     <div className="flex items-center justify-end gap-1.5">
-                      <Button size="sm" className="h-7 px-2 text-xs" onClick={() => approve(a)} disabled={busyId === a.id}>Approve</Button>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => { setRejectRow(a); setRejectReason(""); }} disabled={busyId === a.id}>Reject</Button>
+                      <Button size="sm" className="h-7 px-2 text-xs gradient-primary text-primary-foreground border-0" onClick={() => approve(a)} disabled={busyId === a.id}>Approve</Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs border-destructive/50 text-destructive hover:bg-destructive/10" onClick={() => { setRejectRow(a); setRejectReason(""); }} disabled={busyId === a.id}>Reject</Button>
                     </div>
                   ) : pending ? (
                     <span className="text-xs text-muted-foreground">Awaiting approval</span>

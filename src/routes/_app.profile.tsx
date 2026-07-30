@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { api, type User } from "@/lib/api";
 import { useAuth, ROLE_LABELS } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { isValidContactPersonName, isValidSaudiPhone, sanitizeNameInput, sanitizePhoneInput, PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/profile")({
   component: Profile,
@@ -44,6 +45,14 @@ function Profile() {
     if (!user?.id) return;
     if (!fullName.trim() || !email.trim()) {
       toast.error("Name and email are required.");
+      return;
+    }
+    if (!isValidContactPersonName(fullName)) {
+      toast.error("Enter a valid full name (letters only).");
+      return;
+    }
+    if (phone.trim() && !isValidSaudiPhone(phone)) {
+      toast.error("Enter a valid Saudi mobile number (05XXXXXXXX).");
       return;
     }
     setSaving(true);
@@ -89,7 +98,7 @@ function Profile() {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="profile-name">Full Name</Label>
-              <Input id="profile-name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+              <Input id="profile-name" value={fullName} onChange={(e) => setFullName(sanitizeNameInput(e.target.value))} maxLength={CONTACT_PERSON_MAX_LENGTH} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="profile-email">Email</Label>
@@ -97,7 +106,7 @@ function Profile() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="profile-phone">Phone</Label>
-              <Input id="profile-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+966 5xx xxx xxx" />
+              <Input id="profile-phone" value={phone} onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))} placeholder="0501234567" inputMode="numeric" maxLength={PHONE_MAX_LENGTH} />
             </div>
             <div className="space-y-1.5">
               <Label>Role</Label>

@@ -18,6 +18,7 @@ import { api, type Customer, type LoyaltyTransaction, type LoyaltyProgram, type 
 import { StatusBadge } from "@/components/module-placeholder";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
+import { isValidContactPersonName, sanitizeNameInput, CONTACT_PERSON_MAX_LENGTH } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/customers")({ component: Customers });
 
@@ -274,6 +275,13 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
 // without a country code, and foreign customers' numbers entered in full E.164 form).
 const PHONE_RE = /^(\+[1-9]\d{7,14}|05\d{8})$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_INPUT_MAX_LENGTH = 16; // "+" plus up to 15 digits (E.164 max)
+
+// Digits only, plus a single leading "+" for international numbers — filters out letters and
+// other characters as-typed instead of only catching them in the error message afterward.
+function sanitizeCustomerPhone(value: string): string {
+  return (value[0] === "+" ? "+" : "") + value.replace(/\D/g, "").slice(0, PHONE_INPUT_MAX_LENGTH - 1);
+}
 
 type CustomerForm = { fullName: string; phone: string; email: string; tier: string; status: string };
 const emptyForm: CustomerForm = { fullName: "", phone: "", email: "", tier: "standard", status: "active" };
@@ -296,6 +304,10 @@ function CustomerForm({ editing, onSaved, onCancel }: {
   const handleSave = async () => {
     if (!form.fullName.trim() || !form.phone.trim() || !form.email.trim()) {
       setError("Full name, phone and email are required.");
+      return;
+    }
+    if (!isValidContactPersonName(form.fullName)) {
+      setError("Enter a valid full name (letters only).");
       return;
     }
     if (!PHONE_RE.test(form.phone.trim())) {
@@ -322,10 +334,10 @@ function CustomerForm({ editing, onSaved, onCancel }: {
   return (
     <div className="space-y-4 mt-4">
       <CFormField label="Full Name *">
-        <Input value={form.fullName} onChange={e => setForm(p => ({ ...p, fullName: e.target.value }))} placeholder="Ahmed Al Mansouri" className="h-9" />
+        <Input value={form.fullName} onChange={e => setForm(p => ({ ...p, fullName: sanitizeNameInput(e.target.value) }))} placeholder="Ahmed Al Mansouri" className="h-9" maxLength={CONTACT_PERSON_MAX_LENGTH} />
       </CFormField>
       <CFormField label="Phone * (with country code)">
-        <Input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="+966501234567" className="h-9" />
+        <Input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: sanitizeCustomerPhone(e.target.value) }))} placeholder="+966501234567" className="h-9" maxLength={PHONE_INPUT_MAX_LENGTH} inputMode="tel" />
       </CFormField>
       <CFormField label="Email *">
         <Input value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="ahmed@example.com" type="email" className="h-9" />

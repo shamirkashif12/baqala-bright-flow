@@ -543,10 +543,18 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var nonCombinableRuleNames = new List<string>();
         foreach (var d in order.Discounts)
         {
-            // No DiscountId means this line represents an Offer's effect — there's no OfferId
-            // column anywhere on Order/OrderItem to re-verify it against, so (same as before) it
-            // stays client-computed-and-trusted.
-            if (d.DiscountId is null) { validatedDiscountTotal += d.Amount; continue; }
+            // No DiscountId means this is a POS "Manual discount" line (basket-wide, no
+            // Discount row to re-verify against) — client-computed-and-trusted for the amount
+            // itself, but it still has to honor the tobacco carve-out below, same as a named
+            // "all"/"branch" Discount does. Without this it was a silent bypass: a cashier could
+            // manually discount a tobacco item that a named Discount/Coupon would be refused for.
+            if (d.DiscountId is null)
+            {
+                if (tobaccoProductIds.Count > 0)
+                    return BadRequest(new { message = $"\"{d.Name}\" cannot be applied — tobacco items are not eligible for discounts." });
+                validatedDiscountTotal += d.Amount;
+                continue;
+            }
             anyRuleReference = true;
             referencedRuleCount++;
             var rule = await db.Discounts.FindAsync(d.DiscountId.Value);
@@ -605,6 +613,28 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
         if (anyRuleReference)
         {
+            // Catalog-level Product.Discount/DiscountType markdowns and any Loyalty-point redemption
+            // are both folded into the client's own DiscountAmount (see _app.pos.tsx's
+            // `discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal +
+            // loyaltyDiscount`), but validatedDiscountTotal above only re-derives the Coupon/
+            // Discount/Manual portions — overwriting order.DiscountAmount with just that silently
+            // dropped the catalog and loyalty portions whenever a Coupon/Discount was ALSO present,
+            // re-inflating TotalAmount (most visible on tobacco items, where excise then sits on an
+            // artificially-large taxable base). Catalog discount is re-derived from the product's
+            // own current record — never trusted from the client, same as Coupon/Discount above.
+            // The loyalty portion is the client's requested figure; it gets trued up to the
+            // server-clamped actual redemption by the loyalty block further down, which adjusts
+            // order.DiscountAmount by (actual - requested) starting from this same total.
+            foreach (var item in order.Items)
+            {
+                var product = await db.Products.FindAsync(item.ProductId);
+                if (product?.Discount is not > 0) continue;
+                validatedDiscountTotal += product.DiscountType == "fixed"
+                    ? Math.Min(product.Discount.Value * item.Quantity, item.TotalPrice)
+                    : Math.Round(item.TotalPrice * product.Discount.Value / 100m, 2);
+            }
+            validatedDiscountTotal += order.LoyaltyDiscountAmount;
+
             order.DiscountAmount = Math.Min(validatedDiscountTotal, order.Subtotal);
             var taxableBase = Math.Max(0, order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount);
             order.TaxAmount = Math.Round(taxableBase * 0.15m, 2);

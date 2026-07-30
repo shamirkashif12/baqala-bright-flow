@@ -21,7 +21,12 @@ import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
 import { api, type Supplier, type SupplierDocument, type PurchaseOrder, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
-import { isValidSaudiCr, isValidSaudiPhone, isValidSaudiVat } from "@/lib/validation";
+import {
+  isValidSaudiCr, isValidSaudiPhone, isValidSaudiVat, isValidContactPersonName,
+  isValidBankAccountNumber, isValidSaudiIban,
+  sanitizePhoneInput, sanitizeNameInput, sanitizeDigitsInput, sanitizeIbanInput,
+  PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH, BANK_ACCOUNT_MAX_LENGTH, IBAN_MAX_LENGTH,
+} from "@/lib/validation";
 import { fileToDataUrl } from "@/lib/image";
 
 export const Route = createFileRoute("/_app/suppliers")({ component: Suppliers });
@@ -77,6 +82,10 @@ const FORMAT_VALIDATORS: { key: keyof SupplierForm; check: (v: string) => boolea
   { key: "contactNumber", check: isValidSaudiPhone, message: "Enter a valid Saudi mobile number (05XXXXXXXX)." },
   { key: "crNumber", check: isValidSaudiCr, message: "Enter a valid CR number (10 digits)." },
   { key: "vatNumber", check: isValidSaudiVat, message: "Enter a valid VAT number (15 digits, starting and ending with 3)." },
+  { key: "contactPerson", check: isValidContactPersonName, message: "Enter a valid contact person name (letters only)." },
+  { key: "bankAccountHolder", check: isValidContactPersonName, message: "Enter a valid account holder name (letters only)." },
+  { key: "bankAccountNumber", check: isValidBankAccountNumber, message: "Enter a valid bank account number (digits only)." },
+  { key: "bankIban", check: isValidSaudiIban, message: "Enter a valid Saudi IBAN (SA followed by 22 digits)." },
 ];
 
 function validateSupplierFormats(form: SupplierForm): SupplierFormErrors {
@@ -126,6 +135,11 @@ function SupplierFormFields({
   errors: SupplierFormErrors;
   setErrors: React.Dispatch<React.SetStateAction<SupplierFormErrors>>;
 }) {
+  // Tracks whether City is showing the free-text "Other" input — separate from form.city itself
+  // so picking "Other…" (which has no city name yet) doesn't collapse back to the dropdown before
+  // the user has typed anything. Previously the dropdown and a free-text override were both shown
+  // at once, which read as two separate, redundant city fields.
+  const [otherCity, setOtherCity] = useState(() => !!form.city && !SAUDI_CITIES.includes(form.city));
   const clearError = (k: keyof SupplierForm) =>
     setErrors(prev => (prev[k] ? { ...prev, [k]: undefined } : prev));
   const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -136,6 +150,13 @@ function SupplierFormFields({
     setForm(p => ({ ...p, [k]: v }));
     clearError(k);
   };
+  // Sanitizes as-typed — strips characters that could never be valid (letters out of a phone
+  // number, digits out of a name) instead of only catching them at submit time.
+  const setSanitized = (k: keyof SupplierForm, sanitize: (v: string) => string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm(p => ({ ...p, [k]: sanitize(e.target.value) }));
+    clearError(k);
+  };
+  const setDigitsOnly = (k: keyof SupplierForm, maxLength: number) => setSanitized(k, v => v.replace(/\D/g, "").slice(0, maxLength));
   const req = mode === "create";
   const label = (text: string, required: boolean) => required ? `${text} *` : text;
   const errCls = (k: keyof SupplierForm) => (errors[k] ? "border-destructive focus-visible:ring-destructive" : "");
@@ -143,26 +164,36 @@ function SupplierFormFields({
     <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
       <FieldRow label={label("Name", true)} error={errors.name}><Input value={form.name} onChange={set("name")} className={`h-9 ${errCls("name")}`} placeholder="Al-Barakah Trading" required={req} /></FieldRow>
       <FieldRow label="Legal Name"><Input value={form.legalName} onChange={set("legalName")} className="h-9" placeholder="Registered legal business name (if different)" /></FieldRow>
-      <FieldRow label={label("CR Number", true)} error={errors.crNumber}><Input value={form.crNumber} onChange={set("crNumber")} className={`h-9 ${errCls("crNumber")}`} placeholder="Commercial Registration number" required={req} /></FieldRow>
-      <FieldRow label={label("VAT Number", true)} error={errors.vatNumber}><Input value={form.vatNumber} onChange={set("vatNumber")} className={`h-9 ${errCls("vatNumber")}`} placeholder="15-digit VAT registration number" required={req} /></FieldRow>
-      <FieldRow label={label("Contact Person", true)} error={errors.contactPerson}><Input value={form.contactPerson} onChange={set("contactPerson")} className={`h-9 ${errCls("contactPerson")}`} required={req} /></FieldRow>
-      <FieldRow label={label("Phone", true)} error={errors.contactNumber}><Input value={form.contactNumber} onChange={set("contactNumber")} className={`h-9 ${errCls("contactNumber")}`} required={req} /></FieldRow>
+      <FieldRow label={label("CR Number", true)} error={errors.crNumber}><Input value={form.crNumber} onChange={setDigitsOnly("crNumber", 10)} className={`h-9 ${errCls("crNumber")}`} placeholder="Commercial Registration number" inputMode="numeric" maxLength={10} required={req} /></FieldRow>
+      <FieldRow label={label("VAT Number", true)} error={errors.vatNumber}><Input value={form.vatNumber} onChange={setDigitsOnly("vatNumber", 15)} className={`h-9 ${errCls("vatNumber")}`} placeholder="15-digit VAT registration number" inputMode="numeric" maxLength={15} required={req} /></FieldRow>
+      <FieldRow label={label("Contact Person", true)} error={errors.contactPerson}><Input value={form.contactPerson} onChange={setSanitized("contactPerson", sanitizeNameInput)} className={`h-9 ${errCls("contactPerson")}`} maxLength={CONTACT_PERSON_MAX_LENGTH} required={req} /></FieldRow>
+      <FieldRow label={label("Phone", true)} error={errors.contactNumber}><Input value={form.contactNumber} onChange={setSanitized("contactNumber", sanitizePhoneInput)} className={`h-9 ${errCls("contactNumber")}`} placeholder="05XXXXXXXX" inputMode="numeric" maxLength={PHONE_MAX_LENGTH} required={req} /></FieldRow>
       <FieldRow label="Email"><Input value={form.email} onChange={set("email")} className="h-9" type="email" /></FieldRow>
       <FieldRow label="City">
-        <div className="space-y-1">
-          <Select value={SAUDI_CITIES.includes(form.city) ? form.city : ""} onValueChange={setS("city")}>
+        {otherCity ? (
+          <div className="space-y-1">
+            <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Enter city name" autoFocus />
+            <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherCity(false); setS("city")(""); }}>
+              Choose from list instead
+            </button>
+          </div>
+        ) : (
+          <Select
+            value={form.city}
+            onValueChange={v => { if (v === "__other") { setOtherCity(true); setS("city")(""); } else setS("city")(v); }}
+          >
             <SelectTrigger className="h-9"><SelectValue placeholder="Select city" /></SelectTrigger>
             <SelectContent>
               {SAUDI_CITIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              <SelectItem value="__other">Other…</SelectItem>
             </SelectContent>
           </Select>
-          <Input value={form.city} onChange={set("city")} className="h-8 text-xs" placeholder="Or type a city not listed above" />
-        </div>
+        )}
       </FieldRow>
       <div className="sm:col-span-2">
         <FieldRow label={label("Address", true)} error={errors.address}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} className={errCls("address")} /></FieldRow>
       </div>
-      <FieldRow label={label("Supplier Type / Category", true)} error={errors.category}>
+      <FieldRow label={label("Category", true)} error={errors.category}>
         <Select value={form.category} onValueChange={setS("category")}>
           <SelectTrigger className={`h-9 ${errCls("category")}`}><SelectValue placeholder="Select category" /></SelectTrigger>
           <SelectContent>
@@ -181,21 +212,24 @@ function SupplierFormFields({
         </Select>
       </FieldRow>
       <FieldRow label="Payment Terms">
-        <div className="space-y-1">
-          <Select value={PAYMENT_TERMS_OPTIONS.includes(form.paymentTerms) ? form.paymentTerms : ""} onValueChange={setS("paymentTerms")}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select payment terms" /></SelectTrigger>
-            <SelectContent>
-              {PAYMENT_TERMS_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input value={form.paymentTerms} onChange={set("paymentTerms")} className="h-8 text-xs" placeholder="Or type custom terms" />
-        </div>
+        <Select value={PAYMENT_TERMS_OPTIONS.includes(form.paymentTerms) ? form.paymentTerms : ""} onValueChange={setS("paymentTerms")}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Select payment terms" /></SelectTrigger>
+          <SelectContent>
+            {PAYMENT_TERMS_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </FieldRow>
       <FieldRow label="Credit Limit (SAR)"><Input value={form.creditLimit} onChange={set("creditLimit")} className="h-9" type="number" min="0" step="0.01" /></FieldRow>
       <FieldRow label="Bank Name"><Input value={form.bankName} onChange={set("bankName")} className="h-9" /></FieldRow>
-      <FieldRow label="Bank Account Holder Name"><Input value={form.bankAccountHolder} onChange={set("bankAccountHolder")} className="h-9" /></FieldRow>
-      <FieldRow label="Bank Account Number"><Input value={form.bankAccountNumber} onChange={set("bankAccountNumber")} className="h-9" /></FieldRow>
-      <FieldRow label="IBAN"><Input value={form.bankIban} onChange={set("bankIban")} className="h-9" placeholder="SAxx xxxx xxxx xxxx xxxx xxxx" /></FieldRow>
+      <FieldRow label="Bank Account Holder Name" error={errors.bankAccountHolder}>
+        <Input value={form.bankAccountHolder} onChange={setSanitized("bankAccountHolder", sanitizeNameInput)} className={`h-9 ${errCls("bankAccountHolder")}`} maxLength={CONTACT_PERSON_MAX_LENGTH} />
+      </FieldRow>
+      <FieldRow label="Bank Account Number" error={errors.bankAccountNumber}>
+        <Input value={form.bankAccountNumber} onChange={setDigitsOnly("bankAccountNumber", BANK_ACCOUNT_MAX_LENGTH)} className={`h-9 ${errCls("bankAccountNumber")}`} inputMode="numeric" maxLength={BANK_ACCOUNT_MAX_LENGTH} />
+      </FieldRow>
+      <FieldRow label="IBAN" error={errors.bankIban}>
+        <Input value={form.bankIban} onChange={setSanitized("bankIban", sanitizeIbanInput)} className={`h-9 ${errCls("bankIban")}`} placeholder="SAxxxxxxxxxxxxxxxxxxxxxx" maxLength={IBAN_MAX_LENGTH} />
+      </FieldRow>
       <div className="sm:col-span-2">
         <FieldRow label="Notes"><Textarea value={form.notes} onChange={set("notes")} rows={2} placeholder="Any other useful information about this supplier" /></FieldRow>
       </div>
@@ -866,7 +900,11 @@ function SuppliersTab() {
       <Dialog open={!!editSupplier} onOpenChange={v => { if (!v) { setEditSupplier(null); setFormErrors({}); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Supplier</DialogTitle></DialogHeader>
-          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="edit" errors={formErrors} setErrors={setFormErrors} />
+          {/* Keyed by supplier id so switching which supplier is being edited fully remounts this
+              — otherwise its otherCity toggle (set once from the first-ever form.city) wouldn't
+              re-derive for the next supplier's city, since this component is never itself unmounted
+              between edits (only the Dialog's visibility toggles). */}
+          <SupplierFormFields key={editSupplier?.id} form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="edit" errors={formErrors} setErrors={setFormErrors} />
         </DialogContent>
       </Dialog>
 

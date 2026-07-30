@@ -460,17 +460,18 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         }
 
         // A supplier return (RTS) against a given PO could previously be created any number of
-        // times — nothing stopped a second return being drafted, submitted, or even approved while
-        // an earlier one for the same PO was still open. Block a new one while any prior return for
-        // this PO hasn't reached a terminal state (completed/rejected/cancelled) yet.
+        // times — nothing stopped a second return being drafted, submitted, approved, or even
+        // completed while another one for the same PO already existed. A PO should only ever have
+        // one live-or-finished return; only a rejected/cancelled prior attempt frees the PO up for
+        // a fresh one (it never went through).
         if (req.TransferType == "warehouse_to_supplier" && req.PurchaseOrderId.HasValue)
         {
-            var hasOpenReturn = await db.StockTransfers.AnyAsync(t =>
+            var hasExistingReturn = await db.StockTransfers.AnyAsync(t =>
                 t.PurchaseOrderId == req.PurchaseOrderId
                 && t.TransferType == "warehouse_to_supplier"
-                && t.Status != "completed" && t.Status != "rejected" && t.Status != "cancelled");
-            if (hasOpenReturn)
-                return BadRequest(new { message = "A return for this purchase order is already in progress. Wait for it to complete, or cancel/reject it first." });
+                && t.Status != "rejected" && t.Status != "cancelled");
+            if (hasExistingReturn)
+                return BadRequest(new { message = "A return has already been created for this purchase order. Cancel or reject it before creating another." });
         }
 
         var transferId = Guid.NewGuid();
@@ -747,12 +748,18 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateTransferStatusRequest req)
     {
+        // The Supplier Returns cancel dialog collects a reason and disables its submit button until
+        // one is entered, but that was only ever enforced client-side — a direct API call could
+        // cancel with no reason at all. Enforced here too so the requirement actually holds.
+        if (req.Status == "cancelled" && string.IsNullOrWhiteSpace(req.CancelReason))
+            return BadRequest(new { message = "A cancellation reason is required." });
+
         var transfer = await db.StockTransfers.Include(t => t.Items).FirstOrDefaultAsync(t => t.Id == id);
         if (transfer is null) return NotFound();
         var prev = transfer.Status;
         transfer.Status = req.Status;
         if (req.ApprovedBy.HasValue) transfer.ApprovedBy = req.ApprovedBy;
-        if (req.Status == "cancelled" && !string.IsNullOrWhiteSpace(req.CancelReason)) transfer.CancelReason = req.CancelReason;
+        if (req.Status == "cancelled") transfer.CancelReason = req.CancelReason;
         transfer.UpdatedAt = DateTime.UtcNow;
 
         // Approval previously waved through any requested quantity unchecked — nothing stopped an

@@ -25,7 +25,7 @@ import { LoadErrorBanner } from "@/components/load-error-banner";
 import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
-import { uuid } from "@/lib/utils";
+import { uuid, POS_ADMIN_BRANCH_KEY } from "@/lib/utils";
 
 // "Failed to fetch" is the browser's own error when it can't reach anything at all (nothing
 // listening on the local print-agent port) — i.e. no printer/agent has ever been set up on
@@ -134,7 +134,7 @@ type InvoiceSnapshot = {
 };
 
 // ─── Quick Stock In Dialog ────────────────────────────────────────────────────
-function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allowNegativeStock, onStockAdded }: {
+function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allowNegativeStock, initialProduct, onStockAdded }: {
   open: boolean; onClose: () => void;
   products: Product[]; stockMap: Map<string, number>;
   branchId: string;
@@ -143,6 +143,9 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
   // (the default), so a "never stocked" item would add to the cart here only to fail at checkout
   // with no clear reason. Gate the option on the same flag the backend actually enforces.
   allowNegativeStock: boolean;
+  // A scan/search that already resolved an exact product (barcode/SKU) but found it unstocked at
+  // this branch can jump straight to that product instead of making the cashier search again.
+  initialProduct?: Product | null;
   onStockAdded: (product: Product, newStock: number) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -153,7 +156,14 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) { setQuery(""); setSelected(null); setQty(1); setError(""); setTimeout(() => inputRef.current?.focus(), 80); }
+    if (open) {
+      setQuery(initialProduct?.name ?? "");
+      setSelected(initialProduct ?? null);
+      setQty(1);
+      setError("");
+      setTimeout(() => inputRef.current?.focus(), 80);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const results = useMemo(() => {
@@ -215,7 +225,15 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent
+        className="max-w-md"
+        // When a scan/search already resolved a product, Radix's default open-focus would land
+        // on the first focusable element in the "already selected" view (the "✕ clear" button) —
+        // the tail end of the same Enter keypress that opened this dialog then activates it on
+        // keyup, instantly clearing the very selection this dialog just pre-filled. Suppress it
+        // only in that case; the plain "search first" flow still gets normal auto-focus.
+        onOpenAutoFocus={(e) => { if (initialProduct) e.preventDefault(); }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <Package className="h-4 w-4 text-primary" /> Quick Stock In
@@ -518,7 +536,7 @@ function POS() {
   // manual choice anywhere — every refresh re-derived it from scratch (own-shift branch, else an
   // arbitrary "first active branch"), silently discarding whatever the admin had actually picked.
   // Session-scoped (not permanent) to match the cart's own `pos_cart_${branchId}` persistence below.
-  const ADMIN_BRANCH_KEY = "pos_admin_branch_id";
+  const ADMIN_BRANCH_KEY = POS_ADMIN_BRANCH_KEY;
   const [branchId, setBranchIdRaw] = useState(() => {
     if (lockedBranchId) return lockedBranchId;
     try { return sessionStorage.getItem(ADMIN_BRANCH_KEY) ?? ""; } catch { return ""; }
@@ -551,7 +569,11 @@ function POS() {
   useEffect(() => {
     if (branchId || !branches.length || !ownShiftChecked) return;
     const preferred = ownShiftBranchId && branches.some((b) => b.id === ownShiftBranchId) ? ownShiftBranchId : null;
-    setBranchIdRaw(preferred ?? branches.find((b) => b.status === "active")?.id ?? branches[0].id);
+    // Must persist (setBranchId), not just set locally (setBranchIdRaw) — this auto-resolved
+    // default is otherwise never written to sessionStorage, so Held Orders/Cashier Workspace (which
+    // read that same key via getPosBranchId) saw no branch at all for an admin who never manually
+    // touched the branch dropdown, even though POS itself was clearly operating on one.
+    setBranchId(preferred ?? branches.find((b) => b.status === "active")?.id ?? branches[0].id);
   }, [branches, branchId, ownShiftChecked, ownShiftBranchId]);
   // The persisted/locked branchId could point at a branch that no longer exists or was disabled
   // by the time branches finish loading — fall back to re-running the resolution above instead of
@@ -673,6 +695,10 @@ function POS() {
   const [payOpen, setPayOpen] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
   const [stockInOpen, setStockInOpen] = useState(false);
+  // Set right before opening QuickStockInDialog when a scan/search already resolved an exact
+  // product (barcode/SKU match) that just isn't stocked at this branch — pre-selects it in the
+  // dialog instead of making the cashier search for the same product a second time.
+  const [stockInInitialProduct, setStockInInitialProduct] = useState<Product | null>(null);
 
   // ─── Invoice snapshot (preserved after cart is cleared) ───────────────────────
   const [invoice, setInvoice] = useState<InvoiceSnapshot | null>(null);
@@ -1057,10 +1083,11 @@ function POS() {
         const addQty = packHit && p && p.barcode !== code && p.sku !== code ? packHit.packSize : 1;
         if (p) {
           if (!stockMapRef.current.has(p.id)) {
-            toast.error(`Product not available in this branch`, {
-              description: `"${p.name}" is not stocked at this branch. Switch to the correct branch or add stock here first.`,
-              duration: 4000,
-            });
+            // Real-time counter sale: this product exists but has never been stocked at this
+            // branch — jump straight into Quick Stock In with it pre-selected instead of a dead
+            // end, so the cashier can add the stock entry and sell it in one motion.
+            setStockInInitialProduct(p);
+            setStockInOpen(true);
             return;
           }
           if (expiredProductIdsRef.current.has(p.id)) {
@@ -1242,25 +1269,28 @@ function POS() {
     return Math.max(tobaccoExciseMinimum, base * tobaccoExcisePercentage / 100);
   }
   // Excise has to be charged on the NET price the item is actually sold at, not its undiscounted
-  // catalog price — a product-level discount (the only discount type the Rules Engine's "No
-  // discount on tobacco items" rule still allows on a tobacco item; Coupons/manual Discounts are
-  // blocked outright) previously left the excise completely untouched even at 100% off, so a
-  // fully-discounted tobacco item still carried its full undiscounted excise instead of dropping
-  // to the statutory minimum on a zero base price.
+  // catalog price — a product-level discount previously left the excise completely untouched
+  // even at 100% off, so a fully-discounted tobacco item still carried its full undiscounted
+  // excise instead of dropping to the statutory minimum on a zero base price.
   function tobaccoNetUnitPrice(prod: Product, price: number): number {
     if (!prod.discount || prod.discount <= 0) return price;
     return Math.max(0, prod.discountType === "percentage" ? price * (1 - prod.discount / 100) : price - prod.discount);
   }
-  const tobaccoExcise = displayCart.reduce((sum, ci) => {
-    const prod = products.find(p => p.id === ci.productId);
-    if (!prod?.isTobacco || !tobaccoFeeEnabled) return sum;
-    return sum + ci.qty * calcTobaccoFee(tobaccoNetUnitPrice(prod, ci.price));
-  }, 0);
-  const couponDiscount = appliedCoupon
-    ? appliedCoupon.type === "percentage"
+  // Same "tobacco items are not eligible for discounts" carve-out named Discounts/Coupons are
+  // refused for server-side (skipped entirely when the Rules Engine rule is inactive) — Manual
+  // discount has no rule row to check it against, so it's gated here at the point of adding it
+  // instead (server also refuses it as of the OrdersController fix).
+  const cartHasTobacco = displayCart.some(ci => products.find(p => p.id === ci.productId)?.isTobacco);
+  const couponDiscount = (() => {
+    if (!appliedCoupon) return 0;
+    const raw = appliedCoupon.type === "percentage"
       ? Math.min(subtotal * (appliedCoupon.value / 100), subtotal)
-      : Math.min(appliedCoupon.value, subtotal)
-    : 0;
+      : Math.min(appliedCoupon.value, subtotal);
+    // Mirrors OrdersController's Math.Min(couponAmount, MaxDiscountAmount) — without this the
+    // cart showed the full uncapped amount while the server silently clamped it at save time,
+    // so the total the cashier/customer saw didn't match what was actually charged.
+    return appliedCoupon.maxDiscountAmount != null ? Math.min(raw, appliedCoupon.maxDiscountAmount) : raw;
+  })();
 
   // Loyalty points redemption — mirrors couponDiscount's role in the taxable base below. The
   // server re-clamps to the customer's live balance/program caps at checkout (OrdersController),
@@ -1299,22 +1329,26 @@ function POS() {
   function computeDiscountSaving(d: Discount): number {
     if (d.requiresCustomer && !customer) return 0; // customer detached after applying — don't charge for it
     const excludedIds = new Set(parseIdList(d.excludedProductIdsJson));
+    let raw: number;
     if (d.appliesTo === "all" || d.appliesTo === "branch") {
       const eligibleSubtotal = displayCart.filter(ci => !excludedIds.has(ci.productId)).reduce((s, ci) => s + ci.qty * ci.price, 0);
       if (eligibleSubtotal <= 0) return 0;
-      return d.discountType === "percentage" ? eligibleSubtotal * (d.value / 100) : Math.min(d.value, eligibleSubtotal);
-    }
-    if (d.appliesTo === "product" && d.productId && !excludedIds.has(d.productId)) {
+      raw = d.discountType === "percentage" ? eligibleSubtotal * (d.value / 100) : Math.min(d.value, eligibleSubtotal);
+    } else if (d.appliesTo === "product" && d.productId && !excludedIds.has(d.productId)) {
       const item = displayCart.find(i => i.productId === d.productId);
       if (!item) return 0;
-      return d.discountType === "percentage" ? item.qty * item.price * (d.value / 100) : Math.min(d.value * item.qty, item.qty * item.price);
-    }
-    if (d.appliesTo === "category" && d.categoryId) {
+      raw = d.discountType === "percentage" ? item.qty * item.price * (d.value / 100) : Math.min(d.value * item.qty, item.qty * item.price);
+    } else if (d.appliesTo === "category" && d.categoryId) {
       const lines = displayCart.filter(ci => !excludedIds.has(ci.productId) && products.find(p => p.id === ci.productId)?.categoryId === d.categoryId);
       if (lines.length === 0) return 0;
-      return lines.reduce((s, ci) => s + (d.discountType === "percentage" ? ci.qty * ci.price * (d.value / 100) : Math.min(d.value * ci.qty, ci.qty * ci.price)), 0);
+      raw = lines.reduce((s, ci) => s + (d.discountType === "percentage" ? ci.qty * ci.price * (d.value / 100) : Math.min(d.value * ci.qty, ci.qty * ci.price)), 0);
+    } else {
+      return 0;
     }
-    return 0;
+    // Mirrors OrdersController's Math.Min(computed, rule.MaxDiscountAmount) — capped here too so
+    // the cart shows the same amount the server will actually apply, instead of the full
+    // uncapped value with the server silently clamping it down at save time.
+    return d.maxDiscountAmount != null ? Math.min(raw, d.maxDiscountAmount) : raw;
   }
   const discountSavings = appliedDiscounts.reduce((sum, d) => sum + computeDiscountSaving(d), 0);
 
@@ -1325,6 +1359,56 @@ function POS() {
     return m.kind === "percentage" ? subtotal * (m.value / 100) : Math.min(m.value, subtotal);
   }
   const manualDiscountSavings = manualDiscounts.reduce((sum, m) => sum + computeManualDiscountSaving(m), 0);
+
+  // How much order-level discount (Coupon + applied named Discounts + Manual discount + redeemed
+  // Loyalty points) actually lands on one specific cart line — needed so tobacco excise (below) is
+  // charged on what the item really sells for once one of these is allowed through (e.g. the Rules
+  // Engine "No discount on tobacco items" rule has been turned off). Catalog-level product.discount
+  // is handled separately by tobaccoNetUnitPrice above; this only covers the checkout-time
+  // mechanisms — basket-wide amounts (Coupon, Manual, Loyalty, "all"/"branch" Discounts) are
+  // prorated by the line's share of the (eligible) subtotal, product/category-scoped Discounts are
+  // matched directly. Loyalty redemption was missing here entirely, so a tobacco item fully paid
+  // off with points still had excise computed on its pre-redemption price.
+  function orderLevelDiscountForItem(ci: typeof displayCart[number]): number {
+    const lineSubtotal = ci.qty * ci.price;
+    if (lineSubtotal <= 0) return 0;
+    let total = 0;
+    if (appliedCoupon && subtotal > 0) total += couponDiscount * (lineSubtotal / subtotal);
+    if (manualDiscountSavings > 0 && subtotal > 0) total += manualDiscountSavings * (lineSubtotal / subtotal);
+    if (loyaltyDiscount > 0 && subtotal > 0) total += loyaltyDiscount * (lineSubtotal / subtotal);
+    for (const d of appliedDiscounts) {
+      if (d.requiresCustomer && !customer) continue;
+      const excludedIds = new Set(parseIdList(d.excludedProductIdsJson));
+      if (excludedIds.has(ci.productId)) continue;
+      if (d.appliesTo === "all" || d.appliesTo === "branch") {
+        const eligibleSubtotal = displayCart.filter(x => !excludedIds.has(x.productId)).reduce((s, x) => s + x.qty * x.price, 0);
+        if (eligibleSubtotal > 0) total += computeDiscountSaving(d) * (lineSubtotal / eligibleSubtotal);
+      } else if (d.appliesTo === "product" && d.productId === ci.productId) {
+        // Only one line can ever match a product-scoped discount, so this line's share IS the
+        // whole (capped) discount — route through computeDiscountSaving so the cap applies here too.
+        total += computeDiscountSaving(d);
+      } else if (d.appliesTo === "category" && products.find(p => p.id === ci.productId)?.categoryId === d.categoryId) {
+        // Several lines can share a category-scoped discount, so prorate the (capped) total by
+        // this line's share of the category's eligible subtotal — same pattern as "all"/"branch"
+        // above — rather than re-deriving each line's cut independently, which would ignore the cap.
+        const categoryEligibleSubtotal = displayCart
+          .filter(x => !excludedIds.has(x.productId) && products.find(p => p.id === x.productId)?.categoryId === d.categoryId)
+          .reduce((s, x) => s + x.qty * x.price, 0);
+        if (categoryEligibleSubtotal > 0) total += computeDiscountSaving(d) * (lineSubtotal / categoryEligibleSubtotal);
+      }
+    }
+    return Math.min(total, lineSubtotal);
+  }
+  function tobaccoNetPriceAfterAllDiscounts(prod: Product, ci: typeof displayCart[number]): number {
+    const catalogNetPrice = tobaccoNetUnitPrice(prod, ci.price);
+    const orderLevelPerUnit = ci.qty > 0 ? orderLevelDiscountForItem(ci) / ci.qty : 0;
+    return Math.max(0, catalogNetPrice - orderLevelPerUnit);
+  }
+  const tobaccoExcise = displayCart.reduce((sum, ci) => {
+    const prod = products.find(p => p.id === ci.productId);
+    if (!prod?.isTobacco || !tobaccoFeeEnabled) return sum;
+    return sum + ci.qty * calcTobaccoFee(tobaccoNetPriceAfterAllDiscounts(prod, ci));
+  }, 0);
 
   // What's left in the dropdown to pick from — active, in date range, branch-eligible, not
   // already applied, and (for requiresCustomer discounts) only once a customer is attached.
@@ -1587,10 +1671,10 @@ function POS() {
       const byBarcode = products.find((p) => p.barcode === trimmed);
       if (byBarcode) {
         if (!stockMap.has(byBarcode.id)) {
-          toast.error(`Product not available in this branch`, {
-            description: `"${byBarcode.name}" is not stocked at this branch.`,
-            duration: 4000,
-          });
+          // Real-time counter sale: jump straight into Quick Stock In with it pre-selected
+          // instead of a dead end, same as the global scanner listener above.
+          setStockInInitialProduct(byBarcode);
+          setStockInOpen(true);
           setQuery("");
           return;
         }
@@ -1600,10 +1684,8 @@ function POS() {
       const bySku = products.find((p) => p.sku === trimmed);
       if (bySku) {
         if (!stockMap.has(bySku.id)) {
-          toast.error(`Product not available in this branch`, {
-            description: `"${bySku.name}" is not stocked at this branch.`,
-            duration: 4000,
-          });
+          setStockInInitialProduct(bySku);
+          setStockInOpen(true);
           setQuery("");
           return;
         }
@@ -1641,6 +1723,21 @@ function POS() {
       { entityType: "Customer", entityId: c.id });
   };
 
+  // The search box takes "Name or phone number" — if nothing matched and what was typed doesn't
+  // look like a phone number, it was almost certainly a name attempt, so hand it to the "Full
+  // name" field instead of leaving it stuck in "Phone" (customerPhone backs both boxes). Without
+  // this, searching by name landed the typed text in Phone with Name left blank — confusing, and
+  // the cashier would have to notice and retype it in the right box.
+  const enterNotFoundState = () => {
+    const typed = customerPhone.trim();
+    if (typed && !/^[0-9+\-\s()]+$/.test(typed)) {
+      setNewCustomerName(typed);
+      setCustomerPhone("");
+    }
+    setCustomerNotFound(true);
+    setRedeemPoints(0);
+  };
+
   const lookupCustomer = async () => {
     if (!customerPhone.trim()) return;
     setCustomerLoading(true);
@@ -1655,12 +1752,10 @@ function POS() {
       } else {
         // The "not found" panel below already surfaces this state visually — a toast on top of
         // it was redundant, and would fire on every keystroke once search runs live as you type.
-        setCustomerNotFound(true);
-        setRedeemPoints(0);
+        enterNotFoundState();
       }
     } catch {
-      setCustomerNotFound(true);
-      setRedeemPoints(0);
+      enterNotFoundState();
     } finally {
       setCustomerLoading(false);
     }
@@ -1827,14 +1922,14 @@ function POS() {
     if (user?.role === "cashier" && !activeShift)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
 
-    // Card-payments-scoped fees only apply when the order is actually being paid by card — folded
-    // in here (not earlier, into `total`) since paymentMethod isn't known until charge time. Split
-    // payments are out of scope: apportioning a card surcharge across a cash+card split is a
-    // separate question this fix doesn't address, so no card surcharge is added there.
-    const isCardOnly = paymentMethod === "card";
-    const finalServiceChargeRows = isCardOnly ? [...serviceChargeRows, ...cardSurchargeRows] : serviceChargeRows;
-    const finalCustomFeeTotal = customFeeTotal + (isCardOnly ? cardSurchargeTotal : 0);
-    const finalTotal = total + (isCardOnly ? cardSurchargeTotal : 0);
+    // Card-payments-scoped fees only apply when part of the order is actually being paid by card —
+    // folded in here (not earlier, into `total`) since paymentMethod isn't known until charge time.
+    // A split payment with a nonzero card portion also triggers it (PaymentDialog's split tab
+    // computes "still owed" the same way, so the payments it sends already add up to this total).
+    const hasCardPortion = paymentMethod === "card" || (splitPayments?.some((p) => p.method === "card" && p.amount > 0) ?? false);
+    const finalServiceChargeRows = hasCardPortion ? [...serviceChargeRows, ...cardSurchargeRows] : serviceChargeRows;
+    const finalCustomFeeTotal = customFeeTotal + (hasCardPortion ? cardSurchargeTotal : 0);
+    const finalTotal = total + (hasCardPortion ? cardSurchargeTotal : 0);
 
     const payments = splitPayments
       ? splitPayments
@@ -1879,7 +1974,7 @@ function POS() {
           quantity: item.qty,
           unitPrice: item.price,
           totalPrice: item.qty * item.price,
-          tobaccoFeeAmount: prod?.isTobacco && tobaccoFeeEnabled ? item.qty * calcTobaccoFee(tobaccoNetUnitPrice(prod, item.price)) : 0,
+          tobaccoFeeAmount: prod?.isTobacco && tobaccoFeeEnabled ? item.qty * calcTobaccoFee(tobaccoNetPriceAfterAllDiscounts(prod, item)) : 0,
         };
       }),
       payments,
@@ -2295,29 +2390,36 @@ function POS() {
             ) : customerNotFound ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5 space-y-2">
                 <p className="text-[10px] font-medium text-amber-700 dark:text-amber-400">Not found — save as new customer?</p>
-                <Input
-                  value={newCustomerName}
-                  onChange={(e) => setNewCustomerName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
-                  placeholder="Full name…"
-                  className="h-8 text-xs"
-                  autoFocus
-                />
-                <div className="flex gap-1.5">
+                <div className="space-y-0.5">
+                  <label className="text-[10px] text-muted-foreground">Name</label>
                   <Input
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="Phone…"
-                    className="h-8 text-xs flex-1"
+                    value={newCustomerName}
+                    onChange={(e) => setNewCustomerName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
+                    placeholder="Full name…"
+                    className="h-8 text-xs"
+                    autoFocus
                   />
-                  <Button size="sm" className="h-8 px-3 text-xs gradient-primary text-primary-foreground border-0"
-                    onClick={createNewCustomer} disabled={creatingCustomer || !newCustomerName.trim()}>
-                    {creatingCustomer ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
-                    onClick={() => { setCustomerNotFound(false); setNewCustomerName(""); }}>
-                    Skip
-                  </Button>
+                </div>
+                <div className="space-y-0.5">
+                  <label className="text-[10px] text-muted-foreground">Phone</label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
+                      placeholder="Phone number…"
+                      className="h-8 text-xs flex-1"
+                    />
+                    <Button size="sm" className="h-8 px-3 text-xs gradient-primary text-primary-foreground border-0"
+                      onClick={createNewCustomer} disabled={creatingCustomer || !newCustomerName.trim() || !customerPhone.trim()}>
+                      {creatingCustomer ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
+                      onClick={() => { setCustomerNotFound(false); setNewCustomerName(""); }}>
+                      Skip
+                    </Button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -2481,6 +2583,13 @@ function POS() {
                   onClick={() => {
                     const value = Number(manualDiscountValue);
                     if (!Number.isFinite(value) || value <= 0) return;
+                    if (cartHasTobacco) {
+                      toast.error("Cannot apply a discount", {
+                        description: "Tobacco items in this order are not eligible for discounts.",
+                        duration: 4000,
+                      });
+                      return;
+                    }
                     setManualDiscounts(list => [...list, {
                       id: uuid(),
                       name: manualDiscountKind === "percentage" ? `Manual discount (${value}%)` : `Manual discount (SAR ${value})`,
@@ -2867,11 +2976,12 @@ function POS() {
 
       <QuickStockInDialog
         open={stockInOpen}
-        onClose={() => setStockInOpen(false)}
+        onClose={() => { setStockInOpen(false); setStockInInitialProduct(null); }}
         products={products}
         stockMap={stockMap}
         branchId={branch?.id ?? ""}
         allowNegativeStock={posPerms.allowNegativeStock}
+        initialProduct={stockInInitialProduct}
         onStockAdded={(product, newStock) => {
           // Not capped at newStock here — when currentStock was 0, QuickStockInDialog
           // intentionally didn't receive any stock and expects this add-to-cart to proceed
@@ -2883,6 +2993,7 @@ function POS() {
             return [...c, { name: product.name, sku: product.sku, productId: product.id, qty: 1, price: effectivePrice(product), stock: newStock }];
           });
           setStockInOpen(false);
+          setStockInInitialProduct(null);
         }}
       />
 
@@ -2943,25 +3054,27 @@ function PaymentDialog({
   const [splitCash, setSplitCash] = useState("0.00");
   const [splitCard, setSplitCard] = useState("0.00");
 
-  // The card surcharge only applies once the customer is actually paying by card — split payments
-  // are out of scope (see handleCharge), so only the "card" tab's displayed total picks it up.
+  // The card surcharge applies once the customer is actually paying by card — the "card" tab picks
+  // it up outright, and the split tab picks it up too as soon as any card amount is entered there
+  // (see splitEffectiveTotal below), so a cash+card split isn't silently exempt from it.
   const displayTotal = tab === "card" ? total + cardSurchargeAmount : total;
 
   const change = Math.max(0, parseFloat(received || "0") - total);
 
   // splitCard is charged exactly as entered — there's no "change" concept for a card charge, so it
-  // can never exceed the total. splitCash is what the customer HANDS OVER for the remainder, not
-  // what gets recorded as paid: if it's more than what's still owed after the card portion, the
-  // excess is change owed back, same as the plain Cash tab. Previously splitCash was recorded
-  // verbatim and the sum had to land within 1 cent of `total`, so any cash overpayment (the normal
-  // case — customers rarely hand over exact change) was rejected outright as "invalid" instead of
-  // returning change.
+  // can never exceed the order's total (including surcharge). splitCash is what the customer HANDS
+  // OVER for the remainder, not what gets recorded as paid: if it's more than what's still owed
+  // after the card portion, the excess is change owed back, same as the plain Cash tab. Previously
+  // splitCash was recorded verbatim and the sum had to land within 1 cent of `total`, so any cash
+  // overpayment (the normal case — customers rarely hand over exact change) was rejected outright
+  // as "invalid" instead of returning change.
   const splitCardNum = parseFloat(splitCard) || 0;
   const splitCashTendered = parseFloat(splitCash) || 0;
-  const splitRemainingAfterCard = Math.max(0, total - splitCardNum);
+  const splitEffectiveTotal = splitCardNum > 0 ? total + cardSurchargeAmount : total;
+  const splitRemainingAfterCard = Math.max(0, splitEffectiveTotal - splitCardNum);
   const splitCashApplied = Math.min(splitCashTendered, splitRemainingAfterCard);
   const splitChange = Math.max(0, splitCashTendered - splitRemainingAfterCard);
-  const splitOk = splitCardNum <= total && splitCashTendered >= splitRemainingAfterCard;
+  const splitOk = splitCardNum <= splitEffectiveTotal && splitCashTendered >= splitRemainingAfterCard;
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -3093,8 +3206,14 @@ function PaymentDialog({
                 <Input className="h-9" type="number" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} onFocus={(e) => e.target.select()} />
               </div>
             </div>
-            {splitCardNum > total && (
+            {splitCardNum > splitEffectiveTotal && (
               <p className="text-xs text-destructive">Card amount can't exceed the order total — there's no change on a card charge.</p>
+            )}
+            {splitCardNum > 0 && cardSurchargeAmount > 0 && (
+              <div className="rounded-lg bg-muted/40 p-2 text-xs flex justify-between">
+                <span className="text-muted-foreground">Card payment surcharge</span>
+                <span className="font-medium flex items-center gap-0.5"><SARIcon />{cardSurchargeAmount.toFixed(2)}</span>
+              </div>
             )}
             <div className={`flex justify-between text-sm p-2 rounded-lg ${splitOk ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
               <span>Still owed after card</span>

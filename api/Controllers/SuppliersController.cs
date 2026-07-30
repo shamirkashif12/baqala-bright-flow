@@ -59,6 +59,10 @@ public class SuppliersController(BaqalaDbContext db, IAuditService audit) : Cont
         if (!ContactValidation.IsValidSaudiPhone(supplier.ContactNumber)) return "Enter a valid Saudi mobile number (05XXXXXXXX).";
         if (!ContactValidation.IsValidSaudiCr(supplier.CrNumber)) return "Enter a valid CR number (10 digits).";
         if (!ContactValidation.IsValidSaudiVat(supplier.VatNumber)) return "Enter a valid VAT number (15 digits, starting and ending with 3).";
+        if (!ContactValidation.IsValidContactPersonName(supplier.ContactPerson)) return "Enter a valid contact person name (letters only).";
+        if (!ContactValidation.IsValidContactPersonName(supplier.BankAccountHolder)) return "Enter a valid account holder name (letters only).";
+        if (!ContactValidation.IsValidBankAccountNumber(supplier.BankAccountNumber)) return "Enter a valid bank account number (digits only).";
+        if (!ContactValidation.IsValidSaudiIban(supplier.BankIban)) return "Enter a valid Saudi IBAN (SA followed by 22 digits).";
         return null;
     }
 
