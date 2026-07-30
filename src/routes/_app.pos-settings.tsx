@@ -9,12 +9,13 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
+import { Loader2, Moon, Sun } from "lucide-react";
 import { toast } from "sonner";
 import { api, type PosSettingsRecord } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
 import { useAuth } from "@/lib/auth";
+import { useTheme } from "@/lib/theme";
 
 export const Route = createFileRoute("/_app/pos-settings")({
   component: () => (
@@ -92,6 +93,7 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
 function PosSettings() {
   const { user } = useAuth();
   const { branches } = useBranch();
+  const { theme, toggleTheme } = useTheme();
   const isAdmin = user?.role === "tenant_admin";
   const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
   const [branchId, setBranchId] = useState(lockedBranchId ?? "");
@@ -221,6 +223,7 @@ function PosSettings() {
           <TabsTrigger value="online">Online Ordering</TabsTrigger>
           <TabsTrigger value="card">Card Machine</TabsTrigger>
           <TabsTrigger value="printer">Printer</TabsTrigger>
+          <TabsTrigger value="appearance">Appearance</TabsTrigger>
         </TabsList>
 
         {/* ── Cashier ── */}
@@ -372,6 +375,20 @@ function PosSettings() {
               <p className="text-sm font-medium">Open cash drawer after cash sale</p>
             </div>
             <Switch defaultChecked />
+          </div>
+        </TabsContent>
+
+        {/* ── Appearance (client-side preference, not a per-branch DB setting) ── */}
+        <TabsContent value="appearance" className="space-y-3 mt-4">
+          <div className="flex items-start justify-between gap-4 p-4 rounded-xl border border-border/60 hover:border-primary/40 transition-colors">
+            <div className="flex items-start gap-3">
+              {theme === "dark" ? <Moon className="h-4 w-4 mt-0.5 text-muted-foreground" /> : <Sun className="h-4 w-4 mt-0.5 text-muted-foreground" />}
+              <div>
+                <p className="text-sm font-medium">Dark mode</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Switch the app's appearance between light and dark themes. Applies to this device only.</p>
+              </div>
+            </div>
+            <Switch checked={theme === "dark"} onCheckedChange={toggleTheme} />
           </div>
         </TabsContent>
       </Tabs>

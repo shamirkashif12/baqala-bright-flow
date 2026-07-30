@@ -263,7 +263,7 @@ function ZatcaSettings() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-semibold truncate">ZATCA Phase 2 — {branch?.name ?? "No branch available"}</h3>
-                    <Badge className={zatca.onboardingStatus === "production_ready" ? "bg-success text-success-foreground border-0" : "bg-warning text-warning-foreground border-0"}>
+                    <Badge className={zatca.onboardingStatus === "production_ready" ? "bg-success text-success-foreground border-0" : "bg-warning text-neutral-900 border-0"}>
                       {onboardingLabel(zatca.onboardingStatus)}
                     </Badge>
                   </div>

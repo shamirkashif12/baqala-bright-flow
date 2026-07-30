@@ -233,7 +233,7 @@ function TaxFees() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold">ZATCA e-Invoicing</h3>
-                    <Badge className={zatca.phase2Enabled ? "bg-success text-success-foreground border-0" : "bg-warning text-warning-foreground border-0"}>
+                    <Badge className={zatca.phase2Enabled ? "bg-success text-success-foreground border-0" : "bg-warning text-neutral-900 border-0"}>
                       {zatca.phase2Enabled ? "Live" : "Disabled"}
                     </Badge>
                   </div>

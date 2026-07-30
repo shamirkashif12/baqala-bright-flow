@@ -93,4 +93,28 @@ public class DesignationsController(BaqalaDbContext db, IAuditService audit) : C
 
         return NoContent();
     }
+
+    // True hard delete — only reachable once already deactivated, and only when no employee
+    // still holds this designation.
+    [RequirePermission("HR Master Data", PermAction.Delete)]
+    [HttpDelete("{id:guid}/permanent")]
+    public async Task<IActionResult> PermanentDelete(Guid id)
+    {
+        var designation = await db.Designations.FindAsync(id);
+        if (designation is null) return NotFound();
+        if (designation.Status != "inactive")
+            return BadRequest(new { message = "Deactivate this designation before permanently deleting it." });
+
+        var employeeCount = await db.Employees.CountAsync(e => e.DesignationId == id);
+        if (employeeCount > 0)
+            return Conflict(new { message = $"Cannot permanently delete — still held by {employeeCount} employee(s)." });
+
+        db.Designations.Remove(designation);
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(action: "Designation permanently deleted", entityType: "Designation", entityId: id,
+            userId: CallerId(), severity: "warning", beforeValue: designation.Name, module: "HR Master Data");
+
+        return NoContent();
+    }
 }

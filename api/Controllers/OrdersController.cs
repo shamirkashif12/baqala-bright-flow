@@ -611,6 +611,18 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             order.TotalAmount = order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount + order.TaxAmount + order.CustomFeeAmount;
         }
 
+        // Same gap as OrderItem.TaxAmount above: the client only ever sends one order-level
+        // discount total, so OrderItem.DiscountAmount stayed at its 0 default forever — which is
+        // why Monthly Sales/Category Performance/Product Sales (which sum this column) always
+        // read a 0.00 Discount Value even though orders.discount_amount was correctly populated.
+        // Allocate the order's final discount proportionally by each item's share of the subtotal.
+        if (order.DiscountAmount > 0 && order.Subtotal > 0)
+        {
+            foreach (var item in order.Items)
+                if (item.DiscountAmount == 0)
+                    item.DiscountAmount = Math.Round(item.TotalPrice / order.Subtotal * order.DiscountAmount, 2);
+        }
+
         db.Orders.Add(order);
 
         // Keep the till's running totals live so "expected cash"/variance at close-out

@@ -50,6 +50,7 @@ import {
   Gift,
   CalendarCheck2,
   AlarmClockOff,
+  Gavel,
 } from "lucide-react";
 import {
   Sidebar,
@@ -146,6 +147,7 @@ const navGroups: NavGroup[] = [
       { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
       { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
       { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower" },
+      { title: "Approval Centre",     url: "/reports/approval-center", icon: Gavel, module: "Reports" },
     ],
   },
   {

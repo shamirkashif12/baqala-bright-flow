@@ -1372,7 +1372,9 @@ public static class DataSeeder
         await db.SaveChangesAsync();
     }
 
-    private static IEnumerable<RolePermission> BuildPermissions(Guid roleId, string roleName)
+    // Public so RolesController's "Reset to Default Roles" can restore a system role's
+    // permissions to this same matrix without duplicating it.
+    public static IEnumerable<RolePermission> BuildPermissions(Guid roleId, string roleName)
     {
         static RolePermission P(Guid id, string mod,
             bool v, bool c, bool e, bool d, bool a, bool x)

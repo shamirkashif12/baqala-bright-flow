@@ -172,6 +172,8 @@ export const api = {
     request<Role>(`/api/roles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteRole: (id: string) =>
     request<{ deleted: boolean }>(`/api/roles/${id}`, { method: "DELETE" }),
+  resetRolesToDefaults: () =>
+    request<{ resetCount: number }>("/api/roles/reset-defaults", { method: "POST" }),
 
   // Products
   getProducts: (params?: { categoryId?: string; status?: string; search?: string }) => {
@@ -1035,6 +1037,7 @@ export const api = {
   updateDepartment: (id: string, data: Partial<Department>) =>
     request<Department>(`/api/departments/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteDepartment: (id: string) => request<void>(`/api/departments/${id}`, { method: "DELETE" }),
+  permanentDeleteDepartment: (id: string) => request<void>(`/api/departments/${id}/permanent`, { method: "DELETE" }),
 
   // Designations (HRM)
   getDesignations: (params?: { departmentId?: string; status?: string; search?: string }) =>
@@ -1044,6 +1047,7 @@ export const api = {
   updateDesignation: (id: string, data: Partial<Designation>) =>
     request<Designation>(`/api/designations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteDesignation: (id: string) => request<void>(`/api/designations/${id}`, { method: "DELETE" }),
+  permanentDeleteDesignation: (id: string) => request<void>(`/api/designations/${id}/permanent`, { method: "DELETE" }),
 
   // Holidays (HRM)
   getHolidays: (params?: { branchId?: string; year?: number; holidayType?: string; status?: string; search?: string }) =>
@@ -1053,6 +1057,7 @@ export const api = {
   updateHoliday: (id: string, data: Partial<Holiday>) =>
     request<Holiday>(`/api/holidays/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteHoliday: (id: string) => request<void>(`/api/holidays/${id}`, { method: "DELETE" }),
+  permanentDeleteHoliday: (id: string) => request<void>(`/api/holidays/${id}/permanent`, { method: "DELETE" }),
 
   // Work Shifts (HRM)
   getWorkShifts: (params?: { branchId?: string; departmentId?: string; status?: string }) =>

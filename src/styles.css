@@ -149,14 +149,25 @@
   --card-foreground: oklch(0.984 0.003 247.858);
   --popover: oklch(0.208 0.042 265.755);
   --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
-  --primary-foreground: oklch(0.208 0.042 265.755);
+  /* Kept as the SAME dark-purple-bg/white-text pairing as :root (not the generic scaffolded
+     light-bg/dark-text flip) — .gradient-primary's background (used on ~200 buttons/badges
+     app-wide) is only ever defined once, in :root, so a foreground color that assumes a light
+     background here made that text unreadable against it. */
+  --primary: oklch(0.46 0.21 295);
+  --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.279 0.041 260.031);
   --secondary-foreground: oklch(0.984 0.003 247.858);
   --muted: oklch(0.279 0.041 260.031);
   --muted-foreground: oklch(0.704 0.04 256.788);
   --accent: oklch(0.279 0.041 260.031);
   --accent-foreground: oklch(0.984 0.003 247.858);
+  /* Missing from the scaffolded dark theme — every other *-foreground token here is either
+     already light or explicitly redefined, but this one was left at :root's dark-brown value
+     (meant for text on a SOLID bright-amber --warning surface). ~90 call sites across the app
+     use it as standalone warning-colored text over the page/card background instead (the same
+     pattern text-success/text-destructive use with their base color, not their -foreground
+     variant) — against a dark background that dark-brown text was invisible. */
+  --warning-foreground: oklch(0.85 0.15 70);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.984 0.003 247.858);
   --border: oklch(1 0 0 / 10%);

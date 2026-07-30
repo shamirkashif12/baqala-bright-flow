@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Pencil, Plus, Trash2, Download, Loader2 } from "lucide-react";
+import { Pencil, Plus, Trash2, Download, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Holiday } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -105,6 +105,8 @@ function HolidaysTab() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Holiday | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<Holiday | null>(null);
+  const [permanentDeleting, setPermanentDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -163,6 +165,31 @@ function HolidaysTab() {
       toast.error(e?.message || "Failed to delete holiday.");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    if (!permanentDeleteTarget) return;
+    setPermanentDeleting(true);
+    try {
+      await api.permanentDeleteHoliday(permanentDeleteTarget.id);
+      toast.success(`"${permanentDeleteTarget.name}" permanently deleted.`);
+      setPermanentDeleteTarget(null);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to permanently delete holiday.");
+    } finally {
+      setPermanentDeleting(false);
+    }
+  };
+
+  const handleActivate = async (h: Holiday) => {
+    try {
+      await api.updateHoliday(h.id, { name: h.name, holidayType: h.holidayType, date: h.date, branchId: h.branchId ?? undefined, description: h.description ?? undefined, status: "active" });
+      toast.success(`"${h.name}" activated.`);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to activate holiday.");
     }
   };
 
@@ -266,7 +293,12 @@ function HolidaysTab() {
                     <td className="px-3 py-3">
                       <div className="flex gap-1 justify-end">
                         {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(h)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(h)}><Trash2 className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && (h.status === "active"
+                          ? <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => setDeleteTarget(h)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                          : <>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-success" title="Activate" onClick={() => handleActivate(h)}><RotateCcw className="h-3.5 w-3.5" /></Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Delete Permanently" onClick={() => setPermanentDeleteTarget(h)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </>)}
                       </div>
                     </td>
                   </tr>
@@ -305,6 +337,22 @@ function HolidaysTab() {
             <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={deleting}>
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
               Deactivate
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!permanentDeleteTarget} onOpenChange={v => !v && setPermanentDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Permanently delete holiday?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Permanently delete <span className="font-semibold text-foreground">{permanentDeleteTarget?.name}</span>? This cannot be undone.
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setPermanentDeleteTarget(null)} disabled={permanentDeleting}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handlePermanentDelete} disabled={permanentDeleting}>
+              {permanentDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Delete Permanently
             </Button>
           </div>
         </DialogContent>

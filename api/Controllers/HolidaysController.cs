@@ -101,4 +101,26 @@ public class HolidaysController(BaqalaDbContext db, IAuditService audit) : Contr
 
         return NoContent();
     }
+
+    // True hard delete — only reachable once already deactivated. Unlike Department/Designation,
+    // no other table holds a foreign key to Holiday (attendance/leave calculations look holidays
+    // up by branch+date, filtered to Status == "active", so nothing references a row by id) —
+    // still gated on already-inactive to keep the same deactivate-first workflow.
+    [RequirePermission("HR Master Data", PermAction.Delete)]
+    [HttpDelete("{id:guid}/permanent")]
+    public async Task<IActionResult> PermanentDelete(Guid id)
+    {
+        var holiday = await db.Holidays.FindAsync(id);
+        if (holiday is null) return NotFound();
+        if (holiday.Status != "inactive")
+            return BadRequest(new { message = "Deactivate this holiday before permanently deleting it." });
+
+        db.Holidays.Remove(holiday);
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(action: "Holiday permanently deleted", entityType: "Holiday", entityId: id,
+            userId: CallerId(), branchId: holiday.BranchId, severity: "warning", beforeValue: holiday.Name, module: "HR Master Data");
+
+        return NoContent();
+    }
 }

@@ -83,6 +83,30 @@ public class RolesController(BaqalaDbContext db, IAuditService audit) : Controll
         return Ok(refreshed);
     }
 
+    // Restores every system role's permissions to the seeded default matrix (DataSeeder.BuildPermissions)
+    // — the fix for a system role whose permissions were edited away from what a fresh install ships
+    // with. Custom (non-system) roles are never touched; they have no "default" to reset to.
+    [RequirePermission("Roles", PermAction.Edit)]
+    [HttpPost("reset-defaults")]
+    public async Task<IActionResult> ResetToDefaults()
+    {
+        var systemRoles = await db.Roles.Include(r => r.Permissions).Where(r => r.IsSystem).ToListAsync();
+        foreach (var role in systemRoles)
+        {
+            db.RolePermissions.RemoveRange(role.Permissions);
+            db.RolePermissions.AddRange(DataSeeder.BuildPermissions(role.Id, role.Name));
+            role.UpdatedAt = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        await audit.LogAsync(action: "Roles reset to defaults", entityType: "Role",
+            userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId), severity: "warning",
+            details: $"Reset {systemRoles.Count} system role(s) to default permissions", module: "Roles");
+
+        return Ok(new { resetCount = systemRoles.Count });
+    }
+
     [RequirePermission("Roles", PermAction.Delete)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)

@@ -93,7 +93,9 @@ function Sales() {
           <div className="flex items-end gap-2 h-48">
             {bars.map((v, i) => (
               <div key={i} className="flex-1 flex flex-col items-center gap-1" title={`${fmt(v)} SAR`}>
-                <div className="w-full rounded-t-lg gradient-primary hover:opacity-80 transition-opacity" style={{ height: `${Math.max(2, (v / max) * 100)}%` }} />
+                <div className="w-full h-40 flex items-end">
+                  <div className="w-full rounded-t-lg gradient-primary hover:opacity-80 transition-opacity" style={{ height: `${Math.max(2, (v / max) * 100)}%` }} />
+                </div>
                 <span className="text-[10px] text-muted-foreground">{HOUR_START + i}h</span>
               </div>
             ))}

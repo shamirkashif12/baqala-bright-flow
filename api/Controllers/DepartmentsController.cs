@@ -95,4 +95,39 @@ public class DepartmentsController(BaqalaDbContext db, IAuditService audit) : Co
 
         return NoContent();
     }
+
+    // True hard delete — only reachable once a department has already been deactivated (via
+    // Delete above), and only when nothing still references it. Designation.DepartmentId is a
+    // required FK, Employee/WorkShift.DepartmentId are nullable ones, but any of the three
+    // existing would either fail at the DB with an opaque FK-violation error or, worse, silently
+    // orphan/cascade into HR records — so check and report exactly what's blocking it instead.
+    [RequirePermission("HR Master Data", PermAction.Delete)]
+    [HttpDelete("{id:guid}/permanent")]
+    public async Task<IActionResult> PermanentDelete(Guid id)
+    {
+        var department = await db.Departments.FindAsync(id);
+        if (department is null) return NotFound();
+        if (department.Status != "inactive")
+            return BadRequest(new { message = "Deactivate this department before permanently deleting it." });
+
+        var designationCount = await db.Designations.CountAsync(d => d.DepartmentId == id);
+        var employeeCount = await db.Employees.CountAsync(e => e.DepartmentId == id);
+        var shiftCount = await db.WorkShifts.CountAsync(w => w.DepartmentId == id);
+        if (designationCount > 0 || employeeCount > 0 || shiftCount > 0)
+        {
+            var blockers = new List<string>();
+            if (designationCount > 0) blockers.Add($"{designationCount} designation(s)");
+            if (employeeCount > 0) blockers.Add($"{employeeCount} employee(s)");
+            if (shiftCount > 0) blockers.Add($"{shiftCount} shift(s)");
+            return Conflict(new { message = $"Cannot permanently delete — still referenced by {string.Join(", ", blockers)}." });
+        }
+
+        db.Departments.Remove(department);
+        await db.SaveChangesAsync();
+
+        await audit.LogAsync(action: "Department permanently deleted", entityType: "Department", entityId: id,
+            userId: CallerId(), branchId: department.BranchId, severity: "warning", beforeValue: department.Name, module: "HR Master Data");
+
+        return NoContent();
+    }
 }

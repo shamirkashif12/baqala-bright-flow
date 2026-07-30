@@ -106,12 +106,26 @@ function AdminOverview() {
       .finally(() => setLoading(false));
   }, []);
 
+  // ── Branches linked to the selected warehouse(s) ─────────────────────────
+  // Stock has no warehouseId of its own, so the warehouse filter is applied
+  // by restricting to the branches that those warehouses are linked to.
+  const warehouseBranchIds = useMemo(() => {
+    if (warehouseFilter.length === 0) return null;
+    const ids = new Set<string>();
+    for (const w of warehouses) {
+      if (!warehouseFilter.includes(w.id)) continue;
+      for (const bw of w.branchWarehouses ?? []) ids.add(bw.branchId);
+    }
+    return ids;
+  }, [warehouses, warehouseFilter]);
+
   // ── Filtered stock ────────────────────────────────────────────────────────
   const filteredStock = useMemo(() => stock.filter(s => {
     const mb = !(branchFilter.length && !branchFilter.includes(s.branchId));
     const mc = !(categoryFilter.length && !categoryFilter.includes(s.product?.category?.name ?? ""));
-    return mb && mc;
-  }), [stock, branchFilter, categoryFilter]);
+    const mw = !warehouseBranchIds || warehouseBranchIds.has(s.branchId);
+    return mb && mc && mw;
+  }), [stock, branchFilter, categoryFilter, warehouseBranchIds]);
 
   // ── Global metrics ────────────────────────────────────────────────────────
   const totalSKUs = filteredStock.length;
@@ -126,19 +140,28 @@ function AdminOverview() {
     [warehouses, warehouseFilter],
   );
   const warehouseSummaries = useMemo(() => filteredWarehouses.map(w => {
-    const items = w.stock ?? [];
+    const items = (w.stock ?? []).filter(s =>
+      !(categoryFilter.length && !categoryFilter.includes(s.product?.category?.name ?? ""))
+    );
     const skus = items.length;
     const value = items.reduce((sum, s) => sum + s.quantity * (s.product?.costPrice ?? 0), 0);
     const oos = items.filter(s => s.quantity === 0).length;
     const low = items.filter(s => s.quantity > 0 && s.quantity <= s.reorderLevel).length;
     return { warehouse: w, skus, value, oos, low };
-  }), [filteredWarehouses]);
+  }), [filteredWarehouses, categoryFilter]);
+
+  // ── Branches matching the branch + warehouse filters ─────────────────────
+  const filteredBranches = useMemo(
+    () => branches
+      .filter(b => branchFilter.length === 0 || branchFilter.includes(b.id))
+      .filter(b => !warehouseBranchIds || warehouseBranchIds.has(b.id)),
+    [branches, branchFilter, warehouseBranchIds],
+  );
 
   // ── Per-branch summary ────────────────────────────────────────────────────
   const branchSummaries = useMemo(() => {
-    const displayBranches = branchFilter.length === 0 ? branches : branches.filter(b => branchFilter.includes(b.id));
-    return displayBranches.map(branch => {
-      const items = stock.filter(s => s.branchId === branch.id && !(categoryFilter.length && !categoryFilter.includes(s.product?.category?.name ?? "")));
+    return filteredBranches.map(branch => {
+      const items = filteredStock.filter(s => s.branchId === branch.id);
       const value = items.reduce((sum, s) => sum + s.quantity * (s.product?.costPrice ?? 0), 0);
       const skus = items.length;
       const oos = items.filter(s => s.quantity === 0).length;
@@ -149,7 +172,7 @@ function AdminOverview() {
       );
       return { branch, skus, value, oos, low, exp, linked };
     });
-  }, [stock, branches, warehouses, branchFilter, categoryFilter]);
+  }, [filteredStock, filteredBranches, warehouses]);
 
   return (
     <PageShell
@@ -192,8 +215,8 @@ function AdminOverview() {
         <>
           {/* ── Summary metrics ── */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <MetricTile icon={Warehouse}   label="Warehouses"     value={warehouses.length} />
-            <MetricTile icon={Building2}   label="Branches"       value={branches.length} />
+            <MetricTile icon={Warehouse}   label="Warehouses"     value={filteredWarehouses.length} sub={warehouseFilter.length > 0 ? `of ${warehouses.length} total` : undefined} />
+            <MetricTile icon={Building2}   label="Branches"       value={filteredBranches.length} sub={(branchFilter.length > 0 || warehouseFilter.length > 0) ? `of ${branches.length} total` : undefined} />
             <MetricTile icon={Boxes}       label="Total SKUs"     value={totalSKUs.toLocaleString()} />
             <MetricTile icon={AlertTriangle} label="Low / OOS"    value={`${lowStock} / ${outOfStock}`} accent="warning" />
             <MetricTile icon={CalendarClock} label="Expiring ≤7d" value={expiringSoon} accent={expiringSoon > 0 ? "danger" : "default"} />

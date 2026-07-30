@@ -639,6 +639,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 OrderId = i.OrderId,
                 Gross = i.UnitPrice * i.Quantity,
                 i.DiscountAmount,
+                OrderDiscountAmount = i.Order!.DiscountAmount,
                 i.TaxAmount,
                 OrderTaxAmount = i.Order!.TaxAmount,
                 i.TobaccoFeeAmount,
@@ -683,7 +684,16 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             var items = itemsByDate[day].ToList();
             var returns = returnsByDate[day].ToList();
             var gross = items.Sum(x => x.Gross);
-            var discounts = items.Sum(x => x.DiscountAmount);
+            // Mirrors the VAT logic below: OrderItem.DiscountAmount is only proportionally
+            // allocated for orders created after that allocation was added, so historical rows
+            // (and any order the allocation didn't touch) still sit at 0 there even though
+            // Order.DiscountAmount is correctly populated. Unfiltered, every item of every
+            // matching order is present, so summing the header amount once per distinct order is
+            // both correct and immune to that gap; a line-level filter still has to fall back to
+            // the per-item figure since only some of an order's items may be selected.
+            var discounts = isLineFiltered
+                ? items.Sum(x => x.DiscountAmount)
+                : items.DistinctBy(x => x.OrderId).Sum(x => x.OrderDiscountAmount);
             var returnValue = returns.Sum(x => x.RefundAmount);
             var vat = isLineFiltered
                 ? items.Sum(x => x.TaxAmount)

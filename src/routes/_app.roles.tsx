@@ -11,9 +11,11 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Lock, Plus, Shield, UserCog, Trash2, Loader2, Users, ShieldCheck } from "lucide-react";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { Lock, Plus, Shield, UserCog, Trash2, Loader2, Users, ShieldCheck, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Role, type RolePermission, type User, type UserPermissionOverride } from "@/lib/api";
+import { useBranch } from "@/lib/branch-context";
 
 export const Route = createFileRoute("/_app/roles")({
   component: () => (
@@ -452,6 +454,7 @@ function UserPermDialog({ user, rolePerms, onClose, onSaved }: { user: User; rol
 
 // ── Main Roles component ───────────────────────────────────────────────────────
 function Roles() {
+  const { branches } = useBranch();
   const [roles, setRoles] = useState<Role[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -463,6 +466,10 @@ function Roles() {
   const [permUser, setPermUser] = useState<User | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
   const [roleSearch, setRoleSearch] = useState("");
+  const [memberBranchFilter, setMemberBranchFilter] = useState<string[]>([]);
+  const [memberSyncFilter, setMemberSyncFilter] = useState<string[]>([]);
+  const [resetDefaultsOpen, setResetDefaultsOpen] = useState(false);
+  const [resettingDefaults, setResettingDefaults] = useState(false);
 
   const loadAll = useCallback(async () => {
     // Each call is isolated with .catch() so one endpoint failing doesn't discard
@@ -557,12 +564,59 @@ function Roles() {
     if (created) setActive(created);
   };
 
+  const handleResetDefaults = async () => {
+    setResettingDefaults(true);
+    try {
+      const { resetCount } = await api.resetRolesToDefaults();
+      const data = await loadAll();
+      if (active) setActive(data.find(r => r.id === active.id) ?? data[0] ?? null);
+      setResetDefaultsOpen(false);
+      toast.success(`Reset ${resetCount} system role(s) to their default permissions.`);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to reset roles to defaults.");
+    } finally {
+      setResettingDefaults(false);
+    }
+  };
+
   const roleMembers = users.filter(u => u.roleId === active?.id);
+  const filteredRoleMembers = roleMembers.filter(u => {
+    const mb = memberBranchFilter.length === 0 || (u.branchId && memberBranchFilter.includes(u.branchId));
+    const ms = memberSyncFilter.length === 0 || memberSyncFilter.includes(u.hasCustomPermissions ? "customized" : "synced");
+    return mb && ms;
+  });
+  const memberFiltersActive = memberBranchFilter.length > 0 || memberSyncFilter.length > 0;
+  const clearMemberFilters = () => { setMemberBranchFilter([]); setMemberSyncFilter([]); };
   const initials = (name: string) => name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const filteredRoles = roles.filter(r => !roleSearch || r.name.toLowerCase().includes(roleSearch.toLowerCase()));
 
   return (
-    <PageShell title="Roles & Permissions" subtitle="Access control · permission matrix · custom roles">
+    <PageShell
+      title="Roles & Permissions"
+      subtitle="Access control · permission matrix · custom roles"
+      actions={
+        <Dialog open={resetDefaultsOpen} onOpenChange={setResetDefaultsOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5">
+              <RotateCcw className="h-3.5 w-3.5" /> Reset to Default Roles
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle>Reset all system roles to defaults?</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              This restores every built-in system role (Tenant Administrator, Branch Manager, Cashier, etc.) to its original default permissions. Any custom edits made to a system role's permissions will be lost. Custom roles you created are not affected.
+            </p>
+            <DialogFooter className="mt-4">
+              <Button variant="outline" onClick={() => setResetDefaultsOpen(false)} disabled={resettingDefaults}>Cancel</Button>
+              <Button variant="destructive" onClick={handleResetDefaults} disabled={resettingDefaults}>
+                {resettingDefaults && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                Reset to Defaults
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      }
+    >
       {loading ? (
         <div className="text-muted-foreground text-sm">Loading…</div>
       ) : (
@@ -659,7 +713,36 @@ function Roles() {
                       <p className="text-xs text-muted-foreground mb-3">
                         Individual overrides are enforced by the server and layered on top of the role defaults. Users without overrides inherit the role permissions above.
                       </p>
-                      {roleMembers.map(u => (
+                      <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <div className="w-40">
+                          <SearchableMultiSelect
+                            placeholder="All Branches"
+                            options={branches.map(b => ({ id: b.id, label: b.name }))}
+                            selected={memberBranchFilter}
+                            onChange={setMemberBranchFilter}
+                          />
+                        </div>
+                        <div className="w-40">
+                          <SearchableMultiSelect
+                            placeholder="All Sync Status"
+                            options={[{ id: "synced", label: "Synced" }, { id: "customized", label: "Customized" }]}
+                            selected={memberSyncFilter}
+                            onChange={setMemberSyncFilter}
+                          />
+                        </div>
+                        {memberFiltersActive && (
+                          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearMemberFilters}>
+                            <X className="h-3.5 w-3.5" /> Clear Filters
+                          </Button>
+                        )}
+                        {memberFiltersActive && (
+                          <span className="text-xs text-muted-foreground">{filteredRoleMembers.length} of {roleMembers.length}</span>
+                        )}
+                      </div>
+                      {filteredRoleMembers.length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-8">No members match the current filters.</p>
+                      )}
+                      {filteredRoleMembers.map(u => (
                         <div key={u.id} className="flex items-center gap-3 p-3 rounded-lg border border-border/60 hover:bg-muted/30 transition-colors">
                           <Avatar className="h-9 w-9 shrink-0">
                             <AvatarFallback className="text-xs gradient-primary text-primary-foreground">{initials(u.fullName)}</AvatarFallback>

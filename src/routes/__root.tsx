@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider, useAuth, type AuthState } from "../lib/auth";
 import { I18nProvider } from "@/lib/i18n";
 import { AutoTranslate } from "@/lib/auto-translate";
+import { ThemeProvider } from "@/lib/theme";
 
 function NotFoundComponent() {
   return (
@@ -113,11 +114,23 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient; auth
   errorComponent: ErrorComponent,
 });
 
+// Applied before hydration so a saved dark-mode preference doesn't flash light on first paint.
+const THEME_INIT_SCRIPT = `
+(function () {
+  try {
+    var stored = localStorage.getItem("mimony-theme");
+    var dark = stored ? stored === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.classList.toggle("dark", dark);
+  } catch (e) {}
+})();
+`;
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
         <HeadContent />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
         {children}
@@ -132,13 +145,15 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <AuthProvider>
-          <AutoTranslate />
-          <Outlet />
-          <Toaster richColors position="top-right" />
-        </AuthProvider>
-      </I18nProvider>
+      <ThemeProvider>
+        <I18nProvider>
+          <AuthProvider>
+            <AutoTranslate />
+            <Outlet />
+            <Toaster richColors position="top-right" />
+          </AuthProvider>
+        </I18nProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Download, Pencil, Plus, Trash2, Users, Loader2, X } from "lucide-react";
+import { Download, Pencil, Plus, Trash2, Users, Loader2, X, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Department, type Employee } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -104,6 +104,8 @@ function DepartmentsTab() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Department | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<Department | null>(null);
+  const [permanentDeleting, setPermanentDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -161,6 +163,31 @@ function DepartmentsTab() {
       toast.error(e?.message || "Failed to delete department.");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    if (!permanentDeleteTarget) return;
+    setPermanentDeleting(true);
+    try {
+      await api.permanentDeleteDepartment(permanentDeleteTarget.id);
+      toast.success(`"${permanentDeleteTarget.name}" permanently deleted.`);
+      setPermanentDeleteTarget(null);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to permanently delete department.");
+    } finally {
+      setPermanentDeleting(false);
+    }
+  };
+
+  const handleActivate = async (d: Department) => {
+    try {
+      await api.updateDepartment(d.id, { name: d.name, branchId: d.branchId ?? undefined, managerEmployeeId: d.managerEmployeeId ?? undefined, status: "active" });
+      toast.success(`"${d.name}" activated.`);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to activate department.");
     }
   };
 
@@ -247,7 +274,12 @@ function DepartmentsTab() {
                       <div className="flex gap-1 justify-end">
                         <Button size="icon" variant="ghost" className="h-7 w-7" title="View Employees" onClick={() => navigate({ to: "/employees", search: { departmentId: d.id, designationId: undefined } })}><Users className="h-3.5 w-3.5" /></Button>
                         {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(d)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(d)}><Trash2 className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && (d.status === "active"
+                          ? <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Deactivate" onClick={() => setDeleteTarget(d)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                          : <>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-success" title="Activate" onClick={() => handleActivate(d)}><RotateCcw className="h-3.5 w-3.5" /></Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="Delete Permanently" onClick={() => setPermanentDeleteTarget(d)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </>)}
                       </div>
                     </td>
                   </tr>
@@ -286,6 +318,22 @@ function DepartmentsTab() {
             <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={deleting}>
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
               Deactivate
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!permanentDeleteTarget} onOpenChange={v => !v && setPermanentDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Permanently delete department?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Permanently delete <span className="font-semibold text-foreground">{permanentDeleteTarget?.name}</span>? This cannot be undone. This will fail if any employee, designation, or shift still references it.
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setPermanentDeleteTarget(null)} disabled={permanentDeleting}>Cancel</Button>
+            <Button variant="destructive" className="flex-1" onClick={handlePermanentDelete} disabled={permanentDeleting}>
+              {permanentDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Delete Permanently
             </Button>
           </div>
         </DialogContent>
