@@ -273,10 +273,24 @@ public class ProductsController(
         }));
     }
 
+    // Subcategories are just Category rows with ParentId set — only two levels are supported
+    // (category -> subcategory), so a parent-to-be may not itself already have a parent.
+    private async Task<string?> ValidateParentAsync(Guid? parentId, Guid selfId)
+    {
+        if (!parentId.HasValue) return null;
+        if (parentId.Value == selfId) return "A category cannot be its own parent.";
+        var parent = await db.Categories.FindAsync(parentId.Value);
+        if (parent is null) return "Selected parent category does not exist.";
+        if (parent.ParentId.HasValue) return "A subcategory cannot itself be a parent — only two levels are supported.";
+        return null;
+    }
+
     [RequirePermission("Inventory", PermAction.Create)]
     [HttpPost("/api/categories")]
     public async Task<IActionResult> CreateCategory([FromBody] Category category)
     {
+        var parentError = await ValidateParentAsync(category.ParentId, Guid.Empty);
+        if (parentError is not null) return BadRequest(new { message = parentError });
         category.Id = Guid.NewGuid();
         category.CreatedAt = category.UpdatedAt = DateTime.UtcNow;
         db.Categories.Add(category);
@@ -290,10 +304,18 @@ public class ProductsController(
     {
         var category = await db.Categories.FindAsync(id);
         if (category is null) return NotFound();
+        if (updated.ParentId != category.ParentId)
+        {
+            var parentError = await ValidateParentAsync(updated.ParentId, id);
+            if (parentError is not null) return BadRequest(new { message = parentError });
+            if (updated.ParentId.HasValue && await db.Categories.AnyAsync(c => c.ParentId == id))
+                return BadRequest(new { message = "This category has subcategories and cannot itself become a subcategory." });
+        }
         category.Name = updated.Name;
         category.NameAr = updated.NameAr;
         category.IsActive = updated.IsActive;
         category.SortOrder = updated.SortOrder;
+        category.ParentId = updated.ParentId;
         category.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Ok(category);
@@ -307,6 +329,14 @@ public class ProductsController(
     {
         var category = await db.Categories.FindAsync(id);
         if (category is null) return NotFound();
+
+        // The DB's self-referencing FK (and the Products FK) are DeleteBehavior.Restrict, so an
+        // unguarded delete would only fail once approved, deep in the Approval Center flow. Catch
+        // it here instead with a message the person queuing the deletion can actually act on.
+        if (await db.Categories.AnyAsync(c => c.ParentId == id))
+            return Conflict(new { message = "Cannot delete a category that has subcategories. Delete or reassign them first." });
+        if (await db.Products.AnyAsync(p => p.CategoryId == id))
+            return Conflict(new { message = "Cannot delete this category while products are still assigned to it. Reassign those products first." });
 
         var pending = new ApprovalRequest
         {

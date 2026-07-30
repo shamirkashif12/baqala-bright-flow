@@ -359,6 +359,10 @@ app.Use(async (context, next) =>
         var method = context.Request.Method;
         var allowed =
             (method == "GET" && path.StartsWith("/api/products")) ||
+            // Read-only category/subcategory list, for the kiosk's own browse/search filter —
+            // same catalog data GetAll's category filter already lets a kiosk cross-reference,
+            // just the category names/tree themselves rather than one product's CategoryId.
+            (method == "GET" && path.StartsWith("/api/categories")) ||
             // The kiosk must only ever recognize items actually stocked at its own paired
             // branch, not the whole tenant-wide catalog — this is the branch-scoped stock
             // join the staffed POS itself uses. GetStock already self-enforces branch scoping

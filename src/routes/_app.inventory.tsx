@@ -401,6 +401,16 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupStatus, setLookupStatus] = useState<"found" | "found_kept_existing" | "not_found" | null>(null);
 
+  // Category/Subcategory cascade: a product's real CategoryId always holds the most specific
+  // level, so these two are UI-only state, synced into form.categoryId below.
+  const topCategories = useMemo(() => categories.filter(c => !c.parentId), [categories]);
+  const subcategoriesOf = (parentId: string) => categories.filter(c => c.parentId === parentId);
+  const [topCategoryId, setTopCategoryId] = useState("");
+  const [subCategoryId, setSubCategoryId] = useState("");
+  useEffect(() => {
+    setForm(p => ({ ...p, categoryId: subCategoryId || topCategoryId }));
+  }, [topCategoryId, subCategoryId]);
+
   const lookupBarcode = async (barcode: string) => {
     if (!barcode || barcode.length < 6) return;
     // Captured before the network round-trip — if the cashier had already typed a name (e.g.
@@ -499,6 +509,8 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     setBranchPrices({});
     setTierPrice({ tiers: [], price: "" });
     setPriceSchedule({ from: "", to: "" });
+    setTopCategoryId("");
+    setSubCategoryId("");
     setForm({ name: "", sku: "", barcode: "", categoryId: "", saleUnitType: "single", itemsPerPack: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", weightBased: false, batchNumber: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "", description: "" });
   };
 
@@ -732,13 +744,24 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             )}
           </FieldRow>
           <FieldRow label="Category *">
-            <Select value={form.categoryId} onValueChange={set("categoryId")}>
+            <Select value={topCategoryId} onValueChange={v => { setTopCategoryId(v); setSubCategoryId(""); }}>
               <SelectTrigger className={`h-9 ${fieldError("Category")}`}>
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
-              <SelectContent>{categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              <SelectContent>{topCategories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
             </Select>
           </FieldRow>
+          {subcategoriesOf(topCategoryId).length > 0 && (
+            <FieldRow label="Subcategory">
+              <Select value={subCategoryId || "__none__"} onValueChange={v => setSubCategoryId(v === "__none__" ? "" : v)}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select subcategory" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {subcategoriesOf(topCategoryId).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldRow>
+          )}
           <div className="col-span-2">
             <FieldRow label="Branches * (stock the product into these)">
               <SearchableMultiSelect
@@ -969,6 +992,16 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     status: "active", weightBased: false,
   });
 
+  // Category/Subcategory cascade: a product's real CategoryId always holds the most specific
+  // level, so these two are UI-only state, synced into form.categoryId below.
+  const topCategories = useMemo(() => categories.filter(c => !c.parentId), [categories]);
+  const subcategoriesOf = (parentId: string) => categories.filter(c => c.parentId === parentId);
+  const [topCategoryId, setTopCategoryId] = useState("");
+  const [subCategoryId, setSubCategoryId] = useState("");
+  useEffect(() => {
+    setForm(p => ({ ...p, categoryId: subCategoryId || topCategoryId }));
+  }, [topCategoryId, subCategoryId]);
+
   // Existing extra prices for this product (FRD §12), managed inline here so the edit form shows
   // the same pricing options as add. Branch rows stay one-independent-row-per-branch (edit/delete
   // only — branch prices are set when the product is added, not offered here). Tier rows are
@@ -1068,11 +1101,21 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
       status: p.status ?? "active",
       weightBased: p.weightBased ?? false,
     });
+    const currentCategoryId = (p as unknown as { categoryId?: string }).categoryId ?? "";
+    const currentCategory = categories.find(c => c.id === currentCategoryId);
+    if (currentCategory?.parentId) {
+      setTopCategoryId(currentCategory.parentId);
+      setSubCategoryId(currentCategory.id);
+    } else {
+      setTopCategoryId(currentCategoryId);
+      setSubCategoryId("");
+    }
     setEditingRuleId(null);
     setError("");
     loadRules(p.id);
     loadVariants(p.id);
     setVariantForm({ variantType: "", variantValue: "", skuSuffix: "", barcode: "", priceModifier: "0" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item]);
 
   const handleSave = async () => {
@@ -1286,11 +1329,22 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
             )}
           </FieldRow>
           <FieldRow label="Category">
-            <Select value={form.categoryId} onValueChange={v => setForm(p => ({ ...p, categoryId: v }))}>
+            <Select value={topCategoryId} onValueChange={v => { setTopCategoryId(v); setSubCategoryId(""); }}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Select category" /></SelectTrigger>
-              <SelectContent>{categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              <SelectContent>{topCategories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
             </Select>
           </FieldRow>
+          {subcategoriesOf(topCategoryId).length > 0 && (
+            <FieldRow label="Subcategory">
+              <Select value={subCategoryId || "__none__"} onValueChange={v => setSubCategoryId(v === "__none__" ? "" : v)}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select subcategory" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {subcategoriesOf(topCategoryId).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldRow>
+          )}
           <FieldRow label="Purchase Price">
             <Input type="number" step="0.01" className="h-9" value={form.purchasePrice} onChange={set("purchasePrice")} placeholder="4.20" />
           </FieldRow>

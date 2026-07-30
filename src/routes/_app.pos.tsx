@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getUsbPrinter, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram } from "@/lib/api";
+import { api, getUsbPrinter, type Product, type Category, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram } from "@/lib/api";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
@@ -588,6 +588,7 @@ function POS() {
 
   // ─── Data ─────────────────────────────────────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
   const [expiredProductIds, setExpiredProductIds] = useState<Set<string>>(new Set());
   const [taxRate, setTaxRate] = useState(0.15);
@@ -603,6 +604,15 @@ function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [query, setQuery] = useState("");
   const [showResults, setShowResults] = useState(false);
+  // Category/Subcategory browse filter — independent of the text search below, so a cashier can
+  // either type to search or narrow by category/subcategory (or both together). "all" (not "")
+  // matches this app's existing cascading-filter convention (see product-sales.tsx) since a
+  // Radix Select item can't take an empty-string value.
+  const [categoryId, setCategoryId] = useState("all");
+  const [subcategoryId, setSubcategoryId] = useState("all");
+  const categoryFilterActive = categoryId !== "all";
+  const topCategories = useMemo(() => categories.filter((c) => !c.parentId), [categories]);
+  const subcategoriesOf = (parentId: string) => categories.filter((c) => c.parentId === parentId);
   const [flashSku, setFlashSku] = useState<string | null>(null);
   const [scanFlash, setScanFlash] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -714,9 +724,11 @@ function POS() {
       api.getProducts(),
       api.getTaxRules(),
       api.getActiveShifts(),
+      api.getCategories(),
     ])
-      .then(([prodsR, taxRulesR, shiftsR]) => {
+      .then(([prodsR, taxRulesR, shiftsR, categoriesR]) => {
         if (prodsR.status === "fulfilled") setProducts(prodsR.value);
+        if (categoriesR.status === "fulfilled") setCategories(categoriesR.value);
 
         if (taxRulesR.status === "fulfilled") {
           const taxRules = taxRulesR.value;
@@ -1650,19 +1662,32 @@ function POS() {
   // ─── Search / barcode scan ─────────────────────────────────────────────────────
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return products
-      .filter((p) => {
-        if (p.status !== "active") return false;
-        if (!stockMap.has(p.id)) return false; // hide products not stocked in current branch
-        return (
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q))
-        );
-      })
-      .slice(0, 8);
-  }, [query, products, stockMap]);
+    if (!q && !categoryFilterActive) return [];
+    // "under this category" = the category itself plus every one of its subcategories, unless a
+    // specific subcategory was picked (then just that one).
+    const categoryIdSet = categoryFilterActive
+      ? new Set(
+          subcategoryId !== "all"
+            ? [subcategoryId]
+            : [categoryId, ...subcategoriesOf(categoryId).map((c) => c.id)],
+        )
+      : null;
+    const filtered = products.filter((p) => {
+      if (p.status !== "active") return false;
+      if (!stockMap.has(p.id)) return false; // hide products not stocked in current branch
+      if (categoryIdSet && !(p.categoryId && categoryIdSet.has(p.categoryId))) return false;
+      if (!q) return true;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        (p.barcode && p.barcode.toLowerCase().includes(q))
+      );
+    });
+    // A bare text search keeps the short typeahead cap; browsing by category/subcategory is a
+    // deliberate "show me everything in here" action, not a safety-capped autocomplete.
+    return categoryFilterActive ? filtered : filtered.slice(0, 8);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, products, stockMap, categoryId, subcategoryId, categories]);
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -2104,6 +2129,38 @@ function POS() {
               </div>
             </div>
 
+            {topCategories.length > 0 && (
+              <div className="flex items-center gap-2 mt-2">
+                <Select
+                  value={categoryId}
+                  onValueChange={(v) => { setCategoryId(v); setSubcategoryId("all"); setShowResults(true); }}
+                >
+                  <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="Category" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {topCategories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {categoryFilterActive && subcategoriesOf(categoryId).length > 0 && (
+                  <Select value={subcategoryId} onValueChange={(v) => { setSubcategoryId(v); setShowResults(true); }}>
+                    <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="Subcategory" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Subcategories</SelectItem>
+                      {subcategoriesOf(categoryId).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                {categoryFilterActive && (
+                  <Button
+                    size="sm" variant="ghost" className="h-8 text-xs px-2 text-muted-foreground"
+                    onClick={() => { setCategoryId("all"); setSubcategoryId("all"); }}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            )}
+
             {scanFlash && (
               <div className="mt-2 flex items-center gap-2 text-sm text-green-600 dark:text-green-400 px-1 font-medium animate-pulse">
                 <ScanBarcode className="h-4 w-4" /> Item scanned — added to cart
@@ -2122,8 +2179,8 @@ function POS() {
               </div>
             )}
 
-            {!loading && showResults && matches.length > 0 && (
-              <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden">
+            {!loading && (showResults || categoryFilterActive) && matches.length > 0 && (
+              <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden max-h-[420px] overflow-y-auto">
                 {matches.map((p) => {
                   const stock = stockMap.get(p.id);
                   const outOfStock = stock !== undefined && stock <= 0;
@@ -2167,8 +2224,10 @@ function POS() {
                 })}
               </div>
             )}
-            {!loading && showResults && query && matches.length === 0 && (
-              <p className="mt-2 text-sm text-muted-foreground px-1">No product matches "{query}"</p>
+            {!loading && (showResults || categoryFilterActive) && (query || categoryFilterActive) && matches.length === 0 && (
+              <p className="mt-2 text-sm text-muted-foreground px-1">
+                {query ? `No product matches "${query}"` : "No products in this category."}
+              </p>
             )}
             <p className="text-[11px] text-muted-foreground mt-2 px-1">
               Tip: hardware barcode scanners work automatically — just scan, item drops into order.
