@@ -224,6 +224,21 @@ export interface Product {
   discountType?: "percentage" | "fixed";
 }
 
+export interface Category {
+  id: string;
+  name: string;
+  nameAr?: string;
+  parentId?: string;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+// A "subcategory" is just a Category whose parentId points at another Category — same shape
+// the staff POS's category filter uses, kept to two levels (category -> subcategory).
+export function getCategories(): Promise<Category[]> {
+  return request<Category[]>("/api/categories");
+}
+
 export function getProductByBarcode(barcode: string): Promise<Product> {
   return request<Product>(`/api/products/barcode/${encodeURIComponent(barcode)}`);
 }

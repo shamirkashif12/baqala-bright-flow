@@ -2,9 +2,11 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import {
   getActiveDiscounts,
   getActiveOffers,
+  getCategories,
   getTaxRules,
   listActiveProducts,
   resolvePrices,
+  type Category,
   type Coupon,
   type Customer,
   type Discount,
@@ -25,6 +27,7 @@ interface CartContextValue extends PricingResult {
   coupon: Coupon | null;
   customer: Customer | null;
   products: Product[];
+  categories: Category[];
   taxLabel: string;
   addProduct: (product: Product) => void;
   updateQuantity: (productId: string, quantity: number) => void;
@@ -47,6 +50,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   // per session rather than re-fetched per scan/keystroke (same reasoning as the product
   // catalog: it's what makes the global scanner listener and live search instant).
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [activeDiscounts, setActiveDiscounts] = useState<Discount[]>([]);
   const [activeOffers, setActiveOffers] = useState<Offer[]>([]);
   const [taxRules, setTaxRules] = useState<TaxFeeRule[]>([]);
@@ -59,6 +63,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!paired) return;
     listActiveProducts().then(setProducts).catch(() => {});
+    getCategories().then(setCategories).catch(() => {});
     getActiveDiscounts().then(setActiveDiscounts).catch(() => {});
     getActiveOffers().then(setActiveOffers).catch(() => {});
     getTaxRules().then(setTaxRules).catch(() => {});
@@ -140,6 +145,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         coupon,
         customer,
         products,
+        categories,
         taxLabel,
         addProduct,
         updateQuantity,
