@@ -58,7 +58,6 @@ const ROUTE_RULES: RouteRule[] = [
   { url: "/stock-transfers",     module: "Stock Transfers" },
   // Finance
   { url: "/expenses",            module: "Accounting & Finance" },
-  { url: "/expense-types",       module: "Accounting & Finance" },
   { url: "/purchase-orders",     module: "Purchase Orders" },
   { url: "/coupons",             module: "Coupons" },
   { url: "/loyalty-program",     module: "Loyalty Program" },

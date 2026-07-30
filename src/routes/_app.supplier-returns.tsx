@@ -94,7 +94,9 @@ function MultiSelect({
 }
 
 // ─── RTS item row ──────────────────────────────────────────────────────────────
-interface RtsItem { productId: string; productName: string; requestedQuantity: number; unitCost: string }
+// maxQuantity is what was actually ordered/received in the source order — a return can never claim
+// more of an item than was originally bought, only ever that much or less.
+interface RtsItem { productId: string; productName: string; requestedQuantity: number; maxQuantity: number; unitCost: string }
 
 // ─── RTS Sheet — step 1: lookup, step 2: configure ────────────────────────────
 function RtsSheet({ open, onOpenChange, onCreated }: {
@@ -194,6 +196,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
               productId: i.productId,
               productName: i.product!.name,
               requestedQuantity: i.approvedQuantity ?? i.requestedQuantity,
+              maxQuantity: i.approvedQuantity ?? i.requestedQuantity,
               unitCost: i.product?.costPrice ? String(i.product.costPrice) : "",
             }))
           );
@@ -239,6 +242,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
               productId: i.productId,
               productName: i.product?.name ?? i.productId,
               requestedQuantity: i.orderedQuantity,
+              maxQuantity: i.orderedQuantity,
               unitCost: String(i.unitCost ?? i.product?.costPrice ?? ""),
             })));
           }
@@ -255,6 +259,11 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
           setFetchedSupplierName(t.sourceSupplier?.name ?? suppliers.find(s => s.id === t.sourceSupplierId)?.name ?? "");
 
           let whPairs: { id: string; label: string }[] = [];
+          // Each dest warehouse's return links back to the PO that stocked it — without this, the
+          // create call sends no purchaseOrderId at all and the server's "a return for this PO is
+          // already in progress" duplicate check (Create, StockTransfersController) never fires,
+          // silently allowing a second return against the same PO.
+          const poIdByWarehouse: Record<string, string> = {};
           if (t.batchId) {
             // Batch transfer — collect all sibling dest warehouses
             const siblings = await api.getStockTransfersByBatch(t.batchId);
@@ -263,22 +272,27 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
               .filter(s => s.destWarehouseId)
               .map(s => {
                 const wh = warehouses.find(w => w.id === s.destWarehouseId);
+                const whId = wh?.id ?? s.destWarehouseId!;
+                if (s.purchaseOrderId) poIdByWarehouse[whId] = s.purchaseOrderId;
                 return wh ? { id: wh.id, label: wh.name } : { id: s.destWarehouseId!, label: s.destWarehouse?.name ?? s.destWarehouseId! };
               })
               .filter((p): p is { id: string; label: string } => !!p.id && !seen.has(p.id) && !!seen.add(p.id));
           } else {
             const wh = warehouses.find(w => w.id === t.destWarehouseId);
             whPairs = wh ? [{ id: wh.id, label: wh.name }] : t.destWarehouseId ? [{ id: t.destWarehouseId, label: t.destWarehouse?.name ?? t.destWarehouseId }] : [];
+            if (t.purchaseOrderId && whPairs[0]) poIdByWarehouse[whPairs[0].id] = t.purchaseOrderId;
           }
 
           setAllWhOptions(whPairs);
           setSelectedWhIds(whPairs.map(w => w.id));
+          setWhToPoId(poIdByWarehouse);
 
           if (t.items?.length) {
             setItems(t.items.map(i => ({
               productId: i.productId,
               productName: i.product?.name ?? i.productId,
               requestedQuantity: i.receivedQuantity ?? i.requestedQuantity,
+              maxQuantity: i.receivedQuantity ?? i.requestedQuantity,
               unitCost: String(i.unitCost ?? i.product?.costPrice ?? ""),
             })));
           }
@@ -535,8 +549,11 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
                         <Input
                           type="number"
                           min={1}
+                          max={item.maxQuantity}
                           value={item.requestedQuantity}
-                          onChange={e => setItems(prev => prev.map((it, i) => i === idx ? { ...it, requestedQuantity: Math.max(1, parseInt(e.target.value) || 1) } : it))}
+                          onChange={e => setItems(prev => prev.map((it, i) => i === idx
+                            ? { ...it, requestedQuantity: Math.min(it.maxQuantity, Math.max(1, parseInt(e.target.value) || 1)) }
+                            : it))}
                           className={`h-8 text-xs text-center px-1 ${isOverStock ? "border-destructive ring-1 ring-destructive" : ""}`}
                         />
                         <Input
@@ -549,6 +566,9 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
                           placeholder="0.00"
                         />
                       </div>
+                      <p className="text-[10px] text-right pr-1 text-muted-foreground">
+                        of {item.maxQuantity} ordered — can't return more than that
+                      </p>
                       {maxAvailable !== null && (
                         <p className={`text-[10px] text-right pr-1 ${isOverStock ? "text-destructive" : "text-muted-foreground"}`}>
                           {maxAvailable} available at selected warehouse(s)

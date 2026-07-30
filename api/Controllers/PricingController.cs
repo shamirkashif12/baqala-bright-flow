@@ -23,7 +23,7 @@ public class PricingController(
     IAuditService audit,
     ILogger<PricingController> logger) : ControllerBase
 {
-    private static readonly string[] ValidPriceTypes = ["standard", "online", "aggregator", "wholesale"];
+    private static readonly string[] ValidPriceTypes = ["standard", "online"];
     private static readonly string[] ValidTiers = ["standard", "silver", "gold", "platinum"];
     private static readonly string[] ValidUnitTypes = ["unit", "pack"];
 

@@ -158,7 +158,7 @@ public class ProductPriceList
     public Guid? BranchId { get; set; }
 
     [Required, MaxLength(50), Column("price_type")]
-    public string PriceType { get; set; } = "standard"; // standard | online | aggregator | wholesale
+    public string PriceType { get; set; } = "standard"; // standard | online
 
     [Required, Column("price")]
     public decimal Price { get; set; }

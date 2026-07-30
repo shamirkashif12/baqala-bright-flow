@@ -747,12 +747,18 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateTransferStatusRequest req)
     {
+        // The Supplier Returns cancel dialog collects a reason and disables its submit button until
+        // one is entered, but that was only ever enforced client-side — a direct API call could
+        // cancel with no reason at all. Enforced here too so the requirement actually holds.
+        if (req.Status == "cancelled" && string.IsNullOrWhiteSpace(req.CancelReason))
+            return BadRequest(new { message = "A cancellation reason is required." });
+
         var transfer = await db.StockTransfers.Include(t => t.Items).FirstOrDefaultAsync(t => t.Id == id);
         if (transfer is null) return NotFound();
         var prev = transfer.Status;
         transfer.Status = req.Status;
         if (req.ApprovedBy.HasValue) transfer.ApprovedBy = req.ApprovedBy;
-        if (req.Status == "cancelled" && !string.IsNullOrWhiteSpace(req.CancelReason)) transfer.CancelReason = req.CancelReason;
+        if (req.Status == "cancelled") transfer.CancelReason = req.CancelReason;
         transfer.UpdatedAt = DateTime.UtcNow;
 
         // Approval previously waved through any requested quantity unchecked — nothing stopped an

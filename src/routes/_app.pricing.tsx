@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { SearchableSelect } from "@/components/searchable-select";
 import { TierMultiSelect } from "@/components/tier-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Plus, Loader2, Trash2, Pencil, Power, Tag, Boxes } from "lucide-react";
@@ -23,7 +24,7 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/pricing")({ component: Pricing });
 
-const PRICE_TYPES: PriceType[] = ["standard", "online", "aggregator", "wholesale"];
+const PRICE_TYPES: PriceType[] = ["standard", "online"];
 
 // Mirrors PriceResolutionService.SourceOf — the same precedence, spelled for a human. Kept in sync
 // by eye; the server is the authority and the Effective price column below shows what it decided.
@@ -56,7 +57,6 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [productSearch, setProductSearch] = useState("");
   const [form, setForm] = useState({
     productId: "", branchId: "", priceType: "standard" as PriceType, price: "",
     effectiveFrom: "", effectiveTo: "", minCustomerTiers: [] as CustomerTier[],
@@ -66,7 +66,6 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
   useEffect(() => {
     if (!open) return;
     setError("");
-    setProductSearch("");
     setForm(rule ? {
       productId: rule.productId,
       branchId: rule.branchId ?? "",
@@ -96,10 +95,6 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
       ? (p.minCustomerTiers.includes(tier) ? [] : [tier])
       : (p.minCustomerTiers.includes(tier) ? p.minCustomerTiers.filter(t => t !== tier) : [...p.minCustomerTiers, tier]),
   }));
-
-  const filteredProducts = productSearch.trim()
-    ? products.filter(p => p.name.toLowerCase().includes(productSearch.trim().toLowerCase()) || p.sku.toLowerCase().includes(productSearch.trim().toLowerCase()))
-    : products;
 
   const isPack = form.unitType === "pack";
   const derivedUnitPrice = isPack && Number(form.packSize) > 0 && form.price !== ""
@@ -158,20 +153,16 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
         <div className="space-y-3 mt-2">
           <div>
             <Label className="text-xs">Product *</Label>
-            {!rule && (
-              <Input
-                className="h-9 mt-1 mb-1.5" placeholder="Search product name or SKU…"
-                value={productSearch} onChange={e => setProductSearch(e.target.value)}
-              />
-            )}
-            <Select value={form.productId} onValueChange={v => setForm(p => ({ ...p, productId: v }))} disabled={!!rule}>
-              <SelectTrigger className="h-9 mt-1"><SelectValue placeholder="Select product" /></SelectTrigger>
-              <SelectContent>
-                {filteredProducts.length === 0
-                  ? <p className="px-2 py-1.5 text-xs text-muted-foreground">No products match "{productSearch}".</p>
-                  : filteredProducts.map(p => <SelectItem key={p.id} value={p.id}>{p.name} · {p.sku}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              className="mt-1"
+              options={products.map(p => ({ id: p.id, label: p.name, sublabel: p.sku }))}
+              value={form.productId}
+              onChange={v => setForm(p => ({ ...p, productId: v }))}
+              placeholder="Select product"
+              searchPlaceholder="Search product name or SKU…"
+              emptyText="No products match."
+              disabled={!!rule}
+            />
           </div>
 
           {/* Pack pricing moved to the product form (Inventory → Add/Edit Product → "Sold as"): a pack
@@ -194,7 +185,7 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Price list</Label>
+              <Label className="text-xs">Sales channel</Label>
               <Select value={form.priceType} onValueChange={v => setForm(p => ({ ...p, priceType: v as PriceType }))}>
                 <SelectTrigger className="h-9 mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -205,8 +196,8 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
           </div>
           <p className="text-[10px] text-muted-foreground -mt-1.5">
             Which sales channel this price applies to — "Standard" is regular in-store/POS sales;
-            pick "Online"/"Aggregator"/"Wholesale" only if this product is priced differently on
-            that channel. Most rules should stay on Standard.
+            pick "Online" only if this product is priced differently for online orders.
+            Most rules should stay on Standard.
           </p>
 
           <div className="grid grid-cols-2 gap-2">

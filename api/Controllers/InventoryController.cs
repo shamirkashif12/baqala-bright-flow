@@ -582,6 +582,18 @@ public class InventoryController(
                 // from the delta — a clamped removal (Math.Max(0, …)) moves stock by less than the
                 // requested quantity, and the audit trail must show what actually happened on hand.
                 quantityBefore: quantityBefore, quantityAfter: quantityAfter);
+
+            // No specific lot was picked, so ApplyAdjustmentToStock above only touched the aggregate
+            // row — nothing has kept any batch's RemainingQuantity in sync for this deduction. Every
+            // *sale* already gets this same FEFO fallback (see OrdersController.Create); a manual
+            // write-off/count-correction with no batch chosen (the common case — most callers don't
+            // pick one) previously never did, which is what let a product read qty=0 on-hand while
+            // its batch drill-down still showed stock untouched. Same best-effort contract as there.
+            if (!isIncrease && batch is null)
+            {
+                try { await batchConsumption.ConsumeFefoAsync(req.ProductId, req.BranchId, warehouseId: null, req.Quantity); }
+                catch (Exception ex) { logger.LogError(ex, "Batch consumption failed after adjustment {AdjustmentId}", adjustment.Id); }
+            }
         }
 
         await db.SaveChangesAsync();
@@ -719,6 +731,15 @@ public class InventoryController(
                 batchId: adjustment.BatchId, referenceType: "adjustment", referenceId: adjustment.Id,
                 notes: $"Write-off approved: {adjustment.Reason}", createdBy: reviewerId,
                 quantityBefore: quantityBefore, quantityAfter: quantityAfter);
+
+            // Same FEFO fallback as Adjust() above — this write-off is always a deduction
+            // (RequiresApproval only gates waste/damage/expired/theft/other), so if no specific lot
+            // was picked when it was raised, the batch drill-down needs the same catch-up here.
+            if (adjustment.BatchId is null)
+            {
+                try { await batchConsumption.ConsumeFefoAsync(adjustment.ProductId, adjustment.BranchId, warehouseId: null, adjustment.Quantity); }
+                catch (Exception ex) { logger.LogError(ex, "Batch consumption failed after adjustment approval {AdjustmentId}", adjustment.Id); }
+            }
         }
         else if (!req.Approved && adjustment.StockApplied && adjustment.BranchId.HasValue)
         {

@@ -126,6 +126,11 @@ function SupplierFormFields({
   errors: SupplierFormErrors;
   setErrors: React.Dispatch<React.SetStateAction<SupplierFormErrors>>;
 }) {
+  // Tracks whether City is showing the free-text "Other" input — separate from form.city itself
+  // so picking "Other…" (which has no city name yet) doesn't collapse back to the dropdown before
+  // the user has typed anything. Previously the dropdown and a free-text override were both shown
+  // at once, which read as two separate, redundant city fields.
+  const [otherCity, setOtherCity] = useState(() => !!form.city && !SAUDI_CITIES.includes(form.city));
   const clearError = (k: keyof SupplierForm) =>
     setErrors(prev => (prev[k] ? { ...prev, [k]: undefined } : prev));
   const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -149,20 +154,30 @@ function SupplierFormFields({
       <FieldRow label={label("Phone", true)} error={errors.contactNumber}><Input value={form.contactNumber} onChange={set("contactNumber")} className={`h-9 ${errCls("contactNumber")}`} required={req} /></FieldRow>
       <FieldRow label="Email"><Input value={form.email} onChange={set("email")} className="h-9" type="email" /></FieldRow>
       <FieldRow label="City">
-        <div className="space-y-1">
-          <Select value={SAUDI_CITIES.includes(form.city) ? form.city : ""} onValueChange={setS("city")}>
+        {otherCity ? (
+          <div className="space-y-1">
+            <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Enter city name" autoFocus />
+            <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherCity(false); setS("city")(""); }}>
+              Choose from list instead
+            </button>
+          </div>
+        ) : (
+          <Select
+            value={form.city}
+            onValueChange={v => { if (v === "__other") { setOtherCity(true); setS("city")(""); } else setS("city")(v); }}
+          >
             <SelectTrigger className="h-9"><SelectValue placeholder="Select city" /></SelectTrigger>
             <SelectContent>
               {SAUDI_CITIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              <SelectItem value="__other">Other…</SelectItem>
             </SelectContent>
           </Select>
-          <Input value={form.city} onChange={set("city")} className="h-8 text-xs" placeholder="Or type a city not listed above" />
-        </div>
+        )}
       </FieldRow>
       <div className="sm:col-span-2">
         <FieldRow label={label("Address", true)} error={errors.address}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} className={errCls("address")} /></FieldRow>
       </div>
-      <FieldRow label={label("Supplier Type / Category", true)} error={errors.category}>
+      <FieldRow label={label("Category", true)} error={errors.category}>
         <Select value={form.category} onValueChange={setS("category")}>
           <SelectTrigger className={`h-9 ${errCls("category")}`}><SelectValue placeholder="Select category" /></SelectTrigger>
           <SelectContent>
@@ -181,15 +196,12 @@ function SupplierFormFields({
         </Select>
       </FieldRow>
       <FieldRow label="Payment Terms">
-        <div className="space-y-1">
-          <Select value={PAYMENT_TERMS_OPTIONS.includes(form.paymentTerms) ? form.paymentTerms : ""} onValueChange={setS("paymentTerms")}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select payment terms" /></SelectTrigger>
-            <SelectContent>
-              {PAYMENT_TERMS_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input value={form.paymentTerms} onChange={set("paymentTerms")} className="h-8 text-xs" placeholder="Or type custom terms" />
-        </div>
+        <Select value={PAYMENT_TERMS_OPTIONS.includes(form.paymentTerms) ? form.paymentTerms : ""} onValueChange={setS("paymentTerms")}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Select payment terms" /></SelectTrigger>
+          <SelectContent>
+            {PAYMENT_TERMS_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </FieldRow>
       <FieldRow label="Credit Limit (SAR)"><Input value={form.creditLimit} onChange={set("creditLimit")} className="h-9" type="number" min="0" step="0.01" /></FieldRow>
       <FieldRow label="Bank Name"><Input value={form.bankName} onChange={set("bankName")} className="h-9" /></FieldRow>
@@ -866,7 +878,11 @@ function SuppliersTab() {
       <Dialog open={!!editSupplier} onOpenChange={v => { if (!v) { setEditSupplier(null); setFormErrors({}); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Supplier</DialogTitle></DialogHeader>
-          <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="edit" errors={formErrors} setErrors={setFormErrors} />
+          {/* Keyed by supplier id so switching which supplier is being edited fully remounts this
+              — otherwise its otherCity toggle (set once from the first-ever form.city) wouldn't
+              re-derive for the next supplier's city, since this component is never itself unmounted
+              between edits (only the Dialog's visibility toggles). */}
+          <SupplierFormFields key={editSupplier?.id} form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="edit" errors={formErrors} setErrors={setFormErrors} />
         </DialogContent>
       </Dialog>
 

@@ -212,7 +212,7 @@ function TypeSelectorStep({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">Select the direction of the stock transfer.</p>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3">
         {visibleTypes.map(({ value, label, description, icon: Icon }) => (
           <Card
             key={value}
@@ -515,16 +515,22 @@ function ItemsStep({
     if (e.key !== "Enter") return;
     const code = scanBuf.trim();
     if (!code) return;
+    setScanBuf("");
     const match = products.find(p => p.barcode === code);
-    if (!match) return;
-    if (poItems && !poItems.some(pi => pi.productId === match.id)) return; // not available at this source
+    // Previously both of these just silently did nothing — indistinguishable from the scanner
+    // input not working at all. A hardware scanner clears its buffer and fires Enter in a fraction
+    // of a second, so there's no time to notice a row wasn't added unless something says why.
+    if (!match) { toast.error(`No product found with barcode "${code}".`); return; }
+    if (poItems && !poItems.some(pi => pi.productId === match.id)) {
+      toast.error(`"${match.name}" isn't available at the selected source location.`);
+      return;
+    }
     const existingEmpty = items.findIndex(it => !it.productId);
     if (existingEmpty >= 0) {
       handleProductChange(existingEmpty, match.id);
     } else {
       onChange([...items, { productId: match.id, requestedQuantity: 1, unitCost: String(match.costPrice ?? ""), expiryDate: "" }]);
     }
-    setScanBuf("");
   };
 
   return (
@@ -2105,6 +2111,15 @@ function StockTransfers() {
                 </Button>
               )}
             </div>
+            {(search || typeFilter !== "all" || statusFilter.length > 0 || branchFilter.length > 0 || warehouseFilter.length > 0 || productFilter.length > 0 || createdByFilter.length > 0 || approvedByFilter.length > 0 || dateFrom || dateTo) && (
+              <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => {
+                setSearch(""); setTypeFilter("all"); setStatusFilter([]); setBranchFilter([]);
+                setWarehouseFilter([]); setProductFilter([]); setCreatedByFilter([]); setApprovedByFilter([]);
+                setDateFrom(""); setDateTo("");
+              }}>
+                <X className="h-3.5 w-3.5" /> Clear Filters
+              </Button>
+            )}
           </div>
 
           {/* Table */}

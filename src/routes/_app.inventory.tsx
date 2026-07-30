@@ -1220,6 +1220,17 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   // Branch-scoped rows keep their own per-row edit/delete list — tier rows are unified below.
   const branchRules = rules.filter(r => r.branchId);
 
+  // Picking a tier chip saves immediately (toggleTier), but changing the price/schedule needs an
+  // explicit "Save price & schedule" click — easy to miss since nothing else on this screen works
+  // that way, so a changed price silently never reaches the server. Surfaced here so the button
+  // itself calls out that there's something unsaved, instead of looking identical either way.
+  const tierDirty = tierForm.tiers.length > 0 && rules.some(r =>
+    !r.branchId && r.minCustomerTier && tierForm.tiers.includes(r.minCustomerTier as CustomerTier) && (
+      String(r.price) !== tierForm.price ||
+      (r.effectiveFrom ? r.effectiveFrom.slice(0, 10) : "") !== tierForm.from ||
+      (r.effectiveTo ? r.effectiveTo.slice(0, 10) : "") !== tierForm.to
+    ));
+
   return (
     <Dialog open={!!item} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -1379,12 +1390,15 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
                   <div className="flex items-center gap-1 shrink-0">
                     <span className="text-[10px] text-muted-foreground">SAR</span>
                     <Input type="number" step="0.01" min={0} className="h-8 w-20 text-xs" placeholder="0.00"
-                      value={tierForm.price} onChange={e => { setTierForm(p => ({ ...p, price: e.target.value })); setError(""); }} />
+                      value={tierForm.price}
+                      onChange={e => { setTierForm(p => ({ ...p, price: e.target.value })); setError(""); }}
+                      onKeyDown={e => { if (e.key === "Enter" && tierDirty && !ruleBusy) saveTierGroup(); }} />
                   </div>
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  Click a tier to add or remove it. One shared price for every tier picked — change it
-                  (then Save) to update all of them at once.
+                  Click a tier to add or remove it. One shared price for every tier picked — changing
+                  it does NOT save automatically, unlike picking a tier — click "Save price &amp; schedule"
+                  below (or press Enter) to actually update all of them.
                 </p>
               </div>
 
@@ -1399,9 +1413,11 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
                 </div>
               </div>
 
-              <Button type="button" size="sm" variant="outline" className="w-full gap-1"
+              <Button type="button" size="sm"
+                variant={tierDirty ? "default" : "outline"}
+                className={`w-full gap-1 ${tierDirty ? "gradient-primary text-primary-foreground border-0 shadow-glow" : ""}`}
                 disabled={ruleBusy || tierForm.tiers.length === 0} onClick={saveTierGroup}>
-                Save price &amp; schedule
+                {tierDirty ? "Save price & schedule — unsaved changes" : "Save price & schedule"}
               </Button>
             </div>
           </div>

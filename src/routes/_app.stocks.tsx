@@ -880,7 +880,7 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
           )}
           {isPendingReview && canEdit && (
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setRejectStage("review"); setRejectReason(""); }} disabled={signingOff}>
+              <Button variant="outline" size="sm" className="gap-1.5 border-destructive/50 text-destructive hover:bg-destructive/10" onClick={() => { setRejectStage("review"); setRejectReason(""); }} disabled={signingOff}>
                 <X className="h-3.5 w-3.5" /> Reject
               </Button>
               <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => handleReview(true)} disabled={signingOff}>
@@ -890,7 +890,7 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
           )}
           {isPendingApproval && canApprove && (
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setRejectStage("approve"); setRejectReason(""); }} disabled={signingOff}>
+              <Button variant="outline" size="sm" className="gap-1.5 border-destructive/50 text-destructive hover:bg-destructive/10" onClick={() => { setRejectStage("approve"); setRejectReason(""); }} disabled={signingOff}>
                 <X className="h-3.5 w-3.5" /> Reject
               </Button>
               <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => handleApprove(true)} disabled={signingOff}>
@@ -1090,9 +1090,14 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function Stocks() {
-  const { user } = useAuth();
+  const { user, canViewModule } = useAuth();
   const navigate = useNavigate();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+  // The Reports tab just links out to /reports/* pages, which RouteGuard gates on the separate
+  // "Reports" module permission — a role with Stocks access but no Reports access (e.g. Picker)
+  // could see this tab yet hit "Access Denied" on every card inside it, so hide the tab entirely
+  // for those roles instead.
+  const canViewReports = canViewModule("Reports");
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -1319,7 +1324,7 @@ function Stocks() {
           <TabsTrigger value="delivery" className="gap-1.5"><Truck className="h-3.5 w-3.5" />Store Delivery</TabsTrigger>
           <TabsTrigger value="wastage" className="gap-1.5"><Trash2 className="h-3.5 w-3.5" />Wastage</TabsTrigger>
           <TabsTrigger value="movement" className="gap-1.5"><History className="h-3.5 w-3.5" />Movement</TabsTrigger>
-          <TabsTrigger value="reports" className="gap-1.5"><FileBarChart className="h-3.5 w-3.5" />Reports</TabsTrigger>
+          {canViewReports && <TabsTrigger value="reports" className="gap-1.5"><FileBarChart className="h-3.5 w-3.5" />Reports</TabsTrigger>}
         </TabsList>
 
         {/* ── Overview ── */}
@@ -1823,8 +1828,8 @@ function AdjustmentTable({ rows, branches, loading, onReviewed }: { rows: Invent
                 <td className="px-4 py-2.5 text-right">
                   {pending && canApprove ? (
                     <div className="flex items-center justify-end gap-1.5">
-                      <Button size="sm" className="h-7 px-2 text-xs" onClick={() => approve(a)} disabled={busyId === a.id}>Approve</Button>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => { setRejectRow(a); setRejectReason(""); }} disabled={busyId === a.id}>Reject</Button>
+                      <Button size="sm" className="h-7 px-2 text-xs gradient-primary text-primary-foreground border-0" onClick={() => approve(a)} disabled={busyId === a.id}>Approve</Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs border-destructive/50 text-destructive hover:bg-destructive/10" onClick={() => { setRejectRow(a); setRejectReason(""); }} disabled={busyId === a.id}>Reject</Button>
                     </div>
                   ) : pending ? (
                     <span className="text-xs text-muted-foreground">Awaiting approval</span>

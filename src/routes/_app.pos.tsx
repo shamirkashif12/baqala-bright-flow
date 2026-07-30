@@ -1827,14 +1827,14 @@ function POS() {
     if (user?.role === "cashier" && !activeShift)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
 
-    // Card-payments-scoped fees only apply when the order is actually being paid by card — folded
-    // in here (not earlier, into `total`) since paymentMethod isn't known until charge time. Split
-    // payments are out of scope: apportioning a card surcharge across a cash+card split is a
-    // separate question this fix doesn't address, so no card surcharge is added there.
-    const isCardOnly = paymentMethod === "card";
-    const finalServiceChargeRows = isCardOnly ? [...serviceChargeRows, ...cardSurchargeRows] : serviceChargeRows;
-    const finalCustomFeeTotal = customFeeTotal + (isCardOnly ? cardSurchargeTotal : 0);
-    const finalTotal = total + (isCardOnly ? cardSurchargeTotal : 0);
+    // Card-payments-scoped fees only apply when part of the order is actually being paid by card —
+    // folded in here (not earlier, into `total`) since paymentMethod isn't known until charge time.
+    // A split payment with a nonzero card portion also triggers it (PaymentDialog's split tab
+    // computes "still owed" the same way, so the payments it sends already add up to this total).
+    const hasCardPortion = paymentMethod === "card" || (splitPayments?.some((p) => p.method === "card" && p.amount > 0) ?? false);
+    const finalServiceChargeRows = hasCardPortion ? [...serviceChargeRows, ...cardSurchargeRows] : serviceChargeRows;
+    const finalCustomFeeTotal = customFeeTotal + (hasCardPortion ? cardSurchargeTotal : 0);
+    const finalTotal = total + (hasCardPortion ? cardSurchargeTotal : 0);
 
     const payments = splitPayments
       ? splitPayments
@@ -2943,25 +2943,27 @@ function PaymentDialog({
   const [splitCash, setSplitCash] = useState("0.00");
   const [splitCard, setSplitCard] = useState("0.00");
 
-  // The card surcharge only applies once the customer is actually paying by card — split payments
-  // are out of scope (see handleCharge), so only the "card" tab's displayed total picks it up.
+  // The card surcharge applies once the customer is actually paying by card — the "card" tab picks
+  // it up outright, and the split tab picks it up too as soon as any card amount is entered there
+  // (see splitEffectiveTotal below), so a cash+card split isn't silently exempt from it.
   const displayTotal = tab === "card" ? total + cardSurchargeAmount : total;
 
   const change = Math.max(0, parseFloat(received || "0") - total);
 
   // splitCard is charged exactly as entered — there's no "change" concept for a card charge, so it
-  // can never exceed the total. splitCash is what the customer HANDS OVER for the remainder, not
-  // what gets recorded as paid: if it's more than what's still owed after the card portion, the
-  // excess is change owed back, same as the plain Cash tab. Previously splitCash was recorded
-  // verbatim and the sum had to land within 1 cent of `total`, so any cash overpayment (the normal
-  // case — customers rarely hand over exact change) was rejected outright as "invalid" instead of
-  // returning change.
+  // can never exceed the order's total (including surcharge). splitCash is what the customer HANDS
+  // OVER for the remainder, not what gets recorded as paid: if it's more than what's still owed
+  // after the card portion, the excess is change owed back, same as the plain Cash tab. Previously
+  // splitCash was recorded verbatim and the sum had to land within 1 cent of `total`, so any cash
+  // overpayment (the normal case — customers rarely hand over exact change) was rejected outright
+  // as "invalid" instead of returning change.
   const splitCardNum = parseFloat(splitCard) || 0;
   const splitCashTendered = parseFloat(splitCash) || 0;
-  const splitRemainingAfterCard = Math.max(0, total - splitCardNum);
+  const splitEffectiveTotal = splitCardNum > 0 ? total + cardSurchargeAmount : total;
+  const splitRemainingAfterCard = Math.max(0, splitEffectiveTotal - splitCardNum);
   const splitCashApplied = Math.min(splitCashTendered, splitRemainingAfterCard);
   const splitChange = Math.max(0, splitCashTendered - splitRemainingAfterCard);
-  const splitOk = splitCardNum <= total && splitCashTendered >= splitRemainingAfterCard;
+  const splitOk = splitCardNum <= splitEffectiveTotal && splitCashTendered >= splitRemainingAfterCard;
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -3093,8 +3095,14 @@ function PaymentDialog({
                 <Input className="h-9" type="number" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} onFocus={(e) => e.target.select()} />
               </div>
             </div>
-            {splitCardNum > total && (
+            {splitCardNum > splitEffectiveTotal && (
               <p className="text-xs text-destructive">Card amount can't exceed the order total — there's no change on a card charge.</p>
+            )}
+            {splitCardNum > 0 && cardSurchargeAmount > 0 && (
+              <div className="rounded-lg bg-muted/40 p-2 text-xs flex justify-between">
+                <span className="text-muted-foreground">Card payment surcharge</span>
+                <span className="font-medium flex items-center gap-0.5"><SARIcon />{cardSurchargeAmount.toFixed(2)}</span>
+              </div>
             )}
             <div className={`flex justify-between text-sm p-2 rounded-lg ${splitOk ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
               <span>Still owed after card</span>
