@@ -1242,20 +1242,18 @@ function POS() {
     return Math.max(tobaccoExciseMinimum, base * tobaccoExcisePercentage / 100);
   }
   // Excise has to be charged on the NET price the item is actually sold at, not its undiscounted
-  // catalog price — a product-level discount (the only discount type the Rules Engine's "No
-  // discount on tobacco items" rule still allows on a tobacco item; Coupons/manual Discounts are
-  // blocked outright) previously left the excise completely untouched even at 100% off, so a
-  // fully-discounted tobacco item still carried its full undiscounted excise instead of dropping
-  // to the statutory minimum on a zero base price.
+  // catalog price — a product-level discount previously left the excise completely untouched
+  // even at 100% off, so a fully-discounted tobacco item still carried its full undiscounted
+  // excise instead of dropping to the statutory minimum on a zero base price.
   function tobaccoNetUnitPrice(prod: Product, price: number): number {
     if (!prod.discount || prod.discount <= 0) return price;
     return Math.max(0, prod.discountType === "percentage" ? price * (1 - prod.discount / 100) : price - prod.discount);
   }
-  const tobaccoExcise = displayCart.reduce((sum, ci) => {
-    const prod = products.find(p => p.id === ci.productId);
-    if (!prod?.isTobacco || !tobaccoFeeEnabled) return sum;
-    return sum + ci.qty * calcTobaccoFee(tobaccoNetUnitPrice(prod, ci.price));
-  }, 0);
+  // Same "tobacco items are not eligible for discounts" carve-out named Discounts/Coupons are
+  // refused for server-side (skipped entirely when the Rules Engine rule is inactive) — Manual
+  // discount has no rule row to check it against, so it's gated here at the point of adding it
+  // instead (server also refuses it as of the OrdersController fix).
+  const cartHasTobacco = displayCart.some(ci => products.find(p => p.id === ci.productId)?.isTobacco);
   const couponDiscount = appliedCoupon
     ? appliedCoupon.type === "percentage"
       ? Math.min(subtotal * (appliedCoupon.value / 100), subtotal)
@@ -1325,6 +1323,46 @@ function POS() {
     return m.kind === "percentage" ? subtotal * (m.value / 100) : Math.min(m.value, subtotal);
   }
   const manualDiscountSavings = manualDiscounts.reduce((sum, m) => sum + computeManualDiscountSaving(m), 0);
+
+  // How much order-level discount (Coupon + applied named Discounts + Manual discount) actually
+  // lands on one specific cart line — needed so tobacco excise (below) is charged on what the
+  // item really sells for once one of these is allowed through (e.g. the Rules Engine "No
+  // discount on tobacco items" rule has been turned off). Catalog-level product.discount is
+  // handled separately by tobaccoNetUnitPrice above; this only covers the three checkout-time
+  // mechanisms — basket-wide amounts (Coupon, Manual, "all"/"branch" Discounts) are prorated by
+  // the line's share of the (eligible) subtotal, product/category-scoped Discounts are matched
+  // directly.
+  function orderLevelDiscountForItem(ci: typeof displayCart[number]): number {
+    const lineSubtotal = ci.qty * ci.price;
+    if (lineSubtotal <= 0) return 0;
+    let total = 0;
+    if (appliedCoupon && subtotal > 0) total += couponDiscount * (lineSubtotal / subtotal);
+    if (manualDiscountSavings > 0 && subtotal > 0) total += manualDiscountSavings * (lineSubtotal / subtotal);
+    for (const d of appliedDiscounts) {
+      if (d.requiresCustomer && !customer) continue;
+      const excludedIds = new Set(parseIdList(d.excludedProductIdsJson));
+      if (excludedIds.has(ci.productId)) continue;
+      if (d.appliesTo === "all" || d.appliesTo === "branch") {
+        const eligibleSubtotal = displayCart.filter(x => !excludedIds.has(x.productId)).reduce((s, x) => s + x.qty * x.price, 0);
+        if (eligibleSubtotal > 0) total += computeDiscountSaving(d) * (lineSubtotal / eligibleSubtotal);
+      } else if (d.appliesTo === "product" && d.productId === ci.productId) {
+        total += d.discountType === "percentage" ? lineSubtotal * (d.value / 100) : Math.min(d.value * ci.qty, lineSubtotal);
+      } else if (d.appliesTo === "category" && products.find(p => p.id === ci.productId)?.categoryId === d.categoryId) {
+        total += d.discountType === "percentage" ? lineSubtotal * (d.value / 100) : Math.min(d.value * ci.qty, lineSubtotal);
+      }
+    }
+    return Math.min(total, lineSubtotal);
+  }
+  function tobaccoNetPriceAfterAllDiscounts(prod: Product, ci: typeof displayCart[number]): number {
+    const catalogNetPrice = tobaccoNetUnitPrice(prod, ci.price);
+    const orderLevelPerUnit = ci.qty > 0 ? orderLevelDiscountForItem(ci) / ci.qty : 0;
+    return Math.max(0, catalogNetPrice - orderLevelPerUnit);
+  }
+  const tobaccoExcise = displayCart.reduce((sum, ci) => {
+    const prod = products.find(p => p.id === ci.productId);
+    if (!prod?.isTobacco || !tobaccoFeeEnabled) return sum;
+    return sum + ci.qty * calcTobaccoFee(tobaccoNetPriceAfterAllDiscounts(prod, ci));
+  }, 0);
 
   // What's left in the dropdown to pick from — active, in date range, branch-eligible, not
   // already applied, and (for requiresCustomer discounts) only once a customer is attached.
@@ -1641,6 +1679,21 @@ function POS() {
       { entityType: "Customer", entityId: c.id });
   };
 
+  // The search box takes "Name or phone number" — if nothing matched and what was typed doesn't
+  // look like a phone number, it was almost certainly a name attempt, so hand it to the "Full
+  // name" field instead of leaving it stuck in "Phone" (customerPhone backs both boxes). Without
+  // this, searching by name landed the typed text in Phone with Name left blank — confusing, and
+  // the cashier would have to notice and retype it in the right box.
+  const enterNotFoundState = () => {
+    const typed = customerPhone.trim();
+    if (typed && !/^[0-9+\-\s()]+$/.test(typed)) {
+      setNewCustomerName(typed);
+      setCustomerPhone("");
+    }
+    setCustomerNotFound(true);
+    setRedeemPoints(0);
+  };
+
   const lookupCustomer = async () => {
     if (!customerPhone.trim()) return;
     setCustomerLoading(true);
@@ -1655,12 +1708,10 @@ function POS() {
       } else {
         // The "not found" panel below already surfaces this state visually — a toast on top of
         // it was redundant, and would fire on every keystroke once search runs live as you type.
-        setCustomerNotFound(true);
-        setRedeemPoints(0);
+        enterNotFoundState();
       }
     } catch {
-      setCustomerNotFound(true);
-      setRedeemPoints(0);
+      enterNotFoundState();
     } finally {
       setCustomerLoading(false);
     }
@@ -1879,7 +1930,7 @@ function POS() {
           quantity: item.qty,
           unitPrice: item.price,
           totalPrice: item.qty * item.price,
-          tobaccoFeeAmount: prod?.isTobacco && tobaccoFeeEnabled ? item.qty * calcTobaccoFee(tobaccoNetUnitPrice(prod, item.price)) : 0,
+          tobaccoFeeAmount: prod?.isTobacco && tobaccoFeeEnabled ? item.qty * calcTobaccoFee(tobaccoNetPriceAfterAllDiscounts(prod, item)) : 0,
         };
       }),
       payments,
@@ -2295,29 +2346,36 @@ function POS() {
             ) : customerNotFound ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5 space-y-2">
                 <p className="text-[10px] font-medium text-amber-700 dark:text-amber-400">Not found — save as new customer?</p>
-                <Input
-                  value={newCustomerName}
-                  onChange={(e) => setNewCustomerName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
-                  placeholder="Full name…"
-                  className="h-8 text-xs"
-                  autoFocus
-                />
-                <div className="flex gap-1.5">
+                <div className="space-y-0.5">
+                  <label className="text-[10px] text-muted-foreground">Name</label>
                   <Input
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="Phone…"
-                    className="h-8 text-xs flex-1"
+                    value={newCustomerName}
+                    onChange={(e) => setNewCustomerName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
+                    placeholder="Full name…"
+                    className="h-8 text-xs"
+                    autoFocus
                   />
-                  <Button size="sm" className="h-8 px-3 text-xs gradient-primary text-primary-foreground border-0"
-                    onClick={createNewCustomer} disabled={creatingCustomer || !newCustomerName.trim()}>
-                    {creatingCustomer ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
-                    onClick={() => { setCustomerNotFound(false); setNewCustomerName(""); }}>
-                    Skip
-                  </Button>
+                </div>
+                <div className="space-y-0.5">
+                  <label className="text-[10px] text-muted-foreground">Phone</label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
+                      placeholder="Phone number…"
+                      className="h-8 text-xs flex-1"
+                    />
+                    <Button size="sm" className="h-8 px-3 text-xs gradient-primary text-primary-foreground border-0"
+                      onClick={createNewCustomer} disabled={creatingCustomer || !newCustomerName.trim() || !customerPhone.trim()}>
+                      {creatingCustomer ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
+                      onClick={() => { setCustomerNotFound(false); setNewCustomerName(""); }}>
+                      Skip
+                    </Button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -2481,6 +2539,13 @@ function POS() {
                   onClick={() => {
                     const value = Number(manualDiscountValue);
                     if (!Number.isFinite(value) || value <= 0) return;
+                    if (cartHasTobacco) {
+                      toast.error("Cannot apply a discount", {
+                        description: "Tobacco items in this order are not eligible for discounts.",
+                        duration: 4000,
+                      });
+                      return;
+                    }
                     setManualDiscounts(list => [...list, {
                       id: uuid(),
                       name: manualDiscountKind === "percentage" ? `Manual discount (${value}%)` : `Manual discount (SAR ${value})`,

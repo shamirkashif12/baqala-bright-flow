@@ -399,15 +399,22 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   const [submitted, setSubmitted] = useState(false);
   const [skuManual, setSkuManual] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
-  const [lookupStatus, setLookupStatus] = useState<"found" | "not_found" | null>(null);
+  const [lookupStatus, setLookupStatus] = useState<"found" | "found_kept_existing" | "not_found" | null>(null);
 
   const lookupBarcode = async (barcode: string) => {
     if (!barcode || barcode.length < 6) return;
+    // Captured before the network round-trip — if the cashier had already typed a name (e.g.
+    // scanning a barcode partway through manually filling the form), the external lookup must not
+    // silently clobber it. Only auto-fills a genuinely blank name/SKU; a match against an
+    // already-filled name is reported as "found_kept_existing" rather than "not_found" (it WAS
+    // found — it just wasn't applied) so the cashier isn't told to fill in details manually.
+    const hadName = !!form.name.trim();
     setLookupLoading(true);
     setLookupStatus(null);
     const applyName = (raw: string, imageUrl?: string) => {
       const name = raw.trim();
       if (!name) return false;
+      if (hadName) { setLookupStatus("found_kept_existing"); return true; }
       setForm(prev => ({ ...prev, name, sku: generateSKU(name), ...(imageUrl ? { imageUrl } : {}) }));
       setSkuManual(false);
       setLookupStatus("found");
@@ -682,24 +689,37 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             <div className="flex gap-1">
               <div className="relative flex-1">
                 <Input ref={barcodeRef}
-                  className={`h-9 pr-7 ${scanning ? "border-primary ring-1 ring-primary" : ""} ${lookupStatus === "found" ? "border-green-500" : ""} ${barcodeFormatError(form.barcode) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`}
+                  className={`h-9 pr-7 ${scanning ? "border-primary ring-1 ring-primary" : ""} ${lookupStatus === "found" || lookupStatus === "found_kept_existing" ? "border-green-500" : ""} ${barcodeFormatError(form.barcode) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`}
                   placeholder={scanning ? "Scan now…" : "6281007012340"}
                   value={form.barcode}
                   onChange={e => { set("barcode")(e.target.value); setLookupStatus(null); }}
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); lookupBarcode(e.currentTarget.value); } }}
                   onBlur={() => setScanning(false)} />
                 {lookupLoading && <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                {lookupStatus === "found" && !lookupLoading && <CheckCircle2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-500" />}
+                {(lookupStatus === "found" || lookupStatus === "found_kept_existing") && !lookupLoading && <CheckCircle2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-500" />}
               </div>
               <Button type="button" size="icon" variant={scanning ? "default" : "outline"}
                 className={`h-9 w-9 shrink-0 ${scanning ? "gradient-primary text-primary-foreground border-0" : ""}`}
-                onClick={() => { setScanning(true); setLookupStatus(null); setTimeout(() => barcodeRef.current?.focus(), 50); }}>
+                onClick={() => {
+                  // Starting a scan means "this is a whole new product" — wipe the entire form
+                  // (same full reset used when the dialog closes) rather than leaving old
+                  // name/branch/quantity/price data from whatever was typed before to linger into
+                  // the new scan.
+                  reset();
+                  setScanning(true);
+                  setTimeout(() => barcodeRef.current?.focus(), 50);
+                }}>
                 <ScanLine className="h-4 w-4" />
               </Button>
             </div>
             {lookupStatus === "found" && (
               <p className="text-[11px] text-green-600 flex items-center gap-1 mt-1">
                 <Sparkles className="h-3 w-3" /> Product details filled from barcode database
+              </p>
+            )}
+            {lookupStatus === "found_kept_existing" && (
+              <p className="text-[11px] text-green-600 flex items-center gap-1 mt-1">
+                <Sparkles className="h-3 w-3" /> Barcode recognized — kept the name/SKU you already entered
               </p>
             )}
             {lookupStatus === "not_found" && (
@@ -1641,11 +1661,14 @@ function AdjustDialog({ item, batches, onClose, onDone }: { item: StockItem | nu
                 </SelectContent>
               </Select>
             </FieldRow>
-            <FieldRow label="Batch (optional)">
+            <FieldRow label={eligibleBatches.length > 0 ? "Batch *" : "Batch"}>
               <Select value={batchId || "none"} onValueChange={v => setBatchId(v === "none" ? "" : v)}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No specific batch</SelectItem>
+                  {/* Once this product/branch has tracked batches, one must be picked — a
+                      batch-less adjustment only moves the aggregate quantity, leaving every
+                      batch's remaining count stale (see InventoryController.Adjust). */}
+                  {eligibleBatches.length === 0 && <SelectItem value="none">No specific batch</SelectItem>}
                   {eligibleBatches.map(b => (
                     <SelectItem key={b.id} value={b.id} title={`${b.batchNumber} — ${b.remainingQuantity}/${b.quantity} — ${b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}`}>
                       {b.batchNumber} — {b.remainingQuantity}/{b.quantity} — {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : "no expiry"}
@@ -1653,6 +1676,9 @@ function AdjustDialog({ item, batches, onClose, onDone }: { item: StockItem | nu
                   ))}
                 </SelectContent>
               </Select>
+              {eligibleBatches.length > 0 && !batchId && (
+                <p className="text-[11px] text-muted-foreground mt-1">This product has tracked batches — pick which one this adjustment applies to.</p>
+              )}
             </FieldRow>
           </div>
           <FieldRow label="Notes">
@@ -1660,7 +1686,7 @@ function AdjustDialog({ item, batches, onClose, onDone }: { item: StockItem | nu
           </FieldRow>
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
-        <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleSave} disabled={saving || adjustAmount === ""}>
+        <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleSave} disabled={saving || adjustAmount === "" || (eligibleBatches.length > 0 && !batchId)}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Save adjustment
         </Button>
         <button type="button" onClick={() => { onClose(); navigate({ to: "/supplier-returns" }); }}
