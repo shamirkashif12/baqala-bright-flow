@@ -11,46 +11,38 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<bool>(
-                name: "auto_apply",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "discounts",
-                type: "tinyint(1)",
-                nullable: false,
-                defaultValue: false);
+                column: "auto_apply",
+                columnDefinitionSql: "tinyint(1) NOT NULL DEFAULT 0");
 
             // Existing discount rows must stay combinable=true — before this column existed, every
             // discount always stacked with everything else unconditionally, so backfilling false
             // here would silently change behavior for every discount already configured.
-            migrationBuilder.AddColumn<bool>(
-                name: "combinable",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "discounts",
-                type: "tinyint(1)",
-                nullable: false,
-                defaultValue: true);
+                column: "combinable",
+                columnDefinitionSql: "tinyint(1) NOT NULL DEFAULT 1");
 
-            migrationBuilder.AddColumn<decimal>(
-                name: "max_discount_amount",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "discounts",
-                type: "decimal(18,4)",
-                nullable: true);
+                column: "max_discount_amount",
+                columnDefinitionSql: "decimal(18,4) NULL");
 
-            migrationBuilder.AddColumn<Guid>(
-                name: "branch_id",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "coupons",
-                type: "char(36)",
-                nullable: true);
+                column: "branch_id",
+                columnDefinitionSql: "char(36) NULL");
 
-            migrationBuilder.AddColumn<TimeSpan>(
-                name: "end_time",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "coupons",
-                type: "time(6)",
-                nullable: true);
+                column: "end_time",
+                columnDefinitionSql: "time(6) NULL");
 
-            migrationBuilder.AddColumn<TimeSpan>(
-                name: "start_time",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "coupons",
-                type: "time(6)",
-                nullable: true);
+                column: "start_time",
+                columnDefinitionSql: "time(6) NULL");
         }
 
         /// <inheritdoc />

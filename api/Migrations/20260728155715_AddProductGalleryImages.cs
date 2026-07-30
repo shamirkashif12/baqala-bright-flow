@@ -11,44 +11,44 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.CreateTable(
-                name: "product_images",
-                columns: table => new
-                {
-                    id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    product_id = table.Column<Guid>(type: "char(36)", nullable: false),
-                    file_url = table.Column<string>(type: "longtext", nullable: false),
-                    sort_order = table.Column<int>(type: "int", nullable: false),
-                    uploaded_by = table.Column<Guid>(type: "char(36)", nullable: true),
-                    uploaded_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_product_images", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_product_images_products_product_id",
-                        column: x => x.product_id,
-                        principalTable: "products",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_product_images_users_uploaded_by",
-                        column: x => x.uploaded_by,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Restrict);
-                })
-                .Annotation("MySQL:Charset", "utf8mb4");
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS `product_images` (
+                    `id` char(36) NOT NULL,
+                    `product_id` char(36) NOT NULL,
+                    `file_url` longtext NOT NULL,
+                    `sort_order` int NOT NULL,
+                    `uploaded_by` char(36) NULL,
+                    `uploaded_at` datetime(6) NOT NULL,
+                    CONSTRAINT `PK_product_images` PRIMARY KEY (`id`)
+                ) CHARACTER SET utf8mb4;
+            ");
 
-            migrationBuilder.CreateIndex(
+            migrationBuilder.CreateIndexIfNotExists(
                 name: "IX_product_images_product_id",
                 table: "product_images",
-                column: "product_id");
+                columnsSql: "`product_id`");
 
-            migrationBuilder.CreateIndex(
+            migrationBuilder.CreateIndexIfNotExists(
                 name: "IX_product_images_uploaded_by",
                 table: "product_images",
-                column: "uploaded_by");
+                columnsSql: "`uploaded_by`");
+
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_product_images_products_product_id",
+                table: "product_images",
+                column: "product_id",
+                principalTable: "products",
+                principalColumn: "id",
+                onDeleteSql: "CASCADE");
+
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
+                name: "FK_product_images_users_uploaded_by",
+                table: "product_images",
+                column: "uploaded_by",
+                principalTable: "users",
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT",
+                nullable: true);
         }
 
         /// <inheritdoc />

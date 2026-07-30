@@ -10,12 +10,10 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "cancel_reason",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "stock_transfers",
-                type: "varchar(255)",
-                maxLength: 255,
-                nullable: true);
+                column: "cancel_reason",
+                columnDefinitionSql: "varchar(255) NULL");
         }
 
         /// <inheritdoc />

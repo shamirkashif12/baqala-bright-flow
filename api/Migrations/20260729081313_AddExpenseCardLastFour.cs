@@ -10,12 +10,10 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "card_last_four",
+            migrationBuilder.AddColumnIfNotExists(
                 table: "expenses",
-                type: "varchar(4)",
-                maxLength: 4,
-                nullable: true);
+                column: "card_last_four",
+                columnDefinitionSql: "varchar(4) NULL");
         }
 
         /// <inheritdoc />
