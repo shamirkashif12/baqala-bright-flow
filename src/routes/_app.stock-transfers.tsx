@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
@@ -16,7 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   ArrowRight, Warehouse, Building2, Truck, Package, RefreshCcw,
   CheckCircle2, Clock, Plus, Trash2, Eye, ArrowLeftRight, Loader2, X, Search,
-  ChevronDown, Check,
+  ChevronDown, Check, ScanLine,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn, localDateStr, uuid, wholeUnitQuantityError } from "@/lib/utils";
@@ -511,27 +511,110 @@ function ItemsStep({
   // POS/Warehouse's item picker) adds a new row for the scanned product directly, instead of
   // manually opening the product Select and scrolling/typing to find it.
   const [scanBuf, setScanBuf] = useState("");
-  const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== "Enter") return;
-    const code = scanBuf.trim();
+  const scanInputRef = useRef<HTMLInputElement>(null);
+  // items/poItems change on every keystroke of the wizard, but a scan only ever needs the latest
+  // values at the moment Enter fires — a ref sidesteps re-subscribing the document listener below
+  // on every render (which would otherwise drop/duplicate keystrokes mid-scan).
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const poItemsRef = useRef(poItems);
+  poItemsRef.current = poItems;
+
+  const processScanCode = useCallback((raw: string) => {
+    const code = raw.trim();
     if (!code) return;
-    setScanBuf("");
     const match = products.find(p => p.barcode === code);
     // Previously both of these just silently did nothing — indistinguishable from the scanner
     // input not working at all. A hardware scanner clears its buffer and fires Enter in a fraction
     // of a second, so there's no time to notice a row wasn't added unless something says why.
     if (!match) { toast.error(`No product found with barcode "${code}".`); return; }
-    if (poItems && !poItems.some(pi => pi.productId === match.id)) {
+    const currentPoItems = poItemsRef.current;
+    if (currentPoItems && !currentPoItems.some(pi => pi.productId === match.id)) {
       toast.error(`"${match.name}" isn't available at the selected source location.`);
       return;
     }
-    const existingEmpty = items.findIndex(it => !it.productId);
-    if (existingEmpty >= 0) {
-      handleProductChange(existingEmpty, match.id);
-    } else {
-      onChange([...items, { productId: match.id, requestedQuantity: 1, unitCost: String(match.costPrice ?? ""), expiryDate: "" }]);
+    const currentItems = itemsRef.current;
+    // Same barcode scanned again — bump the existing line's quantity instead of adding a
+    // second row for the same product.
+    const existingMatch = currentItems.findIndex(it => it.productId === match.id);
+    if (existingMatch >= 0) {
+      onChange(currentItems.map((it, idx) =>
+        idx === existingMatch ? { ...it, requestedQuantity: it.requestedQuantity + 1 } : it
+      ));
+      return;
     }
+    // Mirrors handleProductChange's cost auto-fill, inlined here (rather than calling that
+    // function directly) so this stays a stable callback independent of per-render closures —
+    // it's registered on a page-wide listener that must not go stale between renders.
+    const costFromPoOrProduct = () => {
+      if (currentPoItems) {
+        const pi = currentPoItems.find(x => x.productId === match.id);
+        const cost = pi && pi.unitCost > 0 ? pi.unitCost : (match.costPrice ?? 0);
+        return cost > 0 ? String(cost) : "";
+      }
+      return (match.costPrice ?? 0) > 0 ? String(match.costPrice) : "";
+    };
+    const existingEmpty = currentItems.findIndex(it => !it.productId);
+    if (existingEmpty >= 0) {
+      onChange(currentItems.map((it, idx) =>
+        idx === existingEmpty ? { ...it, productId: match.id, batchId: undefined, unitCost: costFromPoOrProduct() || it.unitCost } : it
+      ));
+    } else {
+      onChange([...currentItems, { productId: match.id, requestedQuantity: 1, unitCost: costFromPoOrProduct(), expiryDate: "" }]);
+    }
+  }, [products, onChange]);
+
+  const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const code = scanBuf;
+    setScanBuf("");
+    processScanCode(code);
   };
+
+  // Scanners emit real keystrokes, so they land wherever the DOM focus happens to be — not
+  // necessarily inside the "Scan a barcode…" input. This listens page-wide, so scanning works
+  // immediately without clicking into that field first. Two guards keep it from misfiring:
+  //  - a focused text/number/date/select input is left alone (the user may be typing a manual
+  //    qty/cost/expiry), so we never corrupt those fields with barcode digits.
+  //  - anything else (a card, the "Add Item" button, the page body) is fair game, and the
+  //    completed Enter keystroke is preventDefault'd so it can't also fire a native button click
+  //    (that's what was inserting a blank row when "Add Item" happened to still be focused).
+  useEffect(() => {
+    let buf = "";
+    let lastKeyAt = 0;
+    const handler = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      const isOwnScanInput = active === scanInputRef.current;
+      if (isOwnScanInput) return; // handled by handleScanKeyDown/onChange above
+      const isEditableElsewhere =
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement ||
+        (active instanceof HTMLElement && active.isContentEditable);
+      if (isEditableElsewhere) return;
+
+      const now = Date.now();
+      if (now - lastKeyAt > 200) buf = "";
+      lastKeyAt = now;
+
+      if (e.key === "Enter") {
+        const code = buf;
+        buf = "";
+        if (code.trim().length < 3) return; // too short to be a real barcode — leave Enter alone
+        e.preventDefault();
+        e.stopPropagation();
+        processScanCode(code);
+        return;
+      }
+      if (e.key.length === 1) {
+        buf += e.key;
+      } else if (e.key !== "Shift") {
+        buf = "";
+      }
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [processScanCode]);
 
   return (
     <div className="space-y-3">
@@ -541,13 +624,18 @@ function ItemsStep({
           <Plus className="h-3.5 w-3.5" /> Add Item
         </Button>
       </div>
-      <Input
-        value={scanBuf}
-        onChange={e => setScanBuf(e.target.value)}
-        onKeyDown={handleScanKeyDown}
-        placeholder="Scan a barcode to add an item…"
-        className="h-8 text-xs"
-      />
+      <div className="relative">
+        <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <Input
+          ref={scanInputRef}
+          autoFocus
+          value={scanBuf}
+          onChange={e => setScanBuf(e.target.value)}
+          onKeyDown={handleScanKeyDown}
+          placeholder="Scan a barcode to add an item… (works anywhere on this step)"
+          className="h-8 text-xs pl-8"
+        />
+      </div>
       {poItems && (
         <p className="text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1">
           Only items available at the source location are shown. Quantity cannot exceed available stock.
@@ -986,6 +1074,19 @@ function CreateTransferSheet({
           }
         } else {
           throw new Error("not found");
+        }
+      }
+
+      // Block the RTS before the user spends time on Steps 2/3 if a return for this PO already
+      // exists (the backend rejects it on submit too — see StockTransfersController.Create —
+      // but catching it here at lookup time avoids a wasted trip through the whole wizard).
+      if (transferType === "warehouse_to_supplier" && fetched.id) {
+        const existing = await api.getStockTransfers({ purchaseOrderId: fetched.id, transferType: "warehouse_to_supplier" });
+        const blocking = existing.find(t => t.status !== "rejected" && t.status !== "cancelled");
+        if (blocking) {
+          setPoError(`A return (${blocking.transferNumber}) already exists for this purchase order. Cancel or reject it before creating another.`);
+          setPoFetching(false);
+          return;
         }
       }
 
