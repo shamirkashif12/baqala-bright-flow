@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { api, type CashierShift, type Order } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { SARIcon, fmtSAR } from "@/lib/currency";
-import { cn } from "@/lib/utils";
+import { cn, getPosBranchId } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/cashier")({ component: CashierWorkspace });
 
@@ -198,10 +198,10 @@ function CashierWorkspace() {
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
 
-  // Held orders count for the branch this cashier is actually working at right now — the
-  // active shift's own branchId, not a page-level filter (POS no longer shares one globally).
-  // Falls back to the user's assigned branch before the shift finishes loading.
-  const heldBranchId = shift?.branchId ?? (user?.role !== "tenant_admin" ? user?.branchId : undefined);
+  // Must resolve to the exact same branch POS itself is keying `pos_holds_${branchId}` under —
+  // previously derived from the cashier's own shift instead, which disagreed with POS's own
+  // count whenever an admin's manually-picked branch differed from their shift (see Held Orders).
+  const heldBranchId = getPosBranchId(user);
   const heldCount = (() => {
     if (!heldBranchId) return 0;
     try { return (JSON.parse(sessionStorage.getItem(`pos_holds_${heldBranchId}`) ?? "[]") as unknown[]).length; }
