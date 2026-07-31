@@ -261,7 +261,7 @@ function AuditLogs() {
         ? `Activity trail for ${selectedUser.fullName} — sales, refunds, discounts, edits and adjustments`
         : "Every cashier, manager, system & device action — tamper-proof trail"}
     >
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Events" value={String(total)} icon={ScanBarcode} accent="primary" />
         <MetricCard label="Critical" value={String(critical)} icon={ShieldAlert} accent="destructive" />
         <MetricCard label="Warnings" value={String(warnings)} icon={Undo2} accent="warning" />

@@ -159,7 +159,7 @@ function PaymentMethods() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Cash Collected" value={<><SARIcon />{fmt(kpis?.cashCollected ?? 0)}</>} icon={Banknote} accent="primary" />
         <MetricCard label="Card Settled" value={<><SARIcon />{fmt(kpis?.cardSettled ?? 0)}</>} icon={CreditCard} accent="success" />
         <MetricCard label="Wallet Amount" value={<><SARIcon />{fmt(kpis?.walletAmount ?? 0)}</>} icon={Wallet} accent="warning" />

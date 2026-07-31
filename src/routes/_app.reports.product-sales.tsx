@@ -181,7 +181,7 @@ function ProductSales() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Top SKU" value={kpis?.topSku ?? "—"} icon={Tag} accent="primary" />
         <MetricCard label="Units Sold" value={String(kpis?.unitsSold ?? 0)} icon={Boxes} />
         <MetricCard label="Net Sales" value={<><SARIcon />{fmt(kpis?.netSales ?? 0)}</>} icon={Wallet} />

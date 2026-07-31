@@ -158,7 +158,7 @@ function TaxFees() {
     <PageShell title="Tax, Fees & Tobacco" subtitle="VAT and tobacco excise — the two taxes KSA actually recognizes. For delivery fees/surcharges, see Service Charges.">
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ─── Metric cards ─────────────────────────────────────────────────── */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="ZATCA Status" value={zatca.phase2Enabled ? "Enabled" : "Disabled"} icon={ShieldCheck} accent={zatca.phase2Enabled ? "success" : "warning"} />
         <MetricCard label="Tobacco SKUs" value={String(tobaccoProducts.length)} icon={Cigarette} accent="warning" />
         <MetricCard

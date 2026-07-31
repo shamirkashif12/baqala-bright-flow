@@ -2026,7 +2026,7 @@ function Inventory() {
     >
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ── Alert Banners ── */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <div className="rounded-2xl border border-warning/30 bg-warning/10 p-4 flex items-center gap-4">
           <CalendarClock className="h-8 w-8 text-warning shrink-0" />
           <div>
@@ -2046,7 +2046,7 @@ function Inventory() {
       </div>
 
       {/* ── Metrics ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <div className="rounded-2xl border border-border/60 bg-card shadow-card p-4">
           <div className="flex items-center justify-between">
             <div>

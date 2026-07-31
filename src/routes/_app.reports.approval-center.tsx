@@ -228,7 +228,7 @@ function ApprovalCenter() {
         )}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Pending" value={String(pendingCount)} icon={Clock} accent="warning" />
         <MetricCard label="Approved" value={String(approvedCount)} icon={CheckCircle2} accent="success" />
         <MetricCard label="Rejected" value={String(rejectedCount)} icon={XCircle} accent="destructive" />

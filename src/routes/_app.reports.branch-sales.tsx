@@ -192,7 +192,7 @@ function BranchSales() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Top Branch" value={kpis?.topBranch ?? "—"} icon={Trophy} accent="primary" />
         <MetricCard label="Lowest Branch" value={kpis?.lowestBranch ?? "—"} icon={TrendingDown} accent="warning" />
         <MetricCard label="Total Net Sales" value={<><SARIcon />{fmt(kpis?.totalNetSales ?? 0)}</>} icon={Wallet} />

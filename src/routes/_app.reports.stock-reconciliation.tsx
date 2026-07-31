@@ -220,7 +220,7 @@ function StockReconciliation() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Count Sessions" value={String(kpis?.sessionCount ?? 0)} icon={ClipboardCheck} accent="primary" />
         <MetricCard label="Items Counted" value={String(kpis?.itemsCounted ?? 0)} icon={ListChecks} />
         <MetricCard label="Items With Variance" value={String(kpis?.itemsWithVariance ?? 0)} icon={Scale} accent="warning" />

@@ -179,13 +179,13 @@ function StatCard({ c, updatedLabel }: { c: StatCardDef; updatedLabel: string })
 
   return (
     <Card className="relative p-5 border-border/60 shadow-card hover:shadow-elegant transition-shadow flex flex-col gap-3">
-      <div className="flex items-start justify-between">
-        <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center", iconBg)}>
+      <div className="flex items-start justify-between gap-2">
+        <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center shrink-0", iconBg)}>
           <CardIcon className="h-5 w-5" />
         </div>
         {hasChange && (
           <span className={cn(
-            "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold",
+            "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold shrink-0",
             positive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
           )}>
             {positive ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
@@ -225,9 +225,9 @@ function AlertCard({ tone, icon: Icon, label, value, hint, href }: {
           <Icon className="h-5 w-5" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] uppercase tracking-wider font-bold opacity-80">{label}</p>
-          <p className="text-xl font-bold tabular-nums leading-tight">{value}</p>
-          <p className="text-xs opacity-75 truncate">{hint}</p>
+          <p className="text-[10px] uppercase tracking-wide font-bold opacity-80 leading-tight break-words">{label}</p>
+          <p className="text-xl font-bold tabular-nums leading-tight truncate" title={value}>{value}</p>
+          <p className="text-xs opacity-75 leading-tight truncate" title={hint}>{hint}</p>
         </div>
         <ArrowRight className="h-4 w-4 opacity-50" />
       </Card>
@@ -558,7 +558,7 @@ function Dashboard() {
       </Card>
 
       {/* Alert cards row */}
-      <div data-tour="alerts-row" className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div data-tour="alerts-row" className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[92px] rounded-xl" />)
         ) : (
@@ -589,11 +589,11 @@ function Dashboard() {
       {/* KPI stat cards */}
       <div data-tour="stat-cards">
         {loading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
             {Array.from({ length: 10 }).map((_, i) => <Skeleton key={i} className="h-36 rounded-2xl" />)}
           </div>
         ) : statCards.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
             {statCards.map((c) => <StatCard key={c.id} c={c} updatedLabel={updatedLabel} />)}
           </div>
         ) : (
@@ -1001,9 +1001,9 @@ function Mini({ label, value, tone = "default" }: { label: string; value: string
     destructive: "bg-destructive/15 text-destructive",
   };
   return (
-    <div className={cn("rounded-xl p-3", map[tone])}>
-      <p className="text-[10px] uppercase tracking-wider font-semibold opacity-70">{label}</p>
-      <p className="text-lg font-bold mt-0.5">{value}</p>
+    <div className={cn("rounded-xl p-3 min-w-0", map[tone])}>
+      <p className="text-[10px] uppercase tracking-wider font-semibold opacity-70 truncate">{label}</p>
+      <p className="text-lg font-bold mt-0.5 truncate">{value}</p>
     </div>
   );
 }

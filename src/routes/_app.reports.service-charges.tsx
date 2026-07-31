@@ -105,7 +105,7 @@ function FeeReportPage() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Service Charges" value={<><SARIcon />{fmt(kpis?.totalServiceCharges ?? 0)}</>} icon={Truck} accent="primary" />
         <MetricCard label="Transactions with Charge" value={String(kpis?.transactionsWithFees ?? 0)} icon={Receipt} />
         <MetricCard label="Avg Charge per Transaction" value={<><SARIcon />{fmt(kpis?.averageFeePerTransaction ?? 0)}</>} icon={TrendingUp} accent="success" />

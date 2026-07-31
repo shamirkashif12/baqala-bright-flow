@@ -239,7 +239,7 @@ function Unified() {
 
         <TabsContent value="items" className="mt-0 space-y-4">
           <FilterBar placeholder="Search items by name, SKU, barcode…" />
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             <MetricCard label="Items on Device" value="2,148" icon={Package} accent="primary" />
             <MetricCard label="Low Stock" value="14" icon={AlertTriangle} accent="warning" />
             <MetricCard label="Close to Expiry" value="8" icon={CalendarClock} accent="warning" />
@@ -267,7 +267,7 @@ function Unified() {
 
         <TabsContent value="reports" className="mt-0 space-y-4">
           <FilterBar placeholder="Search reports by name…" />
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             <MetricCard label="Sales (Today)" value={<><SARIcon />4,820</>} icon={TrendingUp} accent="primary" delta="+14%" trend="up" />
             <MetricCard label="Orders" value="87" icon={ShoppingBag} />
             <MetricCard label="Avg Basket" value={<><SARIcon />55.40</>} icon={Wallet} accent="success" />
@@ -319,7 +319,7 @@ function Unified() {
               </Button>
             </div>
           </Card>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             <MetricCard label="Opening Cash" value={<><SARIcon />500</>} icon={Wallet} />
             <MetricCard label="Expected Cash" value={<><SARIcon />3,488</>} icon={Banknote} accent="primary" />
             <MetricCard label="Counted Cash" value={<><SARIcon />3,480</>} icon={Banknote} accent="success" />

@@ -247,6 +247,7 @@ function Terminals() {
   const [kioskTerm, setKioskTerm] = useState<Terminal | null>(null);
   const [kioskSecret, setKioskSecret] = useState<{ terminalCode: string; pairingSecret: string } | null>(null);
   const [kioskGenerating, setKioskGenerating] = useState(false);
+  const [customSecretInput, setCustomSecretInput] = useState("");
   const [lockdownPin, setLockdownPin] = useState("");
   const [lockdownSaving, setLockdownSaving] = useState(false);
 
@@ -361,10 +362,13 @@ function Terminals() {
 
   const handleGenerateKioskCode = async () => {
     if (!kioskTerm) return;
+    const trimmed = customSecretInput.trim();
+    if (trimmed && trimmed.length < 6) { toast.error("Custom pairing secret must be at least 6 characters."); return; }
     setKioskGenerating(true);
     try {
-      const res = await api.generateKioskPairingCode(kioskTerm.id);
+      const res = await api.generateKioskPairingCode(kioskTerm.id, trimmed || undefined);
       setKioskSecret(res);
+      setCustomSecretInput("");
       load();
     } catch (e: any) { console.error(e); toast.error(e?.message || "Failed to generate kiosk pairing code."); } finally { setKioskGenerating(false); }
   };
@@ -788,7 +792,7 @@ function Terminals() {
       </Sheet>
 
       {/* Self-checkout kiosk pairing sheet */}
-      <Sheet open={!!kioskTerm} onOpenChange={v => { if (!v) { setKioskTerm(null); setKioskSecret(null); setLockdownPin(""); } }}>
+      <Sheet open={!!kioskTerm} onOpenChange={v => { if (!v) { setKioskTerm(null); setKioskSecret(null); setCustomSecretInput(""); setLockdownPin(""); } }}>
         <SheetContent>
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
@@ -814,9 +818,26 @@ function Terminals() {
                 <Button variant="outline" className="w-full" onClick={() => setKioskTerm(null)}>Done</Button>
               </div>
             ) : (
-              <Button className="w-full gradient-primary text-primary-foreground border-0" disabled={kioskGenerating} onClick={handleGenerateKioskCode}>
-                {kioskGenerating ? "Generating…" : kioskTerm?.pairingSecretSetAt ? "Regenerate Pairing Code" : "Generate Pairing Code"}
-              </Button>
+              <div className="space-y-2">
+                <FieldRow label="Custom secret (optional)">
+                  <Input
+                    value={customSecretInput}
+                    onChange={e => setCustomSecretInput(e.target.value)}
+                    placeholder="Leave blank to generate a random secret"
+                    className="h-9 font-mono"
+                  />
+                </FieldRow>
+                <p className="text-xs text-muted-foreground">
+                  Set your own easy-to-type secret (min 6 characters), or leave this blank for a random one.
+                </p>
+                <Button className="w-full gradient-primary text-primary-foreground border-0" disabled={kioskGenerating} onClick={handleGenerateKioskCode}>
+                  {kioskGenerating
+                    ? "Generating…"
+                    : customSecretInput.trim()
+                      ? "Set Custom Secret"
+                      : kioskTerm?.pairingSecretSetAt ? "Regenerate Pairing Code" : "Generate Pairing Code"}
+                </Button>
+              </div>
             )}
           </div>
 

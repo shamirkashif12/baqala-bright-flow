@@ -255,7 +255,7 @@ function Maintenance() {
     >
       {loadError && <LoadErrorBanner onRetry={reload} />}
       {/* Metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Devices"        value={loading ? "—" : String(devices.length)} icon={Monitor}      accent="primary" />
         <MetricCard label="Online"               value={loading ? "—" : String(online)}          icon={Wrench}       accent="success" />
         <MetricCard label="Offline / Maintenance"value={loading ? "—" : String(offline)}         icon={WifiOff}      accent="warning" />

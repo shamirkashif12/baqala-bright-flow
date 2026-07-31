@@ -139,7 +139,7 @@ function LowStock() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Low Stock SKUs" value={String(kpis?.lowStockSkus ?? 0)} icon={Boxes} accent="warning" />
         <MetricCard label="Critical SKUs" value={String(kpis?.criticalSkus ?? 0)} icon={AlertTriangle} accent="destructive" />
         <MetricCard label="Out of Stock" value={String(kpis?.outOfStockSkus ?? 0)} icon={XCircle} accent="destructive" />

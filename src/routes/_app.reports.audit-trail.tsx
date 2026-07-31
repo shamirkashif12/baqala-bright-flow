@@ -201,7 +201,7 @@ function AuditTrail() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Critical Events" value={String(kpis?.criticalEvents ?? 0)} icon={ShieldAlert} accent="destructive" />
         <MetricCard label="Failed Logins" value={String(kpis?.failedLogins ?? 0)} icon={KeyRound} accent="warning" />
         <MetricCard label="Override Count" value={String(kpis?.overrideCount ?? 0)} icon={Wrench} />

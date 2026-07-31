@@ -129,7 +129,7 @@ function TobaccoExcise() {
         </p>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Excise Sales Value" value={<><SARIcon />{fmt(kpis?.exciseSalesValue ?? 0)}</>} icon={Cigarette} accent="primary" />
         <MetricCard label="Excise Tax Amount" value={<><SARIcon />{fmt(kpis?.exciseTaxAmount ?? 0)}</>} icon={Coins} accent="warning" />
         <MetricCard label="Tobacco Units Sold" value={String(kpis?.tobaccoUnitsSold ?? 0)} icon={Package} />

@@ -175,14 +175,14 @@ function Devices() {
   return (
     <PageShell title="Devices" subtitle="Hardware fleet + behavior in one place">
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Devices" value={String(total)} icon={HardDrive} accent="primary" />
         <MetricCard label="Healthy" value={String(healthy)} icon={Activity} accent="success" />
         <MetricCard label="Maintenance" value={String(maintenance)} icon={Power} accent="warning" />
         <MetricCard label="Network OK" value={`${synced}/${total}`} icon={Wifi} />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         {[
           { label: "Network uptime", value: total > 0 ? Math.round((synced / total) * 100) : 0, icon: Signal },
           { label: "Active devices", value: total > 0 ? Math.round((healthy / total) * 100) : 0, icon: Battery },
