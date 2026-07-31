@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -17,7 +18,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getUsbPrinter, type Product, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram } from "@/lib/api";
+import { api, getUsbPrinter, type Product, type Category, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram } from "@/lib/api";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
@@ -26,6 +27,7 @@ import { useAuth } from "@/lib/auth";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
 import { uuid, POS_ADMIN_BRANCH_KEY } from "@/lib/utils";
+import { isValidSaudiPhone } from "@/lib/validation";
 
 // "Failed to fetch" is the browser's own error when it can't reach anything at all (nothing
 // listening on the local print-agent port) — i.e. no printer/agent has ever been set up on
@@ -134,9 +136,14 @@ type InvoiceSnapshot = {
 };
 
 // ─── Quick Stock In Dialog ────────────────────────────────────────────────────
-function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allowNegativeStock, initialProduct, onStockAdded }: {
+function QuickStockInDialog({ open, onClose, products, stockMap, cartQtyBySku, branchId, allowNegativeStock, initialProduct, onStockAdded }: {
   open: boolean; onClose: () => void;
   products: Product[]; stockMap: Map<string, number>;
+  // How many units of each SKU are already sitting in the cart — "Quantity Needed" below is the
+  // sale's TOTAL for that product, not an amount to pile on top, so the cart line has to be set to
+  // it directly. Needed here just to show the cashier what's already there, avoiding the confusing
+  // "I entered 77, why did the cart jump to 151?" when 74 were already in the cart beforehand.
+  cartQtyBySku: Map<string, number>;
   branchId: string;
   // Whether this branch's POS Settings allow a sale to push stock negative — "Sell Anyway" below
   // relies on exactly that, but OrdersController.Create rejects it when the branch has this off
@@ -146,7 +153,8 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
   // A scan/search that already resolved an exact product (barcode/SKU) but found it unstocked at
   // this branch can jump straight to that product instead of making the cashier search again.
   initialProduct?: Product | null;
-  onStockAdded: (product: Product, newStock: number) => void;
+  // cartQty is the line's new TOTAL quantity, not a delta — the caller must set, never add.
+  onStockAdded: (product: Product, newStock: number, cartQty: number) => void;
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Product | null>(null);
@@ -166,6 +174,15 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Default the quantity field to "one more than what's already on hand" the moment a product is
+  // picked (search result or a pre-resolved scan) — the field means "how many does this sale need",
+  // so it should never start at a value that's already satisfied by existing stock.
+  useEffect(() => {
+    if (!selected) return;
+    const stock = stockMap.get(selected.id) ?? 0;
+    setQty(stock > 0 ? stock + 1 : 1);
+  }, [selected, stockMap]);
+
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q || selected) return [];
@@ -173,10 +190,14 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
       p.name.toLowerCase().includes(q) ||
       p.sku.toLowerCase().includes(q) ||
       (p.barcode && p.barcode.toLowerCase().includes(q))
-    ).slice(0, 6);
+    ).slice(0, 20);
   }, [query, selected, products]);
 
   const currentStock = selected ? (stockMap.get(selected.id) ?? 0) : 0;
+  const existingCartQty = selected ? (cartQtyBySku.get(selected.sku) ?? 0) : 0;
+  // Quick Stock In is a shortfall tool, not a side-door around the official Inventory stock-in
+  // flow — it only opens when the sale genuinely needs more than what's already on hand.
+  const belowNeeded = currentStock > 0 && qty <= currentStock;
 
   // Hardware barcode scanners emit the code + Enter — match by barcode only here,
   // never by name/SKU, so a scan can't accidentally land on the wrong product.
@@ -192,35 +213,44 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
     }
   };
 
-  const canSellAnyway = currentStock > 0 || allowNegativeStock;
-
+  // Receiving genuinely new stock (this button) and allowNegativeStock (POS Settings) are unrelated
+  // concerns — that flag only governs whether a SALE may push stock negative. It must never block
+  // an actual stock receipt, or a never-stocked item at a strict branch becomes a dead end with no
+  // way to receive it short of leaving POS for Inventory. The quantity flow below always works.
   const handleConfirm = async () => {
     if (!selected) return;
-    if (currentStock <= 0 && !allowNegativeStock) {
-      setError("This branch doesn't allow negative stock — receive real stock for this product in Inventory first.");
+    if (belowNeeded) {
+      setError(`You already have ${currentStock} in stock — enter a quantity greater than that, or use Inventory → Stock In for routine restocking.`);
       return;
     }
     setError("");
     setSaving(true);
     try {
-      if (currentStock > 0) {
-        // Genuine restock: physically receive the extra stock before adding to cart.
-        try {
-          await api.adjustInventory({ productId: selected.id, branchId, quantity: qty, adjustmentType: "receive", reason: "Quick stock-in from POS" });
-        } catch {
-          await api.receiveBatch({ productId: selected.id, branchId, quantity: qty });
-        }
-        onStockAdded(selected, currentStock + qty);
-      } else {
-        // Never stocked at this branch — sell it directly instead of pre-receiving
-        // exactly what's about to be sold (which would just cancel back to zero).
-        // The sale itself records the shortfall as negative on-hand stock, visible
-        // for reconciliation the next time this product is actually received.
-        onStockAdded(selected, 0);
+      // Only the shortfall actually needs receiving — currentStock (possibly 0) already exists on hand.
+      const shortfall = qty - currentStock;
+      try {
+        // "addition" is the only adjustmentType the backend actually treats as an increase
+        // (InventoryController.Adjust's isIncrease whitelist) — anything else, including the
+        // previous "receive" here, is silently applied as a DECREASE instead. This 400s when the
+        // product already has tracked batches at this branch (no BatchId is passed here), which
+        // is exactly when the fallback below — a proper new batch via Batches:Create — takes over.
+        await api.adjustInventory({ productId: selected.id, branchId, quantity: shortfall, adjustmentType: "addition", reason: "Quick stock-in from POS" });
+      } catch {
+        await api.receiveBatch({ productId: selected.id, branchId, quantity: shortfall, notes: "Quick stock-in from POS" });
       }
+      onStockAdded(selected, qty, qty);
     } catch (e: any) {
       setError(e.message ?? "Failed to add stock.");
     } finally { setSaving(false); }
+  };
+
+  // Distinct from handleConfirm above: this deliberately skips receiving anything and sells on a
+  // negative on-hand balance instead — for a genuine "reconcile the paperwork later" counter sale
+  // (e.g. fresh-cut meat weighed at checkout). Only offered where POS Settings allows it.
+  const handleSellAnyway = () => {
+    if (!selected) return;
+    setError("");
+    onStockAdded(selected, 0, existingCartQty + 1);
   };
 
   return (
@@ -247,12 +277,27 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
           )}
           {!selected ? (
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-              <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Search product name, SKU or barcode…" className="pl-9 h-9" />
-              {results.length > 0 && (
-                <div className="absolute z-10 top-full mt-1 w-full bg-background border rounded-lg shadow-lg overflow-hidden">
+              {/* DialogContent clips overflow (see dialog.tsx), so a plain absolutely-positioned
+                  list here gets cut off at the dialog's edge instead of scrolling — a Popover
+                  portals its content to document.body, entirely outside that clipped subtree,
+                  same fix already used for Select/Combobox dropdowns elsewhere in the app. */}
+              <Popover open={results.length > 0} onOpenChange={() => {}}>
+                <PopoverAnchor asChild>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
+                      onKeyDown={handleSearchKeyDown}
+                      placeholder="Search product name, SKU or barcode…" className="pl-9 h-9" />
+                  </div>
+                </PopoverAnchor>
+                <PopoverContent
+                  align="start"
+                  sideOffset={4}
+                  onOpenAutoFocus={(e) => e.preventDefault()}
+                  onCloseAutoFocus={(e) => e.preventDefault()}
+                  onInteractOutside={(e) => e.preventDefault()}
+                  className="w-[--radix-popover-trigger-width] p-0 max-h-72 overflow-y-auto overscroll-contain rounded-lg shadow-lg"
+                >
                   {results.map(p => (
                     <button key={p.id} className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted text-sm text-left gap-3"
                       onMouseDown={e => { e.preventDefault(); setSelected(p); setQuery(p.name); }}>
@@ -265,8 +310,8 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
                       </span>
                     </button>
                   ))}
-                </div>
-              )}
+                </PopoverContent>
+              </Popover>
               {query.trim().length > 0 && results.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-2 px-1">
                   No product found — create it in <span className="font-medium">Inventory → Products</span> first.
@@ -288,44 +333,55 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
             </div>
           )}
 
-          {selected && currentStock > 0 && (
+          {selected && (
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Quantity to Add</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                Quantity Needed <span className="normal-case font-normal text-muted-foreground/80">(total for this sale, not extra on top)</span>
+              </p>
+              {existingCartQty > 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                  Already <span className="font-semibold">{existingCartQty}</span> of this in the cart — entering a
+                  quantity here replaces that line's total, it doesn't add to it.
+                </p>
+              )}
               <div className="flex items-center gap-3">
                 <button className="h-9 w-9 rounded-lg border flex items-center justify-center hover:bg-muted disabled:opacity-30"
                   disabled={qty <= 1} onClick={() => setQty(q => Math.max(1, q - 1))}>
                   <Minus className="h-4 w-4" />
                 </button>
                 <Input type="number" min={1} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="h-9 text-center w-20 tabular-nums font-semibold text-base" />
+                  className={`h-9 text-center w-20 tabular-nums font-semibold text-base ${belowNeeded ? "border-destructive focus-visible:ring-destructive" : ""}`} />
                 <button className="h-9 w-9 rounded-lg border flex items-center justify-center hover:bg-muted"
                   onClick={() => setQty(q => q + 1)}>
                   <Plus className="h-4 w-4" />
                 </button>
-                <p className="text-xs text-muted-foreground">
-                  New stock: <span className="font-semibold text-foreground">{currentStock + qty}</span>
-                </p>
+                {!belowNeeded && (
+                  <p className="text-xs text-muted-foreground">
+                    Receiving <span className="font-semibold text-foreground">{qty - currentStock}</span> · New stock: <span className="font-semibold text-foreground">{qty}</span>
+                  </p>
+                )}
               </div>
+              {belowNeeded && (
+                <p className="text-xs text-destructive mt-2">
+                  You already have <span className="font-semibold">{currentStock}</span> in stock — Quick Stock In only
+                  opens for a genuine shortfall (a quantity greater than what's on hand). For routine restocking, use{" "}
+                  <span className="font-medium">Inventory → Stock In</span> instead.
+                </p>
+              )}
             </div>
           )}
 
           {selected && currentStock <= 0 && allowNegativeStock && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5 flex items-center justify-between gap-3">
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                This item has no stock on record at this branch. Selling it now will record on-hand
-                stock as <span className="font-semibold">-1</span> until it's actually received —
-                no stock will be added here.
+                Prefer to sell it right now without receiving stock first? Records on-hand as{" "}
+                <span className="font-semibold">-1</span> instead, to reconcile once it's actually received.
               </p>
-            </div>
-          )}
-
-          {selected && currentStock <= 0 && !allowNegativeStock && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5">
-              <p className="text-xs text-destructive">
-                This item has no stock on record at this branch, and this branch doesn't allow
-                negative stock (POS Settings). Receive real stock for it in Inventory first — selling
-                it here would just fail at checkout.
-              </p>
+              <Button type="button" size="sm" variant="outline"
+                className="h-7 text-xs shrink-0 border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-400"
+                onClick={handleSellAnyway} disabled={saving}>
+                Sell Anyway
+              </Button>
             </div>
           )}
 
@@ -335,9 +391,9 @@ function QuickStockInDialog({ open, onClose, products, stockMap, branchId, allow
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button className="gradient-primary text-primary-foreground border-0 gap-1.5"
-            onClick={handleConfirm} disabled={!selected || saving || !canSellAnyway}>
+            onClick={handleConfirm} disabled={!selected || saving || belowNeeded}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
-            {currentStock > 0 ? "Add to Stock & Cart" : "Sell Anyway & Add to Cart"}
+            Add to Stock & Cart
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -587,6 +643,7 @@ function POS() {
 
   // ─── Data ─────────────────────────────────────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());
   const [expiredProductIds, setExpiredProductIds] = useState<Set<string>>(new Set());
   const [taxRate, setTaxRate] = useState(0.15);
@@ -600,8 +657,18 @@ function POS() {
 
   // ─── Cart ─────────────────────────────────────────────────────────────────────
   const [cart, setCart] = useState<CartItem[]>([]);
+  const cartQtyBySku = useMemo(() => new Map(cart.map(i => [i.sku, i.qty])), [cart]);
   const [query, setQuery] = useState("");
   const [showResults, setShowResults] = useState(false);
+  // Category/Subcategory browse filter — independent of the text search below, so a cashier can
+  // either type to search or narrow by category/subcategory (or both together). "all" (not "")
+  // matches this app's existing cascading-filter convention (see product-sales.tsx) since a
+  // Radix Select item can't take an empty-string value.
+  const [categoryId, setCategoryId] = useState("all");
+  const [subcategoryId, setSubcategoryId] = useState("all");
+  const categoryFilterActive = categoryId !== "all";
+  const topCategories = useMemo(() => categories.filter((c) => !c.parentId), [categories]);
+  const subcategoriesOf = (parentId: string) => categories.filter((c) => c.parentId === parentId);
   const [flashSku, setFlashSku] = useState<string | null>(null);
   const [scanFlash, setScanFlash] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -713,9 +780,11 @@ function POS() {
       api.getProducts(),
       api.getTaxRules(),
       api.getActiveShifts(),
+      api.getCategories(),
     ])
-      .then(([prodsR, taxRulesR, shiftsR]) => {
+      .then(([prodsR, taxRulesR, shiftsR, categoriesR]) => {
         if (prodsR.status === "fulfilled") setProducts(prodsR.value);
+        if (categoriesR.status === "fulfilled") setCategories(categoriesR.value);
 
         if (taxRulesR.status === "fulfilled") {
           const taxRules = taxRulesR.value;
@@ -1649,19 +1718,32 @@ function POS() {
   // ─── Search / barcode scan ─────────────────────────────────────────────────────
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return products
-      .filter((p) => {
-        if (p.status !== "active") return false;
-        if (!stockMap.has(p.id)) return false; // hide products not stocked in current branch
-        return (
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q))
-        );
-      })
-      .slice(0, 8);
-  }, [query, products, stockMap]);
+    if (!q && !categoryFilterActive) return [];
+    // "under this category" = the category itself plus every one of its subcategories, unless a
+    // specific subcategory was picked (then just that one).
+    const categoryIdSet = categoryFilterActive
+      ? new Set(
+          subcategoryId !== "all"
+            ? [subcategoryId]
+            : [categoryId, ...subcategoriesOf(categoryId).map((c) => c.id)],
+        )
+      : null;
+    const filtered = products.filter((p) => {
+      if (p.status !== "active") return false;
+      if (!stockMap.has(p.id)) return false; // hide products not stocked in current branch
+      if (categoryIdSet && !(p.categoryId && categoryIdSet.has(p.categoryId))) return false;
+      if (!q) return true;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        (p.barcode && p.barcode.toLowerCase().includes(q))
+      );
+    });
+    // A bare text search keeps the short typeahead cap; browsing by category/subcategory is a
+    // deliberate "show me everything in here" action, not a safety-capped autocomplete.
+    return categoryFilterActive ? filtered : filtered.slice(0, 8);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, products, stockMap, categoryId, subcategoryId, categories]);
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -1776,6 +1858,10 @@ function POS() {
   // ─── Create new customer from POS ─────────────────────────────────────────────
   const createNewCustomer = async () => {
     if (!newCustomerName.trim() || !customerPhone.trim()) return;
+    if (!isValidSaudiPhone(customerPhone)) {
+      toast.error("Enter a valid Saudi mobile number (05XXXXXXXX or +9665XXXXXXXX).");
+      return;
+    }
     setCreatingCustomer(true);
     try {
       const c = await api.createCustomer({ fullName: newCustomerName.trim(), phone: customerPhone.trim() });
@@ -2099,6 +2185,38 @@ function POS() {
               </div>
             </div>
 
+            {topCategories.length > 0 && (
+              <div className="flex items-center gap-2 mt-2">
+                <Select
+                  value={categoryId}
+                  onValueChange={(v) => { setCategoryId(v); setSubcategoryId("all"); setShowResults(true); }}
+                >
+                  <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="Category" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {topCategories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {categoryFilterActive && subcategoriesOf(categoryId).length > 0 && (
+                  <Select value={subcategoryId} onValueChange={(v) => { setSubcategoryId(v); setShowResults(true); }}>
+                    <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="Subcategory" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Subcategories</SelectItem>
+                      {subcategoriesOf(categoryId).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                {categoryFilterActive && (
+                  <Button
+                    size="sm" variant="ghost" className="h-8 text-xs px-2 text-muted-foreground"
+                    onClick={() => { setCategoryId("all"); setSubcategoryId("all"); }}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            )}
+
             {scanFlash && (
               <div className="mt-2 flex items-center gap-2 text-sm text-green-600 dark:text-green-400 px-1 font-medium animate-pulse">
                 <ScanBarcode className="h-4 w-4" /> Item scanned — added to cart
@@ -2117,8 +2235,8 @@ function POS() {
               </div>
             )}
 
-            {!loading && showResults && matches.length > 0 && (
-              <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden">
+            {!loading && (showResults || categoryFilterActive) && matches.length > 0 && (
+              <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden max-h-[420px] overflow-y-auto">
                 {matches.map((p) => {
                   const stock = stockMap.get(p.id);
                   const outOfStock = stock !== undefined && stock <= 0;
@@ -2162,8 +2280,10 @@ function POS() {
                 })}
               </div>
             )}
-            {!loading && showResults && query && matches.length === 0 && (
-              <p className="mt-2 text-sm text-muted-foreground px-1">No product matches "{query}"</p>
+            {!loading && (showResults || categoryFilterActive) && (query || categoryFilterActive) && matches.length === 0 && (
+              <p className="mt-2 text-sm text-muted-foreground px-1">
+                {query ? `No product matches "${query}"` : "No products in this category."}
+              </p>
             )}
             <p className="text-[11px] text-muted-foreground mt-2 px-1">
               Tip: hardware barcode scanners work automatically — just scan, item drops into order.
@@ -2406,13 +2526,22 @@ function POS() {
                   <div className="flex gap-1.5">
                     <Input
                       value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      // Digits only, plus a single leading "+" for the country code — filters out
+                      // letters/other characters as they're typed, same as Branches/Warehouses'
+                      // contact number fields, instead of only catching it on Save.
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setCustomerPhone((raw[0] === "+" ? "+" : "") + raw.replace(/[^\d]/g, ""));
+                      }}
                       onKeyDown={(e) => e.key === "Enter" && createNewCustomer()}
                       placeholder="Phone number…"
                       className="h-8 text-xs flex-1"
+                      maxLength={13}
+                      inputMode="tel"
                     />
                     <Button size="sm" className="h-8 px-3 text-xs gradient-primary text-primary-foreground border-0"
-                      onClick={createNewCustomer} disabled={creatingCustomer || !newCustomerName.trim() || !customerPhone.trim()}>
+                      onClick={createNewCustomer}
+                      disabled={creatingCustomer || !newCustomerName.trim() || !customerPhone.trim() || !isValidSaudiPhone(customerPhone)}>
                       {creatingCustomer ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
                     </Button>
                     <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
@@ -2420,6 +2549,9 @@ function POS() {
                       Skip
                     </Button>
                   </div>
+                  {customerPhone.trim() && !isValidSaudiPhone(customerPhone) && (
+                    <p className="text-[10px] text-destructive">Enter a valid Saudi mobile number (05XXXXXXXX or +9665XXXXXXXX).</p>
+                  )}
                 </div>
               </div>
             ) : (
@@ -2979,18 +3111,23 @@ function POS() {
         onClose={() => { setStockInOpen(false); setStockInInitialProduct(null); }}
         products={products}
         stockMap={stockMap}
+        cartQtyBySku={cartQtyBySku}
         branchId={branch?.id ?? ""}
         allowNegativeStock={posPerms.allowNegativeStock}
         initialProduct={stockInInitialProduct}
-        onStockAdded={(product, newStock) => {
+        onStockAdded={(product, newStock, cartQty) => {
           // Not capped at newStock here — when currentStock was 0, QuickStockInDialog
           // intentionally didn't receive any stock and expects this add-to-cart to proceed
           // anyway, so the sale below records the shortfall as negative on-hand stock.
+          // cartQty is the line's new TOTAL (the dialog already folded in whatever was in the
+          // cart beforehand) — set it directly, never add on top, or a product already in the
+          // cart would double up every time this dialog runs again for it.
           setStockMap(prev => { const next = new Map(prev); next.set(product.id, newStock); return next; });
           setCart(c => {
             const ex = c.find(i => i.sku === product.sku);
-            if (ex) return c.map(i => i.sku === product.sku ? { ...i, qty: i.qty + 1, stock: newStock } : i);
-            return [...c, { name: product.name, sku: product.sku, productId: product.id, qty: 1, price: effectivePrice(product), stock: newStock }];
+            // Re-price on quantity change — see priceForQty: a pack price unlocks at its pack size.
+            if (ex) return c.map(i => i.sku === product.sku ? { ...i, qty: cartQty, price: priceForQty(product, cartQty), stock: newStock } : i);
+            return [...c, { name: product.name, sku: product.sku, productId: product.id, qty: cartQty, price: priceForQty(product, cartQty), stock: newStock }];
           });
           setStockInOpen(false);
           setStockInInitialProduct(null);

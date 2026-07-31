@@ -259,6 +259,17 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasForeignKey<OrderDeliveryDetail>(d => d.OrderId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // ─── StockMovement: created_by ────────────────────────────────────────
+        // Without this, CreatedByUser has no Fluent config anywhere and EF never wires it to the
+        // created_by column — every movement's "who did this" silently reads back null regardless
+        // of what's actually stored, the same gap InventoryAdjustment.AdjustedByUser (just below)
+        // already had to be configured explicitly to avoid.
+        modelBuilder.Entity<StockMovement>()
+            .HasOne(m => m.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(m => m.CreatedBy)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // ─── InventoryAdjustment: adjusted_by / approved_by ──────────────────
         modelBuilder.Entity<InventoryAdjustment>()
             .HasOne(a => a.AdjustedByUser)

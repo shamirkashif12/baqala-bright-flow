@@ -3,8 +3,13 @@
 // definition here so every form validates the same way instead of drifting per-file.
 
 // Saudi mobile: 05XXXXXXXX (10 digits) or +9665XXXXXXXX/9665XXXXXXXX (12 digits with country code).
+// Rejects anything containing letters or other stray characters outright — stripping non-digits
+// before checking (the previous approach) let junk like "a0b5c1d2e3f4g5h6i7j8" through, since the
+// leftover digits alone happened to form a valid-looking 10-digit number.
 export function isValidSaudiPhone(phone: string): boolean {
-  const digits = phone.replace(/\D/g, "");
+  const trimmed = phone.trim();
+  if (!/^\+?\d+$/.test(trimmed)) return false;
+  const digits = trimmed.replace(/^\+/, "");
   return /^05\d{8}$/.test(digits) || /^9665\d{8}$/.test(digits);
 }
 

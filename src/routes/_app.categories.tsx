@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
@@ -9,9 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Pencil, Trash2, Loader2, Tag, CheckCircle2, Search,
-  ToggleLeft, ToggleRight, Clock,
+  ToggleLeft, ToggleRight, Clock, ChevronRight, ChevronDown, Layers, CornerDownRight, FolderPlus,
 } from "lucide-react";
 import { api, type Category } from "@/lib/api";
 import { RoleGate } from "@/components/role-gate";
@@ -27,20 +28,30 @@ export const Route = createFileRoute("/_app/categories")({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="space-y-1.5"><Label className="text-xs font-medium">{label}</Label>{children}</div>;
+function FieldRow({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-medium">{label}</Label>
+      {children}
+      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
 }
 
-// ─── Add / Edit Dialog ────────────────────────────────────────────────────────
+const NONE_PARENT = "__none__";
 
-function CategoryDialog({ open, onClose, editing, onDone }: {
+// ─── Add / Edit Dialog ────────────────────────────────────────────────────
+
+function CategoryDialog({ open, onClose, editing, presetParentId, categories, onDone }: {
   open: boolean; onClose: () => void;
   editing: Category | null;
+  presetParentId?: string;
+  categories: Category[];
   onDone: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ name: "", nameAr: "", sortOrder: "0", isActive: true });
+  const [form, setForm] = useState({ name: "", nameAr: "", sortOrder: "0", isActive: true, parentId: NONE_PARENT });
 
   useEffect(() => {
     if (editing) {
@@ -49,15 +60,25 @@ function CategoryDialog({ open, onClose, editing, onDone }: {
         nameAr: editing.nameAr ?? "",
         sortOrder: String(editing.sortOrder ?? 0),
         isActive: editing.isActive,
+        parentId: editing.parentId ?? NONE_PARENT,
       });
     } else {
-      setForm({ name: "", nameAr: "", sortOrder: "0", isActive: true });
+      setForm({ name: "", nameAr: "", sortOrder: "0", isActive: true, parentId: presetParentId ?? NONE_PARENT });
     }
     setError("");
-  }, [editing, open]);
+  }, [editing, presetParentId, open]);
+
+  // Only top-level categories can be a parent (subcategories are capped at one level deep), and a
+  // category can never be its own parent.
+  const parentOptions = categories.filter(c => !c.parentId && c.id !== editing?.id);
+  const parentName = parentOptions.find(c => c.id === (presetParentId ?? form.parentId))?.name;
+  const isSubcategory = form.parentId !== NONE_PARENT;
+  const title = editing
+    ? (isSubcategory ? "Edit Subcategory" : "Edit Category")
+    : (presetParentId ? `Add Subcategory to ${parentName ?? "Category"}` : "Add Category");
 
   const handleSave = async () => {
-    if (!form.name.trim()) return setError("Category name is required.");
+    if (!form.name.trim()) return setError("Name is required.");
     setSaving(true); setError("");
     try {
       const payload: Partial<Category> = {
@@ -65,6 +86,7 @@ function CategoryDialog({ open, onClose, editing, onDone }: {
         nameAr: form.nameAr.trim() || undefined,
         sortOrder: Number(form.sortOrder) || 0,
         isActive: form.isActive,
+        parentId: form.parentId === NONE_PARENT ? undefined : form.parentId,
       };
       if (editing) {
         await api.updateCategory(editing.id, payload);
@@ -80,16 +102,25 @@ function CategoryDialog({ open, onClose, editing, onDone }: {
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit Category" : "Add Category"}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 mt-2">
-          <FieldRow label="Category Name (English) *">
-            <Input className="h-9" placeholder="e.g. Dairy & Eggs" value={form.name}
+          <FieldRow label={isSubcategory || presetParentId ? "Subcategory Name (English) *" : "Category Name (English) *"}>
+            <Input className="h-9" value={form.name}
               onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
           </FieldRow>
-          <FieldRow label="Category Name (Arabic)">
-            <Input className="h-9" dir="rtl" placeholder="مثال: الألبان والبيض" value={form.nameAr}
+          <FieldRow label="Name (Arabic)">
+            <Input className="h-9" dir="rtl" value={form.nameAr}
               onChange={e => setForm(p => ({ ...p, nameAr: e.target.value }))} />
+          </FieldRow>
+          <FieldRow label="Parent Category" hint="Leave as top-level to create a category, or pick one to make this a subcategory.">
+            <Select value={form.parentId} onValueChange={v => setForm(p => ({ ...p, parentId: v }))}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_PARENT}>None — Top-level Category</SelectItem>
+                {parentOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </FieldRow>
           <FieldRow label="Sort Order">
             <Input type="number" min={0} className="h-9" placeholder="0" value={form.sortOrder}
@@ -98,7 +129,7 @@ function CategoryDialog({ open, onClose, editing, onDone }: {
           <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5">
             <div>
               <p className="text-sm font-medium">Active</p>
-              <p className="text-xs text-muted-foreground">Inactive categories are hidden from product forms</p>
+              <p className="text-xs text-muted-foreground">Inactive entries are hidden from product forms</p>
             </div>
             <button type="button" onClick={() => setForm(p => ({ ...p, isActive: !p.isActive }))}>
               {form.isActive
@@ -111,7 +142,7 @@ function CategoryDialog({ open, onClose, editing, onDone }: {
         <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow mt-2"
           onClick={handleSave} disabled={saving}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
-          {editing ? "Save Changes" : "Create Category"}
+          {editing ? "Save Changes" : isSubcategory ? "Create Subcategory" : "Create Category"}
         </Button>
       </DialogContent>
     </Dialog>
@@ -140,16 +171,20 @@ function DeleteDialog({ category, onClose, onDone }: {
     finally { setDeleting(false); }
   };
 
+  const isSubcategory = !!category?.parentId;
+
   return (
     <Dialog open={!!category} onOpenChange={v => { if (!v) { setReason(""); onClose(); } }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Delete Category</DialogTitle>
+          <DialogTitle>Delete {isSubcategory ? "Subcategory" : "Category"}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground mt-1">
-          Delete <span className="font-semibold text-foreground">{category?.name}</span>? Products
-          assigned to this category will become uncategorised. This always goes to a manager for
-          approval first — even you can't action your own request — and only takes effect once approved.
+          Delete <span className="font-semibold text-foreground">{category?.name}</span>? This always
+          goes to a manager for approval first — even you can't action your own request — and only
+          takes effect once approved. A {isSubcategory ? "subcategory" : "category"} with products or
+          {isSubcategory ? "" : " subcategories"} still assigned to it can't be deleted until those are
+          reassigned first.
         </p>
         <div className="mt-2">
           <Label className="text-xs">Reason (optional)</Label>
@@ -177,14 +212,16 @@ function CategoriesPage() {
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
+  const [addParentId, setAddParentId] = useState<string | undefined>(undefined);
   const [editItem, setEditItem] = useState<Category | null>(null);
   const [deleteItem, setDeleteItem] = useState<Category | null>(null);
 
   const load = () => {
     setLoading(true);
     // includeInactive so the Inactive metric card reflects reality — the visible
-    // table below still filters back down to active-only rows.
+    // tree below still filters back down to active-only rows.
     api.getCategories({ includeInactive: true })
       .then((cats) => { setCategories(cats); setLoadError(false); })
       .catch(() => setLoadError(true))
@@ -192,34 +229,66 @@ function CategoriesPage() {
   };
   useEffect(load, []);
 
-  const filtered = categories.filter(c => showInactive || c.isActive).filter(c =>
-    !q || c.name.toLowerCase().includes(q.toLowerCase()) || (c.nameAr ?? "").includes(q),
+  const topCategories = useMemo(
+    () => categories.filter(c => !c.parentId).slice().sort((a, b) => a.sortOrder - b.sortOrder),
+    [categories],
   );
+  const subcategoriesOf = (parentId: string) =>
+    categories.filter(c => c.parentId === parentId).slice().sort((a, b) => a.sortOrder - b.sortOrder);
 
   const active = categories.filter(c => c.isActive).length;
   const inactive = categories.length - active;
+  const subcategoryCount = categories.length - topCategories.length;
+
+  const matches = (c: Category) =>
+    !q || c.name.toLowerCase().includes(q.toLowerCase()) || (c.nameAr ?? "").includes(q);
+  const visible = (c: Category) => showInactive || c.isActive;
+
+  const rows = topCategories
+    .map(top => ({ top, children: subcategoriesOf(top.id).filter(visible) }))
+    .filter(({ top, children }) => visible(top) && (
+      !q || matches(top) || children.some(matches)
+    ));
+
+  const toggle = (id: string) => setCollapsed(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const openAdd = (parentId?: string) => { setAddParentId(parentId); setAddOpen(true); };
+  const closeDialogs = () => { setAddOpen(false); setAddParentId(undefined); setEditItem(null); };
 
   return (
     <PageShell
       title="Categories"
-      subtitle="Manage product categories · used in inventory & POS"
+      subtitle="Manage product categories & subcategories · used in inventory & POS"
       actions={
         <Button className="gradient-primary text-primary-foreground border-0 shadow-glow h-9 gap-1.5"
-          onClick={() => setAddOpen(true)}>
+          onClick={() => openAdd(undefined)}>
           <Plus className="h-4 w-4" />Add Category
         </Button>
       }
     >
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ── Metrics ── */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="rounded-2xl border border-border/60 bg-card shadow-card p-4 flex items-center gap-4">
           <div className="h-11 w-11 rounded-xl gradient-primary flex items-center justify-center shrink-0">
             <Tag className="h-5 w-5 text-primary-foreground" />
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total</p>
-            <p className="text-2xl font-black">{categories.length}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Categories</p>
+            <p className="text-2xl font-black">{topCategories.length}</p>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-border/60 bg-card shadow-card p-4 flex items-center gap-4">
+          <div className="h-11 w-11 rounded-xl bg-muted flex items-center justify-center shrink-0">
+            <Layers className="h-5 w-5 text-foreground" />
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Subcategories</p>
+            <p className="text-2xl font-black">{subcategoryCount}</p>
           </div>
         </div>
         <div className="rounded-2xl border border-success/30 bg-success/5 shadow-card p-4 flex items-center gap-4">
@@ -237,9 +306,9 @@ function CategoriesPage() {
           </div>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Inactive</p>
-            {/* Hidden inactive categories aren't part of what's currently on screen, so the
-                tile reads 0 to match the table below — the "Show Inactive (N)" button right above
-                is where the true count still surfaces, so nothing is actually hidden from the user. */}
+            {/* Hidden inactive rows aren't part of what's currently on screen, so the tile reads 0
+                to match the tree below — the "Show Inactive (N)" button is where the true count
+                still surfaces, so nothing is actually hidden from the user. */}
             <p className="text-2xl font-black">{showInactive ? inactive : 0}</p>
           </div>
         </div>
@@ -249,7 +318,7 @@ function CategoriesPage() {
       <div className="flex items-center gap-2">
         <div className="relative max-w-sm flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input className="h-9 pl-9 bg-muted/40" placeholder="Search categories…"
+          <Input className="h-9 pl-9 bg-muted/40" placeholder="Search categories & subcategories…"
             value={q} onChange={e => setQ(e.target.value)} />
         </div>
         <Button
@@ -262,75 +331,96 @@ function CategoriesPage() {
         </Button>
       </div>
 
-      {/* ── Table ── */}
+      {/* ── Tree ── */}
       {loading ? (
         <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
           <Loader2 className="h-5 w-5 animate-spin" />Loading categories…
         </div>
       ) : (
-        <Card className="overflow-hidden border-border/60 shadow-card">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
-                  <th className="px-4 py-3 font-semibold">Name</th>
-                  <th className="px-4 py-3 font-semibold">Arabic Name</th>
-                  <th className="px-4 py-3 font-semibold">Sort Order</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(c => (
-                  <tr key={c.id} className="border-b border-border/40 hover:bg-muted/20 last:border-0">
-                    <td className="px-4 py-3 font-semibold" data-no-i18n>{c.name}</td>
-                    <td className="px-4 py-3 text-sm text-left" dir="rtl" data-no-i18n>{c.nameAr || <span className="text-muted-foreground">—</span>}</td>
-                    <td className="px-4 py-3 tabular-nums text-muted-foreground">{c.sortOrder}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col gap-1 items-start">
-                        {c.isActive
-                          ? <Badge variant="outline" className="bg-success/15 text-success border-success/30 text-xs gap-1"><span className="h-1.5 w-1.5 rounded-full bg-success inline-block" />Active</Badge>
-                          : <Badge variant="outline" className="text-xs gap-1"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground inline-block" />Inactive</Badge>}
-                        {/* The Delete action queues a manager-approval request and doesn't touch the
-                            row otherwise — without this, clicking Delete looked like it did nothing. */}
-                        {c.pendingApproval && (
-                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 text-[10px] gap-1" title={`Requested by ${c.pendingApproval.requestedByName ?? "—"}`}>
-                            <Clock className="h-2.5 w-2.5" />Deletion Pending
-                          </Badge>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit"
-                          onClick={() => setEditItem(c)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
-                          title={c.pendingApproval ? "Deletion already pending manager approval" : "Delete"}
-                          disabled={!!c.pendingApproval}
-                          onClick={() => setDeleteItem(c)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
+        <Card className="overflow-hidden border-border/60 shadow-card divide-y divide-border/40">
+          {rows.map(({ top, children: allChildren }) => {
+            const children = q ? allChildren.filter(matches) : allChildren;
+            const isCollapsed = collapsed.has(top.id) && !q;
+            return (
+              <div key={top.id}>
+                <div className="flex items-center gap-2 px-4 py-3 hover:bg-muted/20">
+                  <button type="button" className="shrink-0 text-muted-foreground disabled:opacity-0"
+                    disabled={children.length === 0} onClick={() => toggle(top.id)}>
+                    {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </button>
+                  <div className="flex-1 min-w-0 flex items-center gap-2">
+                    <span className="font-semibold truncate" data-no-i18n>{top.name}</span>
+                    {top.nameAr && <span className="text-xs text-muted-foreground" dir="rtl" data-no-i18n>{top.nameAr}</span>}
+                    {children.length > 0 && (
+                      <Badge variant="outline" className="text-[10px]">{children.length} subcategor{children.length === 1 ? "y" : "ies"}</Badge>
+                    )}
+                    {top.isActive
+                      ? <Badge variant="outline" className="bg-success/15 text-success border-success/30 text-[10px] gap-1"><span className="h-1.5 w-1.5 rounded-full bg-success inline-block" />Active</Badge>
+                      : <Badge variant="outline" className="text-[10px] gap-1"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground inline-block" />Inactive</Badge>}
+                    {top.pendingApproval && (
+                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 text-[10px] gap-1" title={`Requested by ${top.pendingApproval.requestedByName ?? "—"}`}>
+                        <Clock className="h-2.5 w-2.5" />Deletion Pending
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => openAdd(top.id)}>
+                      <FolderPlus className="h-3.5 w-3.5" />Subcategory
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit"
+                      onClick={() => setEditItem(top)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
+                      title={top.pendingApproval ? "Deletion already pending manager approval" : "Delete"}
+                      disabled={!!top.pendingApproval}
+                      onClick={() => setDeleteItem(top)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                {!isCollapsed && children.map(c => (
+                  <div key={c.id} className="flex items-center gap-2 pl-10 pr-4 py-2.5 bg-muted/10 hover:bg-muted/25 border-t border-border/30">
+                    <CornerDownRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <span className="text-sm truncate" data-no-i18n>{c.name}</span>
+                      {c.nameAr && <span className="text-xs text-muted-foreground" dir="rtl" data-no-i18n>{c.nameAr}</span>}
+                      {c.isActive
+                        ? <Badge variant="outline" className="bg-success/15 text-success border-success/30 text-[10px] gap-1"><span className="h-1.5 w-1.5 rounded-full bg-success inline-block" />Active</Badge>
+                        : <Badge variant="outline" className="text-[10px] gap-1"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground inline-block" />Inactive</Badge>}
+                      {c.pendingApproval && (
+                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 text-[10px] gap-1" title={`Requested by ${c.pendingApproval.requestedByName ?? "—"}`}>
+                          <Clock className="h-2.5 w-2.5" />Deletion Pending
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit"
+                        onClick={() => setEditItem(c)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
+                        title={c.pendingApproval ? "Deletion already pending manager approval" : "Delete"}
+                        disabled={!!c.pendingApproval}
+                        onClick={() => setDeleteItem(c)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
                 ))}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="text-center py-12 text-muted-foreground text-sm">
-                      {q ? "No categories match your search." : "No categories yet. Add one above."}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            );
+          })}
+          {rows.length === 0 && (
+            <div className="text-center py-12 text-muted-foreground text-sm">
+              {q ? "No categories or subcategories match your search." : "No categories yet. Add one above."}
+            </div>
+          )}
         </Card>
       )}
 
-      <CategoryDialog open={addOpen || !!editItem} onClose={() => { setAddOpen(false); setEditItem(null); }}
-        editing={editItem} onDone={load} />
+      <CategoryDialog open={addOpen || !!editItem} onClose={closeDialogs}
+        editing={editItem} presetParentId={editItem ? undefined : addParentId} categories={categories} onDone={load} />
       <DeleteDialog category={deleteItem} onClose={() => setDeleteItem(null)} onDone={load} />
     </PageShell>
   );

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Minus, Plus, RotateCcw, ScanBarcode, ShoppingCart, Tag, Trash2, X, QrCode, User, Loader2, Gift,
+  ChevronDown, ImageOff, Minus, Plus, RotateCcw, ScanBarcode, ShoppingCart, Tag, Trash2, X, QrCode, User, Loader2, Gift,
 } from "lucide-react";
 import { useCart } from "../lib/cart";
 import { useSession } from "../lib/session";
@@ -32,6 +32,42 @@ export default function ScanScreen() {
   const [newOrderConfirmOpen, setNewOrderConfirmOpen] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
   const autoPrintRef = useRef(false);
+
+  // Category / Subcategory browse filter, plus name/SKU search-as-you-type — mirrors the staff
+  // POS's product filter. A "subcategory" is just a Category whose parentId points at another
+  // Category. Independent of the scan-to-add flow above; both paths go through
+  // addProductToCart, which still enforces allowSelfCheckout/active status either way.
+  const [categoryId, setCategoryId] = useState("all");
+  const [subcategoryId, setSubcategoryId] = useState("all");
+  const categoryFilterActive = categoryId !== "all";
+  const topCategories = useMemo(() => cart.categories.filter((c) => !c.parentId), [cart.categories]);
+  const subcategoriesOf = (parentId: string) => cart.categories.filter((c) => c.parentId === parentId);
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q && !categoryFilterActive) return [];
+    const categoryIdSet = categoryFilterActive
+      ? new Set(
+          subcategoryId !== "all"
+            ? [subcategoryId]
+            : [categoryId, ...subcategoriesOf(categoryId).map((c) => c.id)],
+        )
+      : null;
+    const filtered = cart.products.filter((p) => {
+      if (p.status !== "active") return false;
+      if (categoryIdSet && !(p.categoryId && categoryIdSet.has(p.categoryId))) return false;
+      if (!q) return true;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        (p.barcode && p.barcode.toLowerCase().includes(q))
+      );
+    });
+    // A bare text search keeps a short cap (it's meant to help find the one item just typed);
+    // browsing by category/subcategory is a deliberate "show me everything in here" action.
+    return categoryFilterActive ? filtered : filtered.slice(0, 8);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, cart.products, categoryId, subcategoryId, cart.categories]);
 
   // Customer lookup (optional, matches the staff POS's own phone-lookup panel)
   const [customerPhone, setCustomerPhone] = useState("");
@@ -291,7 +327,7 @@ export default function ScanScreen() {
                   autoFocus
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Scan barcode…"
+                  placeholder="Scan barcode or search product name…"
                   className="pl-10 h-12 sm:h-14 text-base bg-background shadow-none border-border/70"
                 />
               </div>
@@ -299,6 +335,74 @@ export default function ScanScreen() {
                 <ScanBarcode className="h-5 w-5" /> Scan
               </Button>
             </form>
+
+            {topCategories.length > 0 && (
+              <div className="mt-3 flex gap-2">
+                <div className="relative">
+                  <select
+                    value={categoryId}
+                    onChange={(e) => { setCategoryId(e.target.value); setSubcategoryId("all"); }}
+                    className="h-10 rounded-md border border-input bg-transparent pl-3 pr-8 text-sm shadow-sm appearance-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <option value="all">All Categories</option>
+                    {topCategories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="h-4 w-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
+                {categoryFilterActive && subcategoriesOf(categoryId).length > 0 && (
+                  <div className="relative">
+                    <select
+                      value={subcategoryId}
+                      onChange={(e) => setSubcategoryId(e.target.value)}
+                      className="h-10 rounded-md border border-input bg-transparent pl-3 pr-8 text-sm shadow-sm appearance-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="all">All Subcategories</option>
+                      {subcategoriesOf(categoryId).map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="h-4 w-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {(query.trim() || categoryFilterActive) && (
+              matches.length > 0 ? (
+                <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden max-h-[360px] overflow-y-auto">
+                  {matches.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => addProductToCart(p)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 hover:bg-muted/60"
+                    >
+                      <div className="h-9 w-9 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center shrink-0">
+                        <ImageOff className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{p.name}</p>
+                        <p className="text-xs text-muted-foreground">SKU {p.sku}</p>
+                      </div>
+                      {!p.allowSelfCheckout && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-warning/20 text-warning-foreground shrink-0">
+                          Ask attendant
+                        </span>
+                      )}
+                      <span className="font-bold text-primary tabular-nums shrink-0">
+                        <SARIcon />{p.basePrice.toFixed(2)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground px-1">
+                  {query.trim() ? `No product matches "${query.trim()}"` : "No products in this category."}
+                </p>
+              )
+            )}
 
             {message && (
               <p className={`mt-2 text-sm px-1 font-medium ${message.tone === "error" ? "text-destructive" : "text-success"}`}>
