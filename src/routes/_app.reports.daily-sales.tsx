@@ -162,7 +162,7 @@ function DailySales() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Gross Sales" value={<><SARIcon />{fmt(kpis?.grossSales ?? 0)}</>} icon={Wallet} accent="primary" />
         <MetricCard label="Net Sales" value={<><SARIcon />{fmt(kpis?.netSales ?? 0)}</>} icon={Wallet} />
         <MetricCard label="Transactions" value={String(kpis?.transactions ?? 0)} icon={Receipt} />

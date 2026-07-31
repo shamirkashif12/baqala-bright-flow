@@ -260,7 +260,7 @@ function WasteSpoilage() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         {canViewCost && <MetricCard label="Total Write-off Value" value={<><SARIcon />{fmt(kpis?.totalWriteOffValue ?? 0)}</>} icon={Ban} accent="destructive" />}
         <MetricCard label="Expired Items" value={String(kpis?.expiredItems ?? 0)} icon={AlertTriangle} accent="warning" />
         <MetricCard label="Damaged Items" value={String(kpis?.damagedItems ?? 0)} icon={Ban} accent="destructive" />

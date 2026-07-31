@@ -816,7 +816,7 @@ function SuppliersTab() {
     <div className="space-y-5">
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Metric cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Suppliers" value={String(totalSuppliers)} icon={Truck} accent="primary" />
         <MetricCard label="Active" value={String(activeSuppliers)} icon={CheckCircle} accent="success" />
         <MetricCard label="Inactive" value={String(totalSuppliers - activeSuppliers)} icon={Clock} accent="warning" />

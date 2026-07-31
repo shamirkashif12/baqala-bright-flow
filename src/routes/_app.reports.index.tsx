@@ -131,7 +131,7 @@ function Reports() {
 
   return (
     <PageShell title="Reports" subtitle="Operational, financial and compliance reports">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {reports.map((r) => {
           const enabled = !!r.href;
           return (
@@ -152,7 +152,7 @@ function Reports() {
                     {!enabled && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">{r.desc}</p>
-                  <div className="flex gap-2 mt-3">
+                  <div className="flex flex-wrap gap-2 mt-3">
                     {enabled ? (
                       <Button asChild variant="ghost" size="sm" className="h-7 text-xs px-2 gap-1">
                         <Link to={r.href!} target="_blank" rel="noopener noreferrer">

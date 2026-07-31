@@ -165,7 +165,7 @@ function SupplierPerformance() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Best Fill Rate %" value={`${kpis?.bestFillRatePct ?? 0}%`} icon={Gauge} accent="success" />
         <MetricCard label="Avg Lead Time (days)" value={String(kpis?.averageLeadTimeDays ?? 0)} icon={Clock} />
         <MetricCard label="Total Purchase Value" value={<><SARIcon />{fmt(kpis?.totalPurchaseValue ?? 0)}</>} icon={Wallet} accent="primary" />

@@ -188,7 +188,7 @@ function EntriesTab() {
     <div className="space-y-4">
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ─── Summary ─── */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Expenses" value={<><SARIcon />{stats.total.toFixed(2)}</>} icon={Receipt} accent="primary" />
         <MetricCard label="Pending Approval" value={String(stats.pendingCount)} icon={Clock} accent="warning" />
         <MetricCard label="Approved" value={<><SARIcon />{stats.approvedTotal.toFixed(2)}</>} icon={CheckCircle} accent="success" />

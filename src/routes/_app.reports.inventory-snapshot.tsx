@@ -186,7 +186,7 @@ function InventorySnapshot() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         {canViewCost && <MetricCard label="Total Stock Value" value={<><SARIcon />{fmt(kpis?.totalStockValue ?? 0)}</>} icon={Boxes} accent="primary" />}
         <MetricCard label="SKU Count" value={String(kpis?.skuCount ?? 0)} icon={Package} />
         <MetricCard label="Available Qty" value={String(kpis?.availableQty ?? 0)} icon={PackageCheck} accent="success" />

@@ -135,7 +135,7 @@ function ServiceCharges() {
   return (
     <PageShell title="Service Charges" subtitle="Business-configured surcharges (delivery fee, card surcharge) — not a tax. See Tax, Fees & Tobacco for VAT and tobacco excise.">
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Active Service Charges" value={String(activeChargesCount)} icon={Truck} accent="primary" />
         <MetricCard label="Total Configured" value={String(charges.length)} icon={Receipt} />
       </div>

@@ -135,7 +135,7 @@ function CashierSales() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Top Cashier" value={kpis?.topCashier ?? "—"} icon={Trophy} accent="primary" />
         <MetricCard label="Total Sales" value={<><SARIcon />{fmt(kpis?.totalSales ?? 0)}</>} icon={Wallet} />
         <MetricCard label="Cash Variance" value={<><SARIcon />{fmt(kpis?.cashVariance ?? 0)}</>} icon={Wallet} accent={Math.abs(kpis?.cashVariance ?? 0) > VARIANCE_THRESHOLD ? "destructive" : "default"} />

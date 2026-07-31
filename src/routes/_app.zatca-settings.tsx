@@ -237,7 +237,7 @@ function ZatcaSettings() {
     >
       {loadError && <LoadErrorBanner onRetry={loadSettings} message="Failed to load ZATCA settings — the onboarding status and fields below may not reflect saved values. Do not save until this is resolved." />}
       {/* Health row */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Phase 2 Status" value={enabled ? "Enabled" : "Disabled"} icon={ShieldCheck} accent={enabled ? "success" : "warning"} />
         <MetricCard label="Onboarding" value={onboardingLabel(zatca.onboardingStatus)} icon={KeyRound} accent={zatca.onboardingStatus === "production_ready" ? "success" : "warning"} />
         <MetricCard label="Environment" value={zatca.environment === "production" ? "Production" : "Sandbox"} icon={Activity} accent={zatca.environment === "production" ? "success" : "warning"} />

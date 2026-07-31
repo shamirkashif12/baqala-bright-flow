@@ -377,7 +377,7 @@ export function PageShell({ title, subtitle, breadcrumb, actions, children }: { 
   return (
     <>
       <AppTopbar title={title} subtitle={subtitle} breadcrumb={breadcrumb} />
-      <div className="px-4 md:px-6 py-6 space-y-6">
+      <div className="px-4 md:px-6 py-6 space-y-6 w-full max-w-[1800px] mx-auto">
         {actions && <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>}
         {children}
       </div>

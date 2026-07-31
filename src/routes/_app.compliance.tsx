@@ -193,7 +193,7 @@ function Compliance() {
   return (
     <PageShell title="Compliance — Permissible Items" subtitle="Rules that the POS enforces in real time">
       {rulesLoadError && <LoadErrorBanner onRetry={loadRules} />}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Active Rules" value={String(activeCount)} icon={ShieldCheck} accent="primary" />
         <MetricCard label="Blocked SKUs" value={String(inactiveCount)} icon={Ban} accent="destructive" />
         <MetricCard label="Triggered Today" value="—" icon={AlertTriangle} accent="warning" />

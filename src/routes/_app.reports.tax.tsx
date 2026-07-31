@@ -118,7 +118,7 @@ function TaxReportPage() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Taxable Amount" value={<><SARIcon />{fmt(kpis?.totalTaxableAmount ?? 0)}</>} icon={Coins} accent="primary" />
         <MetricCard label="VAT Amount" value={<><SARIcon />{fmt(kpis?.vatAmount ?? 0)}</>} icon={Percent} accent="success" />
         <MetricCard label="Zero-rated Sales" value={<><SARIcon />{fmt(kpis?.zeroRatedSales ?? 0)}</>} icon={Ban} />

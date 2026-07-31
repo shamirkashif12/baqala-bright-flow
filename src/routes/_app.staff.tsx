@@ -54,7 +54,7 @@ function Staff() {
   return (
     <PageShell title="Staff & Roles" subtitle="People · permissions · shifts · attendance">
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Staff" value={String(staff.length)} icon={Users} accent="primary" />
         <MetricCard label="Active" value={String(active)} icon={UserCheck} accent="success" />
         <MetricCard label="Inactive / Pending" value={String(staff.length - active)} icon={Clock} accent="warning" />

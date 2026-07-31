@@ -193,7 +193,7 @@ function EmployeeAuditCenter() {
           <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
           <MetricCard label="Total Activities" value={String(rows.length)} icon={ShieldAlert} accent="primary" />
           <MetricCard label="Employees Involved" value={String(employeeCount)} icon={Users} />
           <MetricCard label="Discounts Given" value={String(discountCount)} icon={Percent} accent="warning" />

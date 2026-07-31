@@ -231,7 +231,7 @@ function InventoryDashboard() {
         )}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Star Products" value={String(data?.kpis.starCount ?? 0)} icon={Sparkles} accent="success" />
         <MetricCard label="High Performers" value={String(data?.kpis.highPerformerCount ?? 0)} icon={TrendingUp} />
         <MetricCard label="Average Performers" value={String(data?.kpis.averagePerformerCount ?? 0)} icon={Minus} />

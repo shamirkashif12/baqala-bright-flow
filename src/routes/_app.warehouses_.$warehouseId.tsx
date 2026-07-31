@@ -171,7 +171,7 @@ function WarehouseDetail() {
       }
     >
       {stockLoadError && <LoadErrorBanner onRetry={loadStock} />}
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+      <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="SKUs" value={String(skuCount)} icon={Package} accent="primary" />
         <MetricCard label="Total Units" value={String(Math.round(totalStock))} icon={Boxes} accent="success" />
         <MetricCard label="Reserved" value={String(Math.round(totalReserved))} icon={Boxes} accent="default" />
@@ -310,15 +310,17 @@ function WarehouseDetail() {
             ) : (
               <div className="space-y-4">
                 {/* Summary cards */}
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
                   {[
                     { label: "Total Invoiced", val: totalReceived, cls: "" },
                     { label: "Paid", val: totalPaid, cls: "text-success" },
                     { label: "RTS Credits", val: rtsCredits, cls: "text-primary" },
                   ].map(({ label, val, cls }) => (
                     <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
-                      <p className={`text-base font-bold ${cls}`}><SARIcon />{val.toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className={`text-base font-bold ${cls}`}>
+                        <span className="inline-flex items-center gap-0.5 whitespace-nowrap"><SARIcon />{val.toLocaleString()}</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground break-words">{label}</p>
                     </div>
                   ))}
                 </div>

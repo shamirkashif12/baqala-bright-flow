@@ -179,7 +179,7 @@ function AdminHome() {
       </Card>
 
       {/* Live metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Live Sales" value={<><SARIcon />{Math.round(salesValue).toLocaleString()}</>}
           delta={dashboard ? `${dashboard.sales.totalTodayDeltaPct > 0 ? "+" : ""}${dashboard.sales.totalTodayDeltaPct}%` : undefined}
           trend={dashboard ? (dashboard.sales.totalTodayDeltaPct >= 0 ? "up" : "down") : undefined}

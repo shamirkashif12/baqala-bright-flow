@@ -447,7 +447,7 @@ function BatchLocationPanel({
     <div className="space-y-4">
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Metrics */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Batches" value={String(total)} icon={Boxes} accent="default" />
         <MetricCard label="Active" value={String(active)} icon={PackageCheck} accent="success" />
         <MetricCard label="Near Expiry / Expired" value={String(wastageRisk)} icon={CalendarClock} accent="warning" />

@@ -123,7 +123,7 @@ function LoyaltyReport() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Points Earned" value={(kpis?.totalPointsEarned ?? 0).toLocaleString()} icon={ArrowUpCircle} accent="success" />
         <MetricCard label="Points Redeemed" value={(kpis?.totalPointsRedeemed ?? 0).toLocaleString()} icon={ArrowDownCircle} accent="warning" />
         <MetricCard label="Points Expired" value={(kpis?.totalPointsExpired ?? 0).toLocaleString()} icon={Star} accent="destructive" />
