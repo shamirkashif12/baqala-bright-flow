@@ -326,6 +326,37 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var posSettings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
         var blockExpiredItems = posSettings?.BlockExpiredItems ?? true;
 
+        // Discount policy cap (POS Settings → CashierMaxDiscountPct / ManagerMaxDiscountPct). These
+        // columns were settable via the Settings API but nothing ever read them at checkout — only
+        // EditOrder enforced ManagerMaxDiscountPct (see below), and only on a later dashboard edit, so
+        // the original sale could still carry any uncapped discount. Catalog-level Product.Discount
+        // (a fixed markdown the cashier never chose, not a discretionary discount) is backed out of
+        // order.DiscountAmount before the cap is applied — recomputed here from the line items the
+        // same way the POS frontend computes its own productDiscountTotal, since Create only ever
+        // receives the combined figure. tenant_admin is exempt, same as EditOrder.
+        if (order.Source != "kiosk" && order.Subtotal > 0 && order.DiscountAmount > 0)
+        {
+            var callerRole = User.FindFirst("role")?.Value;
+            if (callerRole != "tenant_admin")
+            {
+                var catalogDiscountTotal = 0m;
+                foreach (var item in order.Items)
+                {
+                    var product = await db.Products.FindAsync(item.ProductId);
+                    if (product is null || product.Discount is null || product.Discount <= 0) continue;
+                    var lineSubtotal = item.Quantity * item.UnitPrice;
+                    catalogDiscountTotal += product.DiscountType == "percentage"
+                        ? lineSubtotal * (product.Discount.Value / 100m)
+                        : Math.Min(product.Discount.Value * item.Quantity, lineSubtotal);
+                }
+                var discretionaryDiscount = Math.Max(0, order.DiscountAmount - catalogDiscountTotal);
+                var requestedDiscountPct = discretionaryDiscount / order.Subtotal * 100m;
+                var cap = callerRole == "cashier" ? (posSettings?.CashierMaxDiscountPct ?? 5m) : (posSettings?.ManagerMaxDiscountPct ?? 25m);
+                if (requestedDiscountPct > cap)
+                    return BadRequest(new { message = $"A discount of {requestedDiscountPct:0.##}% exceeds the {cap:0.##}% maximum allowed on this branch." });
+            }
+        }
+
         // Block sale of expired items: if a product's only tracked batches at this
         // branch are expired, it cannot be sold — mirrors the "Block sale of expired
         // items" Rules Engine rule, enforced here since checkout must not rely solely

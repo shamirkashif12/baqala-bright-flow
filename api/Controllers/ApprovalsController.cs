@@ -351,7 +351,21 @@ public class ApprovalsController(
 
                 case "item_deletion":
                     if (pending.EntityType == "Category")
-                        await productDeletion.DeleteCategoryAsync(pending.EntityId!.Value, actorId);
+                    {
+                        // Left as "pending" (not marked approved/rejected below) on a conflict, so
+                        // once products/subcategories are reassigned the approver can just retry
+                        // the same request instead of it having been silently lost to a 500.
+                        var outcome = await productDeletion.DeleteCategoryAsync(pending.EntityId!.Value, actorId);
+                        switch (outcome)
+                        {
+                            case CategoryDeletionOutcome.HasSubcategories:
+                                return Conflict(new { message = "Cannot delete a category that has subcategories. Delete or reassign them first." });
+                            case CategoryDeletionOutcome.HasProducts:
+                                return Conflict(new { message = "Cannot delete this category while products are still assigned to it. Reassign those products first." });
+                            case CategoryDeletionOutcome.NotFound:
+                                return NotFound(new { message = "This category no longer exists." });
+                        }
+                    }
                     else
                         await productDeletion.DeleteProductAsync(pending.EntityId!.Value, actorId, pending.BranchId);
                     break;

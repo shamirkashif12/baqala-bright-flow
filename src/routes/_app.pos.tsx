@@ -729,7 +729,7 @@ function POS() {
   // — Branch Manager/Supervisor/tenant_admin covering a register aren't restricted by these.
   // Defaults match PosSettings.cs so the UI behaves the same as an unconfigured branch until the
   // real settings load.
-  const [posPerms, setPosPerms] = useState({ cashierCanCoupon: true, cashierCanHoldOrder: true, allowNegativeStock: false });
+  const [posPerms, setPosPerms] = useState({ cashierCanCoupon: true, cashierCanHoldOrder: true, allowNegativeStock: false, cashierMaxDiscountPct: 5, managerMaxDiscountPct: 25 });
   const isRestrictedCashier = user?.role === "cashier";
   const navigate = useNavigate();
   const search = Route.useSearch();
@@ -949,7 +949,10 @@ function POS() {
     // admin configured. Missing settings row (new branch) keeps the PosSettings.cs defaults set
     // above rather than resetting to some other value.
     api.getPosSettings(branch.id)
-      .then((s) => setPosPerms({ cashierCanCoupon: s.cashierCanCoupon, cashierCanHoldOrder: s.cashierCanHoldOrder, allowNegativeStock: s.allowNegativeStock }))
+      .then((s) => setPosPerms({
+        cashierCanCoupon: s.cashierCanCoupon, cashierCanHoldOrder: s.cashierCanHoldOrder, allowNegativeStock: s.allowNegativeStock,
+        cashierMaxDiscountPct: s.cashierMaxDiscountPct, managerMaxDiscountPct: s.managerMaxDiscountPct,
+      }))
       .catch(() => {});
   }, [branch]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1560,6 +1563,21 @@ function POS() {
   // etc.) still triggers automatically off cart contents alone.
   const totalAutoDiscount = discountSavings + offerDiscount + manualDiscountSavings;
 
+  // Discount policy cap (POS Settings → CashierMaxDiscountPct / ManagerMaxDiscountPct) — checked at
+  // the moment each discretionary discount (coupon / named Discount / manual discount) is applied,
+  // not just at final checkout, so a cashier gets stopped immediately instead of building up a whole
+  // sale before being told to undo it. null = no cap (tenant_admin). Catalog-level Product.Discount
+  // is deliberately excluded — it's a fixed markdown, not something chosen per-sale (mirrors the
+  // hard-block in handleCharge below and OrdersController.Create's server-side check).
+  const discountCapPct = user?.role === "tenant_admin" ? null
+    : user?.role === "cashier" ? posPerms.cashierMaxDiscountPct
+    : posPerms.managerMaxDiscountPct;
+  function discountCapExceededPct(candidateAmount: number): number | null {
+    if (discountCapPct === null || subtotal <= 0) return null;
+    const pct = ((couponDiscount + totalAutoDiscount + loyaltyDiscount + candidateAmount) / subtotal) * 100;
+    return pct > discountCapPct ? pct : null;
+  }
+
   // Product-level discounts set in inventory (discount + discountType fields on Product)
   const productDiscountTotal = displayCart.reduce((sum, ci) => {
     const prod = products.find(p => p.id === ci.productId);
@@ -1884,6 +1902,18 @@ function POS() {
     setCouponError(null);
     try {
       const coupon = await api.validateCoupon(couponCode.trim().toUpperCase(), { customerId: customer?.id, branchId: branch?.id });
+      const rawSaving = coupon.type === "percentage" ? Math.min(subtotal * (coupon.value / 100), subtotal) : Math.min(coupon.value, subtotal);
+      const candidateSaving = coupon.maxDiscountAmount != null ? Math.min(rawSaving, coupon.maxDiscountAmount) : rawSaving;
+      const overPct = discountCapExceededPct(candidateSaving);
+      if (overPct !== null) {
+        setCouponError(`This coupon would bring the total discount to ${overPct.toFixed(2)}% — above the ${discountCapPct}% maximum allowed for your role.`);
+        setAppliedCoupon(null);
+        if (!opts?.silent) {
+          api.notify("Discounts / Coupons", "Coupon Exceeds Discount Cap", "Coupon Exceeds Discount Cap",
+            `Coupon ${coupon.code} would exceed the ${discountCapPct}% discount cap`, { severity: "warning" });
+        }
+        return;
+      }
       setAppliedCoupon(coupon);
       api.notify("Discounts / Coupons", "Coupon Applied", "Coupon Applied", `Coupon applied: ${coupon.code}`,
         { entityType: "Coupon", entityId: coupon.id });
@@ -2007,6 +2037,17 @@ function POS() {
     // has no ShiftId to reconcile against (see OrdersController.Create).
     if (user?.role === "cashier" && !activeShift)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
+
+    // Discount policy cap (POS Settings → CashierMaxDiscountPct / ManagerMaxDiscountPct) — was
+    // persisted via the Settings API but never enforced here, so a cashier could apply any
+    // discount uncapped. discountCapExceededPct already stops each discount from being applied in
+    // the first place (see the coupon/discount-picker/manual-discount handlers above); this is the
+    // final safety net for cases those can't catch — e.g. the subtotal shrinking (an item removed)
+    // after a discount was already applied, pushing the same amount over the cap in percentage
+    // terms. Mirrors OrdersController.Create's server-side check, which is the real source of truth.
+    const overPct = discountCapExceededPct(0);
+    if (overPct !== null)
+      throw new Error(`A discount of ${overPct.toFixed(2)}% exceeds the ${discountCapPct}% maximum allowed on this branch.`);
 
     // Card-payments-scoped fees only apply when part of the order is actually being paid by card —
     // folded in here (not earlier, into `total`) since paymentMethod isn't known until charge time.
@@ -2659,7 +2700,17 @@ function POS() {
                 value={discountPickerId}
                 onValueChange={(v) => {
                   const d = activeDiscounts.find(x => x.id === v);
-                  if (d) setAppliedDiscounts(list => [...list, d]);
+                  if (d) {
+                    const overPct = discountCapExceededPct(computeDiscountSaving(d));
+                    if (overPct !== null) {
+                      toast.error("Discount exceeds allowed limit", {
+                        description: `Applying "${d.name}" would bring the total discount to ${overPct.toFixed(2)}% — above the ${discountCapPct}% maximum allowed for your role.`,
+                        duration: 4500,
+                      });
+                    } else {
+                      setAppliedDiscounts(list => [...list, d]);
+                    }
+                  }
                   setDiscountPickerId("");
                 }}
               >
@@ -2719,6 +2770,15 @@ function POS() {
                       toast.error("Cannot apply a discount", {
                         description: "Tobacco items in this order are not eligible for discounts.",
                         duration: 4000,
+                      });
+                      return;
+                    }
+                    const candidateSaving = manualDiscountKind === "percentage" ? subtotal * (value / 100) : Math.min(value, subtotal);
+                    const overPct = discountCapExceededPct(candidateSaving);
+                    if (overPct !== null) {
+                      toast.error("Discount exceeds allowed limit", {
+                        description: `This would bring the total discount to ${overPct.toFixed(2)}% — above the ${discountCapPct}% maximum allowed for your role.`,
+                        duration: 4500,
                       });
                       return;
                     }

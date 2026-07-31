@@ -4,13 +4,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BaqalaPOS.Api.Services;
 
+public enum CategoryDeletionOutcome { Deleted, NotFound, HasSubcategories, HasProducts }
+
 public interface IProductDeletionService
 {
     /// <summary>Soft-deletes (discontinues) a product. Returns false if the product no longer exists.</summary>
     Task<bool> DeleteProductAsync(Guid id, Guid? actorId, Guid? branchId = null);
 
-    /// <summary>Hard-deletes a category. Returns false if the category no longer exists.</summary>
-    Task<bool> DeleteCategoryAsync(Guid id, Guid? actorId);
+    /// <summary>Hard-deletes a category, re-checking it's still deletable at this later point in time.</summary>
+    Task<CategoryDeletionOutcome> DeleteCategoryAsync(Guid id, Guid? actorId);
 }
 
 // Extracted out of ProductsController so both an immediate (self-approve) deletion and a later
@@ -75,10 +77,20 @@ public class ProductDeletionService(BaqalaDbContext db, IAuditService audit, ILo
         return true;
     }
 
-    public async Task<bool> DeleteCategoryAsync(Guid id, Guid? actorId)
+    public async Task<CategoryDeletionOutcome> DeleteCategoryAsync(Guid id, Guid? actorId)
     {
         var category = await db.Categories.FindAsync(id);
-        if (category is null) return false;
+        if (category is null) return CategoryDeletionOutcome.NotFound;
+
+        // Re-checked here, not just when the deletion was first requested — a category's FK is
+        // DeleteBehavior.Restrict, and time passes between queuing a deletion and a manager
+        // approving it. A product or subcategory landing on this category in that window used to
+        // surface as an unhandled DbUpdateException (a raw 500) instead of the same friendly
+        // conflict the initial request-time check already gives.
+        if (await db.Categories.AnyAsync(c => c.ParentId == id))
+            return CategoryDeletionOutcome.HasSubcategories;
+        if (await db.Products.AnyAsync(p => p.CategoryId == id))
+            return CategoryDeletionOutcome.HasProducts;
 
         var before = new { category.Name, category.NameAr, category.IsActive };
         db.Categories.Remove(category);
@@ -97,6 +109,6 @@ public class ProductDeletionService(BaqalaDbContext db, IAuditService audit, ILo
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for category {CategoryId} (delete_category)", id); }
 
-        return true;
+        return CategoryDeletionOutcome.Deleted;
     }
 }

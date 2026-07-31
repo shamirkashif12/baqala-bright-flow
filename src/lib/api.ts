@@ -1867,6 +1867,8 @@ export interface PosSettingsRecord {
   requireReasonForVoid: boolean;
   requireManagerApprovalForRefund: boolean;
   allowNegativeStock: boolean;
+  cashierMaxDiscountPct: number;
+  managerMaxDiscountPct: number;
   // Scan tab
   beepOnScan: boolean;
   warnNearExpiry: boolean;
