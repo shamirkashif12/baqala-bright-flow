@@ -2581,7 +2581,6 @@ const en: Record<string, string> = {
   "Registered legal business name (if different)": "Registered legal business name (if different)",
   "Rejection reason (required)": "Rejection reason (required)",
   "Required only when rejecting": "Required only when rejecting",
-  "Returned By: Anyone": "Returned By: Anyone",
   "Rule name…": "Rule name…",
   "SKU suffix (optional)": "SKU suffix (optional)",
   "Scan a barcode to add an item…": "Scan a barcode to add an item…",

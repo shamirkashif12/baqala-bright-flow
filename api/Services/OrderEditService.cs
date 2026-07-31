@@ -120,10 +120,14 @@ public class OrderEditService(
 
         // Same guard as OrdersController.Create — raising a line's quantity on an existing order
         // is still a sale, so it must not be able to push on-hand stock negative when the branch
-        // hasn't opted into AllowNegativeStock. Checked up front, before any stock row is mutated,
-        // so a rejected edit leaves inventory untouched rather than partially applied.
+        // hasn't opted into AllowNegativeStock. Branches that have never saved a PosSettings row
+        // must still default to blocking, same as OrdersController.Create's BlockExpiredItems
+        // pattern — a null posSettings used to skip this check entirely. This is just a fast
+        // pre-flight so a hopeless edit fails before any other work runs; the authoritative,
+        // race-safe check is the locked recheck in the stock-reduction loop below.
         var posSettings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
-        if (posSettings is not null && !posSettings.AllowNegativeStock)
+        var blockNegativeStock = !(posSettings?.AllowNegativeStock ?? false);
+        if (blockNegativeStock)
         {
             foreach (var productId in oldQtyByProduct.Keys.Union(newQtyByProduct.Keys))
             {
@@ -142,12 +146,28 @@ public class OrderEditService(
             }
         }
 
+        // Locks each product's stock row (SELECT ... FOR UPDATE) before reading it and re-checks
+        // the same guard as above — without this, a concurrent edit or sale racing this one could
+        // both read the same pre-decrement on-hand figure and both apply their delta, still
+        // landing stock negative even with AllowNegativeStock off. Same technique as
+        // ZatcaService.SubmitInvoiceAsync's identity-row lock and OrdersController.Create's sale
+        // path.
+        await using var stockTx = await db.Database.BeginTransactionAsync();
         foreach (var productId in oldQtyByProduct.Keys.Union(newQtyByProduct.Keys))
         {
             var delta = newQtyByProduct.GetValueOrDefault(productId, 0m) - oldQtyByProduct.GetValueOrDefault(productId, 0m);
             if (delta == 0) continue;
 
-            var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.ProductId == productId && s.BranchId == order.BranchId);
+            var stock = await db.InventoryStocks
+                .FromSqlRaw("SELECT * FROM inventory_stock WHERE product_id = {0} AND branch_id = {1} FOR UPDATE", productId, order.BranchId)
+                .FirstOrDefaultAsync();
+
+            if (blockNegativeStock && delta > 0 && (stock?.Quantity ?? 0) - delta < 0)
+            {
+                var product = await db.Products.FindAsync(productId);
+                return new OrderEditOutcome(false, $"Cannot increase '{product?.Name ?? "item"}' — only {(stock?.Quantity ?? 0):0.##} on hand and this branch does not allow negative stock.");
+            }
+
             if (stock != null)
             {
                 stock.Quantity -= delta;
@@ -361,6 +381,7 @@ public class OrderEditService(
         }
 
         await db.SaveChangesAsync();
+        await stockTx.CommitAsync();
 
         var employeeId = actorId.HasValue
             ? await db.Employees.Where(e => e.UserId == actorId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()

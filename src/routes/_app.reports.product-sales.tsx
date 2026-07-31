@@ -1,17 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow, type ReportExportFormat, type Category, type Product, type User } from "@/lib/api";
+import { useReportFilterOptions } from "@/lib/use-report-filters";
+import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow, type ReportExportFormat } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
@@ -39,62 +40,48 @@ function ProductSales() {
 
   const [from, setFrom] = useState(firstOfMonthStr());
   const [to, setTo] = useState(todayStr());
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [categoryId, setCategoryId] = useState("all");
-  const [productId, setProductId] = useState("all");
-  const [cashierId, setCashierId] = useState("all");
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
+  const [cashierIds, setCashierIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [cashiers, setCashiers] = useState<User[]>([]);
   const [data, setData] = useState<ProductSalesData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { api.getCategories().then(setCategories).catch(() => {}); }, []);
-  useEffect(() => { api.getProducts({ status: "active" }).then(setProducts).catch(() => {}); }, []);
+  const { categories, products, employees } = useReportFilterOptions(
+    branchIds.length === 1 ? branchIds[0] : undefined,
+    categoryIds.length === 1 ? categoryIds[0] : undefined,
+  );
 
   // The product list follows the category filter so the picker only offers products that could
   // actually appear in the current result set; a stale selection is cleared rather than silently
   // returning an empty report.
-  const productOptions = useMemo(
-    () => (categoryId === "all" ? products : products.filter((p) => p.categoryId === categoryId)),
-    [products, categoryId],
-  );
   useEffect(() => {
-    if (productId !== "all" && !productOptions.some((p) => p.id === productId)) setProductId("all");
-  }, [productOptions, productId]);
-  useEffect(() => {
-    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined })
-      // Any staff role can ring up a sale (Branch Manager/Supervisor covering a register), not
-      // just the Cashier role — filtering this list to literal "Cashier" meant a manager's own
-      // sales could never be selected here, even though "All Employees" clearly included them.
-      .then((u) => setCashiers(u.filter((x) => x.status === "active")))
-      .catch(() => {});
-    setCashierId("all");
-  }, [branchId]);
+    setProductIds((prev) => prev.filter((id) => products.some((p) => p.id === id)));
+  }, [products]);
 
   const load = useCallback(() => {
     setLoading(true);
     api.getProductSalesReport({
-      from, to, branchId: branchId !== "all" ? branchId : undefined,
-      categoryId: categoryId !== "all" ? categoryId : undefined,
-      productId: productId !== "all" ? productId : undefined, search: search || undefined,
-      cashierId: cashierId !== "all" ? cashierId : undefined, hasTobaccoFee: hasTobaccoFee || undefined,
+      from, to, branchId: branchIds.length ? branchIds : undefined,
+      categoryId: categoryIds.length ? categoryIds : undefined,
+      productId: productIds.length ? productIds : undefined, search: search || undefined,
+      cashierId: cashierIds.length ? cashierIds : undefined, hasTobaccoFee: hasTobaccoFee || undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, categoryId, productId, search, cashierId, hasTobaccoFee]);
+  }, [from, to, branchIds, categoryIds, productIds, search, cashierIds, hasTobaccoFee]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportProductSalesReport({
-        from, to, branchId: branchId !== "all" ? branchId : undefined, categoryId: categoryId !== "all" ? categoryId : undefined,
-        productId: productId !== "all" ? productId : undefined,
-        search: search || undefined, cashierId: cashierId !== "all" ? cashierId : undefined, hasTobaccoFee: hasTobaccoFee || undefined,
+        from, to, branchId: branchIds.length ? branchIds : undefined, categoryId: categoryIds.length ? categoryIds : undefined,
+        productId: productIds.length ? productIds : undefined,
+        search: search || undefined, cashierId: cashierIds.length ? cashierIds : undefined, hasTobaccoFee: hasTobaccoFee || undefined,
         exportedBy: user?.id, includeMargin: canViewMargin, format,
       });
       downloadBlob(blob, `product-sales-${from}-to-${to}.${format}`);
@@ -107,11 +94,12 @@ function ProductSales() {
   const fmt = (n: number) => fmtSAR(n);
   const chartData = (data?.rows ?? []).slice(0, 10).map((r) => ({ name: r.productName, sales: r.netSales }));
 
-  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchId !== (lockedBranchId ?? "all")
-    || categoryId !== "all" || productId !== "all" || cashierId !== "all" || search !== "" || hasTobaccoFee;
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || (!lockedBranchId && branchIds.length > 0)
+    || categoryIds.length > 0 || productIds.length > 0 || cashierIds.length > 0 || search !== "" || hasTobaccoFee;
   const clearFilters = () => {
-    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchId(lockedBranchId ?? "all");
-    setCategoryId("all"); setProductId("all"); setCashierId("all"); setSearch(""); setHasTobaccoFee(false);
+    setFrom(firstOfMonthStr()); setTo(todayStr());
+    if (!lockedBranchId) setBranchIds([]);
+    setCategoryIds([]); setProductIds([]); setCashierIds([]); setSearch(""); setHasTobaccoFee(false);
   };
 
   return (
@@ -126,45 +114,49 @@ function ProductSales() {
             <Button type="button" size="sm" variant="outline" className="h-9 text-xs" onClick={() => { setFrom(firstOfMonthStr()); setTo(todayStr()); }}>This Month</Button>
           </div>
         </FilterField>
-        <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-        <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         {!lockedBranchId && (
           <FilterField label="Branch">
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
           </FilterField>
         )}
         <FilterField label="Category">
-          <Select value={categoryId} onValueChange={setCategoryId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Category" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Categories"
+              options={categories.map((c) => ({ id: c.id, label: c.name }))}
+              selected={categoryIds}
+              onChange={setCategoryIds}
+            />
+          </div>
         </FilterField>
         <FilterField label="Product">
-          <Select value={productId} onValueChange={setProductId}>
-            <SelectTrigger className="h-9 w-52"><SelectValue placeholder="Product" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Products</SelectItem>
-              {productOptions.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-52">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={products.map((p) => ({ id: p.id, label: p.name }))}
+              selected={productIds}
+              onChange={setProductIds}
+            />
+          </div>
         </FilterField>
         <FilterField label="Employee">
-          <Select value={cashierId} onValueChange={setCashierId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Employees"
+              options={employees.map((c) => ({ id: c.id, label: c.fullName }))}
+              selected={cashierIds}
+              onChange={setCashierIds}
+            />
+          </div>
         </FilterField>
         <FilterField label="Search">
           <Input placeholder="Search SKU, barcode or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />

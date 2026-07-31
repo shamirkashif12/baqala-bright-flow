@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
@@ -21,7 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { toast } from "sonner";
-import { TrendingDown, Hourglass, Sparkles, TrendingUp, Minus, PackageX, X } from "lucide-react";
+import { TrendingDown, Hourglass, Sparkles, TrendingUp, Minus, PackageX, X, Info } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/inventory-dashboard")({ component: InventoryDashboard });
@@ -137,9 +137,14 @@ function InventoryDashboard() {
 
   return (
     <PageShell title="Inventory Aging" subtitle="Product age, days since last movement, slow-moving and dead stock">
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground -mt-2">
+        <Info className="h-3.5 w-3.5" />
+        Looking for sales velocity, turnover and profitability instead? See{" "}
+        <Link to="/reports/inventory-aging-performance" className="underline underline-offset-2 hover:text-foreground">Product Performance & Classification</Link>.
+      </p>
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} /></FilterField>
-        <FilterField label="To"><Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} /></FilterField>
+        <FilterField label="From"><Input type="date" className="h-9 w-36" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></FilterField>
+        <FilterField label="To"><Input type="date" className="h-9 w-36" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></FilterField>
         {!lockedBranchId && scope?.canFilterBranch && (
           <FilterField label="Branch">
             <div className="w-44">

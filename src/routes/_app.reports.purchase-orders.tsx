@@ -171,8 +171,8 @@ function PurchaseReports() {
   return (
     <PageShell title="Purchase Reports" subtitle="Complete purchase order detail — click a row to see every product">
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-        <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         <FilterField label="Supplier">
           <div className="w-48">
             <SearchableMultiSelect

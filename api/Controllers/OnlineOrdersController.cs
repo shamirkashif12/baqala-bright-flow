@@ -494,21 +494,24 @@ public class OnlineOrdersController(
             return BadRequest(new { message = "Only an approved, ready-to-deliver order can be marked delivered." });
 
         var productIds = order.Items.Select(i => i.ProductId).Distinct().ToList();
-        var stocks = (await db.InventoryStocks.Where(s => s.BranchId == order.BranchId).ToListAsync())
-            .Where(s => productIds.Contains(s.ProductId))
-            .ToDictionary(s => s.ProductId);
 
         // Same "block a sale that would take on-hand stock negative" guard OrdersController.Create
         // applies to POS checkout — this delivery step had no equivalent at all, so an online order
         // could still be marked delivered (and stock.Quantity driven negative) even after other
-        // sales had already consumed the stock it reserved at placement time. Checked per-product,
-        // summed across duplicate line items, before any stock row is mutated.
+        // sales had already consumed the stock it reserved at placement time. Branches that have
+        // never saved a PosSettings row must still default to blocking, same as
+        // OrdersController.Create — a null posSettings used to skip this check entirely. This is
+        // just a fast pre-flight; the authoritative, race-safe check is the locked recheck below.
         var posSettings = await db.PosSettings.FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
-        if (posSettings is not null && !posSettings.AllowNegativeStock)
+        var blockNegativeStock = !(posSettings?.AllowNegativeStock ?? false);
+        if (blockNegativeStock)
         {
+            var preStocks = (await db.InventoryStocks.Where(s => s.BranchId == order.BranchId).ToListAsync())
+                .Where(s => productIds.Contains(s.ProductId))
+                .ToDictionary(s => s.ProductId);
             foreach (var group in order.Items.GroupBy(i => i.ProductId))
             {
-                var onHand = stocks.TryGetValue(group.Key, out var s) ? s.Quantity : 0;
+                var onHand = preStocks.TryGetValue(group.Key, out var s) ? s.Quantity : 0;
                 var needed = group.Sum(i => i.Quantity);
                 if (onHand - needed < 0)
                 {
@@ -520,20 +523,40 @@ public class OnlineOrdersController(
 
         // The ledger-writing step: convert the reservation into a real deduction and append the
         // StockMovement row in the same unit of work, same shape OrdersController.Create uses for
-        // POS sales — this is the one place an online order actually leaves the shelf.
-        foreach (var item in order.Items)
+        // POS sales — this is the one place an online order actually leaves the shelf. Each
+        // product's stock row is locked (SELECT ... FOR UPDATE) and the guard re-checked against
+        // the locked, current quantity — without this, a concurrent delivery or POS sale racing
+        // this one could both read the same pre-decrement on-hand figure and both deduct, still
+        // landing stock negative even with the guard on. Same technique as
+        // ZatcaService.SubmitInvoiceAsync's identity-row lock.
+        await using var stockTx = await db.Database.BeginTransactionAsync();
+        foreach (var group in order.Items.GroupBy(i => i.ProductId))
         {
-            if (!stocks.TryGetValue(item.ProductId, out var stock)) continue;
-            var quantityBefore = stock.Quantity;
-            stock.Quantity -= item.Quantity;
-            stock.ReservedQuantity = Math.Max(0, stock.ReservedQuantity - item.Quantity);
-            stock.LastUpdated = DateTime.UtcNow;
-            stock.UpdatedAt = DateTime.UtcNow;
+            var stock = await db.InventoryStocks
+                .FromSqlRaw("SELECT * FROM inventory_stock WHERE product_id = {0} AND branch_id = {1} FOR UPDATE", group.Key, order.BranchId)
+                .FirstOrDefaultAsync();
+            if (stock is null) continue;
 
-            stockMovements.Record(
-                item.ProductId, order.BranchId, warehouseId: null, movementType: "sale", quantity: -item.Quantity,
-                referenceType: "order", referenceId: order.Id, referenceNumber: order.OrderNumber,
-                quantityBefore: quantityBefore, quantityAfter: quantityBefore - item.Quantity);
+            var needed = group.Sum(i => i.Quantity);
+            if (blockNegativeStock && stock.Quantity - needed < 0)
+            {
+                var product = await db.Products.FindAsync(group.Key);
+                return BadRequest(new { message = $"Cannot deliver — '{product?.Name ?? "an item"}' only has {stock.Quantity:0.##} on hand and this branch does not allow negative stock." });
+            }
+
+            foreach (var item in group)
+            {
+                var quantityBefore = stock.Quantity;
+                stock.Quantity -= item.Quantity;
+                stock.ReservedQuantity = Math.Max(0, stock.ReservedQuantity - item.Quantity);
+                stock.LastUpdated = DateTime.UtcNow;
+                stock.UpdatedAt = DateTime.UtcNow;
+
+                stockMovements.Record(
+                    item.ProductId, order.BranchId, warehouseId: null, movementType: "sale", quantity: -item.Quantity,
+                    referenceType: "order", referenceId: order.Id, referenceNumber: order.OrderNumber,
+                    quantityBefore: quantityBefore, quantityAfter: quantityBefore - item.Quantity);
+            }
         }
 
         order.OrderStatus = "delivered";
@@ -542,6 +565,7 @@ public class OnlineOrdersController(
         foreach (var payment in order.Payments) payment.Status = "completed";
 
         await db.SaveChangesAsync();
+        await stockTx.CommitAsync();
 
         foreach (var productId in productIds)
         {
