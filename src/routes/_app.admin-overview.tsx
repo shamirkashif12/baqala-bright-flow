@@ -62,9 +62,9 @@ function MetricTile({
         <Icon className="h-5 w-5" />
       </div>
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className="text-2xl font-black mt-0.5">{value}</p>
-        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-tight break-words">{label}</p>
+        <p className="text-2xl font-black mt-0.5 break-words">{value}</p>
+        {sub && <p className="text-xs text-muted-foreground mt-0.5 truncate" title={sub}>{sub}</p>}
       </div>
     </div>
   );
@@ -208,13 +208,13 @@ function AdminOverview() {
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
           {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 rounded-2xl" />)}
         </div>
       ) : (
         <>
           {/* ── Summary metrics ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             <MetricTile icon={Warehouse}   label="Warehouses"     value={filteredWarehouses.length} sub={warehouseFilter.length > 0 ? `of ${warehouses.length} total` : undefined} />
             <MetricTile icon={Building2}   label="Branches"       value={filteredBranches.length} sub={(branchFilter.length > 0 || warehouseFilter.length > 0) ? `of ${branches.length} total` : undefined} />
             <MetricTile icon={Boxes}       label="Total SKUs"     value={totalSKUs.toLocaleString()} />

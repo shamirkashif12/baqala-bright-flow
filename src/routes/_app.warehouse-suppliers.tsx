@@ -103,7 +103,7 @@ function WarehouseSuppliers() {
 
   return (
     <PageShell title="Warehouse Suppliers" subtitle="Bulk supply partners feeding all branches">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Suppliers" value={String(total)} icon={Warehouse} accent="primary" />
         <MetricCard label="Active" value={String(active)} icon={PackageCheck} accent="success" />
         <MetricCard label="Warehouse" value={String(warehouseCount)} icon={Truck} />

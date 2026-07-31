@@ -113,7 +113,7 @@ function VatZatca() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Taxable Sales" value={<><SARIcon />{fmt(kpis?.taxableSales ?? 0)}</>} icon={ShieldCheck} accent="primary" />
         <MetricCard label="VAT Collected" value={<><SARIcon />{fmt(kpis?.vatCollected ?? 0)}</>} icon={ShieldCheck} accent="success" />
         <MetricCard label="VAT Reversed" value={<><SARIcon />{fmt(kpis?.vatReversed ?? 0)}</>} icon={ShieldCheck} accent="destructive" />

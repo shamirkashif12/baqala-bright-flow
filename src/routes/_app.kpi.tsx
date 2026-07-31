@@ -46,7 +46,7 @@ function KPI() {
           nothing in this system instruments individual scan events or defines a scoring formula,
           so there was no real number to show. What's below (scan volume, completed orders) is
           computed from real Orders/OrderItems data. */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Scans (today)" value={String(kpi?.totalScansToday ?? 0)} icon={ScanBarcode} accent="primary" />
         <MetricCard label="Orders Completed (today)" value={String(kpi?.ordersCompletedToday ?? 0)} icon={ShoppingBag} />
       </div>
@@ -146,7 +146,7 @@ function KPI() {
         </TabsContent>
 
         <TabsContent value="scan" className="mt-4 space-y-4">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             {/* Avg Scan Time / Misscan Rate genuinely have no source data — this system doesn't
                 instrument individual scan events (timing, mis-scans) anywhere. Left as an honest
                 "not tracked" state rather than a fabricated number. Items / Order below IS real —

@@ -56,7 +56,7 @@ function WarehouseManagement() {
   return (
     <div className="space-y-5">
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Warehouses" value={String(totalWH)} icon={Warehouse} accent="primary" />
         <MetricCard label="Active" value={String(activeWH)} icon={CheckCircle} accent="success" />
         <MetricCard label="SKUs Managed" value={String(totalSKUs)} icon={Package} accent="default" />

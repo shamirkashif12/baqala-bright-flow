@@ -80,7 +80,7 @@ function Sales() {
 
   return (
     <PageShell title="Sales" subtitle="Live transactions across all terminals">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Revenue" value={<><SARIcon />{" "}{fmt(totalRevenue)}</>} icon={Wallet} accent="primary" />
         <MetricCard label="Invoices" value={String(orders.length)} icon={Receipt} />
         <MetricCard label="Avg Discount" value={avgDiscountPct} icon={Percent} accent="warning" />

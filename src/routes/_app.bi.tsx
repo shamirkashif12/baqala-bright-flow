@@ -70,7 +70,7 @@ function BI() {
   return (
     <PageShell title="Business Intelligence" subtitle="Performance, trends and analytics across the chain">
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Revenue (today)" value={<><SARIcon />{" "}{fmt(totalRevenue)}</>} icon={Wallet} accent="primary" />
         <MetricCard label="Orders (today)" value={String(totalOrders)} icon={ShoppingBag} />
         <MetricCard label="Refund Rate" value={refundRate} icon={Undo2} accent="success" />

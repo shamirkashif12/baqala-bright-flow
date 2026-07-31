@@ -470,7 +470,7 @@ function Batches() {
     <PageShell title="Batches & Expiry" subtitle="Wastage watch-list · near-expiry, expired & recalled stock">
       {loadError && <LoadErrorBanner onRetry={loadBatches} />}
       {/* Metrics */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Near Expiry" value={String(nearExpiry)} icon={CalendarClock} accent="warning" />
         <MetricCard label="Expired" value={String(expired)} icon={Ban} accent="destructive" />
         <MetricCard label="Open Recalls" value={String(openRecallCount)} icon={ShieldAlert} accent="destructive" />

@@ -184,7 +184,7 @@ function Shift() {
       </div>
 
       {/* Summary metrics */}
-      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Active Shifts" value={String(activeShifts.length)} icon={Clock} accent="primary" />
         <MetricCard label="Free Terminals" value={String(freeTerminalCount)} icon={Monitor} accent={freeTerminalCount === 0 ? "destructive" : "success"} />
         <MetricCard label="Occupied Terminals" value={String(occupiedTerminalCount)} icon={MonitorX} />

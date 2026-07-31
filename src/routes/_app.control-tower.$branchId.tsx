@@ -126,7 +126,7 @@ function BranchDetail() {
       }
     >
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-4 xl:grid-cols-5">
+      <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Terminals" value={String(terminals.length)} icon={TerminalIcon} accent="primary" />
         <MetricCard label="Active" value={String(active)} icon={Activity} accent="success" />
         <MetricCard label="Offline" value={String(offline)} icon={WifiOff} accent="destructive" />

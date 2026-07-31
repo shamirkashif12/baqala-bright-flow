@@ -259,7 +259,7 @@ function StockTransferReport() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Transfers" value={String(groups.length)} icon={ArrowLeftRight} accent="primary" />
         <MetricCard label="Completed" value={String(completedCount)} icon={CheckCircle} accent="success" />
         <MetricCard label="Distinct Products" value={String(new Set(rows.map(r => r.productName)).size)} icon={Boxes} />

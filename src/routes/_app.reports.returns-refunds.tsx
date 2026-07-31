@@ -197,7 +197,7 @@ function ReturnsRefunds() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Return Count" value={String(kpis?.returnCount ?? 0)} icon={RotateCcw} accent="primary" />
         <MetricCard label="Refund Value" value={<><SARIcon />{fmt(kpis?.refundValue ?? 0)}</>} icon={Wallet} accent="destructive" />
         <MetricCard label="VAT Reversed" value={<><SARIcon />{fmt(kpis?.vatReversed ?? 0)}</>} icon={Receipt} />

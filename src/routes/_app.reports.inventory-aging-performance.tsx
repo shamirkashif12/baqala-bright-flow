@@ -190,7 +190,7 @@ function InventoryAgingPerformance() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Products Analyzed" value={String(kpis?.productCount ?? 0)} icon={Boxes} accent="primary" />
         <MetricCard label="Star Products" value={String(kpis?.starCount ?? 0)} icon={Sparkles} accent="success" />
         <MetricCard label="High Performers" value={String(kpis?.highPerformerCount ?? 0)} icon={TrendingUp} />

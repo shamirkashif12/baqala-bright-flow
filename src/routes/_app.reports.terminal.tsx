@@ -145,7 +145,7 @@ function TerminalReportPage() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Active Terminals" value={String(kpis?.activeTerminals ?? 0)} icon={ShoppingCart} accent="success" />
         <MetricCard label="Offline Terminals" value={String(kpis?.offlineTerminals ?? 0)} icon={WifiOff} accent="destructive" />
         <MetricCard label="Terminal Sales" value={<><SARIcon />{fmt(kpis?.terminalSales ?? 0)}</>} icon={Wallet} accent="primary" />

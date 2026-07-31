@@ -308,7 +308,7 @@ function SupplierReturnsReport() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Returns" value={String(rows.length)} icon={PackageSearch} accent="primary" />
         <MetricCard label="Suppliers Involved" value={String(supplierCount)} icon={Truck} />
         <MetricCard label="Total Returned Qty" value={String(totalQty)} icon={RotateCcw} accent="warning" />

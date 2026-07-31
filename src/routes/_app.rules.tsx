@@ -187,7 +187,7 @@ function Rules() {
       actions={canCreate ? <NewRule branches={branches} createdBy={user?.id} onCreated={reload} /> : undefined}
     >
       {loadError && <LoadErrorBanner onRetry={load} />}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Active Rules" value={loading ? "—" : String(active)} icon={Workflow} accent="primary" />
         <MetricCard label="Inactive Rules" value={loading ? "—" : String(inactive)} icon={ToggleLeft} />
         <MetricCard label="Approval Rules" value={loading ? "—" : String(approvalCount)} icon={ShieldCheck} accent="success" />

@@ -119,7 +119,7 @@ function ProfitMargin() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Gross Profit" value={<><SARIcon />{fmt(kpis?.grossProfit ?? 0)}</>} icon={TrendingUp} accent="success" />
         <MetricCard label="Gross Margin %" value={kpis?.grossMarginPct != null ? `${kpis.grossMarginPct}%` : "N/A"} icon={Percent} accent="primary" />
         <MetricCard label="Net Margin %" value={kpis?.netMarginPct != null ? `${kpis.netMarginPct}%` : "N/A"} icon={Percent} />

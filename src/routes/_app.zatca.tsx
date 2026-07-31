@@ -124,7 +124,7 @@ function Zatca() {
         </div>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Accepted" value={String(clearedCount)} icon={ShieldCheck} accent="success" />
         <MetricCard label="Pending" value={String(pendingCount)} icon={RefreshCw} accent="warning" />
         <MetricCard label="Rejected" value={String(rejectedCount)} icon={FileWarning} accent={rejectedCount > 0 ? "destructive" : "success"} />

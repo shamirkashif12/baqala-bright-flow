@@ -233,7 +233,7 @@ function ControlTower() {
           <p className="text-sm text-muted-foreground">No KPI cards visible. Click <span className="font-semibold">Add / Remove</span> to add some back.</p>
         </Card>
       ) : (
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+        <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
           {ALL_CARDS.filter(cards.isVisible).map(label => <div key={label}>{cardMap[label]}</div>)}
         </div>
       )}
@@ -825,13 +825,15 @@ function MiniInsights({ branches, terminals, activeShifts }: { branches: Branch[
     { label: "Fully Operational", value: `${fullyOp} / ${branches.length}`,                              icon: ShieldCheck },
   ];
   return (
-    <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+    <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
       {insights.map(i => (
         <div key={i.label} className="rounded-2xl border border-border/60 bg-card p-3 shadow-card">
           <div className="flex items-center gap-2 text-muted-foreground text-[10px] uppercase tracking-wider">
-            <i.icon className="h-3.5 w-3.5" /> {i.label}
+            <i.icon className="h-3.5 w-3.5 shrink-0" /> <span className="break-words">{i.label}</span>
           </div>
-          <div className="mt-1 text-xl font-bold tabular-nums">{i.value}</div>
+          <div className="mt-1 text-xl font-bold tabular-nums">
+            <span className="inline-flex items-center gap-0.5 whitespace-nowrap">{i.value}</span>
+          </div>
         </div>
       ))}
     </div>

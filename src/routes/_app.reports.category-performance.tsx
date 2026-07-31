@@ -162,7 +162,7 @@ function CategoryPerformance() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Top Category" value={kpis?.topCategory ?? "—"} icon={Tags} accent="primary" />
         {canViewMargin && <MetricCard label="Highest Margin Category" value={kpis?.highestMarginCategory ?? "—"} icon={Percent} accent="success" />}
         <MetricCard label="Category Return Rate" value={`${kpis?.categoryReturnRatePct ?? 0}%`} icon={Layers} accent="warning" />

@@ -117,7 +117,7 @@ function Discounts() {
         <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Discount Value" value={<><SARIcon />{fmt(kpis?.totalDiscountValue ?? 0)}</>} icon={Percent} accent="primary" />
         <MetricCard label="Manual Discount Value" value={<><SARIcon />{fmt(kpis?.manualDiscountValue ?? 0)}</>} icon={Wallet} accent="warning" />
         <MetricCard label="Loyalty Discount Value" value={<><SARIcon />{fmt(kpis?.loyaltyDiscountValue ?? 0)}</>} icon={Wallet} accent="success" />
