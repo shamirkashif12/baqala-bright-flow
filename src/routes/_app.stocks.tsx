@@ -1706,14 +1706,15 @@ function Stocks() {
                       <th className="px-4 py-2 text-left">Batch #</th>
                       <th className="px-4 py-2 text-right">Qty</th>
                       <th className="px-4 py-2 text-left">Reference</th>
+                      <th className="px-4 py-2 text-left">By</th>
                       <th className="px-4 py-2 text-left">Notes</th>
                     </tr>
                   </thead>
                   <tbody>
                     {tabLoading ? (
-                      <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                      <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
                     ) : movements.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No movement records found</td></tr>
+                      <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No movement records found</td></tr>
                     ) : movements.map(mv => {
                       const meta = movementMeta(mv.movementType);
                       const location = mv.branch?.name ?? mv.warehouse?.name ?? "—";
@@ -1734,6 +1735,7 @@ function Stocks() {
                             {isIncrease ? "+" : ""}{fmt(mv.quantity)}
                           </td>
                           <td className="px-4 py-2.5 text-muted-foreground">{mv.referenceNumber ?? "—"}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{mv.createdByUser?.fullName ?? "—"}</td>
                           <td className="px-4 py-2.5 text-muted-foreground max-w-[220px] truncate" title={mv.notes ?? undefined}>{mv.notes ?? "—"}</td>
                         </tr>
                       );
