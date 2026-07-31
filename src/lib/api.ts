@@ -407,8 +407,12 @@ export const api = {
     request<Terminal>(`/api/terminals/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   // Returns the plaintext pairing secret exactly once — only its hash is stored server-side,
   // so there's no "view existing secret" endpoint, only regenerate (which invalidates the old one).
-  generateKioskPairingCode: (id: string) =>
-    request<{ terminalCode: string; pairingSecret: string }>(`/api/terminals/${id}/kiosk-pairing-code`, { method: "POST" }),
+  // Pass customSecret to set a chosen secret instead of a random one (min 6 chars, enforced server-side).
+  generateKioskPairingCode: (id: string, customSecret?: string) =>
+    request<{ terminalCode: string; pairingSecret: string }>(`/api/terminals/${id}/kiosk-pairing-code`, {
+      method: "POST",
+      body: JSON.stringify({ customSecret: customSecret || null }),
+    }),
   // Same one-time-set shape as the pairing secret above — no "view current PIN" endpoint.
   setKioskLockdownPin: (id: string, pin: string) =>
     request<{ setAt: string; length: number }>(`/api/terminals/${id}/kiosk-lockdown-pin`, { method: "POST", body: JSON.stringify({ pin }) }),

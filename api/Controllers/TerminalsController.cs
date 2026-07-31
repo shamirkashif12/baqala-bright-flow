@@ -169,17 +169,25 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
 
     // Generates a one-time-display pairing secret for a self-checkout kiosk. Staff types this
     // (plus the terminal's code) into the kiosk during setup; only its hash is stored here, so
-    // it can never be recovered afterwards — only rotated by calling this again.
+    // it can never be recovered afterwards — only rotated by calling this again. An admin/manager
+    // may instead supply their own CustomSecret (e.g. something short and memorable to key in on
+    // the kiosk) rather than the random 32-char hex string.
     [RequirePermission("Terminals", PermAction.Edit)]
     [HttpPost("{id:guid}/kiosk-pairing-code")]
-    public async Task<IActionResult> GenerateKioskPairingCode(Guid id)
+    public async Task<IActionResult> GenerateKioskPairingCode(Guid id, [FromBody] GenerateKioskPairingCodeRequest? req)
     {
         var terminal = await db.Terminals.FindAsync(id);
         if (terminal is null) return NotFound();
         if (string.IsNullOrWhiteSpace(terminal.TerminalCode))
             return BadRequest(new { message = "Terminal must have a terminal code before it can be paired as a self-checkout kiosk." });
 
-        var secret = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+        var customSecret = req?.CustomSecret?.Trim();
+        if (!string.IsNullOrEmpty(customSecret) && customSecret.Length < 6)
+            return BadRequest(new { message = "Custom pairing secret must be at least 6 characters." });
+
+        var secret = string.IsNullOrEmpty(customSecret)
+            ? Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16))
+            : customSecret;
         terminal.PairingSecretHash = HashSecret(secret);
         terminal.PairingSecretSetAt = DateTime.UtcNow;
         terminal.UpdatedAt = DateTime.UtcNow;
@@ -239,3 +247,4 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
 }
 
 public record SetLockdownPinRequest(string Pin);
+public record GenerateKioskPairingCodeRequest(string? CustomSecret);
