@@ -335,7 +335,12 @@ public class ApprovalsController(
                     var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments)
                         .FirstOrDefaultAsync(o => o.Id == pending.EntityId);
                     if (order is null) return NotFound(new { message = "The order this request was for no longer exists." });
-                    if (order.OrderStatus != "cancelled")
+                    // "refunded" means a return already restocked some or all of this order's items
+                    // (ReturnsController.Complete) — VoidAsync unconditionally restores every line's
+                    // full original quantity with no awareness of returns, so voiding on top of that
+                    // would add those units back to stock a second time. Skipped the same as an
+                    // already-"cancelled" order.
+                    if (order.OrderStatus is not ("cancelled" or "refunded"))
                         await orderVoidService.VoidAsync(order, pending.Reason);
                     break;
 

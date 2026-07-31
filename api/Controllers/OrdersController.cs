@@ -357,8 +357,14 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // inventory stock" step below always let quantity go negative regardless, so toggling it
         // off in the UI had no effect. Checked per-product (summed across duplicate line items)
         // against current on-hand before any stock row is mutated, so a multi-item sale either
-        // fully succeeds or is rejected before touching the ledger.
-        if (posSettings is not null && !posSettings.AllowNegativeStock)
+        // fully succeeds or is rejected before touching the ledger. Branches that have never saved
+        // a PosSettings row (settings created lazily by SettingsController.UpsertPosSettings on
+        // first save) must still default to blocking, same as BlockExpiredItems above — a null
+        // posSettings used to skip this check entirely, letting a brand-new branch sell into
+        // unlimited negative stock. This is just a fast pre-flight to fail obviously-bad sales
+        // before the order/payment/loyalty work below runs; the authoritative, race-safe check is
+        // the locked recheck in the stock-reduction block further down.
+        if (!(posSettings?.AllowNegativeStock ?? false))
         {
             foreach (var group in order.Items.GroupBy(i => i.ProductId))
             {
@@ -675,48 +681,70 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         }
 
         // ── Reduce inventory stock for each item ───────────────────────────────
-        // A sale is never blocked here (the sellable-stock/expiry check above already gated
-        // that); instead the on-hand count is allowed to go negative when a sale outpaces what
-        // was actually received. Clamping to 0 (the old behaviour) or silently doing nothing
-        // when no stock row exists at all hid the shortfall — the next stock-in (Receive Batch/
-        // PO receive) needs to see the true negative balance to reconcile against it.
-        foreach (var item in order.Items)
+        // When AllowNegativeStock is on, a sale is never blocked here; the on-hand count is
+        // allowed to go negative when a sale outpaces what was actually received, so the next
+        // stock-in (Receive Batch/PO receive) can see the true negative balance to reconcile
+        // against it. When it's off, this is the authoritative, race-safe gate: the pre-flight
+        // check above reads stock without a lock, so two concurrent sales of the same product's
+        // last unit(s) could both pass it against the same stale on-hand figure and both decrement
+        // — still landing stock negative even with the guard on. Locking each product's stock row
+        // (SELECT ... FOR UPDATE, same technique as ZatcaService.SubmitInvoiceAsync's identity-row
+        // lock) for the rest of this transaction serializes concurrent sales of the same product,
+        // so the recheck below always sees the true post-lock on-hand quantity.
+        var blockNegativeStock = !(posSettings?.AllowNegativeStock ?? false);
+        await using var stockTx = await db.Database.BeginTransactionAsync();
+        foreach (var group in order.Items.GroupBy(i => i.ProductId))
         {
             // Branch-exact match only — the previous fallback to "any stock record for this
             // product" silently adjusted a DIFFERENT branch's stock row whenever the selling
             // branch had none, corrupting that other branch's inventory on every such sale.
             var stock = await db.InventoryStocks
-                .FirstOrDefaultAsync(s => s.ProductId == item.ProductId && s.BranchId == order.BranchId);
-            // Captured before the mutation — the ledger's before/after is the audit trail's only
-            // record of on-hand either side of a sale. A product with no stock row yet was at 0.
-            var quantityBefore = stock?.Quantity ?? 0;
-            if (stock != null)
+                .FromSqlRaw("SELECT * FROM inventory_stock WHERE product_id = {0} AND branch_id = {1} FOR UPDATE", group.Key, order.BranchId)
+                .FirstOrDefaultAsync();
+            var needed = group.Sum(i => i.Quantity);
+
+            if (blockNegativeStock && (stock?.Quantity ?? 0) - needed < 0)
             {
-                stock.Quantity -= item.Quantity;
-                stock.LastUpdated = DateTime.UtcNow;
-                stock.UpdatedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                db.InventoryStocks.Add(new InventoryStock
-                {
-                    Id = Guid.NewGuid(),
-                    ProductId = item.ProductId,
-                    BranchId = order.BranchId,
-                    Quantity = -item.Quantity,
-                    LastUpdated = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                });
+                var product = await db.Products.FindAsync(group.Key);
+                return BadRequest(new { message = $"Cannot sell '{product?.Name ?? "item"}' — only {(stock?.Quantity ?? 0):0.##} on hand and this branch does not allow negative stock." });
             }
 
-            stockMovements.Record(
-                item.ProductId, order.BranchId, warehouseId: null, movementType: "sale", quantity: -item.Quantity,
-                referenceType: "order", referenceId: order.Id, referenceNumber: order.OrderNumber,
-                quantityBefore: quantityBefore, quantityAfter: quantityBefore - item.Quantity);
+            foreach (var item in group)
+            {
+                // Captured before the mutation — the ledger's before/after is the audit trail's
+                // only record of on-hand either side of a sale. A product with no stock row yet
+                // was at 0.
+                var quantityBefore = stock?.Quantity ?? 0;
+                if (stock != null)
+                {
+                    stock.Quantity -= item.Quantity;
+                    stock.LastUpdated = DateTime.UtcNow;
+                    stock.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    stock = new InventoryStock
+                    {
+                        Id = Guid.NewGuid(),
+                        ProductId = item.ProductId,
+                        BranchId = order.BranchId,
+                        Quantity = -item.Quantity,
+                        LastUpdated = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                    };
+                    db.InventoryStocks.Add(stock);
+                }
+
+                stockMovements.Record(
+                    item.ProductId, order.BranchId, warehouseId: null, movementType: "sale", quantity: -item.Quantity,
+                    referenceType: "order", referenceId: order.Id, referenceNumber: order.OrderNumber,
+                    quantityBefore: quantityBefore, quantityAfter: quantityBefore - item.Quantity);
+            }
         }
 
         await db.SaveChangesAsync();
+        await stockTx.CommitAsync();
 
         // A sale that drops on-hand to/under the reorder point should surface a Low Stock / Out of
         // Stock alert immediately, not up to 15 minutes later on the next background sweep. Best-
@@ -1357,6 +1385,11 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).Include(o => o.Discounts).Include(o => o.ServiceCharges).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { message = "Order not found." });
         if (order.OrderStatus == "cancelled") return BadRequest(new { message = "This order is already cancelled." });
+        // "refunded" means a return already restocked some or all of this order's items
+        // (ReturnsController.Complete) — VoidAsync unconditionally restores every line's full
+        // original quantity with no awareness of returns, so voiding on top of that would add those
+        // units back to stock a second time.
+        if (order.OrderStatus == "refunded") return BadRequest(new { message = "This order has already been refunded — void the remaining return instead of voiding the whole order." });
 
         var settings = await db.PosSettings.AsNoTracking().FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
         if (settings?.RequireReasonForVoid == true && string.IsNullOrWhiteSpace(req.Reason))
