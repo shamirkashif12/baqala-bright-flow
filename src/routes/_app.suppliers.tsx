@@ -266,6 +266,7 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
   const [documents, setDocuments] = useState<SupplierDocument[]>([]);
   const [uploading, setUploading] = useState(false);
   const [documentType, setDocumentType] = useState(SUPPLIER_DOC_TYPES[0]);
+  const [otherDocumentName, setOtherDocumentName] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [file, setFile] = useState<{ name: string; url: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -287,12 +288,18 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
 
   const handleUpload = async () => {
     if (!file) return;
+    if (documentType === "Other" && !otherDocumentName.trim()) {
+      toast.error("Enter a name for this document.");
+      return;
+    }
     setSaving(true);
     try {
-      await api.uploadSupplierDocument(supplier.id, { documentType, fileName: file.name, fileUrl: file.url, expiryDate: expiryDate || undefined });
+      const resolvedType = documentType === "Other" ? otherDocumentName.trim() : documentType;
+      await api.uploadSupplierDocument(supplier.id, { documentType: resolvedType, fileName: file.name, fileUrl: file.url, expiryDate: expiryDate || undefined });
       setUploading(false);
       setFile(null);
       setExpiryDate("");
+      setOtherDocumentName("");
       reload();
     } catch (e: any) {
       toast.error(e?.message || "Failed to upload document.");
@@ -325,14 +332,17 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>{SUPPLIER_DOC_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
           </Select>
+          {documentType === "Other" && (
+            <Input value={otherDocumentName} onChange={e => setOtherDocumentName(e.target.value)} placeholder="Document name" className="h-9" autoFocus />
+          )}
           <Input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} placeholder="Expiry date (optional)" className="h-9" />
           <Button size="sm" variant="outline" className="w-full" onClick={() => fileInputRef.current?.click()}>{file ? file.name : "Choose File (PDF/JPG/PNG)"}</Button>
           <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleFile} />
           <div className="flex gap-2">
-            <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!file || saving} onClick={handleUpload}>
+            <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!file || saving || (documentType === "Other" && !otherDocumentName.trim())} onClick={handleUpload}>
               {saving ? "Uploading…" : "Save"}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => { setUploading(false); setFile(null); }}>Cancel</Button>
+            <Button size="sm" variant="outline" onClick={() => { setUploading(false); setFile(null); setOtherDocumentName(""); }}>Cancel</Button>
           </div>
         </div>
       )}
@@ -735,6 +745,10 @@ function SuppliersTab() {
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [supplyTypeFilter, setSupplyTypeFilter] = useState<string[]>([]);
+  const [cityFilter, setCityFilter] = useState<string[]>([]);
+  const [paymentTermsFilter, setPaymentTermsFilter] = useState<string[]>([]);
   const [viewSupplier, setViewSupplier] = useState<Supplier | null>(null);
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -807,9 +821,20 @@ function SuppliersTab() {
   const activeSuppliers = suppliers.filter(s => s.status === "active").length;
 
   const filtered = suppliers.filter(s => {
-    const mq = !q || s.name.toLowerCase().includes(q.toLowerCase()) || s.supplierCode.toLowerCase().includes(q.toLowerCase()) || (s.city?.toLowerCase().includes(q.toLowerCase()) ?? false);
+    const needle = q.toLowerCase();
+    const mq = !q
+      || s.name.toLowerCase().includes(needle)
+      || s.supplierCode.toLowerCase().includes(needle)
+      || (s.city?.toLowerCase().includes(needle) ?? false)
+      || (s.contactNumber?.toLowerCase().includes(needle) ?? false)
+      || (s.crNumber?.toLowerCase().includes(needle) ?? false)
+      || (s.vatNumber?.toLowerCase().includes(needle) ?? false);
     const ms = !(statusFilter.length && !statusFilter.includes(s.status));
-    return mq && ms;
+    const mc = !(categoryFilter.length && !categoryFilter.includes(s.category ?? ""));
+    const mt = !(supplyTypeFilter.length && !supplyTypeFilter.includes(s.supplyType ?? ""));
+    const mcity = !(cityFilter.length && !cityFilter.includes(s.city ?? ""));
+    const mpt = !(paymentTermsFilter.length && !paymentTermsFilter.includes(s.paymentTerms ?? ""));
+    return mq && ms && mc && mt && mcity && mpt;
   });
 
   return (
@@ -825,7 +850,7 @@ function SuppliersTab() {
 
       {/* Filters + Actions */}
       <div className="flex flex-wrap items-center gap-2">
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code, city…" className="h-9 w-60" />
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code, city, phone, CR/VAT…" className="h-9 w-60" />
         <div className="w-36">
           <SearchableMultiSelect
             placeholder="All Statuses"
@@ -835,6 +860,42 @@ function SuppliersTab() {
             ]}
             selected={statusFilter}
             onChange={setStatusFilter}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={SUPPLIER_CATEGORIES.map(c => ({ id: c, label: c }))}
+            selected={categoryFilter}
+            onChange={setCategoryFilter}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Supply Channels"
+            options={[
+              { id: "warehouse", label: "Warehouse" },
+              { id: "both", label: "Both (Direct + Warehouse)" },
+              { id: "mart_to_mart", label: "Mart to Mart" },
+            ]}
+            selected={supplyTypeFilter}
+            onChange={setSupplyTypeFilter}
+          />
+        </div>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Cities"
+            options={SAUDI_CITIES.map(c => ({ id: c, label: c }))}
+            selected={cityFilter}
+            onChange={setCityFilter}
+          />
+        </div>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Payment Terms"
+            options={PAYMENT_TERMS_OPTIONS.map(t => ({ id: t, label: t }))}
+            selected={paymentTermsFilter}
+            onChange={setPaymentTermsFilter}
           />
         </div>
         <div className="flex-1" />

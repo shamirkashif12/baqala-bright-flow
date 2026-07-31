@@ -125,8 +125,8 @@ function StockReconciliation() {
       subtitle="Stock review, audit and reconciliation — system vs counted quantity by count session"
     >
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} /></FilterField>
-        <FilterField label="To"><Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} /></FilterField>
+        <FilterField label="From"><Input type="date" className="h-9 w-36" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></FilterField>
+        <FilterField label="To"><Input type="date" className="h-9 w-36" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></FilterField>
         {!lockedBranchId && (
           <FilterField label="Branch">
             <div className="w-44">

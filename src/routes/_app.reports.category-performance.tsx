@@ -101,8 +101,8 @@ function CategoryPerformance() {
   return (
     <PageShell title="Category Performance" subtitle="Sales contribution, margin and velocity by category">
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-        <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+        <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         {!lockedBranchId && (
           <FilterField label="Branch">
             <Select value={branchId} onValueChange={setBranchId}>

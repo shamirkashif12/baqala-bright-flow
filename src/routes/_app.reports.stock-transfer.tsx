@@ -11,6 +11,7 @@ import { PaginatedDataTable, FilterField } from "@/components/module-placeholder
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
+import { useBranch } from "@/lib/branch-context";
 import { api, type StockTransferReportRow, type ReportExportFormat, type Warehouse, type Product, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
@@ -27,6 +28,8 @@ function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+const fmtDateTime = (s: string) =>
+  new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 const TRANSFER_TYPES = ["supplier_to_warehouse", "warehouse_to_branch", "branch_to_warehouse", "branch_to_branch", "warehouse_to_warehouse"];
 const STATUSES = ["draft", "pending_approval", "approved", "in_transit", "completed", "rejected", "cancelled"];
@@ -73,8 +76,11 @@ function StockTransferDetailDrawer({ group, onClose }: { group: StockTransferGro
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div><span className="text-muted-foreground">Source</span><p className="font-medium">{group.sourceLocation}</p></div>
               <div><span className="text-muted-foreground">Destination</span><p className="font-medium">{group.destinationLocation}</p></div>
+              <div><span className="text-muted-foreground">Transfer Date</span><p className="font-medium">{fmtDateTime(group.createdAt)}</p></div>
+              <div><span className="text-muted-foreground">Completed</span><p className="font-medium">{group.completedDate ? fmtDateTime(group.completedDate) : "—"}</p></div>
               <div><span className="text-muted-foreground">Created By</span><p className="font-medium">{group.createdBy}</p></div>
               <div><span className="text-muted-foreground">Approved By</span><p className="font-medium">{group.approvedBy}</p></div>
+              <div><span className="text-muted-foreground">Received By</span><p className="font-medium">{group.receivedBy}</p></div>
               <div><span className="text-muted-foreground">Status</span><p className="font-medium capitalize">{group.status.replace(/_/g, " ")}</p></div>
             </div>
             <div>
@@ -114,17 +120,22 @@ function StockTransferReport() {
   const [to, setTo] = useState(todayStr());
   const [transferType, setTransferType] = useState("all");
   const [statuses, setStatuses] = useState<string[]>([]);
+  const [sourceBranchIds, setSourceBranchIds] = useState<string[]>([]);
   const [sourceWarehouseIds, setSourceWarehouseIds] = useState<string[]>([]);
+  const [destBranchIds, setDestBranchIds] = useState<string[]>([]);
   const [destWarehouseIds, setDestWarehouseIds] = useState<string[]>([]);
   const [productIds, setProductIds] = useState<string[]>([]);
   const [createdByIds, setCreatedByIds] = useState<string[]>([]);
   const [approvedByIds, setApprovedByIds] = useState<string[]>([]);
+  const [receivedByIds, setReceivedByIds] = useState<string[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [rows, setRows] = useState<StockTransferReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewTransfer, setViewTransfer] = useState<StockTransferGroup | null>(null);
+
+  const { branches } = useBranch();
 
   useEffect(() => { api.getWarehouses().then(setWarehouses).catch(() => {}); }, []);
   useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
@@ -134,11 +145,14 @@ function StockTransferReport() {
     from, to,
     transferType: transferType !== "all" ? transferType : undefined,
     status: statuses.length ? statuses : undefined,
+    sourceBranchId: sourceBranchIds.length ? sourceBranchIds : undefined,
     sourceWarehouseId: sourceWarehouseIds.length ? sourceWarehouseIds : undefined,
+    destBranchId: destBranchIds.length ? destBranchIds : undefined,
     destWarehouseId: destWarehouseIds.length ? destWarehouseIds : undefined,
     productId: productIds.length ? productIds : undefined,
     createdBy: createdByIds.length ? createdByIds : undefined,
     approvedBy: approvedByIds.length ? approvedByIds : undefined,
+    receivedBy: receivedByIds.length ? receivedByIds : undefined,
   };
 
   const load = useCallback(() => {
@@ -148,17 +162,18 @@ function StockTransferReport() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, transferType, statuses, sourceWarehouseIds, destWarehouseIds, productIds, createdByIds, approvedByIds]);
+  }, [from, to, transferType, statuses, sourceBranchIds, sourceWarehouseIds, destBranchIds, destWarehouseIds, productIds, createdByIds, approvedByIds, receivedByIds]);
 
   useEffect(() => { load(); }, [load]);
 
   const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || transferType !== "all"
-    || statuses.length > 0 || sourceWarehouseIds.length > 0 || destWarehouseIds.length > 0
-    || productIds.length > 0 || createdByIds.length > 0 || approvedByIds.length > 0;
+    || statuses.length > 0 || sourceBranchIds.length > 0 || sourceWarehouseIds.length > 0
+    || destBranchIds.length > 0 || destWarehouseIds.length > 0
+    || productIds.length > 0 || createdByIds.length > 0 || approvedByIds.length > 0 || receivedByIds.length > 0;
   const clearFilters = () => {
     setFrom(firstOfMonthStr()); setTo(todayStr()); setTransferType("all");
-    setStatuses([]); setSourceWarehouseIds([]); setDestWarehouseIds([]);
-    setProductIds([]); setCreatedByIds([]); setApprovedByIds([]);
+    setStatuses([]); setSourceBranchIds([]); setSourceWarehouseIds([]); setDestBranchIds([]); setDestWarehouseIds([]);
+    setProductIds([]); setCreatedByIds([]); setApprovedByIds([]); setReceivedByIds([]);
   };
 
   const handleExport = async (format: ReportExportFormat) => {
@@ -178,9 +193,9 @@ function StockTransferReport() {
     <PageShell title="Stock Transfer Report" subtitle="Full history of stock movement between warehouses and branches">
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+          <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         </div>
         <FilterField label="Transfer Type">
           <Select value={transferType} onValueChange={setTransferType}>
@@ -201,6 +216,16 @@ function StockTransferReport() {
             />
           </div>
         </FilterField>
+        <FilterField label="Source Branch">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Any Source Branch"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={sourceBranchIds}
+              onChange={setSourceBranchIds}
+            />
+          </div>
+        </FilterField>
         <FilterField label="Source Warehouse">
           <div className="w-44">
             <SearchableMultiSelect
@@ -208,6 +233,16 @@ function StockTransferReport() {
               options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
               selected={sourceWarehouseIds}
               onChange={setSourceWarehouseIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Destination Branch">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Any Destination Branch"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={destBranchIds}
+              onChange={setDestBranchIds}
             />
           </div>
         </FilterField>
@@ -251,6 +286,16 @@ function StockTransferReport() {
             />
           </div>
         </FilterField>
+        <FilterField label="Received By">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Received By: Anyone"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={receivedByIds}
+              onChange={setReceivedByIds}
+            />
+          </div>
+        </FilterField>
         {hasFilters && (
           <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
             <X className="h-3.5 w-3.5" /> Clear Filters
@@ -282,9 +327,9 @@ function StockTransferReport() {
             { key: "orderedQuantity", label: "Quantity Ordered" },
             { key: "receivedQuantity", label: "Quantity Received" },
             { key: "totalCost", label: "Total Cost", render: (g: StockTransferGroup) => <span className="font-semibold"><SARIcon />{fmtSAR(g.totalCost)}</span> },
-            { key: "createdAt", label: "Created At", render: (g: StockTransferGroup) => new Date(g.createdAt).toLocaleDateString("en-SA") },
-            { key: "completedDate", label: "Completed At", render: (g: StockTransferGroup) => g.completedDate ? new Date(g.completedDate).toLocaleDateString("en-SA") : "—" },
-            { key: "view", label: "", render: (g: StockTransferGroup) => (
+            { key: "createdAt", label: "Created At", render: (g: StockTransferGroup) => fmtDateTime(g.createdAt) },
+            { key: "completedDate", label: "Completed At", render: (g: StockTransferGroup) => g.completedDate ? fmtDateTime(g.completedDate) : "—" },
+            { key: "view", label: "Action", render: (g: StockTransferGroup) => (
               <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTransfer(g)}><Eye className="h-3.5 w-3.5" /></Button>
             ) },
           ]}

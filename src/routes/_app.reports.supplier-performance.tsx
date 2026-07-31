@@ -101,9 +101,9 @@ function SupplierPerformance() {
     <PageShell title="Supplier Performance" subtitle="Lead time, fill rate, purchase value and dues">
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
+          <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
           <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
         </div>
         <FilterField label="Supplier">
           <div className="w-48">
