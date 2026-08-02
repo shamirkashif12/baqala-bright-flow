@@ -11,44 +11,19 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<int>(
-                name: "business_id",
-                table: "tenant_plan",
-                type: "int",
-                nullable: true);
+            // AddColumnIfNotExists (see MigrationIdempotencyHelper), not plain AddColumn — same
+            // no-transaction startup-runner risk as AddTenantPlan: a partial prior run would leave
+            // some of these six columns already committed, and a plain AddColumn replay dies on
+            // "Duplicate column name" for whichever one landed last time.
+            migrationBuilder.AddColumnIfNotExists("tenant_plan", "business_id", "int NULL");
+            migrationBuilder.AddColumnIfNotExists("tenant_plan", "category", "varchar(100) NULL");
+            migrationBuilder.AddColumnIfNotExists("tenant_plan", "ecr_id", "int NULL");
+            migrationBuilder.AddColumnIfNotExists("tenant_plan", "last_event_id", "varchar(100) NULL");
+            migrationBuilder.AddColumnIfNotExists("tenant_plan", "max_products", "int NULL");
+            migrationBuilder.AddColumnIfNotExists("tenant_plan", "subscription_id", "int NULL");
 
-            migrationBuilder.AddColumn<string>(
-                name: "category",
-                table: "tenant_plan",
-                type: "varchar(100)",
-                maxLength: 100,
-                nullable: true);
-
-            migrationBuilder.AddColumn<int>(
-                name: "ecr_id",
-                table: "tenant_plan",
-                type: "int",
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "last_event_id",
-                table: "tenant_plan",
-                type: "varchar(100)",
-                maxLength: 100,
-                nullable: true);
-
-            migrationBuilder.AddColumn<int>(
-                name: "max_products",
-                table: "tenant_plan",
-                type: "int",
-                nullable: true);
-
-            migrationBuilder.AddColumn<int>(
-                name: "subscription_id",
-                table: "tenant_plan",
-                type: "int",
-                nullable: true);
-
+            // Setting already-null columns to null is a no-op regardless of how many times this
+            // runs — no guard needed here, unlike the AddColumn calls above.
             migrationBuilder.UpdateData(
                 table: "tenant_plan",
                 keyColumn: "id",
