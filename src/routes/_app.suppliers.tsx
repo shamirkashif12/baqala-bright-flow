@@ -150,6 +150,10 @@ function SupplierFormFields({
   // record, or one saved before this field existed) should show as free text, not silently fall
   // back to the closed dropdown with nothing selected.
   const [otherCategory, setOtherCategory] = useState(() => !!form.category && !SUPPLIER_CATEGORIES.includes(form.category));
+  // Same again for Payment Terms — a custom term saved outside the 6 fixed options (imported data,
+  // or a value set before this field was a dropdown) previously just rendered blank with no way to
+  // see or edit what was actually stored.
+  const [otherPaymentTerms, setOtherPaymentTerms] = useState(() => !!form.paymentTerms && !PAYMENT_TERMS_OPTIONS.includes(form.paymentTerms));
   const clearError = (k: keyof SupplierForm) =>
     setErrors(prev => (prev[k] ? { ...prev, [k]: undefined } : prev));
   const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -234,12 +238,25 @@ function SupplierFormFields({
         </Select>
       </FieldRow>
       <FieldRow label="Payment Terms">
-        <Select value={PAYMENT_TERMS_OPTIONS.includes(form.paymentTerms) ? form.paymentTerms : ""} onValueChange={setS("paymentTerms")}>
-          <SelectTrigger className="h-9"><SelectValue placeholder="Select payment terms" /></SelectTrigger>
-          <SelectContent>
-            {PAYMENT_TERMS_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {otherPaymentTerms ? (
+          <div className="space-y-1">
+            <Input value={form.paymentTerms} onChange={set("paymentTerms")} className="h-9" placeholder="Enter payment terms" maxLength={100} autoFocus />
+            <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherPaymentTerms(false); setS("paymentTerms")(""); }}>
+              Choose from list instead
+            </button>
+          </div>
+        ) : (
+          <Select
+            value={PAYMENT_TERMS_OPTIONS.includes(form.paymentTerms) ? form.paymentTerms : ""}
+            onValueChange={v => { if (v === "__other") { setOtherPaymentTerms(true); setS("paymentTerms")(""); } else setS("paymentTerms")(v); }}
+          >
+            <SelectTrigger className="h-9"><SelectValue placeholder="Select payment terms" /></SelectTrigger>
+            <SelectContent>
+              {PAYMENT_TERMS_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              <SelectItem value="__other">Other…</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </FieldRow>
       <FieldRow label="Credit Limit (SAR)"><Input value={form.creditLimit} onChange={set("creditLimit")} className="h-9" type="number" min="0" step="0.01" /></FieldRow>
       <FieldRow label="Bank Name"><Input value={form.bankName} onChange={set("bankName")} className="h-9" /></FieldRow>

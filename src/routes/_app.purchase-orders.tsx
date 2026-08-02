@@ -57,6 +57,11 @@ const PAY_MAP: Record<string, { label: string; cls: string }> = {
   supplier_credit: { label: "Supplier Credit", cls: "bg-primary/15 text-primary border-primary/30" },
 };
 
+// Mirrors the Supplier form's own PAYMENT_TERMS_OPTIONS (src/routes/_app.suppliers.tsx) — kept as
+// a separate local copy rather than a shared import, matching how this file already duplicates the
+// same list inline as SelectItems below.
+const PO_PAYMENT_TERMS_OPTIONS = ["Net 30", "Net 60", "On Delivery", "Immediate", "COD", "Advance Payment"];
+
 function StatusBadge({ status }: { status: string }) {
   const s = STATUS_MAP[status] ?? { label: status, cls: "bg-muted text-muted-foreground border-border" };
   return <Badge variant="outline" className={`text-xs ${s.cls}`}>{s.label}</Badge>;
@@ -167,6 +172,10 @@ function CreatePOWizard({
   // Step 1
   const [supplierId, setSupplierId] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("Net 30");
+  // A supplier's saved Payment Terms can be a custom value outside the 6 fixed options below
+  // (legacy data, or set via the Suppliers page's own "Other…" fallback) — shown as free text
+  // instead of silently rendering blank, same pattern as the Supplier form.
+  const [otherPaymentTerms, setOtherPaymentTerms] = useState(false);
   // Only editable here when the supplier record itself has none on file yet — otherwise these stay
   // the read-only auto-filled values from the supplier. Filling them in here also saves them back
   // to the supplier record so the next PO for them auto-fills too.
@@ -235,7 +244,13 @@ function CreatePOWizard({
   // Payment terms are already set on the supplier record itself — previously this always started
   // at a hardcoded "Net 30" regardless of supplier, so every PO needed the same manual re-pick.
   useEffect(() => {
-    if (selectedSupplier?.paymentTerms) setPaymentTerms(selectedSupplier.paymentTerms);
+    if (selectedSupplier?.paymentTerms) {
+      setPaymentTerms(selectedSupplier.paymentTerms);
+      // A custom value fetched into state but not one of the 6 fixed SelectItems below rendered
+      // as a blank Select with nothing shown — even though paymentTerms itself held the right
+      // value. Switch to the free-text fallback so it's actually visible.
+      setOtherPaymentTerms(!PO_PAYMENT_TERMS_OPTIONS.includes(selectedSupplier.paymentTerms));
+    }
   }, [selectedSupplier?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- only re-derive on supplier change, not every keystroke on paymentTerms itself
 
   // A supplier's Supply Channel says where it's actually able to deliver. "warehouse" suppliers
@@ -398,17 +413,30 @@ function CreatePOWizard({
                 </>
               )}
               <FieldRow label="Payment Terms">
-                <Select value={paymentTerms} onValueChange={setPaymentTerms}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Net 30">Net 30</SelectItem>
-                    <SelectItem value="Net 60">Net 60</SelectItem>
-                    <SelectItem value="On Delivery">On Delivery</SelectItem>
-                    <SelectItem value="Immediate">Immediate</SelectItem>
-                    <SelectItem value="COD">COD</SelectItem>
-                    <SelectItem value="Advance Payment">Advance Payment</SelectItem>
-                  </SelectContent>
-                </Select>
+                {otherPaymentTerms ? (
+                  <div className="space-y-1">
+                    <Input value={paymentTerms} onChange={e => setPaymentTerms(e.target.value)} className="h-9" placeholder="Enter payment terms" maxLength={100} autoFocus />
+                    <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherPaymentTerms(false); setPaymentTerms("Net 30"); }}>
+                      Choose from list instead
+                    </button>
+                  </div>
+                ) : (
+                  <Select
+                    value={paymentTerms}
+                    onValueChange={v => { if (v === "__other") { setOtherPaymentTerms(true); setPaymentTerms(""); } else setPaymentTerms(v); }}
+                  >
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Net 30">Net 30</SelectItem>
+                      <SelectItem value="Net 60">Net 60</SelectItem>
+                      <SelectItem value="On Delivery">On Delivery</SelectItem>
+                      <SelectItem value="Immediate">Immediate</SelectItem>
+                      <SelectItem value="COD">COD</SelectItem>
+                      <SelectItem value="Advance Payment">Advance Payment</SelectItem>
+                      <SelectItem value="__other">Other…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </FieldRow>
             </>
           )}
