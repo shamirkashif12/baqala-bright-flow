@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
@@ -15,9 +17,10 @@ import { api, type BranchSalesReport, type BranchSalesRow, type ReportExportForm
 import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Trophy, TrendingDown, Wallet, BarChart3, RotateCcw, Cigarette, X } from "lucide-react";
+import { Trophy, TrendingDown, Wallet, BarChart3, RotateCcw, Cigarette, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/branch-sales")({ component: BranchSales });
@@ -54,6 +57,7 @@ function BranchSales() {
   const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<BranchSalesReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { categories, products, employees, terminals } = useReportFilterOptions(branchId, categoryId);
 
@@ -106,90 +110,109 @@ function BranchSales() {
     setCustomerType("all"); setCategoryId("all"); setProductId("all"); setCashierId("all");
     setTerminalId("all"); setHasTobaccoFee(false);
   };
+  const advancedFilterCount = (customerType !== "all" ? 1 : 0) + (categoryId !== "all" ? 1 : 0)
+    + (productId !== "all" ? 1 : 0) + (cashierId !== "all" ? 1 : 0) + (terminalId !== "all" ? 1 : 0)
+    + (hasTobaccoFee ? 1 : 0);
 
   return (
     <PageShell title="Branch Sales" subtitle="Compare performance across branches">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {canFilterByCity && (
-          <>
-            <FilterField label="City">
-              <Select value={city} onValueChange={setCity}>
-                <SelectTrigger className="h-9 w-40"><SelectValue placeholder="City" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Cities</SelectItem>
-                  {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </FilterField>
-            <FilterField label="Branch">
-              <Select value={branchId} onValueChange={setBranchId}>
-                <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Branch" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </FilterField>
-          </>
-        )}
-        <FilterField label="Customer Type">
-          <Select value={customerType} onValueChange={setCustomerType}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Customer Type" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Customers</SelectItem>
-              <SelectItem value="registered">Registered</SelectItem>
-              <SelectItem value="walk-in">Walk-in</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Category">
-          <Select value={categoryId} onValueChange={setCategoryId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Product">
-          <Select value={productId} onValueChange={setProductId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Products</SelectItem>
-              {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Employee">
-          <Select value={cashierId} onValueChange={setCashierId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Device">
-          <Select value={terminalId} onValueChange={setTerminalId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Device" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Devices</SelectItem>
-              {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <label className="flex items-center gap-1.5 text-sm px-2">
-          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
-          Tobacco fee only
-        </label>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {canFilterByCity && (
+            <>
+              <FilterField label="City">
+                <Select value={city} onValueChange={setCity}>
+                  <SelectTrigger className="h-9 w-40"><SelectValue placeholder="City" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Cities</SelectItem>
+                    {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+              <FilterField label="Branch">
+                <Select value={branchId} onValueChange={setBranchId}>
+                  <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Branch" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branches</SelectItem>
+                    {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FilterField>
+            </>
+          )}
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Customer Type">
+            <Select value={customerType} onValueChange={setCustomerType}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Customer Type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Customers</SelectItem>
+                <SelectItem value="registered">Registered</SelectItem>
+                <SelectItem value="walk-in">Walk-in</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Category">
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Category" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Product">
+            <Select value={productId} onValueChange={setProductId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Products</SelectItem>
+                {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Employee">
+            <Select value={cashierId} onValueChange={setCashierId}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Device">
+            <Select value={terminalId} onValueChange={setTerminalId}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Device" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Devices</SelectItem>
+                {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <label className="flex items-center gap-1.5 text-sm px-2">
+            <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+            Tobacco fee only
+          </label>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Top Branch" value={kpis?.topBranch ?? "—"} icon={Trophy} accent="primary" />

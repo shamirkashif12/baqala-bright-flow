@@ -78,10 +78,18 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/stock-reconciliation", exportFile: () => api.exportStockReconciliationReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "stocktaking" },
     // KPI dashboard rather than a tabular report — there is no row set to export, so it opts out
     // of the export affordance the others share.
-    { code: "inventory-dashboard", name: "Inventory Aging", desc: "Product age, days since movement, slow-moving & dead stock", icon: Hourglass, color: "primary",
+    //
+    // Two reports over the same underlying classification, split by what they're FOR: this one is
+    // "is this stock physically stale" (age/days-since-movement, ranked by location), the next is
+    // "is this product a business performer" (sales velocity/turnover/margin, ranked catalog-wide).
+    // Both cross-link to each other and to Stock Movement History in-page — see the info banner on
+    // each report — since the split reads as two similarly-named reports otherwise.
+    { code: "inventory-dashboard", name: "Inventory Aging (by Stock Age & Location)", desc: "Physical staleness per location — product age, days since movement, slow-moving & dead stock, with drill-down", icon: Hourglass, color: "primary",
       href: "/reports/inventory-dashboard" },
-    { code: "inventory-aging-performance", name: "Product Performance", desc: "Star Products, High/Average/Slow performers & Dead Stock by sales, turnover & profitability", icon: Sparkles, color: "success",
+    { code: "inventory-aging-performance", name: "Product Performance (by Sales & Turnover)", desc: "Business ranking per product — Star/High/Average/Slow performers & Dead Stock by sales, turnover & profitability, with drill-down", icon: Sparkles, color: "success",
       href: "/reports/inventory-aging-performance", exportFile: () => api.exportProductPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "kpi_bi" },
+    { code: "stock-movement-history", name: "Stock Movement History", desc: "Full ledger of every stock-affecting transaction — receives, sales, transfers, adjustments & write-offs", icon: History, color: "primary",
+      href: "/reports/stock-movement-history", exportFile: () => api.exportStockMovementHistoryReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "low-stock", name: "Low Stock Report", desc: "Items below reorder thresholds", icon: AlertTriangle, color: "destructive",
       href: "/reports/low-stock", exportFile: () => api.exportLowStockReport({ onlyLowStock: true, exportedBy }) },
     { code: "waste-spoilage", name: "Waste / Spoilage Report", desc: "Expired & damaged write-offs", icon: Ban, color: "destructive",
@@ -108,7 +116,7 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/service-charges", exportFile: () => api.exportFeeReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "tobacco-excise", name: "Tobacco Excise Report", desc: "Excise tax on tobacco products", icon: Cigarette, color: "warning",
       href: "/reports/tobacco-excise", exportFile: () => api.exportTobaccoExciseReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
-    { code: "profit-margin", name: "Profit Margin", desc: "Gross & net margin by product", icon: DollarSign, color: "success",
+    { code: "profit-margin", name: "Profit Margin (Profitability)", desc: "Gross & net margin by product — the dedicated profitability breakdown", icon: DollarSign, color: "success",
       href: "/reports/profit-margin", exportFile: () => api.exportProfitMarginReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "approval-center", name: "Approval Center", desc: "Every manager approval in one place — discounts, cancellations, deletions, refunds & more", icon: Gavel, color: "primary",
       href: "/reports/approval-center", planFeature: "control_tower_approval_centre" },

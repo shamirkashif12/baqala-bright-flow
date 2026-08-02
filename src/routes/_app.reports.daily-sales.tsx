@@ -4,7 +4,9 @@ import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
@@ -16,8 +18,9 @@ import { useBranch } from "@/lib/branch-context";
 import { api, type DailySalesReport, type ReportExportFormat, type Terminal, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Wallet, Receipt, Percent, RotateCcw, X } from "lucide-react";
+import { Wallet, Receipt, Percent, RotateCcw, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/daily-sales")({ component: DailySales });
@@ -51,6 +54,7 @@ function DailySales() {
   const [hideEmptyHours, setHideEmptyHours] = useState(true);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [cashiers, setCashiers] = useState<User[]>([]);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
 
@@ -104,6 +108,7 @@ function DailySales() {
     setFrom(todayStr()); setTo(todayStr()); setBranchIds(lockedBranchId ? [lockedBranchId] : []); setTerminalIds([]); setCashierIds([]);
     setPaymentMethods([]); setCustomerTypes([]); setHasTobaccoFee(false);
   };
+  const advancedFilterCount = cashierIds.length + paymentMethods.length + customerTypes.length + (hasTobaccoFee ? 1 : 0);
 
   const kpis = data?.kpis;
   const fmt = (n: number) => fmtSAR(n);
@@ -117,71 +122,81 @@ function DailySales() {
       title="Daily Sales"
       subtitle="Hour-of-day sales, payment split and VAT — pick a single day, or a range to compare hourly patterns"
     >
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <div className="w-44">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Terminal">
+            <div className="w-40">
               <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
+                placeholder="All Terminals"
+                options={terminals.map((t) => ({ id: t.id, label: t.name }))}
+                selected={terminalIds}
+                onChange={setTerminalIds}
               />
             </div>
           </FilterField>
-        )}
-        <FilterField label="Terminal">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="All Terminals"
-              options={terminals.map((t) => ({ id: t.id, label: t.name }))}
-              selected={terminalIds}
-              onChange={setTerminalIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Cashier">
-          <div className="w-40">
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Cashier">
             <SearchableMultiSelect
               placeholder="All Cashiers"
               options={cashiers.map((c) => ({ id: c.id, label: c.fullName }))}
               selected={cashierIds}
               onChange={setCashierIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Payment Method">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Payment Method">
             <SearchableMultiSelect
               placeholder="All Methods"
               options={PAYMENT_METHODS}
               selected={paymentMethods}
               onChange={setPaymentMethods}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Customer Type">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Customer Type">
             <SearchableMultiSelect
               placeholder="All Customers"
               options={CUSTOMER_TYPES}
               selected={customerTypes}
               onChange={setCustomerTypes}
             />
-          </div>
-        </FilterField>
-        <label className="flex items-center gap-1.5 text-sm px-2">
-          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
-          Tobacco fee only
-        </label>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          </FilterField>
+          <label className="flex items-center gap-1.5 text-sm px-2">
+            <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+            Tobacco fee only
+          </label>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Gross Sales" value={<><SARIcon />{fmt(kpis?.grossSales ?? 0)}</>} icon={Wallet} accent="primary" />

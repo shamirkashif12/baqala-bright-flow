@@ -38,8 +38,8 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? supplierId,
-        [FromQuery] Guid? warehouseId,
-        [FromQuery] Guid? branchId,
+        [FromQuery] Guid[]? warehouseId,
+        [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? createdBy,
         [FromQuery] Guid[]? approvedBy,
         [FromQuery] Guid? productId,
@@ -57,10 +57,8 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             .Include(p => p.Payments)
             .AsQueryable();
         if (supplierId.HasValue) query = query.Where(p => p.SupplierId == supplierId);
-        if (warehouseId.HasValue) query = query.Where(p => p.WarehouseId == warehouseId);
-        if (branchId.HasValue) query = query.Where(p => p.BranchId == branchId);
-        // createdBy/approvedBy are now multi-select arrays — never `.Contains()` a Guid[] directly
-        // against a DbSet-backed IQueryable on this repo's MySQL provider (see the
+        // warehouseId/branchId/createdBy/approvedBy are multi-select arrays — never `.Contains()`
+        // a Guid[] directly against a DbSet-backed IQueryable on this repo's MySQL provider (see the
         // ef-mysql-inlist-gotcha memory: it throws at execution time on 2+ values despite compiling
         // and passing a single-value smoke test). Applied in-memory after ToListAsync below instead.
         if (productId.HasValue) query = query.Where(p => p.Items.Any(i => i.ProductId == productId));
@@ -89,6 +87,8 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
             .ToListAsync();
 
         var scoped = pos.AsEnumerable();
+        if (warehouseId is { Length: > 0 }) scoped = scoped.Where(p => p.WarehouseId.HasValue && warehouseId.Contains(p.WarehouseId.Value));
+        if (branchId is { Length: > 0 }) scoped = scoped.Where(p => p.BranchId.HasValue && branchId.Contains(p.BranchId.Value));
         if (createdBy is { Length: > 0 }) scoped = scoped.Where(p => createdBy.Contains(p.CreatedBy));
         if (approvedBy is { Length: > 0 }) scoped = scoped.Where(p => p.ApprovedBy.HasValue && approvedBy.Contains(p.ApprovedBy.Value));
         if (status is { Length: > 0 }) scoped = scoped.Where(p => status.Contains(p.Status));
