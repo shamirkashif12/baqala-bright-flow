@@ -1367,11 +1367,6 @@ function POS() {
     if (!prod.discount || prod.discount <= 0) return price;
     return Math.max(0, prod.discountType === "percentage" ? price * (1 - prod.discount / 100) : price - prod.discount);
   }
-  // Same "tobacco items are not eligible for discounts" carve-out named Discounts/Coupons are
-  // refused for server-side (skipped entirely when the Rules Engine rule is inactive) — Manual
-  // discount has no rule row to check it against, so it's gated here at the point of adding it
-  // instead (server also refuses it as of the OrdersController fix).
-  const cartHasTobacco = displayCart.some(ci => products.find(p => p.id === ci.productId)?.isTobacco);
   const couponDiscount = (() => {
     if (!appliedCoupon) return 0;
     const raw = appliedCoupon.type === "percentage"
@@ -2785,13 +2780,10 @@ function POS() {
                   onClick={() => {
                     const value = Number(manualDiscountValue);
                     if (!Number.isFinite(value) || value <= 0) return;
-                    if (cartHasTobacco) {
-                      toast.error("Cannot apply a discount", {
-                        description: "Tobacco items in this order are not eligible for discounts.",
-                        duration: 4000,
-                      });
-                      return;
-                    }
+                    // Tobacco items are discountable, same as anything else — tobaccoNetPriceAfterAllDiscounts
+                    // (via orderLevelDiscountForItem, which already includes manualDiscountSavings) floors
+                    // the recalculated excise at the statutory minimum, so a 100% discount never drops a
+                    // tobacco line's tax below what the law requires. See calcTobaccoFee above.
                     const candidateSaving = manualDiscountKind === "percentage" ? subtotal * (value / 100) : Math.min(value, subtotal);
                     const overPct = discountCapExceededPct(candidateSaving);
                     if (overPct !== null) {
