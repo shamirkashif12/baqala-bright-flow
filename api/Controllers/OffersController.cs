@@ -53,6 +53,7 @@ public class OffersController(BaqalaDbContext db, IOfferCreationService offerCre
     // anyone else's request is queued in the Approval Center instead — no Offer row exists until
     // approved.
     [RequirePermission("Coupons", PermAction.Create)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] OfferRequest req)
     {
@@ -80,6 +81,7 @@ public class OffersController(BaqalaDbContext db, IOfferCreationService offerCre
     }
 
     [RequirePermission("Coupons", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] OfferRequest req)
     {
@@ -108,6 +110,7 @@ public class OffersController(BaqalaDbContext db, IOfferCreationService offerCre
     }
 
     [RequirePermission("Coupons", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPatch("{id:guid}/toggle")]
     public async Task<IActionResult> Toggle(Guid id)
     {
@@ -120,6 +123,7 @@ public class OffersController(BaqalaDbContext db, IOfferCreationService offerCre
     }
 
     [RequirePermission("Coupons", PermAction.Delete)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

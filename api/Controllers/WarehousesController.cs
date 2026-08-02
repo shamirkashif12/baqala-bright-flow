@@ -9,6 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/warehouses")]
+[RequirePlanFeature("warehouse_management")]
 public class WarehousesController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>

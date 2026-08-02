@@ -8,6 +8,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequirePlanFeature("warehouse_management")]
 public class WarehouseController(BaqalaDbContext db) : ControllerBase
 {
     // Mirrors GetCallerContext elsewhere. Every role that holds "Warehouses" view also holds

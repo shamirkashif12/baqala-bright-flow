@@ -13,9 +13,11 @@ import { SearchableMultiSelect } from "@/components/report-filters/searchable-mu
 import { StatusBadge } from "@/components/module-placeholder";
 import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut, KeyRound, Copy, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { api, excludeDisabledBranches, type Terminal, type Branch, type User, type CashierShift } from "@/lib/api";
+import { api, excludeDisabledBranches, type Terminal, type Branch, type User, type CashierShift, type TenantPlanInfo } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
+import { usePlanFeature } from "@/lib/use-plan-feature";
+import { LockedFeatureNotice } from "@/components/locked-feature-notice";
 
 export const Route = createFileRoute("/_app/terminals")({ component: Terminals });
 
@@ -23,7 +25,7 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
   return <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>;
 }
 
-function TerminalFormFields({ form, set, setS, branches, users, saving, onSave }: {
+function TerminalFormFields({ form, set, setS, branches, users, saving, onSave, limitBlocked }: {
   form: TerminalForm;
   set: (k: keyof TerminalForm) => (e: React.ChangeEvent<HTMLInputElement>) => void;
   setS: (k: keyof TerminalForm) => (v: string) => void;
@@ -31,6 +33,9 @@ function TerminalFormFields({ form, set, setS, branches, users, saving, onSave }
   users: User[];
   saving: boolean;
   onSave: () => void;
+  // Set (to a user-facing message) when the selected branch has hit the plan's per-branch
+  // terminal limit — disables Save instead of letting the user hit the backend's 403 blind.
+  limitBlocked?: string;
 }) {
   return (
     <div className="mt-4 space-y-4">
@@ -63,7 +68,8 @@ function TerminalFormFields({ form, set, setS, branches, users, saving, onSave }
           </SelectContent>
         </Select>
       </FieldRow>
-      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving}>
+      {limitBlocked && <p className="text-xs text-destructive">{limitBlocked}</p>}
+      <Button className="w-full gradient-primary text-primary-foreground border-0" onClick={onSave} disabled={saving || !!limitBlocked}>
         {saving ? "Saving…" : "Save"}
       </Button>
     </div>
@@ -244,6 +250,8 @@ function Terminals() {
   const [saving, setSaving] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<Terminal | null>(null);
   const [deactivating, setDeactivating] = useState(false);
+  const kioskUnlocked = usePlanFeature("self_service_kiosk");
+  const [planInfo, setPlanInfo] = useState<TenantPlanInfo | null>(null);
   const [kioskTerm, setKioskTerm] = useState<Terminal | null>(null);
   const [kioskSecret, setKioskSecret] = useState<{ terminalCode: string; pairingSecret: string } | null>(null);
   const [kioskGenerating, setKioskGenerating] = useState(false);
@@ -254,6 +262,7 @@ function Terminals() {
   // Load all terminals once (unfiltered) for the Session Logs dropdown
   useEffect(() => {
     api.getTerminals().then(setAllTerminals);
+    api.getTenantPlan().then(setPlanInfo).catch(() => {});
   }, []);
 
   const load = useCallback(() => {
@@ -343,6 +352,9 @@ function Terminals() {
         setCreateOpen(false);
       }
       load();
+      // Keep the unfiltered per-branch counts (used for the plan terminal-limit check) in sync —
+      // `load()` above only refreshes the filtered `terminals` list, not `allTerminals`.
+      api.getTerminals().then(setAllTerminals);
     } catch (e: any) { console.error(e); toast.error(e?.message || "Failed to save terminal."); } finally { setSaving(false); }
   };
 
@@ -403,6 +415,23 @@ function Terminals() {
 
   const openShiftCount = allShifts.filter(s => s.status === "open").length;  // from unfiltered allShifts for badge accuracy
 
+  const maxTerminalsPerBranch = planInfo?.plan.limits.maxTerminalsPerBranch ?? null;
+  const terminalCountByBranch = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allTerminals.forEach(t => { counts[t.branchId] = (counts[t.branchId] ?? 0) + 1; });
+    return counts;
+  }, [allTerminals]);
+  // Branch-scoped users only ever create in their own branch, so the top button can be disabled
+  // up front. A tenant_admin picks the branch inside the dialog, so their check happens there
+  // instead (limitBlocked below, evaluated against whatever branch is currently selected in the form).
+  const lockedBranchAtLimit = !!lockedBranchId && maxTerminalsPerBranch !== null
+    && (terminalCountByBranch[lockedBranchId] ?? 0) >= maxTerminalsPerBranch;
+  const selectedBranchName = branches.find(b => b.id === form.branchId)?.name;
+  const createLimitBlocked = (!editTerm && !!form.branchId && maxTerminalsPerBranch !== null
+    && (terminalCountByBranch[form.branchId] ?? 0) >= maxTerminalsPerBranch)
+    ? `Terminal limit reached (${maxTerminalsPerBranch}) for ${selectedBranchName ?? "this branch"} under your plan. Upgrade to add more.`
+    : undefined;
+
   return (
     <PageShell title="Terminals" subtitle="POS terminal registry, sessions and sync status">
       <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-4">
@@ -416,7 +445,13 @@ function Terminals() {
           </TabsList>
           <div className="flex-1" />
           {mainTab === "terminals" && canCreate && (
-            <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
+            <Button
+              size="sm"
+              className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9"
+              onClick={() => { setForm(emptyForm); setCreateOpen(true); }}
+              disabled={lockedBranchAtLimit}
+              title={lockedBranchAtLimit ? `Terminal limit reached (${maxTerminalsPerBranch}) for your branch under your plan. Upgrade to add more.` : undefined}
+            >
               <Plus className="h-4 w-4" /> Add Terminal
             </Button>
           )}
@@ -787,7 +822,7 @@ function Terminals() {
       <Sheet open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
         <SheetContent>
           <SheetHeader><SheetTitle>Add Terminal</SheetTitle></SheetHeader>
-          <TerminalFormFields form={form} set={set} setS={setS} branches={branches} users={cashiers} saving={saving} onSave={handleSave} />
+          <TerminalFormFields form={form} set={set} setS={setS} branches={branches} users={cashiers} saving={saving} onSave={handleSave} limitBlocked={createLimitBlocked} />
         </SheetContent>
       </Sheet>
 
@@ -800,6 +835,9 @@ function Terminals() {
               Self-Checkout Pairing — {kioskTerm?.terminalCode}
             </SheetTitle>
           </SheetHeader>
+          {!kioskUnlocked ? (
+            <div className="mt-4"><LockedFeatureNotice feature="Self-Service Kiosk" /></div>
+          ) : <>
           <div className="mt-4 space-y-4">
             {!kioskSecret && (
               <p className="text-sm text-muted-foreground">
@@ -868,6 +906,7 @@ function Terminals() {
               </Button>
             )}
           </div>
+          </>}
         </SheetContent>
       </Sheet>
 

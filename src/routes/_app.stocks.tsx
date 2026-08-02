@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import {
   Boxes, ArrowDownToLine, ArrowUpFromLine, ClipboardCheck, Truck, Undo2,
   Trash2, Plus, History, FileBarChart, ScanLine, Package, AlertTriangle,
-  TrendingUp, BarChart3, Download, CheckCircle2, ImageOff, X, RotateCcw, PlayCircle,
+  TrendingUp, BarChart3, Download, CheckCircle2, ImageOff, X, RotateCcw, PlayCircle, Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -26,7 +26,9 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
-import { wholeUnitQuantityError } from "@/lib/utils";
+import { usePlanFeature } from "@/lib/use-plan-feature";
+import { UpgradeModal } from "@/components/upgrade-modal";
+import { cn, wholeUnitQuantityError } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/stocks")({ component: Stocks });
 
@@ -1133,6 +1135,15 @@ function Stocks() {
   // could see this tab yet hit "Access Denied" on every card inside it, so hide the tab entirely
   // for those roles instead.
   const canViewReports = canViewModule("Reports");
+  // Fixed, small set — safe to call unconditionally rather than per-tile in a .map(), which
+  // would violate the rules of hooks. Three of the report tiles below link to plan-gated reports
+  // (GRN Summary → purchase_orders, Supplier Return Report → supplier_returns, Stock Count
+  // Variance → stocktaking); without this they were plain clickable links that dead-ended into
+  // route-guard's upgrade screen with no lock indicator beforehand.
+  const purchaseOrdersUnlocked = usePlanFeature("purchase_orders");
+  const supplierReturnsUnlocked = usePlanFeature("supplier_returns");
+  const stocktakingUnlocked = usePlanFeature("stocktaking");
+  const [reportUpgrade, setReportUpgrade] = useState<string | null>(null);
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -1751,32 +1762,33 @@ function Stocks() {
         <TabsContent value="reports">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { title: "Stock Valuation Report", desc: "Current stock value by product and branch", icon: <BarChart3 className="h-8 w-8 text-blue-500" />, to: "/reports/inventory-snapshot" },
-              { title: "Stock Movement Report", desc: "In/out movements over a date range", icon: <History className="h-8 w-8 text-green-500" />, tab: "movement" },
-              { title: "Low Stock Report", desc: "Products below reorder level", icon: <AlertTriangle className="h-8 w-8 text-yellow-500" />, to: "/reports/low-stock" },
-              { title: "Expiry Report", desc: "Batches expiring within 30/60/90 days", icon: <TrendingUp className="h-8 w-8 text-red-500" />, to: "/batches" },
-              { title: "GRN Summary", desc: "Goods received against purchase orders", icon: <ClipboardCheck className="h-8 w-8 text-purple-500" />, to: "/reports/purchase-orders" },
-              { title: "Wastage Report", desc: "Damage and wastage records by period", icon: <Trash2 className="h-8 w-8 text-red-400" />, to: "/reports/waste-spoilage" },
-              { title: "Supplier Return Report", desc: "Returns sent back to suppliers", icon: <Undo2 className="h-8 w-8 text-orange-500" />, to: "/reports/supplier-returns" },
-              { title: "Store Delivery Report", desc: "Warehouse-to-branch transfers", icon: <Truck className="h-8 w-8 text-indigo-500" />, to: "/reports/stock-transfer" },
-              { title: "Stock Count Variance", desc: "Physical count vs system count differences", icon: <Boxes className="h-8 w-8 text-teal-500" />, to: "/reports/stock-reconciliation" },
+              { title: "Stock Valuation Report", desc: "Current stock value by product and branch", icon: <BarChart3 className="h-8 w-8 text-blue-500" />, to: "/reports/inventory-snapshot", locked: false },
+              { title: "Stock Movement Report", desc: "In/out movements over a date range", icon: <History className="h-8 w-8 text-green-500" />, tab: "movement", locked: false },
+              { title: "Low Stock Report", desc: "Products below reorder level", icon: <AlertTriangle className="h-8 w-8 text-yellow-500" />, to: "/reports/low-stock", locked: false },
+              { title: "Expiry Report", desc: "Batches expiring within 30/60/90 days", icon: <TrendingUp className="h-8 w-8 text-red-500" />, to: "/batches", locked: false },
+              { title: "GRN Summary", desc: "Goods received against purchase orders", icon: <ClipboardCheck className="h-8 w-8 text-purple-500" />, to: "/reports/purchase-orders", locked: !purchaseOrdersUnlocked },
+              { title: "Wastage Report", desc: "Damage and wastage records by period", icon: <Trash2 className="h-8 w-8 text-red-400" />, to: "/reports/waste-spoilage", locked: false },
+              { title: "Supplier Return Report", desc: "Returns sent back to suppliers", icon: <Undo2 className="h-8 w-8 text-orange-500" />, to: "/reports/supplier-returns", locked: !supplierReturnsUnlocked },
+              { title: "Store Delivery Report", desc: "Warehouse-to-branch transfers", icon: <Truck className="h-8 w-8 text-indigo-500" />, to: "/reports/stock-transfer", locked: false },
+              { title: "Stock Count Variance", desc: "Physical count vs system count differences", icon: <Boxes className="h-8 w-8 text-teal-500" />, to: "/reports/stock-reconciliation", locked: !stocktakingUnlocked },
             ].map(r => (
-              <Card key={r.title} className="cursor-pointer hover:shadow-md transition-shadow">
+              <Card key={r.title} className={cn("transition-shadow", r.locked ? "opacity-60" : "cursor-pointer hover:shadow-md")}>
                 <CardContent className="p-4 flex items-start gap-4">
                   <div className="mt-0.5">{r.icon}</div>
                   <div>
-                    <p className="font-semibold text-sm">{r.title}</p>
+                    <p className="font-semibold text-sm flex items-center gap-1.5">{r.title}{r.locked && <Lock className="h-3 w-3 text-muted-foreground" />}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{r.desc}</p>
                     <Button
                       size="sm" variant="outline" className="mt-3 gap-1.5 h-7 text-xs"
-                      onClick={() => r.tab ? setTab(r.tab) : navigate({ to: r.to as any })}
+                      onClick={() => r.locked ? setReportUpgrade(r.title) : (r.tab ? setTab(r.tab) : navigate({ to: r.to as any }))}
                     >
-                      <FileBarChart className="h-3 w-3" /> Open Report
+                      {r.locked ? <Lock className="h-3 w-3" /> : <FileBarChart className="h-3 w-3" />} {r.locked ? "Upgrade to Unlock" : "Open Report"}
                     </Button>
                   </div>
                 </CardContent>
               </Card>
             ))}
+            {reportUpgrade && <UpgradeModal open onOpenChange={() => setReportUpgrade(null)} feature={reportUpgrade} />}
           </div>
         </TabsContent>
       </Tabs>

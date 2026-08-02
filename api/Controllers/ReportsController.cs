@@ -307,6 +307,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("kpi-summary")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("kpi_bi")]
     public async Task<IActionResult> GetKpiSummary([FromQuery] DateTime? date, [FromQuery] Guid? branchId)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
@@ -361,6 +362,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("bi-summary")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("kpi_bi")]
     public async Task<IActionResult> GetBiSummary([FromQuery] Guid? branchId)
     {
         var (scopeRole, scopeBranchId) = GetCallerContext();
@@ -2142,6 +2144,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("inventory-aging-performance")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("kpi_bi")]
     public async Task<IActionResult> GetProductPerformance(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? productId,
@@ -2158,6 +2161,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("inventory-aging-performance/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("kpi_bi")]
     public async Task<IActionResult> ExportProductPerformance(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? categoryId, [FromQuery] Guid[]? productId,
@@ -2511,6 +2515,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("category-performance")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("kpi_bi")]
     public async Task<IActionResult> GetCategoryPerformance(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId,
         [FromQuery] Guid? cashierId, [FromQuery] Guid? terminalId, [FromQuery] Guid? productId, [FromQuery] bool hasTobaccoFee = false)
@@ -2524,6 +2529,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("category-performance/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("kpi_bi")]
     public async Task<IActionResult> ExportCategoryPerformance(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] Guid? categoryId,
         [FromQuery] Guid? cashierId, [FromQuery] Guid? terminalId, [FromQuery] Guid? productId,
@@ -2651,6 +2657,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("supplier-performance")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("kpi_bi")]
     public async Task<IActionResult> GetSupplierPerformance(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId,
         [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? productId, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy)
@@ -2662,6 +2669,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("supplier-performance/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("kpi_bi")]
     public async Task<IActionResult> ExportSupplierPerformance(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId,
         [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? productId, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy,
@@ -2825,6 +2833,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("stock-reconciliation")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("stocktaking")]
     public async Task<IActionResult> GetStockReconciliation(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? productId, [FromQuery] Guid[]? categoryId,
@@ -2841,6 +2850,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("stock-reconciliation/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("stocktaking")]
     public async Task<IActionResult> ExportStockReconciliation(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? productId, [FromQuery] Guid[]? categoryId,
@@ -3426,6 +3436,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("discounts")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> GetDiscounts([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] string? discountType)
     {
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
@@ -3437,6 +3448,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("discounts/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> ExportDiscounts(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] string? discountType,
         [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
@@ -3529,6 +3541,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("vat-zatca")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("zatca_compliance")]
     public async Task<IActionResult> GetVatZatca(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] string? zatcaStatus, [FromQuery] string? invoiceType)
     {
@@ -3539,6 +3552,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("vat-zatca/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("zatca_compliance")]
     public async Task<IActionResult> ExportVatZatca(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid? branchId, [FromQuery] string? zatcaStatus, [FromQuery] string? invoiceType,
         [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
@@ -4155,6 +4169,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("supplier-returns")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("supplier_returns")]
     public async Task<IActionResult> GetSupplierReturnsReport(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId,
         [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? branchId, [FromQuery] string[]? status, [FromQuery] string[]? reason,
@@ -4168,6 +4183,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("supplier-returns/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("supplier_returns")]
     public async Task<IActionResult> ExportSupplierReturnsReport(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId,
         [FromQuery] Guid[]? warehouseId, [FromQuery] Guid[]? branchId, [FromQuery] string[]? status, [FromQuery] string[]? reason,
@@ -4382,6 +4398,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("purchase-order-report")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("purchase_orders")]
     public async Task<IActionResult> GetPurchaseOrderReport(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId, [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? warehouseId, [FromQuery] string[]? status, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy, [FromQuery] Guid[]? productId)
@@ -4393,6 +4410,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("purchase-order-report/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("purchase_orders")]
     public async Task<IActionResult> ExportPurchaseOrderReport(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId, [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? warehouseId, [FromQuery] string[]? status, [FromQuery] Guid[]? createdBy, [FromQuery] Guid[]? approvedBy, [FromQuery] Guid[]? productId,
@@ -4744,6 +4762,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("employee-audit-center")]
     [RequirePermission("Reports", PermAction.View)]
+    [RequirePlanFeature("employee_shift_management")]
     public async Task<IActionResult> GetEmployeeAuditCenter(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? employeeId, [FromQuery] string[]? category, [FromQuery] string? search,
@@ -4756,6 +4775,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
 
     [HttpGet("employee-audit-center/export")]
     [RequirePermission("Reports", PermAction.Export)]
+    [RequirePlanFeature("employee_shift_management")]
     public async Task<IActionResult> ExportEmployeeAuditCenter(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
         [FromQuery] Guid[]? employeeId, [FromQuery] string[]? category, [FromQuery] string? search,

@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class BranchesController(BaqalaDbContext db, IAuditService audit) : ControllerBase
+public class BranchesController(BaqalaDbContext db, IAuditService audit, ITenantPlanService tenantPlans) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch record —
     // this previously had no branch filter at all, returning every branch (including disabled
@@ -61,6 +61,8 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit) : Contr
             return BadRequest(new { message = "Enter a valid Saudi mobile number (05XXXXXXXX)." });
         if (!ContactValidation.IsValidSaudiCr(branch.CommercialRegistration))
             return BadRequest(new { message = "Enter a valid CR number (10 digits)." });
+        if (!await tenantPlans.CanCreateBranchAsync())
+            return StatusCode(403, new { message = "Branch limit reached for your plan. Upgrade to add more branches." });
 
         branch.Id = Guid.NewGuid();
         branch.CreatedAt = branch.UpdatedAt = DateTime.UtcNow;

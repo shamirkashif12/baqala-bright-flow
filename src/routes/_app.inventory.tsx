@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Minus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
-  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft, X,
+  ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft, X, Lock,
 } from "lucide-react";
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
@@ -23,6 +23,8 @@ import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch,
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
+import { usePlanFeature } from "@/lib/use-plan-feature";
+import { LockedFeatureNotice } from "@/components/locked-feature-notice";
 import { fileToCompressedDataUrl } from "@/lib/image";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { localDateStr } from "@/lib/utils";
@@ -392,6 +394,11 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   categories: Category[]; branches: Branch[];
   onDone: () => void;
 }) {
+  // A flat Selling Price (below) always works via ProductsController, every tier — this section
+  // is specifically the PER-BRANCH/TIER override, which is the actual "Pricing & Promotions"
+  // plan feature (PricingController.CreateBulk). Locked rather than left clickable-but-silently-
+  // failing on save.
+  const pricingUnlocked = usePlanFeature("pricing_promotions");
   const barcodeRef = useRef<HTMLInputElement>(null);
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -860,11 +867,14 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
               <span className="flex items-center gap-1.5">
                 <Tag className="h-3.5 w-3.5" />
                 Different prices per branch / tier (optional)
+                {!pricingUnlocked && <Lock className="h-3 w-3" />}
               </span>
               {pricingOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </button>
 
-            {pricingOpen && (
+            {pricingOpen && !pricingUnlocked ? (
+              <div className="mt-3"><LockedFeatureNotice feature="Pricing & Promotions" /></div>
+            ) : pricingOpen && (
               branchIds.length === 0 ? (
                 <p className="text-[11px] text-muted-foreground mt-3">
                   Select one or more branches above first — extra prices apply to the branches the product
@@ -977,6 +987,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   item: StockItem | null; onClose: () => void;
   categories: Category[]; branches: Branch[]; onDone: () => void;
 }) {
+  const pricingUnlocked = usePlanFeature("pricing_promotions");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1394,8 +1405,12 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
           <div className="col-span-2 border-t border-border/60 pt-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mb-2">
               <Tag className="h-3.5 w-3.5" /> Customer-tier &amp; scheduled prices
+              {!pricingUnlocked && <Lock className="h-3 w-3" />}
             </p>
 
+            {!pricingUnlocked ? (
+              <LockedFeatureNotice feature="Pricing & Promotions" />
+            ) : <>
             {branchRules.length > 0 && (
               <div className="rounded-lg border border-border/60 divide-y divide-border/40 mb-3">
                 {branchRules.map(r => {
@@ -1494,6 +1509,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
                 {tierDirty ? "Save price & schedule — unsaved changes" : "Save price & schedule"}
               </Button>
             </div>
+            </>}
           </div>
 
           <div className="col-span-2 space-y-2 rounded-lg border border-border/60 p-3">

@@ -9,6 +9,11 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+// NOT gated whole-class: every login requires an Employee row (UsersController.Create resolves
+// req.EmployeeId against one), so the plain directory (GetAll/GetById/Create/Update/Delete/Export)
+// is load-bearing for Basic's own "Users & Staff Accounts" feature, not an HRM-only concern.
+// Only the richer HRM sub-resources below (documents/contracts/salary/shift+leave history) are
+// gated — see each action.
 public class EmployeesController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>
@@ -460,6 +465,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
 
     // Shift assignment history for this employee's profile Shifts tab, newest first.
     [RequirePermission("HR Shifts", PermAction.View)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpGet("{id:guid}/shifts")]
     public async Task<IActionResult> GetShifts(Guid id)
     {
@@ -475,6 +481,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
 
     // Leave history for this employee's profile Leaves tab, newest first.
     [RequirePermission("Leave Management", PermAction.View)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpGet("{id:guid}/leaves")]
     public async Task<IActionResult> GetLeaves(Guid id)
     {
@@ -492,6 +499,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     // FRD 3.1/6.4 — document attachments must be ACL-controlled like every other sensitive field;
     // gated on the same "Employees" Edit permission GetAll/GetById already use to decide whether
     // to mask PII, with a self-service carve-out so an employee can always see their own uploads.
+    [RequirePlanFeature("employee_shift_management")]
     [HttpGet("{id:guid}/documents")]
     public async Task<IActionResult> GetDocuments(Guid id)
     {
@@ -502,6 +510,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     [RequirePermission("Employees", PermAction.Edit)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpPost("{id:guid}/documents")]
     public async Task<IActionResult> UploadDocument(Guid id, [FromBody] EmployeeDocument document)
     {
@@ -523,6 +532,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     [RequirePermission("Employees", PermAction.Delete)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpDelete("{id:guid}/documents/{documentId:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid id, Guid documentId)
     {
@@ -537,6 +547,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         return NoContent();
     }
 
+    [RequirePlanFeature("employee_shift_management")]
     [HttpGet("{id:guid}/contracts")]
     public async Task<IActionResult> GetContracts(Guid id)
     {
@@ -545,6 +556,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     [RequirePermission("Employees", PermAction.Edit)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpPost("{id:guid}/contracts")]
     public async Task<IActionResult> UploadContract(Guid id, [FromBody] EmployeeContract contract)
     {
@@ -567,6 +579,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     [RequirePermission("Employees", PermAction.Edit)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpPost("{id:guid}/contracts/{contractId:guid}/terminate")]
     public async Task<IActionResult> TerminateContract(Guid id, Guid contractId)
     {
@@ -634,6 +647,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
         return callerRank > targetRank;
     }
 
+    [RequirePlanFeature("employee_shift_management")]
     [HttpGet("{id:guid}/salary-components")]
     public async Task<IActionResult> GetSalaryComponents(Guid id)
     {
@@ -644,6 +658,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     [RequirePermission("Payroll", PermAction.Create)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpPost("{id:guid}/salary-components")]
     public async Task<IActionResult> AddSalaryComponent(Guid id, [FromBody] SalaryComponent component)
     {
@@ -667,6 +682,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     [RequirePermission("Payroll", PermAction.Edit)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpPut("{id:guid}/salary-components/{componentId:guid}")]
     public async Task<IActionResult> UpdateSalaryComponent(Guid id, Guid componentId, [FromBody] SalaryComponent updated)
     {
@@ -691,6 +707,7 @@ public class EmployeesController(BaqalaDbContext db, IAuditService audit) : Cont
     }
 
     [RequirePermission("Payroll", PermAction.Delete)]
+    [RequirePlanFeature("employee_shift_management")]
     [HttpDelete("{id:guid}/salary-components/{componentId:guid}")]
     public async Task<IActionResult> DeleteSalaryComponent(Guid id, Guid componentId)
     {

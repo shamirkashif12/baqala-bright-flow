@@ -56,6 +56,50 @@ internal static class MigrationIdempotencyHelper
         ");
     }
 
+    public static void DropIndexIfExists(
+        this MigrationBuilder migrationBuilder,
+        string table,
+        string name)
+    {
+        migrationBuilder.Sql($@"
+            SET @idx_exists = (
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' AND INDEX_NAME = '{name}'
+            );
+            SET @ddl = IF(@idx_exists = 0, 'SELECT 1',
+                'ALTER TABLE `{table}` DROP INDEX `{name}`');
+            PREPARE stmt FROM @ddl;
+            EXECUTE stmt;
+            DEALLOCATE PREPARE stmt;
+        ");
+    }
+
+    /// <summary>
+    /// Plain add-if-missing FK (no collation matching — use
+    /// <see cref="AddForeignKeyWithMatchedCollationIfNotExists"/> instead when that's needed).
+    /// </summary>
+    public static void AddForeignKeyIfNotExists(
+        this MigrationBuilder migrationBuilder,
+        string name,
+        string table,
+        string column,
+        string principalTable,
+        string principalColumn,
+        string onDeleteSql = "RESTRICT")
+    {
+        migrationBuilder.Sql($@"
+            SET @fk_exists = (
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' AND CONSTRAINT_NAME = '{name}'
+            );
+            SET @ddl = IF(@fk_exists > 0, 'SELECT 1',
+                'ALTER TABLE `{table}` ADD CONSTRAINT `{name}` FOREIGN KEY (`{column}`) REFERENCES `{principalTable}` (`{principalColumn}`) ON DELETE {onDeleteSql}');
+            PREPARE stmt FROM @ddl;
+            EXECUTE stmt;
+            DEALLOCATE PREPARE stmt;
+        ");
+    }
+
     public static void DropForeignKeyIfExists(
         this MigrationBuilder migrationBuilder,
         string table,

@@ -1,7 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { UpgradeModal } from "@/components/upgrade-modal";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -24,6 +26,11 @@ type ReportCard = {
   color: string;
   href?: string;
   exportFile?: () => Promise<Blob>;
+  // planFeature: mirrors the backend [RequirePlanFeature] gate on this report's endpoint (see
+  // ReportsController.cs/HrReportsController.cs) — without this, every one of these cards
+  // rendered as a normal clickable "Open" link regardless of plan, dead-ending into
+  // route-guard's upgrade screen with no lock indicator beforehand.
+  planFeature?: string;
 };
 
 function todayStr() {
@@ -50,17 +57,17 @@ function buildReports(exportedBy?: string): ReportCard[] {
     { code: "product-sales", name: "Product Sales", desc: "Top SKUs, dead stock, velocity", icon: Tag, color: "warning",
       href: "/reports/product-sales", exportFile: () => api.exportProductSalesReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "category-performance", name: "Category Performance", desc: "Margin & velocity by category", icon: Tag, color: "warning",
-      href: "/reports/category-performance", exportFile: () => api.exportCategoryPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/category-performance", exportFile: () => api.exportCategoryPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "kpi_bi" },
     { code: "supplier-performance", name: "Supplier Performance", desc: "Lead time, fill rate, dues", icon: Truck, color: "warning",
-      href: "/reports/supplier-performance", exportFile: () => api.exportSupplierPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/supplier-performance", exportFile: () => api.exportSupplierPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "kpi_bi" },
     { code: "supplier-returns", name: "Supplier Returns Report", desc: "Full transaction detail for stock returned to suppliers", icon: PackageSearch, color: "warning",
-      href: "/reports/supplier-returns", exportFile: () => api.exportSupplierReturnsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/supplier-returns", exportFile: () => api.exportSupplierReturnsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "supplier_returns" },
     { code: "supplier-report", name: "Supplier Report", desc: "Per-supplier purchase totals — paid, due and returns with accurate payment tracking", icon: Wallet, color: "warning",
       href: "/reports/supplier-report", exportFile: () => api.exportSupplierReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "stock-transfer", name: "Stock Transfer Report", desc: "Full history of stock moved between warehouses and branches", icon: ArrowLeftRight, color: "primary",
       href: "/reports/stock-transfer", exportFile: () => api.exportStockTransferReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "purchase-orders-report", name: "Purchase Reports", desc: "Complete purchase order detail, drill into every product", icon: Receipt, color: "success",
-      href: "/reports/purchase-orders", exportFile: () => api.exportPurchaseOrderReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/purchase-orders", exportFile: () => api.exportPurchaseOrderReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "purchase_orders" },
     { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch & warehouse", icon: Boxes, color: "warning",
       href: "/reports/inventory-snapshot", exportFile: () => api.exportInventorySnapshotReport({ exportedBy }) },
     // Named for what the business calls it (Stocktaking / Inventory Count) rather than only for
@@ -68,13 +75,13 @@ function buildReports(exportedBy?: string): ReportCard[] {
     // qualifier, but this catalog card didn't — a tester scanning the report list for "Inventory
     // Audit" / "Stock Count" terminology found nothing matching and reported the report missing.
     { code: "stock-reconciliation", name: "Stocktaking Report (Inventory Audit / Stock Count)", desc: "Inventory count sessions — system vs counted quantity, variance and sign-off", icon: ClipboardCheck, color: "primary",
-      href: "/reports/stock-reconciliation", exportFile: () => api.exportStockReconciliationReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/stock-reconciliation", exportFile: () => api.exportStockReconciliationReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "stocktaking" },
     // KPI dashboard rather than a tabular report — there is no row set to export, so it opts out
     // of the export affordance the others share.
     { code: "inventory-dashboard", name: "Inventory Aging", desc: "Product age, days since movement, slow-moving & dead stock", icon: Hourglass, color: "primary",
       href: "/reports/inventory-dashboard" },
     { code: "inventory-aging-performance", name: "Product Performance", desc: "Star Products, High/Average/Slow performers & Dead Stock by sales, turnover & profitability", icon: Sparkles, color: "success",
-      href: "/reports/inventory-aging-performance", exportFile: () => api.exportProductPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/inventory-aging-performance", exportFile: () => api.exportProductPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "kpi_bi" },
     { code: "low-stock", name: "Low Stock Report", desc: "Items below reorder thresholds", icon: AlertTriangle, color: "destructive",
       href: "/reports/low-stock", exportFile: () => api.exportLowStockReport({ onlyLowStock: true, exportedBy }) },
     { code: "waste-spoilage", name: "Waste / Spoilage Report", desc: "Expired & damaged write-offs", icon: Ban, color: "destructive",
@@ -86,15 +93,15 @@ function buildReports(exportedBy?: string): ReportCard[] {
     { code: "audit-trail", name: "Audit Trail Report", desc: "Critical events across system", icon: ClipboardList, color: "primary",
       href: "/reports/audit-trail", exportFile: () => api.exportAuditTrailReport({ exportedBy }) },
     { code: "employee-audit-center", name: "Employee Audit Center", desc: "Full employee activity history for audit and misuse tracking", icon: ShieldAlert, color: "destructive",
-      href: "/reports/employee-audit-center", exportFile: () => api.exportEmployeeAuditCenter({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/employee-audit-center", exportFile: () => api.exportEmployeeAuditCenter({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "employee_shift_management" },
     { code: "discounts", name: "Discount Report", desc: "Discounts applied across periods", icon: Percent, color: "warning",
-      href: "/reports/discounts", exportFile: () => api.exportDiscountsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/discounts", exportFile: () => api.exportDiscountsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "pricing_promotions" },
     { code: "loyalty", name: "Loyalty Program", desc: "Points earned, redeemed and expired by branch", icon: Gift, color: "success",
       href: "/reports/loyalty", exportFile: () => api.exportLoyaltyReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "payment-methods", name: "Payment Methods", desc: "Cash / Card / STC Pay split", icon: CreditCard, color: "primary",
       href: "/reports/payment-methods", exportFile: () => api.exportPaymentMethodsReport({ from: todayStr(), to: todayStr(), exportedBy }) },
     { code: "vat-zatca", name: "VAT / ZATCA Report", desc: "Tax filing-ready VAT summary", icon: ShieldCheck, color: "success",
-      href: "/reports/vat-zatca", exportFile: () => api.exportVatZatcaReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+      href: "/reports/vat-zatca", exportFile: () => api.exportVatZatcaReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "zatca_compliance" },
     { code: "tax", name: "Tax Report", desc: "Tax breakdown by branch and cashier", icon: Coins, color: "success",
       href: "/reports/tax", exportFile: () => api.exportTaxReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "service-charges", name: "Service Charges Report", desc: "Delivery fee & surcharges collected — not a tax", icon: Truck, color: "primary",
@@ -104,7 +111,7 @@ function buildReports(exportedBy?: string): ReportCard[] {
     { code: "profit-margin", name: "Profit Margin", desc: "Gross & net margin by product", icon: DollarSign, color: "success",
       href: "/reports/profit-margin", exportFile: () => api.exportProfitMarginReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "approval-center", name: "Approval Center", desc: "Every manager approval in one place — discounts, cancellations, deletions, refunds & more", icon: Gavel, color: "primary",
-      href: "/reports/approval-center" },
+      href: "/reports/approval-center", planFeature: "control_tower_approval_centre" },
     // Attendance Report, Shift Closing Report and Employee Activity Report are intentionally not
     // listed here — they're already reachable from the "Human Resources" sidebar group, and were
     // previously duplicated on this tab too.
@@ -119,9 +126,10 @@ const colorMap: Record<string, string> = {
 };
 
 function Reports() {
-  const { user } = useAuth();
+  const { user, isFeatureEnabled } = useAuth();
   const { canExport } = usePermission("Reports");
   const reports = buildReports(user?.id);
+  const [upgradeCard, setUpgradeCard] = useState<ReportCard | null>(null);
 
   const handleDownload = async (r: ReportCard) => {
     if (!r.exportFile) return;
@@ -137,14 +145,16 @@ function Reports() {
     <PageShell title="Reports" subtitle="Operational, financial and compliance reports">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {reports.map((r) => {
-          const enabled = !!r.href;
+          const hasHref = !!r.href;
+          const planLocked = !!r.planFeature && !isFeatureEnabled(r.planFeature);
+          const enabled = hasHref && !planLocked;
           return (
             <Card
               key={r.code}
               className={`p-5 border-border/60 shadow-card transition-all ${
                 enabled ? "hover:shadow-elegant hover:-translate-y-0.5" : "opacity-60"
               }`}
-              title={enabled ? undefined : "Coming soon in a future release"}
+              title={!hasHref ? "Coming soon in a future release" : planLocked ? "Upgrade your plan to unlock this report" : undefined}
             >
               <div className="flex items-start gap-4">
                 <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${colorMap[r.color]}`}>
@@ -163,6 +173,10 @@ function Reports() {
                           <ExternalLink className="h-3 w-3" />Open
                         </Link>
                       </Button>
+                    ) : planLocked ? (
+                      <Button variant="ghost" size="sm" className="h-7 text-xs px-2 gap-1" onClick={() => setUpgradeCard(r)}>
+                        <Lock className="h-3 w-3" />Upgrade to Unlock
+                      </Button>
                     ) : (
                       <Button variant="ghost" size="sm" className="h-7 text-xs px-2" disabled>Open</Button>
                     )}
@@ -180,6 +194,7 @@ function Reports() {
           );
         })}
       </div>
+      {upgradeCard && <UpgradeModal open onOpenChange={() => setUpgradeCard(null)} feature={upgradeCard.name} />}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <FileBarChart className="h-3.5 w-3.5" />
         All {reports.length} reports are live.

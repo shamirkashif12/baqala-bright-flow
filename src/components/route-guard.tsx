@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { useRouterState, Link } from "@tanstack/react-router";
-import { ShieldAlert, WifiOff } from "lucide-react";
+import { ShieldAlert, WifiOff, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth, type AppRole } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -12,6 +12,10 @@ type RouteRule = {
   roles?: AppRole[];
   /** Block these roles even if they have module canView=true */
   blockRoles?: AppRole[];
+  // planFeature: gated on the tenant's provisioned plan tier, independent of module/roles above
+  // (see src/lib/use-plan-feature.ts). Checked separately from isAllowed — a route can pass the
+  // DB permission check and still be denied here if the plan doesn't include the feature.
+  planFeature?: string;
 };
 
 // Default landing page per role — used for the redirect when a user lands on a denied page.
@@ -45,21 +49,25 @@ const ROUTE_RULES: RouteRule[] = [
   // Finance user has canView=true for Cashier Shifts in the DB (for reconciliation),
   // but business rule says only operational staff should access this page directly.
   { url: "/cashier-shift",       module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
-  { url: "/control-tower",       module: "Control Tower" },
+  { url: "/control-tower",       module: "Control Tower", planFeature: "control_tower_approval_centre" },
   // Stock
   { url: "/stocks",              module: "Stocks" },
   { url: "/inventory",           module: "Inventory" },
-  { url: "/batches",             module: "Batches" },
+  // /pricing and /stocktaking had no entry at all — same gap as the /batch-tracking note below,
+  // any logged-in role could reach them directly regardless of module permission.
+  { url: "/pricing",             module: "Inventory", planFeature: "pricing_promotions" },
+  { url: "/stocktaking",         module: "Stocks", planFeature: "stocktaking" },
+  { url: "/batches",             module: "Batches", planFeature: "batch_tracking" },
   // /batch-tracking had no entry at all — ROUTE_RULES.find() returned undefined and the guard
   // never even ran, so every logged-in role (regardless of Batches.canView) could reach it
   // directly. Worse than a wrong-module gate: no gate at all.
-  { url: "/batch-tracking",      module: "Batches" },
-  { url: "/warehouses",          module: "Warehouses" },
+  { url: "/batch-tracking",      module: "Batches", planFeature: "batch_tracking" },
+  { url: "/warehouses",          module: "Warehouses", planFeature: "warehouse_management" },
   { url: "/stock-transfers",     module: "Stock Transfers" },
   // Finance
   { url: "/expenses",            module: "Accounting & Finance" },
-  { url: "/purchase-orders",     module: "Purchase Orders" },
-  { url: "/coupons",             module: "Coupons" },
+  { url: "/purchase-orders",     module: "Purchase Orders", planFeature: "purchase_orders" },
+  { url: "/coupons",             module: "Coupons", planFeature: "pricing_promotions" },
   { url: "/loyalty-program",     module: "Loyalty Program" },
   { url: "/returns",             module: "Returns" },
   { url: "/refunds",             module: "Returns" },
@@ -71,14 +79,17 @@ const ROUTE_RULES: RouteRule[] = [
   // Supplier Returns is its own matrix row, distinct from Suppliers — Storekeeper and
   // Supervisor hold Suppliers canView but are fully denied Supplier Returns, so gating
   // this route on "Suppliers" let exactly those two roles through.
-  { url: "/supplier-returns",    module: "Supplier Returns" },
+  { url: "/supplier-returns",    module: "Supplier Returns", planFeature: "supplier_returns" },
   { url: "/mart-suppliers",      module: "Suppliers" },
   { url: "/warehouse-suppliers", module: "Suppliers" },
   // Human Resources
+  // Employees itself stays ungated — every login requires a linked Employee record
+  // (UsersController.Create), so the plain directory is load-bearing for Basic's own
+  // "Users & Staff Accounts" feature. Only the richer HRM surface below is plan-gated.
   { url: "/employees",           module: "Employees" },
-  { url: "/hrm-attendance",      module: "HR Attendance" },
-  { url: "/work-shifts",         module: "HR Shifts" },
-  { url: "/leaves",              module: "Leave Management" },
+  { url: "/hrm-attendance",      module: "HR Attendance", planFeature: "employee_shift_management" },
+  { url: "/work-shifts",         module: "HR Shifts", planFeature: "employee_shift_management" },
+  { url: "/leaves",              module: "Leave Management", planFeature: "employee_shift_management" },
   { url: "/departments",         module: "HR Master Data" },
   { url: "/designations",        module: "HR Master Data" },
   { url: "/holidays",            module: "HR Master Data" },
@@ -93,19 +104,30 @@ const ROUTE_RULES: RouteRule[] = [
   // HRM reports carry their own permission gates on the backend (HrReportsController) —
   // these specific entries must come before the generic "/reports" rule below since
   // ROUTE_RULES.find() returns the first prefix match.
-  { url: "/reports/hrm-attendance",      module: "HR Attendance" },
-  { url: "/reports/shift-closing",       module: "HR Shifts" },
+  { url: "/reports/hrm-attendance",      module: "HR Attendance", planFeature: "employee_shift_management" },
+  { url: "/reports/shift-closing",       module: "HR Shifts", planFeature: "employee_shift_management" },
   { url: "/reports/employee-activity",   module: "Audit Logs" },
+  { url: "/reports/employee-audit-center", module: "Reports", planFeature: "employee_shift_management" },
+  { url: "/reports/inventory-aging-performance", module: "Reports", planFeature: "kpi_bi" },
+  { url: "/reports/category-performance",  module: "Reports", planFeature: "kpi_bi" },
+  { url: "/reports/supplier-performance",  module: "Reports", planFeature: "kpi_bi" },
+  { url: "/reports/stock-reconciliation",  module: "Reports", planFeature: "stocktaking" },
+  { url: "/reports/discounts",             module: "Reports", planFeature: "pricing_promotions" },
+  { url: "/reports/vat-zatca",             module: "Reports", planFeature: "zatca_compliance" },
+  { url: "/reports/supplier-returns",      module: "Reports", planFeature: "supplier_returns" },
+  { url: "/reports/purchase-orders",       module: "Reports", planFeature: "purchase_orders" },
+  // Must come before the generic "/reports" rule below (find() returns the first prefix match).
+  { url: "/reports/approval-center",     module: "Reports", planFeature: "control_tower_approval_centre" },
   { url: "/reports",             module: "Reports" },
-  { url: "/kpi",                 module: "Reports" },
-  { url: "/bi",                  module: "Reports" },
+  { url: "/kpi",                 module: "Reports", planFeature: "kpi_bi" },
+  { url: "/bi",                  module: "Reports", planFeature: "kpi_bi" },
   // Admin — module-gated
   { url: "/rules",               module: "Rules Engine" },
   { url: "/users",               module: "Users" },
   { url: "/staff",               module: "Users" },
   { url: "/roles",               module: "Roles" },
-  { url: "/zatca",               module: "Compliance" },
-  { url: "/compliance",          module: "Compliance" },
+  { url: "/zatca",               module: "Compliance", planFeature: "zatca_compliance" },
+  { url: "/compliance",          module: "Compliance", planFeature: "zatca_compliance" },
   { url: "/pos-settings",        module: "Settings" },
   { url: "/settings",            module: "Settings" },
   { url: "/audit-logs",          module: "Audit Logs" },
@@ -120,7 +142,7 @@ const ROUTE_RULES: RouteRule[] = [
   // enforces (ComplianceController.UpsertSettings requires Compliance+Edit) — so a
   // Finance User/Accountant granted Compliance access could never reach the page
   // to use it. Module-gate it like its sibling Compliance routes instead.
-  { url: "/zatca-settings",      module: "Compliance" },
+  { url: "/zatca-settings",      module: "Compliance", planFeature: "zatca_compliance" },
   { url: "/plans",               roles: ["tenant_admin"] },
   { url: "/mobile-pos",          roles: ["tenant_admin"] },
   { url: "/mpos-app",            roles: ["tenant_admin"] },
@@ -154,6 +176,33 @@ function AccessDenied({ dest }: { dest: string }) {
   );
 }
 
+// Distinct from AccessDenied above — this isn't a permission problem (the user's role may well
+// have full module access), it's the tenant's plan not including this feature yet. Deliberately
+// doesn't claim which tier unlocks it — the Tenant Admin Dashboard owns that mapping and can
+// reconfigure it at any time, so the only thing this app can honestly show is the tenant's own
+// current plan name (live from planInfo), not a guessed target tier.
+function PlanUpgradeRequired({ dest }: { dest: string }) {
+  const { planInfo } = useAuth();
+  const planName = planInfo?.provisioned ? planInfo.planName : null;
+  return (
+    <div className="flex min-h-[70vh] flex-col items-center justify-center gap-3 px-6 text-center">
+      <Lock className="h-12 w-12 text-warning" />
+      <h1 className="text-xl font-semibold">Upgrade Required</h1>
+      <p className="max-w-md text-sm text-muted-foreground">
+        This page isn't included in your{planName ? ` ${planName}` : " current"} plan. Upgrade your subscription to unlock it.
+      </p>
+      <div className="flex gap-2 mt-2">
+        <Button asChild variant="outline">
+          <Link to={dest}>Back to safety</Link>
+        </Button>
+        <Button asChild className="gradient-primary text-primary-foreground border-0">
+          <Link to="/plans">View Plans</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // Shown when the last permissions fetch never reached the server (connectivity blip), as opposed
 // to a real 401/403 — this is not an authorization decision, so it must not read as one.
 function ConnectivityIssue({ onRetry }: { onRetry: () => void }) {
@@ -175,7 +224,7 @@ function ConnectivityIssue({ onRetry }: { onRetry: () => void }) {
  * redirecting them away.
  */
 export function RouteGuard({ children }: { children: ReactNode }) {
-  const { user, loading, refreshPermissions } = useAuth();
+  const { user, loading, refreshPermissions, isFeatureEnabled } = useAuth();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const loggedPathRef = useRef<string | null>(null);
 
@@ -189,13 +238,16 @@ export function RouteGuard({ children }: { children: ReactNode }) {
   // simply don't know yet.
   const connectivityIssue = wouldDeny && !!user?.permissionsUnknown;
   const denied = wouldDeny && !connectivityIssue;
+  // Checked independently of the module/role denial above — a route can pass isAllowed and still
+  // be blocked here if the tenant's plan doesn't include it.
+  const planDenied = !loading && !denied && !connectivityIssue && !!rule?.planFeature && !isFeatureEnabled(rule.planFeature);
 
   useEffect(() => {
-    if (denied && user && loggedPathRef.current !== path) {
+    if ((denied || planDenied) && user && loggedPathRef.current !== path) {
       loggedPathRef.current = path;
       api.logAccessDenied(path);
     }
-  }, [denied, user, path]);
+  }, [denied, planDenied, user, path]);
 
   // Still hydrating — render nothing to avoid a flash
   if (loading) return null;
@@ -203,6 +255,10 @@ export function RouteGuard({ children }: { children: ReactNode }) {
   if (denied) {
     const dest = ROLE_DEFAULT_ROUTES[user!.role as AppRole] ?? "/dashboard";
     return <AccessDenied dest={dest} />;
+  }
+  if (planDenied) {
+    const dest = ROLE_DEFAULT_ROUTES[user!.role as AppRole] ?? "/dashboard";
+    return <PlanUpgradeRequired dest={dest} />;
   }
 
   return <>{children}</>;

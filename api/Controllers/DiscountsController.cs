@@ -39,6 +39,7 @@ public class DiscountsController(BaqalaDbContext db, IDiscountCreationService di
     // (self-approve, same precedent as the Wastage/InventoryAdjustment flow). Anyone else's
     // request is queued in the Approval Center instead — no Discount row exists until approved.
     [RequirePermission("Coupons", PermAction.Create)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] DiscountRequest req)
     {
@@ -67,6 +68,7 @@ public class DiscountsController(BaqalaDbContext db, IDiscountCreationService di
     }
 
     [RequirePermission("Coupons", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] DiscountRequest req)
     {
@@ -97,6 +99,7 @@ public class DiscountsController(BaqalaDbContext db, IDiscountCreationService di
         ids is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(ids) : null;
 
     [RequirePermission("Coupons", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPatch("{id:guid}/toggle")]
     public async Task<IActionResult> Toggle(Guid id)
     {
@@ -109,6 +112,7 @@ public class DiscountsController(BaqalaDbContext db, IDiscountCreationService di
     }
 
     [RequirePermission("Coupons", PermAction.Delete)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

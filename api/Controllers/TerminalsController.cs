@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class TerminalsController(BaqalaDbContext db, INotificationService notifications, IAuditService audit) : ControllerBase
+public class TerminalsController(BaqalaDbContext db, INotificationService notifications, IAuditService audit, ITenantPlanService tenantPlans) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's terminals —
     // same fix as DevicesController/OrdersController: branchId was only an optional query param.
@@ -82,6 +82,8 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
     public async Task<IActionResult> Create([FromBody] Terminal terminal)
     {
         if (ValidateTerminal(terminal) is { } validationError) return BadRequest(new { message = validationError });
+        if (!await tenantPlans.CanCreateTerminalAsync(terminal.BranchId))
+            return StatusCode(403, new { message = "Terminal limit reached for this branch under your plan. Upgrade to add more terminals." });
         terminal.Id = Guid.NewGuid();
         terminal.CreatedAt = terminal.UpdatedAt = DateTime.UtcNow;
         db.Terminals.Add(terminal);
@@ -201,6 +203,7 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
     // there's no "view current PIN" endpoint, only replace. A terminal with no PIN configured
     // simply has the lockdown feature unavailable on its kiosk.
     [RequirePermission("Terminals", PermAction.Edit)]
+    [RequirePlanFeature("self_service_kiosk")]
     [HttpPost("{id:guid}/kiosk-lockdown-pin")]
     public async Task<IActionResult> SetKioskLockdownPin(Guid id, [FromBody] SetLockdownPinRequest req)
     {
@@ -221,6 +224,7 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
     // Removes the lockdown PIN — disables the fullscreen-lockdown feature on this kiosk
     // entirely (rather than leaving a guessable/forgotten PIN in place).
     [RequirePermission("Terminals", PermAction.Edit)]
+    [RequirePlanFeature("self_service_kiosk")]
     [HttpDelete("{id:guid}/kiosk-lockdown-pin")]
     public async Task<IActionResult> ClearKioskLockdownPin(Guid id)
     {

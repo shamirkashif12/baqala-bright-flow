@@ -177,6 +177,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     // Only used by the dedicated /coupons page — ValidateCoupon below stays open for POS's
     // by-code lookup, which is the legitimate any-role checkout path.
     [RequirePermission("Coupons", PermAction.View)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpGet("coupons")]
     public async Task<IActionResult> GetCoupons([FromQuery] string? status)
     {
@@ -225,6 +226,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     }
 
     [RequirePermission("Coupons", PermAction.View)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpGet("coupons/{id:guid}/customers")]
     public async Task<IActionResult> GetCouponCustomers(Guid id)
     {
@@ -243,6 +245,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     }
 
     [RequirePermission("Coupons", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPost("coupons/{id:guid}/customers")]
     public async Task<IActionResult> AssignCouponCustomer(Guid id, [FromBody] AssignCouponCustomerRequest req)
     {
@@ -257,6 +260,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     }
 
     [RequirePermission("Coupons", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpDelete("coupons/{id:guid}/customers/{customerId:guid}")]
     public async Task<IActionResult> UnassignCouponCustomer(Guid id, Guid customerId)
     {
@@ -272,6 +276,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     // immediately (self-approve); anyone else's request is queued in the Approval Center instead
     // — no Coupon row exists until approved.
     [RequirePermission("Coupons", PermAction.Create)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPost("coupons")]
     public async Task<IActionResult> CreateCoupon([FromBody] Coupon coupon)
     {
@@ -302,6 +307,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     }
 
     [RequirePermission("Coupons", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpPut("coupons/{id:guid}")]
     public async Task<IActionResult> UpdateCoupon(Guid id, [FromBody] Coupon updated)
     {
@@ -328,6 +334,7 @@ public class FinanceController(BaqalaDbContext db, ICouponCreationService coupon
     }
 
     [RequirePermission("Coupons", PermAction.Delete)]
+    [RequirePlanFeature("pricing_promotions")]
     [HttpDelete("coupons/{id:guid}")]
     public async Task<IActionResult> DeleteCoupon(Guid id)
     {

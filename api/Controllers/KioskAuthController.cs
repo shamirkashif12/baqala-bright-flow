@@ -1,3 +1,4 @@
+using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,6 +18,7 @@ namespace BaqalaPOS.Api.Controllers;
 public class KioskAuthController(BaqalaDbContext db, IConfiguration config, IHostEnvironment env) : ControllerBase
 {
     [AllowAnonymous]
+    [RequirePlanFeature("self_service_kiosk")]
     [HttpPost("pair")]
     public async Task<IActionResult> Pair([FromBody] KioskPairRequest req)
     {
@@ -53,6 +55,7 @@ public class KioskAuthController(BaqalaDbContext db, IConfiguration config, IHos
     // always showing a 6-slot max — length isn't secret (unlike the PIN itself), it just saves
     // staff from typing padding digits for a shorter PIN.
     [HttpGet("lockdown-pin-info")]
+    [RequirePlanFeature("self_service_kiosk")]
     public async Task<IActionResult> GetLockdownPinInfo()
     {
         if (!Guid.TryParse(User.FindFirst("terminalId")?.Value, out var terminalId))
@@ -68,6 +71,7 @@ public class KioskAuthController(BaqalaDbContext db, IConfiguration config, IHos
     // set by staff from the Terminals admin page. "configured: false" lets the kiosk tell a
     // blank setup apart from a wrong guess, since there's nothing correct to type yet.
     [HttpPost("verify-lockdown-pin")]
+    [RequirePlanFeature("self_service_kiosk")]
     public async Task<IActionResult> VerifyLockdownPin([FromBody] VerifyLockdownPinRequest req)
     {
         if (!Guid.TryParse(User.FindFirst("terminalId")?.Value, out var terminalId))

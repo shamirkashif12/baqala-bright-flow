@@ -9,6 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/work-shifts")]
+[RequirePlanFeature("employee_shift_management")]
 public class WorkShiftsController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>

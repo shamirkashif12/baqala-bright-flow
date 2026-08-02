@@ -266,6 +266,11 @@ public class InventoryController(
         return Ok(await query.OrderBy(b => b.ExpiryDate).ToListAsync());
     }
 
+    // NOT plan-gated: this is how stock enters the system at all (used by the core "Add Product"
+    // flow in _app.inventory.tsx, not just dedicated batch/expiry tracking), load-bearing for
+    // every tier's Stock Control. RecallsController remains the genuinely batch_tracking-only
+    // surface (product recalls, a Standard-tier analytics/compliance feature with no Basic
+    // dependency).
     [RequirePermission("Batches", PermAction.Create)]
     [HttpPost("batches")]
     public async Task<IActionResult> ReceiveBatch([FromBody] ReceiveBatchRequest req)

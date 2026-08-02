@@ -79,6 +79,7 @@ public class PricingController(
 
     [HttpGet("lists")]
     [RequirePermission("Inventory", PermAction.View)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> GetLists(
         [FromQuery] Guid? productId,
         [FromQuery] Guid[]? branchId,
@@ -114,6 +115,7 @@ public class PricingController(
 
     [HttpGet("lists/{id:guid}")]
     [RequirePermission("Inventory", PermAction.View)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> GetList(Guid id)
     {
         var r = await db.ProductPriceLists.Include(x => x.Product).Include(x => x.Branch)
@@ -123,6 +125,7 @@ public class PricingController(
 
     [HttpPost("lists")]
     [RequirePermission("Inventory", PermAction.Create)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> CreateList([FromBody] PriceListRequest req)
     {
         var error = await ValidateAsync(req);
@@ -142,6 +145,7 @@ public class PricingController(
 
     [HttpPut("lists/{id:guid}")]
     [RequirePermission("Inventory", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> UpdateList(Guid id, [FromBody] PriceListRequest req)
     {
         var rule = await db.ProductPriceLists.FindAsync(id);
@@ -167,6 +171,7 @@ public class PricingController(
 
     [HttpPatch("lists/{id:guid}/toggle")]
     [RequirePermission("Inventory", PermAction.Edit)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> ToggleList(Guid id)
     {
         var rule = await db.ProductPriceLists.FindAsync(id);
@@ -187,6 +192,7 @@ public class PricingController(
 
     [HttpDelete("lists/{id:guid}")]
     [RequirePermission("Inventory", PermAction.Delete)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> DeleteList(Guid id)
     {
         var rule = await db.ProductPriceLists.FindAsync(id);
@@ -209,6 +215,7 @@ public class PricingController(
     // product priced in three branches out of five.
     [HttpPost("lists/bulk")]
     [RequirePermission("Inventory", PermAction.Create)]
+    [RequirePlanFeature("pricing_promotions")]
     public async Task<IActionResult> CreateBulk([FromBody] BulkPriceListRequest req)
     {
         if (req.Rules is null || req.Rules.Count == 0)

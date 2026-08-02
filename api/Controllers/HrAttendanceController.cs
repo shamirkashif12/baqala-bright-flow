@@ -9,6 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/hrm/attendance")]
+[RequirePlanFeature("employee_shift_management")]
 public class HrAttendanceController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>

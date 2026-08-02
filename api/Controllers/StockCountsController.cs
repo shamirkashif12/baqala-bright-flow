@@ -14,6 +14,7 @@ namespace BaqalaPOS.Api.Controllers;
 // one. Nothing touches on-hand stock until the final Approve step.
 [ApiController]
 [Route("api/stock-counts")]
+[RequirePlanFeature("stocktaking")]
 public class StockCountsController(
     BaqalaDbContext db, IAuditService audit, IStockAlertService stockAlerts,
     IStockMovementService stockMovements, ILogger<StockCountsController> logger) : ControllerBase
