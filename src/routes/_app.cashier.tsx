@@ -204,7 +204,7 @@ function CashierWorkspace() {
   const heldBranchId = getPosBranchId(user);
   const heldCount = (() => {
     if (!heldBranchId) return 0;
-    try { return (JSON.parse(sessionStorage.getItem(`pos_holds_${heldBranchId}`) ?? "[]") as unknown[]).length; }
+    try { return (JSON.parse(localStorage.getItem(`pos_holds_${heldBranchId}`) ?? "[]") as unknown[]).length; }
     catch { return 0; }
   })();
 

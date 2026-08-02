@@ -44,17 +44,29 @@ function HeldOrders() {
   const reloadHolds = useCallback(() => {
     if (!branchId) { setHolds([]); return; }
     try {
-      const saved = sessionStorage.getItem(`pos_holds_${branchId}`);
+      const saved = localStorage.getItem(`pos_holds_${branchId}`);
       setHolds(saved ? (JSON.parse(saved) as HeldOrder[]) : []);
     } catch { setHolds([]); }
   }, [branchId]);
   useEffect(reloadHolds, [reloadHolds]);
 
+  // POS writes to the same localStorage key from its own tab — a plain load only ever sees that
+  // snapshot as of mount, so putting a bill on hold in the POS tab left this screen showing stale
+  // (often 0-bill) data until it was manually reloaded. The `storage` event fires in every OTHER
+  // tab sharing this origin whenever localStorage changes, so this screen picks it up live.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === `pos_holds_${branchId}`) reloadHolds();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [branchId, reloadHolds]);
+
   const discard = (id: string) => {
     if (!branchId) return;
     const next = holds.filter((h) => h.id !== id);
     setHolds(next);
-    sessionStorage.setItem(`pos_holds_${branchId}`, JSON.stringify(next));
+    localStorage.setItem(`pos_holds_${branchId}`, JSON.stringify(next));
     setDiscardId(null);
   };
 

@@ -243,7 +243,7 @@ function SupplierFormFields({
       </FieldRow>
       <FieldRow label="Credit Limit (SAR)"><Input value={form.creditLimit} onChange={set("creditLimit")} className="h-9" type="number" min="0" step="0.01" /></FieldRow>
       <FieldRow label="Bank Name"><Input value={form.bankName} onChange={set("bankName")} className="h-9" /></FieldRow>
-      <FieldRow label="Bank Account Holder Name" error={errors.bankAccountHolder}>
+      <FieldRow label="Bank Account Holder" error={errors.bankAccountHolder}>
         <Input value={form.bankAccountHolder} onChange={setSanitized("bankAccountHolder", sanitizeNameInput)} className={`h-9 ${errCls("bankAccountHolder")}`} maxLength={CONTACT_PERSON_MAX_LENGTH} />
       </FieldRow>
       <FieldRow label="Bank Account Number" error={errors.bankAccountNumber}>
@@ -527,7 +527,7 @@ function SupplierProfileDrawer({ supplier, onClose, onEdit }: { supplier: Suppli
                   ["Payment Terms", supplier.paymentTerms ?? "—"],
                   ["Credit Limit", supplier.creditLimit != null ? `SAR ${supplier.creditLimit.toLocaleString()}` : "—"],
                   ["Bank Name", supplier.bankName ?? "—"],
-                  ["Bank Account Holder Name", supplier.bankAccountHolder ?? "—"],
+                  ["Bank Account Holder", supplier.bankAccountHolder ?? "—"],
                   ["Bank Account Number", supplier.bankAccountNumber ?? "—"],
                   ["IBAN", supplier.bankIban ?? "—"],
                   ["Notes", supplier.notes ?? "—"],

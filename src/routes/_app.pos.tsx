@@ -731,6 +731,11 @@ function POS() {
   // real settings load.
   const [posPerms, setPosPerms] = useState({ cashierCanCoupon: true, cashierCanHoldOrder: true, allowNegativeStock: false, cashierMaxDiscountPct: 5, managerMaxDiscountPct: 25 });
   const isRestrictedCashier = user?.role === "cashier";
+  // Cashier, Branch Manager, and Tenant Administrator accounts can all hold a shift (mirrors
+  // ShiftsController.OpenShift's role check and CheckInDialog's checkInRoles) — any of them
+  // checking out must be gated from using POS, not just the literal "cashier" role. Other roles
+  // (Supervisor, etc.) structurally can't open a shift at all, so they're never gated on one.
+  const needsActiveShift = user?.role === "cashier" || user?.role === "branch_manager" || user?.role === "tenant_admin";
   const navigate = useNavigate();
   const search = Route.useSearch();
   // Enforcement previously existed only at the very last step (handleCharge threw if a cashier had
@@ -738,7 +743,7 @@ function POS() {
   // even opening the payment dialog) was fully usable with no shift at all. `!loading` avoids a
   // one-frame flash of this gate for a cashier who legitimately IS checked in, before their shift
   // has finished loading.
-  const needsCheckIn = !loading && isRestrictedCashier && !activeShift;
+  const needsCheckIn = !loading && needsActiveShift && !activeShift;
 
   // ─── Active Offers & Discounts ────────────────────────────────────────────────
   const [allActiveOffers, setActiveOffers] = useState<Offer[]>([]);
@@ -882,7 +887,7 @@ function POS() {
     // (switch or initial mount) rather than clearing them, so a tab reload or branch switch
     // doesn't lose bills a cashier put on hold earlier in the day.
     try {
-      const savedHolds = sessionStorage.getItem(`pos_holds_${branch.id}`);
+      const savedHolds = localStorage.getItem(`pos_holds_${branch.id}`);
       setHolds(savedHolds ? (JSON.parse(savedHolds) as typeof holds) : []);
     } catch { setHolds([]); }
 
@@ -962,15 +967,29 @@ function POS() {
     sessionStorage.setItem(`pos_cart_${branch.id}`, JSON.stringify(cart));
   }, [cart]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Persist held orders to session storage (survives tab navigation/reload) ─
-  // Previously held only in React state — a reload or crash silently lost every
-  // parked bill with no warning. Also read by the Cashier Workspace dashboard's
-  // "Held Orders" tile (see _app.cashier.tsx) instead of the dead `pos_holds`
-  // localStorage key nothing used to write.
+  // ─── Persist held orders to localStorage (survives tab navigation/reload, and is shared with
+  // the dedicated Held Orders screen / Cashier Workspace tile, which each open in their own tab) ─
+  // Previously held only in React state — a reload or crash silently lost every parked bill with
+  // no warning. sessionStorage (the original choice) is scoped per-tab, so a bill held here never
+  // showed up on the separate Held Orders screen unless it happened to be the very same tab;
+  // localStorage is shared across every tab on this origin, which is what those screens need.
   useEffect(() => {
     if (!branch) return;
-    sessionStorage.setItem(`pos_holds_${branch.id}`, JSON.stringify(holds));
+    localStorage.setItem(`pos_holds_${branch.id}`, JSON.stringify(holds));
   }, [holds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The Held Orders screen (or another POS tab) can resume/discard a bill from its own tab,
+  // mutating the same localStorage key — pick that up live here too, the same way it picks up
+  // holds created in this tab, so both screens always agree.
+  useEffect(() => {
+    if (!branch) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== `pos_holds_${branch.id}`) return;
+      try { setHolds(e.newValue ? (JSON.parse(e.newValue) as typeof holds) : []); } catch { /* ignore malformed value */ }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [branch]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // ─── Resolved pricing (FRD §12) ─────────────────────────────────────────────
@@ -2029,13 +2048,13 @@ function POS() {
   ) => {
     if (!branch) throw new Error("No branch configured");
     if (!cart.length) throw new Error("Cart is empty");
-    // FR-SLS-05 (deliberate exception, not a gap): a shift's cash drawer is a
-    // Cashier-only concept — the check-in flow (CheckInDialog) only ever lists
-    // Cashier-role accounts, so Branch Manager/Supervisor structurally can't open
-    // one. They can ring up a sale covering a register without checking in first;
-    // the server records this override in the audit log since the resulting order
-    // has no ShiftId to reconcile against (see OrdersController.Create).
-    if (user?.role === "cashier" && !activeShift)
+    // FR-CHK-06: Cashier, Branch Manager, and Tenant Administrator accounts can all hold a shift
+    // (CheckInDialog's checkInRoles / ShiftsController.OpenShift) — any of them must be blocked
+    // from charging without one, mirrored server-side in OrdersController.Create as the
+    // authoritative check. Other roles structurally can't open a shift at all, so they're never
+    // gated here; the server logs that override in the audit log since the resulting order has
+    // no ShiftId to reconcile against.
+    if (needsActiveShift && !activeShift)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
 
     // Discount policy cap (POS Settings → CashierMaxDiscountPct / ManagerMaxDiscountPct) — was
