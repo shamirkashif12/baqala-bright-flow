@@ -40,6 +40,7 @@ function formatDate(d?: string) {
 
 const STATUS_MAP: Record<string, { label: string; cls: string }> = {
   draft:            { label: "Draft",              cls: "bg-muted text-muted-foreground border-border" },
+  pending:          { label: "Pending Approval",   cls: "bg-warning/20 text-warning-foreground border-warning/40" },
   pending_approval: { label: "Pending Approval",   cls: "bg-warning/20 text-warning-foreground border-warning/40" },
   approved:         { label: "Approved",           cls: "bg-success/15 text-success border-success/30" },
   sent:             { label: "Sent to Supplier",   cls: "bg-primary/15 text-primary border-primary/30" },
@@ -57,10 +58,21 @@ const PAY_MAP: Record<string, { label: string; cls: string }> = {
   supplier_credit: { label: "Supplier Credit", cls: "bg-primary/15 text-primary border-primary/30" },
 };
 
+// Mirrors the Supplier form's own PAYMENT_TERMS_OPTIONS (src/routes/_app.suppliers.tsx) — kept as
+// a separate local copy rather than a shared import, matching how this file already duplicates the
+// same list inline as SelectItems below.
+const PO_PAYMENT_TERMS_OPTIONS = ["Net 30", "Net 60", "On Delivery", "Immediate", "COD", "Advance Payment"];
+
 function StatusBadge({ status }: { status: string }) {
   const s = STATUS_MAP[status] ?? { label: status, cls: "bg-muted text-muted-foreground border-border" };
   return <Badge variant="outline" className={`text-xs ${s.cls}`}>{s.label}</Badge>;
 }
+
+// A PO awaiting manager decision can come back from the backend/seed data as "draft" (the
+// app's own creation flow) or "pending"/"pending_approval" (seed/legacy data, or a future
+// explicit submit-for-approval step) — treat all three as the same not-yet-decided state so
+// Approve/Reject always shows up for a PO that hasn't been approved or rejected yet.
+const AWAITING_APPROVAL_STATUSES = new Set(["draft", "pending", "pending_approval"]);
 
 function PayBadge({ status }: { status: string }) {
   const s = PAY_MAP[status] ?? { label: status, cls: "bg-muted text-muted-foreground border-border" };
@@ -161,6 +173,10 @@ function CreatePOWizard({
   // Step 1
   const [supplierId, setSupplierId] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("Net 30");
+  // A supplier's saved Payment Terms can be a custom value outside the 6 fixed options below
+  // (legacy data, or set via the Suppliers page's own "Other…" fallback) — shown as free text
+  // instead of silently rendering blank, same pattern as the Supplier form.
+  const [otherPaymentTerms, setOtherPaymentTerms] = useState(false);
   // Only editable here when the supplier record itself has none on file yet — otherwise these stay
   // the read-only auto-filled values from the supplier. Filling them in here also saves them back
   // to the supplier record so the next PO for them auto-fills too.
@@ -229,19 +245,24 @@ function CreatePOWizard({
   // Payment terms are already set on the supplier record itself — previously this always started
   // at a hardcoded "Net 30" regardless of supplier, so every PO needed the same manual re-pick.
   useEffect(() => {
-    if (selectedSupplier?.paymentTerms) setPaymentTerms(selectedSupplier.paymentTerms);
+    if (selectedSupplier?.paymentTerms) {
+      setPaymentTerms(selectedSupplier.paymentTerms);
+      // A custom value fetched into state but not one of the 6 fixed SelectItems below rendered
+      // as a blank Select with nothing shown — even though paymentTerms itself held the right
+      // value. Switch to the free-text fallback so it's actually visible.
+      setOtherPaymentTerms(!PO_PAYMENT_TERMS_OPTIONS.includes(selectedSupplier.paymentTerms));
+    }
   }, [selectedSupplier?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- only re-derive on supplier change, not every keystroke on paymentTerms itself
 
-  // A supplier's Supply Channel says where it's actually able to deliver — "mart_to_mart" suppliers
-  // ship directly to a branch, not a warehouse, but Step 2 previously only ever offered warehouses
-  // as a destination regardless of this, so a mart-to-mart supplier had no valid delivery location
-  // to pick at all. Filter the destination list by that supply channel instead of hardcoding
-  // warehouses; "both"/unset still offers everything so existing warehouse-only flows don't change.
+  // A supplier's Supply Channel says where it's actually able to deliver. "warehouse" suppliers
+  // only ship to a warehouse. "mart_to_mart" suppliers can deliver to either a warehouse or a
+  // branch directly — restricting them to branches only left no valid warehouse destination for
+  // a mart-to-mart supplier that should be able to supply one. "both"/unset still offers
+  // everything so existing warehouse-only flows don't change.
   const destinationOptions = useMemo(() => {
     const supplyType = selectedSupplier?.supplyType;
     const whOpts = warehouses.map(w => ({ id: w.id, label: w.name }));
     const brOpts = branches.map(b => ({ id: b.id, label: b.name }));
-    if (supplyType === "mart_to_mart") return brOpts;
     if (supplyType === "warehouse") return whOpts;
     return [...whOpts, ...brOpts];
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -393,17 +414,30 @@ function CreatePOWizard({
                 </>
               )}
               <FieldRow label="Payment Terms">
-                <Select value={paymentTerms} onValueChange={setPaymentTerms}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Net 30">Net 30</SelectItem>
-                    <SelectItem value="Net 60">Net 60</SelectItem>
-                    <SelectItem value="On Delivery">On Delivery</SelectItem>
-                    <SelectItem value="Immediate">Immediate</SelectItem>
-                    <SelectItem value="COD">COD</SelectItem>
-                    <SelectItem value="Advance Payment">Advance Payment</SelectItem>
-                  </SelectContent>
-                </Select>
+                {otherPaymentTerms ? (
+                  <div className="space-y-1">
+                    <Input value={paymentTerms} onChange={e => setPaymentTerms(e.target.value)} className="h-9" placeholder="Enter payment terms" maxLength={100} autoFocus />
+                    <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherPaymentTerms(false); setPaymentTerms("Net 30"); }}>
+                      Choose from list instead
+                    </button>
+                  </div>
+                ) : (
+                  <Select
+                    value={paymentTerms}
+                    onValueChange={v => { if (v === "__other") { setOtherPaymentTerms(true); setPaymentTerms(""); } else setPaymentTerms(v); }}
+                  >
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Net 30">Net 30</SelectItem>
+                      <SelectItem value="Net 60">Net 60</SelectItem>
+                      <SelectItem value="On Delivery">On Delivery</SelectItem>
+                      <SelectItem value="Immediate">Immediate</SelectItem>
+                      <SelectItem value="COD">COD</SelectItem>
+                      <SelectItem value="Advance Payment">Advance Payment</SelectItem>
+                      <SelectItem value="__other">Other…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </FieldRow>
             </>
           )}
@@ -418,9 +452,6 @@ function CreatePOWizard({
                   onChange={setWarehouseIds}
                   placeholder="Select delivery location(s)…"
                 />
-                {selectedSupplier?.supplyType === "mart_to_mart" && (
-                  <p className="text-[11px] text-muted-foreground mt-1">This supplier delivers directly to branches only.</p>
-                )}
                 {warehouseIds.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {warehouseIds.map(id => {
@@ -1190,7 +1221,7 @@ function PurchaseOrders() {
   const handleApprove = async (group: PurchaseOrder[]) => {
     setActionLoading(group[0].id + "_approve");
     try {
-      for (const po of group) if (po.status === "draft") await api.updatePoStatus(po.id, "approved", user?.id);
+      for (const po of group) if (AWAITING_APPROVAL_STATUSES.has(po.status)) await api.updatePoStatus(po.id, "approved", user?.id);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to update purchase order(s).");
@@ -1200,7 +1231,7 @@ function PurchaseOrders() {
   const handleReject = async (group: PurchaseOrder[]) => {
     setActionLoading(group[0].id + "_reject");
     try {
-      for (const po of group) if (po.status === "draft") await api.updatePoStatus(po.id, "rejected", user?.id);
+      for (const po of group) if (AWAITING_APPROVAL_STATUSES.has(po.status)) await api.updatePoStatus(po.id, "rejected", user?.id);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to update purchase order(s).");
@@ -1406,7 +1437,7 @@ function PurchaseOrders() {
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setViewPO(po); setViewPOGroup(group); }} title="View"><Eye className="h-3.5 w-3.5" /></Button>
-                            {group.some(p => p.status === "draft") && canApprove && (
+                            {group.some(p => AWAITING_APPROVAL_STATUSES.has(p.status)) && canApprove && (
                               <div className="flex gap-1">
                                 <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => handleApprove(group)} disabled={isApproving || isRejecting}>
                                   {isApproving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}

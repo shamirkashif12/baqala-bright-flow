@@ -24,3 +24,19 @@ export function TierMultiSelect({ selected, onToggle }: { selected: CustomerTier
     </div>
   );
 }
+
+// Same pill-row control as TierMultiSelect, but for a field that holds exactly one tier (e.g. a
+// customer's own tier) rather than a set — so the Customer form matches the Pricing/Inventory
+// tier pickers visually instead of falling back to a plain dropdown.
+export function TierSingleSelect({ value, onChange }: { value: CustomerTier; onChange: (tier: CustomerTier) => void }) {
+  return (
+    <div className="flex rounded-lg border border-border/60 overflow-hidden shrink-0">
+      {TIER_OPTIONS.map(({ value: v, label }) => (
+        <button key={v} type="button" onClick={() => onChange(v)}
+          className={`px-3 py-1.5 text-xs transition-colors ${value === v ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted/50"}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}

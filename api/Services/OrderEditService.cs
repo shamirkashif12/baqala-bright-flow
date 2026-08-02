@@ -25,6 +25,7 @@ public class OrderEditService(
     BaqalaDbContext db,
     IAuditService audit,
     IPriceResolutionService priceResolution,
+    IBatchConsumptionService batchConsumption,
     ILogger<OrderEditService> logger) : IOrderEditService
 {
     // ── Shared pricing/loyalty resolvers ──────────────────────────────────────
@@ -187,6 +188,18 @@ public class OrderEditService(
                     UpdatedAt = DateTime.UtcNow,
                 });
             }
+
+            // Only the aggregate InventoryStock row above was ever kept in sync with an edit's
+            // quantity change — same gap the sale/void paths (OrdersController.Create /
+            // OrderVoidService) already close for their own deltas. delta > 0 mirrors an
+            // additional sale (consume from batches); delta < 0 mirrors a partial void (credit
+            // back in the same order it was drawn down). Best-effort: never allowed to fail the edit.
+            try
+            {
+                if (delta > 0) await batchConsumption.ConsumeFefoAsync(productId, order.BranchId, warehouseId: null, delta);
+                else await batchConsumption.RestoreFefoAsync(productId, order.BranchId, warehouseId: null, -delta);
+            }
+            catch (Exception ex) { logger.LogError(ex, "Batch consumption failed while editing order {OrderId} for product {ProductId}", order.Id, productId); }
         }
 
         // Replace line items wholesale rather than diffing individual rows — OrderItem has no

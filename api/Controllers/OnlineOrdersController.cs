@@ -33,7 +33,9 @@ public class OnlineOrdersController(
     IOfferResolutionService offers,
     IStockMovementService stockMovements,
     IStockAlertService stockAlerts,
-    IAuditService audit) : ControllerBase
+    IAuditService audit,
+    IBatchConsumptionService batchConsumption,
+    ILogger<OnlineOrdersController> logger) : ControllerBase
 {
     private (string? Role, Guid? BranchId) GetCallerContext()
     {
@@ -556,6 +558,14 @@ public class OnlineOrdersController(
                     item.ProductId, order.BranchId, warehouseId: null, movementType: "sale", quantity: -item.Quantity,
                     referenceType: "order", referenceId: order.Id, referenceNumber: order.OrderNumber,
                     quantityBefore: quantityBefore, quantityAfter: quantityBefore - item.Quantity);
+
+                // Only the aggregate InventoryStock row above was ever kept in sync for a delivery —
+                // same gap OrdersController.Create's POS sale path already closed, so an online
+                // order's batch drill-down stayed "still full" after the stock it drew down actually
+                // shipped. Best-effort, matching every other call site: never allowed to fail the
+                // delivery itself.
+                try { await batchConsumption.ConsumeFefoAsync(item.ProductId, order.BranchId, warehouseId: null, item.Quantity); }
+                catch (Exception ex) { logger.LogError(ex, "Batch consumption failed after delivering order {OrderId}", order.Id); }
             }
         }
 
