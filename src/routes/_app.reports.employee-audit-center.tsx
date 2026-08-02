@@ -210,7 +210,7 @@ function EmployeeAuditCenter() {
             </div>
           </FilterField>
           <FilterField label="Transaction Type">
-            <div className="w-44">
+            <div className="w-52">
               <SearchableMultiSelect
                 placeholder="All Transaction Types"
                 options={transactionTypesSeen.map(t => ({ id: t, label: t.replace(/([a-z])([A-Z])/g, "$1 $2") }))}

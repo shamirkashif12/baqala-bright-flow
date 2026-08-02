@@ -38,7 +38,9 @@ const STATUSES = ["draft", "pending_approval", "approved", "in_transit", "comple
 // per transfer (with ordered/received totals) and the product/SKU/unit-cost breakdown moves into
 // the detail drawer behind the eye icon instead of cluttering the table with a row per SKU.
 interface StockTransferGroup {
-  transferNumber: string; transferType: string; sourceLocation: string; destinationLocation: string; status: string;
+  transferNumber: string; transferType: string;
+  sourceBranch: string; destinationBranch: string; sendingWarehouse: string; receivingWarehouse: string;
+  status: string;
   createdBy: string; approvedBy: string; receivedBy: string; createdAt: string; completedDate?: string;
   orderedQuantity: number; receivedQuantity: number; totalCost: number;
   items: StockTransferReportRow[];
@@ -49,8 +51,10 @@ function groupByTransfer(rows: StockTransferReportRow[]): StockTransferGroup[] {
     let g = groups.get(r.transferNumber);
     if (!g) {
       g = {
-        transferNumber: r.transferNumber, transferType: r.transferType, sourceLocation: r.sourceLocation,
-        destinationLocation: r.destinationLocation, status: r.status, createdBy: r.createdBy, approvedBy: r.approvedBy,
+        transferNumber: r.transferNumber, transferType: r.transferType,
+        sourceBranch: r.sourceBranch, destinationBranch: r.destinationBranch,
+        sendingWarehouse: r.sendingWarehouse, receivingWarehouse: r.receivingWarehouse,
+        status: r.status, createdBy: r.createdBy, approvedBy: r.approvedBy,
         receivedBy: r.receivedBy, createdAt: r.createdAt, completedDate: r.completedDate,
         orderedQuantity: 0, receivedQuantity: 0, totalCost: 0, items: [],
       };
@@ -74,9 +78,11 @@ function StockTransferDetailDrawer({ group, onClose }: { group: StockTransferGro
         {group && (
           <div className="mt-2 space-y-4 text-sm">
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <div><span className="text-muted-foreground">Source</span><p className="font-medium">{group.sourceLocation}</p></div>
-              <div><span className="text-muted-foreground">Destination</span><p className="font-medium">{group.destinationLocation}</p></div>
-              <div><span className="text-muted-foreground">Transfer Date</span><p className="font-medium">{fmtDateTime(group.createdAt)}</p></div>
+              <div><span className="text-muted-foreground">Source Branch</span><p className="font-medium">{group.sourceBranch}</p></div>
+              <div><span className="text-muted-foreground">Destination Branch</span><p className="font-medium">{group.destinationBranch}</p></div>
+              <div><span className="text-muted-foreground">Sending Warehouse</span><p className="font-medium">{group.sendingWarehouse}</p></div>
+              <div><span className="text-muted-foreground">Receiving Warehouse</span><p className="font-medium">{group.receivingWarehouse}</p></div>
+              <div><span className="text-muted-foreground">Transfer Date & Time</span><p className="font-medium">{fmtDateTime(group.createdAt)}</p></div>
               <div><span className="text-muted-foreground">Completed</span><p className="font-medium">{group.completedDate ? fmtDateTime(group.completedDate) : "—"}</p></div>
               <div><span className="text-muted-foreground">Created By</span><p className="font-medium">{group.createdBy}</p></div>
               <div><span className="text-muted-foreground">Approved By</span><p className="font-medium">{group.approvedBy}</p></div>
@@ -314,8 +320,10 @@ function StockTransferReport() {
           columns={[
             { key: "transferNumber", label: "Transfer Number" },
             { key: "transferType", label: "Type", className: "capitalize", render: (g: StockTransferGroup) => g.transferType.replace(/_/g, " ") },
-            { key: "sourceLocation", label: "Source" },
-            { key: "destinationLocation", label: "Destination" },
+            { key: "sourceBranch", label: "Source Branch" },
+            { key: "destinationBranch", label: "Destination Branch" },
+            { key: "sendingWarehouse", label: "Sending Warehouse" },
+            { key: "receivingWarehouse", label: "Receiving Warehouse" },
             { key: "status", label: "Status", className: "capitalize", render: (g: StockTransferGroup) => g.status.replace(/_/g, " ") },
             { key: "createdBy", label: "Created By" },
             { key: "approvedBy", label: "Approved By" },
@@ -323,8 +331,8 @@ function StockTransferReport() {
             { key: "orderedQuantity", label: "Quantity Ordered" },
             { key: "receivedQuantity", label: "Quantity Received" },
             { key: "totalCost", label: "Total Cost", render: (g: StockTransferGroup) => <span className="font-semibold"><SARIcon />{fmtSAR(g.totalCost)}</span> },
-            { key: "createdAt", label: "Created At", render: (g: StockTransferGroup) => fmtDateTime(g.createdAt) },
-            { key: "completedDate", label: "Completed At", render: (g: StockTransferGroup) => g.completedDate ? fmtDateTime(g.completedDate) : "—" },
+            { key: "createdAt", label: "Transfer Date & Time", render: (g: StockTransferGroup) => fmtDateTime(g.createdAt) },
+            { key: "completedDate", label: "Completed Date & Time", render: (g: StockTransferGroup) => g.completedDate ? fmtDateTime(g.completedDate) : "—" },
             { key: "view", label: "Action", render: (g: StockTransferGroup) => (
               <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTransfer(g)}><Eye className="h-3.5 w-3.5" /></Button>
             ) },

@@ -827,6 +827,13 @@ export const api = {
   exportPurchaseOrderReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; status?: string[]; createdBy?: string[]; approvedBy?: string[]; productId?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/purchase-order-report/export${toQuery(params)}`),
 
+  getSupplierReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; paymentStatus?: string[]; reason?: string[]; createdBy?: string[] }) =>
+    request<SupplierReportRow[]>(`/api/reports/supplier-report${toQuery(params)}`),
+  exportSupplierReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; paymentStatus?: string[]; reason?: string[]; createdBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/supplier-report/export${toQuery(params)}`),
+  getSupplierReportDetail: (params: { supplierId: string; from?: string; to?: string; branchId?: string[]; paymentStatus?: string[]; createdBy?: string[] }) =>
+    request<SupplierReportDetail>(`/api/reports/supplier-report/detail${toQuery(params)}`),
+
   getEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string; deviceId?: string[]; transactionType?: string[] }) =>
     request<EmployeeAuditRow[]>(`/api/reports/employee-audit-center${toQuery(params)}`),
   exportEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string; deviceId?: string[]; transactionType?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
@@ -2370,7 +2377,9 @@ export interface SupplierReturnsReportRow {
 }
 
 export interface StockTransferReportRow {
-  transferNumber: string; transferType: string; sourceLocation: string; destinationLocation: string; status: string;
+  transferNumber: string; transferType: string;
+  sourceBranch: string; destinationBranch: string; sendingWarehouse: string; receivingWarehouse: string;
+  status: string;
   createdBy: string; approvedBy: string; receivedBy: string; productName: string; sku: string;
   orderedQuantity: number; receivedQuantity: number; unitCost: number; totalCost: number; createdAt: string; completedDate?: string; notes?: string;
 }
@@ -2381,6 +2390,23 @@ export interface PurchaseOrderReportItem {
 export interface PurchaseOrderReportRow {
   id: string; poNumber: string; supplierName: string; locationName: string; purchaseDate: string; status: string; paymentStatus: string;
   createdBy: string; approvedBy: string; receivedBy: string; totalAmount: number; items: PurchaseOrderReportItem[];
+}
+
+export interface SupplierReportRow {
+  supplierId: string; supplierName: string; purchaseCount: number; totalPurchaseAmount: number; paidAmount: number;
+  dueAmount: number; returnAmount: number; netPurchaseAmount: number; averagePurchaseValue: number; lastPurchaseDate: string;
+}
+export interface SupplierReportPurchaseItem {
+  productName: string; sku: string; category: string; unitOfMeasure: string;
+  quantity: number; returnedQuantity: number; unitPrice: number; lineTotal: number;
+}
+export interface SupplierReportPurchaseRow {
+  id: string; poNumber: string; purchaseDate: string; locationName: string; status: string; createdBy: string;
+  totalAmount: number; paidAmount: number; dueAmount: number; items: SupplierReportPurchaseItem[];
+}
+export interface SupplierReportDetail {
+  supplierId: string; supplierName: string; purchaseCount: number; totalPurchaseAmount: number; paidAmount: number;
+  dueAmount: number; returnAmount: number; netPurchaseAmount: number; purchases: SupplierReportPurchaseRow[];
 }
 
 export interface EmployeeAuditRow {

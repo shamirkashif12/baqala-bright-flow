@@ -11,7 +11,7 @@ import {
   FileBarChart, Download, TrendingUp, Calendar, Building2, ShoppingCart, Tag, Truck, Boxes,
   Ban, RotateCcw, Percent, CreditCard, ShieldCheck, DollarSign, AlertTriangle, Cigarette, Coins,
   ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, ArrowLeftRight, Receipt, PackageSearch, Sparkles, Gavel, ShieldAlert,
-  UserCheck, CalendarCheck, History, Gift,
+  UserCheck, CalendarCheck, History, Gift, Wallet,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/")({ component: Reports });
@@ -55,6 +55,8 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/supplier-performance", exportFile: () => api.exportSupplierPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "supplier-returns", name: "Supplier Returns Report", desc: "Full transaction detail for stock returned to suppliers", icon: PackageSearch, color: "warning",
       href: "/reports/supplier-returns", exportFile: () => api.exportSupplierReturnsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
+    { code: "supplier-report", name: "Supplier Report", desc: "Per-supplier purchase totals — paid, due and returns with accurate payment tracking", icon: Wallet, color: "warning",
+      href: "/reports/supplier-report", exportFile: () => api.exportSupplierReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "stock-transfer", name: "Stock Transfer Report", desc: "Full history of stock moved between warehouses and branches", icon: ArrowLeftRight, color: "primary",
       href: "/reports/stock-transfer", exportFile: () => api.exportStockTransferReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "purchase-orders-report", name: "Purchase Reports", desc: "Complete purchase order detail, drill into every product", icon: Receipt, color: "success",

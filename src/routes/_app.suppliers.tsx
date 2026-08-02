@@ -88,11 +88,17 @@ const FORMAT_VALIDATORS: { key: keyof SupplierForm; check: (v: string) => boolea
   { key: "bankIban", check: isValidSaudiIban, message: "Enter a valid Saudi IBAN (SA followed by 22 digits)." },
 ];
 
-function validateSupplierFormats(form: SupplierForm): SupplierFormErrors {
+// `original` is the record as loaded from the server (edit mode only). A value that's already
+// stored — malformed or not — was valid enough to exist before this format check was added; it's
+// only re-checked once the user actually changes it. Without this, saving an unrelated field (e.g.
+// Notes) on any legacy supplier whose phone/CR/bank details predate these rules would be blocked.
+function validateSupplierFormats(form: SupplierForm, original?: SupplierForm): SupplierFormErrors {
   const errors: SupplierFormErrors = {};
   for (const f of FORMAT_VALIDATORS) {
     const value = form[f.key]?.trim();
-    if (value && !f.check(value)) errors[f.key] = f.message;
+    if (!value) continue;
+    if (original && value === original[f.key]?.trim()) continue;
+    if (!f.check(value)) errors[f.key] = f.message;
   }
   return errors;
 }
@@ -140,6 +146,10 @@ function SupplierFormFields({
   // the user has typed anything. Previously the dropdown and a free-text override were both shown
   // at once, which read as two separate, redundant city fields.
   const [otherCity, setOtherCity] = useState(() => !!form.city && !SAUDI_CITIES.includes(form.city));
+  // Same "Other" reveal pattern as City — a supplier category outside the fixed list (e.g. an old
+  // record, or one saved before this field existed) should show as free text, not silently fall
+  // back to the closed dropdown with nothing selected.
+  const [otherCategory, setOtherCategory] = useState(() => !!form.category && !SUPPLIER_CATEGORIES.includes(form.category));
   const clearError = (k: keyof SupplierForm) =>
     setErrors(prev => (prev[k] ? { ...prev, [k]: undefined } : prev));
   const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -194,12 +204,24 @@ function SupplierFormFields({
         <FieldRow label={label("Address", true)} error={errors.address}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} className={errCls("address")} /></FieldRow>
       </div>
       <FieldRow label={label("Category", true)} error={errors.category}>
-        <Select value={form.category} onValueChange={setS("category")}>
-          <SelectTrigger className={`h-9 ${errCls("category")}`}><SelectValue placeholder="Select category" /></SelectTrigger>
-          <SelectContent>
-            {SUPPLIER_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {otherCategory ? (
+          <div className="space-y-1">
+            <Input value={form.category} onChange={set("category")} className={`h-9 ${errCls("category")}`} placeholder="Enter category name" maxLength={100} autoFocus />
+            <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherCategory(false); setS("category")(""); }}>
+              Choose from list instead
+            </button>
+          </div>
+        ) : (
+          <Select
+            value={form.category}
+            onValueChange={v => { if (v === "Other") { setOtherCategory(true); setS("category")(""); } else setS("category")(v); }}
+          >
+            <SelectTrigger className={`h-9 ${errCls("category")}`}><SelectValue placeholder="Select category" /></SelectTrigger>
+            <SelectContent>
+              {SUPPLIER_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
       </FieldRow>
       <FieldRow label="Supply Channel">
         <Select value={form.supplyType} onValueChange={setS("supplyType")}>
@@ -753,6 +775,9 @@ function SuppliersTab() {
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
+  // Snapshot of the form as loaded for the supplier currently being edited — lets handleSave tell
+  // an untouched legacy value apart from one the user just typed. Unused in create mode.
+  const [initialForm, setInitialForm] = useState<SupplierForm>(emptyForm);
   const [formErrors, setFormErrors] = useState<SupplierFormErrors>({});
   const [saving, setSaving] = useState(false);
 
@@ -768,18 +793,23 @@ function SuppliersTab() {
   const openEdit = (s: Supplier) => {
     setEditSupplier(s);
     setFormErrors({});
-    setForm({
+    const next: SupplierForm = {
       name: s.name, contactPerson: s.contactPerson ?? "", contactNumber: s.contactNumber ?? "", email: s.email ?? "", city: s.city ?? "",
       supplyType: s.supplyType ?? "warehouse", status: s.status,
       legalName: s.legalName ?? "", crNumber: s.crNumber ?? "", vatNumber: s.vatNumber ?? "", address: s.address ?? "", category: s.category ?? "",
       paymentTerms: s.paymentTerms ?? "", creditLimit: s.creditLimit != null ? String(s.creditLimit) : "",
       bankName: s.bankName ?? "", bankAccountHolder: s.bankAccountHolder ?? "", bankAccountNumber: s.bankAccountNumber ?? "", bankIban: s.bankIban ?? "",
       notes: s.notes ?? "",
-    });
+    };
+    setForm(next);
+    setInitialForm(next);
   };
 
   const handleSave = async () => {
-    const clientErrors = { ...(editSupplier ? {} : validateSupplierForm(form)), ...validateSupplierFormats(form) };
+    const clientErrors = {
+      ...(editSupplier ? {} : validateSupplierForm(form)),
+      ...validateSupplierFormats(form, editSupplier ? initialForm : undefined),
+    };
     if (Object.keys(clientErrors).length > 0) {
       setFormErrors(clientErrors);
       toast.error("Please fix the highlighted fields.");

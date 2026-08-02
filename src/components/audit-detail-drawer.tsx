@@ -52,7 +52,10 @@ export function AuditDetailDrawer({ auditLogId, onClose }: { auditLogId: string 
           <div className="mt-4 space-y-5">
             <Section title="Who & Where">
               <Row label="Employee" value={detail.employeeName} />
-              <Row label="Performed By" value={detail.performedBy} />
+              {/* Almost always the same person as Employee for POS actions — only worth a
+                  separate line when someone else (a manager overriding on their behalf, an
+                  approver) actually performed it. */}
+              {detail.performedBy !== detail.employeeName && <Row label="Performed By" value={detail.performedBy} />}
               <Row label="Branch" value={detail.branchName} />
               <Row label="Device" value={detail.deviceName} />
               <Row label="IP Address" value={detail.ipAddress || "—"} />
@@ -99,18 +102,27 @@ export function AuditDetailDrawer({ auditLogId, onClose }: { auditLogId: string 
 
             {detail.changes.length > 0 && (
               <div>
+                {/* Some actions (a fresh sale, a brand-new record) never had a "before" state at
+                    all — every field arrived at once, it wasn't edited into place. Labeling that
+                    a "change" and drawing a "— → value" arrow implies an edit that never happened,
+                    so the section relabels itself and drops the arrow whenever nothing here
+                    actually had a prior value. */}
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                  What Changed ({detail.changes.length})
+                  {detail.changes.some((c) => c.oldValue != null) ? "What Changed" : "Recorded Details"} ({detail.changes.length})
                 </p>
                 <div className="space-y-1.5">
                   {detail.changes.map((c) => (
                     <div key={c.field} className="rounded-xl border border-border/40 px-3 py-2 text-xs">
                       <p className="font-medium">{c.field}</p>
-                      <div className="mt-0.5 flex items-center gap-2 text-muted-foreground">
-                        <span className="line-through">{c.oldValue ?? "—"}</span>
-                        <span>→</span>
-                        <span className="font-semibold text-foreground">{c.newValue ?? "—"}</span>
-                      </div>
+                      {c.oldValue != null ? (
+                        <div className="mt-0.5 flex items-center gap-2 text-muted-foreground">
+                          <span className="line-through">{c.oldValue}</span>
+                          <span>→</span>
+                          <span className="font-semibold text-foreground">{c.newValue ?? "—"}</span>
+                        </div>
+                      ) : (
+                        <p className="mt-0.5 font-semibold text-foreground">{c.newValue ?? "—"}</p>
+                      )}
                     </div>
                   ))}
                 </div>

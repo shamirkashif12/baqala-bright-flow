@@ -4307,10 +4307,10 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
         if (error != null) return BadRequest(new { message = error });
         var rows = await BuildStockTransferReportAsync(rangeFrom, rangeTo, transferType, status ?? [], sourceBranchId ?? [], sourceWarehouseId ?? [], destBranchId ?? [], destWarehouseId ?? [], productId ?? [], createdBy ?? [], approvedBy ?? [], receivedBy ?? []);
-        var headers = new[] { "Transfer Number", "Type", "Source", "Destination", "Status", "Created By", "Approved By", "Received By", "Product", "SKU", "Ordered Quantity", "Received Quantity", "Unit Cost", "Total Cost", "Created At", "Completed At", "Notes" };
+        var headers = new[] { "Transfer Number", "Type", "Source Branch", "Destination Branch", "Sending Warehouse", "Receiving Warehouse", "Status", "Created By", "Approved By", "Received By", "Product", "SKU", "Ordered Quantity", "Received Quantity", "Unit Cost", "Total Cost", "Transfer Date & Time", "Completed Date & Time", "Notes" };
         var exportRows = rows.Select(r => new object?[]
         {
-            r.TransferNumber, r.TransferType, r.SourceLocation, r.DestinationLocation, r.Status, r.CreatedBy, r.ApprovedBy, r.ReceivedBy,
+            r.TransferNumber, r.TransferType, r.SourceBranch, r.DestinationBranch, r.SendingWarehouse, r.ReceivingWarehouse, r.Status, r.CreatedBy, r.ApprovedBy, r.ReceivedBy,
             r.ProductName, r.Sku, r.OrderedQuantity, r.ReceivedQuantity, r.UnitCost, r.TotalCost, r.CreatedAt, r.CompletedDate, r.Notes,
         }).ToList();
         await audit.LogAsync("export_report", "Report", null, exportedBy, FirstBranchOrNull(sourceBranchId) ?? FirstBranchOrNull(destBranchId),
@@ -4355,8 +4355,10 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         {
             TransferNumber = t.TransferNumber ?? "—",
             TransferType = t.TransferType,
-            SourceLocation = t.SourceBranch?.Name ?? t.SourceWarehouse?.Name ?? "—",
-            DestinationLocation = t.DestBranch?.Name ?? t.DestWarehouse?.Name ?? "—",
+            SourceBranch = t.SourceBranch?.Name ?? "—",
+            DestinationBranch = t.DestBranch?.Name ?? "—",
+            SendingWarehouse = t.SourceWarehouse?.Name ?? "—",
+            ReceivingWarehouse = t.DestWarehouse?.Name ?? "—",
             Status = t.Status,
             CreatedBy = t.CreatedByUser?.FullName ?? "—",
             ApprovedBy = t.ApprovedByUser?.FullName ?? "—",
@@ -4466,6 +4468,199 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                 Subtotal = i.Subtotal,
             }).ToList(),
         }).ToList();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Supplier Report — one row per supplier with accurate payment tracking (Purchases, Total
+    // Purchase, Paid, Due, Returns, Net Purchase, Avg Purchase, Last Purchase), plus a detail
+    // endpoint that drills into that supplier's individual purchase orders and their line-item
+    // pricing (unit price / line total). "Returns" is sourced from StockTransfer rows with
+    // TransferType == "warehouse_to_supplier" (RTS) — the same source BuildSupplierReturnsReportAsync
+    // uses — not from PurchaseOrder itself, which has no returned-amount column.
+    // ───────────────────────────────────────────────────────────────────────
+
+    [HttpGet("supplier-report")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetSupplierReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId, [FromQuery] Guid[]? branchId,
+        [FromQuery] string[]? paymentStatus, [FromQuery] string[]? reason, [FromQuery] Guid[]? createdBy)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        return Ok(await BuildSupplierReportAsync(rangeFrom, rangeTo, supplierId ?? [], branchId ?? [], paymentStatus ?? [], reason ?? [], createdBy ?? []));
+    }
+
+    [HttpGet("supplier-report/export")]
+    [RequirePermission("Reports", PermAction.Export)]
+    public async Task<IActionResult> ExportSupplierReport(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? supplierId, [FromQuery] Guid[]? branchId,
+        [FromQuery] string[]? paymentStatus, [FromQuery] string[]? reason, [FromQuery] Guid[]? createdBy,
+        [FromQuery] Guid? exportedBy, [FromQuery] string? format = "csv")
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var rows = await BuildSupplierReportAsync(rangeFrom, rangeTo, supplierId ?? [], branchId ?? [], paymentStatus ?? [], reason ?? [], createdBy ?? []);
+        var headers = new[] { "Supplier", "Purchases", "Total Purchase", "Paid", "Due", "Returns", "Net Purchase", "Avg Purchase", "Last Purchase" };
+        var exportRows = rows.Select(r => new object?[]
+        {
+            r.SupplierName, r.PurchaseCount, r.TotalPurchaseAmount, r.PaidAmount, r.DueAmount, r.ReturnAmount, r.NetPurchaseAmount, r.AveragePurchaseValue, r.LastPurchaseDate,
+        }).ToList();
+        await audit.LogAsync("export_report", "Report", null, exportedBy, FirstBranchOrNull(branchId),
+            $"{{\"report\":\"supplier-report\",\"from\":\"{rangeFrom:yyyy-MM-dd}\",\"to\":\"{rangeTo:yyyy-MM-dd}\",\"rows\":{exportRows.Count}}}");
+        return await BuildExportFile(format, "Supplier Report", $"Period: {rangeFrom:yyyy-MM-dd} to {rangeTo.AddDays(-1):yyyy-MM-dd}",
+            [], headers, exportRows, $"supplier-report-{rangeFrom:yyyy-MM-dd}-to-{rangeTo:yyyy-MM-dd}");
+    }
+
+    [HttpGet("supplier-report/detail")]
+    [RequirePermission("Reports", PermAction.View)]
+    public async Task<IActionResult> GetSupplierReportDetail(
+        [FromQuery] Guid supplierId, [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] Guid[]? branchId,
+        [FromQuery] string[]? paymentStatus, [FromQuery] Guid[]? createdBy)
+    {
+        var (rangeFrom, rangeTo, error) = ResolveRange(from, to, defaultToFirstOfMonth: true);
+        if (error != null) return BadRequest(new { message = error });
+        var detail = await BuildSupplierReportDetailAsync(supplierId, rangeFrom, rangeTo, branchId ?? [], paymentStatus ?? [], createdBy ?? []);
+        if (detail == null) return NotFound(new { message = "Supplier has no purchases in the selected range." });
+        return Ok(detail);
+    }
+
+    private async Task<List<SupplierReportRow>> BuildSupplierReportAsync(
+        DateTime rangeFrom, DateTime rangeToExclusive, Guid[] supplierIds, Guid[] branchIds,
+        string[] paymentStatuses, string[] reasons, Guid[] createdByIds)
+    {
+        var (callerRole, callerBranchId) = GetCallerContext();
+
+        // Narrowed in memory below, not via SQL .Contains(...) — the MySQL EF Core provider throws
+        // on a parameterized Guid[]/string[] IN-list (see the ef-mysql-inlist-gotcha memory).
+        var q = db.PurchaseOrders
+            .Include(p => p.Supplier)
+            .Where(p => p.CreatedAt >= rangeFrom && p.CreatedAt < rangeToExclusive);
+
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            q = q.Where(p => p.BranchId == callerBranchId);
+
+        var pos = await q.ToListAsync();
+
+        if (supplierIds.Length > 0) pos = [.. pos.Where(p => supplierIds.Contains(p.SupplierId))];
+        if (branchIds.Length > 0) pos = [.. pos.Where(p => p.BranchId.HasValue && branchIds.Contains(p.BranchId.Value))];
+        if (paymentStatuses.Length > 0) pos = [.. pos.Where(p => paymentStatuses.Contains(p.PaymentStatus))];
+        if (createdByIds.Length > 0) pos = [.. pos.Where(p => createdByIds.Contains(p.CreatedBy))];
+
+        // Returns value per supplier, same source and date range as BuildSupplierReturnsReportAsync.
+        var returnTransfers = await db.StockTransfers
+            .Include(t => t.Items)
+            .Where(t => t.TransferType == "warehouse_to_supplier" && t.DestSupplierId.HasValue
+                     && t.CreatedAt >= rangeFrom && t.CreatedAt < rangeToExclusive)
+            .ToListAsync();
+        if (reasons.Length > 0) returnTransfers = [.. returnTransfers.Where(t => t.ReturnReason != null && reasons.Contains(t.ReturnReason))];
+
+        var returnValueBySupplier = returnTransfers
+            .GroupBy(t => t.DestSupplierId!.Value)
+            .ToDictionary(g => g.Key, g => g.Sum(t => t.Items.Sum(i => (i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity) * (i.UnitCost ?? 0m))));
+
+        // A Reason filter narrows to suppliers who actually have a matching return — same
+        // "the filter narrows rows, not just one column" convention every other report filter here follows.
+        if (reasons.Length > 0) pos = [.. pos.Where(p => returnValueBySupplier.ContainsKey(p.SupplierId))];
+
+        return pos
+            .GroupBy(p => new { p.SupplierId, SupplierName = p.Supplier?.Name ?? "—" })
+            .Select(g =>
+            {
+                var totalPurchase = g.Sum(p => p.TotalAmount);
+                var returnAmount = returnValueBySupplier.TryGetValue(g.Key.SupplierId, out var rv) ? rv : 0m;
+                return new SupplierReportRow
+                {
+                    SupplierId = g.Key.SupplierId,
+                    SupplierName = g.Key.SupplierName,
+                    PurchaseCount = g.Count(),
+                    TotalPurchaseAmount = totalPurchase,
+                    PaidAmount = g.Sum(p => p.PaidAmount),
+                    DueAmount = g.Sum(p => p.TotalAmount - p.PaidAmount),
+                    ReturnAmount = returnAmount,
+                    NetPurchaseAmount = totalPurchase - returnAmount,
+                    AveragePurchaseValue = g.Average(p => p.TotalAmount),
+                    LastPurchaseDate = g.Max(p => p.CreatedAt),
+                };
+            })
+            .OrderByDescending(s => s.TotalPurchaseAmount)
+            .ToList();
+    }
+
+    private async Task<SupplierReportDetail?> BuildSupplierReportDetailAsync(
+        Guid supplierId, DateTime rangeFrom, DateTime rangeToExclusive, Guid[] branchIds,
+        string[] paymentStatuses, Guid[] createdByIds)
+    {
+        var (callerRole, callerBranchId) = GetCallerContext();
+
+        var q = db.PurchaseOrders
+            .Include(p => p.Supplier).Include(p => p.Branch).Include(p => p.Warehouse).Include(p => p.CreatedByUser)
+            .Include(p => p.Items).ThenInclude(i => i.Product).ThenInclude(pr => pr!.Category)
+            .Where(p => p.SupplierId == supplierId && p.CreatedAt >= rangeFrom && p.CreatedAt < rangeToExclusive);
+
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue)
+            q = q.Where(p => p.BranchId == callerBranchId);
+
+        var pos = await q.OrderByDescending(p => p.CreatedAt).ToListAsync();
+        if (pos.Count == 0) return null;
+
+        if (branchIds.Length > 0) pos = [.. pos.Where(p => p.BranchId.HasValue && branchIds.Contains(p.BranchId.Value))];
+        if (paymentStatuses.Length > 0) pos = [.. pos.Where(p => paymentStatuses.Contains(p.PaymentStatus))];
+        if (createdByIds.Length > 0) pos = [.. pos.Where(p => createdByIds.Contains(p.CreatedBy))];
+
+        var poIds = pos.Select(p => p.Id).ToHashSet();
+        // Returned qty per (PO, product) — best-effort: only counts RTS transfers explicitly linked
+        // back to this PO via StockTransfer.PurchaseOrderId. Returns raised without that link show 0
+        // here rather than guessing which PO they came from. Narrowed to poIds in memory, not via
+        // SQL .Contains(...) — the MySQL EF Core provider throws on a parameterized Guid[] IN-list
+        // (see the ef-mysql-inlist-gotcha memory, same constraint as everywhere else in this file).
+        var allReturnTransfers = await db.StockTransfers
+            .Include(t => t.Items)
+            .Where(t => t.TransferType == "warehouse_to_supplier" && t.PurchaseOrderId.HasValue)
+            .ToListAsync();
+        var relevantReturns = allReturnTransfers.Where(t => poIds.Contains(t.PurchaseOrderId!.Value)).ToList();
+        var returnedQtyByPoProduct = relevantReturns
+            .SelectMany(t => t.Items.Select(i => (PoId: t.PurchaseOrderId!.Value, i.ProductId, Qty: i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity)))
+            .GroupBy(x => (x.PoId, x.ProductId))
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
+        var returnValueTotal = relevantReturns.Sum(t => t.Items.Sum(i => (i.ReceivedQuantity ?? i.ApprovedQuantity ?? i.RequestedQuantity) * (i.UnitCost ?? 0m)));
+
+        var purchases = pos.Select(p => new SupplierReportPurchaseRow
+        {
+            Id = p.Id,
+            PoNumber = p.PoNumber ?? "—",
+            PurchaseDate = p.CreatedAt,
+            LocationName = p.Branch?.Name ?? p.Warehouse?.Name ?? "—",
+            Status = p.Status,
+            CreatedBy = p.CreatedByUser?.FullName ?? "—",
+            TotalAmount = p.TotalAmount,
+            PaidAmount = p.PaidAmount,
+            DueAmount = p.TotalAmount - p.PaidAmount,
+            Items = p.Items.Select(i => new SupplierReportPurchaseItem
+            {
+                ProductName = i.Product?.Name ?? "—",
+                Sku = i.Product?.Sku ?? "—",
+                Category = i.Product?.Category?.Name ?? "—",
+                UnitOfMeasure = i.Product?.UnitOfMeasure ?? "—",
+                Quantity = i.OrderedQuantity,
+                ReturnedQuantity = returnedQtyByPoProduct.TryGetValue((p.Id, i.ProductId), out var rq) ? rq : 0m,
+                UnitPrice = i.UnitCost,
+                LineTotal = i.Subtotal,
+            }).ToList(),
+        }).ToList();
+
+        var totalPurchase = purchases.Sum(p => p.TotalAmount);
+        return new SupplierReportDetail
+        {
+            SupplierId = supplierId,
+            SupplierName = pos[0].Supplier?.Name ?? "—",
+            PurchaseCount = purchases.Count,
+            TotalPurchaseAmount = totalPurchase,
+            PaidAmount = purchases.Sum(p => p.PaidAmount),
+            DueAmount = purchases.Sum(p => p.DueAmount),
+            ReturnAmount = returnValueTotal,
+            NetPurchaseAmount = totalPurchase - returnValueTotal,
+            Purchases = purchases,
+        };
     }
 
     // ───────────────────────────────────────────────────────────────────────
@@ -4818,6 +5013,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
                 if (prop.Name.Equals("Items", StringComparison.OrdinalIgnoreCase)) continue; // line items — too verbose for a one-line summary
+                if (IsRawGuidIdField(prop)) continue; // e.g. "productId": "b2ee88ee-..." — meaningless without a lookup; the Details drawer resolves the real name separately
                 var value = prop.Value.ValueKind switch
                 {
                     System.Text.Json.JsonValueKind.Array => $"{prop.Value.GetArrayLength()} item(s)",
@@ -4832,6 +5028,18 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             return parts.Count > 0 ? string.Join(", ", parts) : null;
         }
         catch { return json; }
+    }
+
+    // True for a scalar property that's a foreign-key reference ("productId", "CategoryId",
+    // "ApprovedBy"...) whose value is actually a GUID. A raw id is noise in a summary meant for a
+    // human auditor — it's never the answer to "which product/employee", only a lookup key — so it's
+    // dropped from both the one-line Old/New Value summary and the Details drawer's field diff.
+    private static bool IsRawGuidIdField(System.Text.Json.JsonProperty prop)
+    {
+        if (prop.Value.ValueKind != System.Text.Json.JsonValueKind.String) return false;
+        var name = prop.Name;
+        var looksLikeId = name.EndsWith("Id", StringComparison.OrdinalIgnoreCase) || name.EndsWith("By", StringComparison.OrdinalIgnoreCase);
+        return looksLikeId && Guid.TryParse(prop.Value.GetString(), out _);
     }
 
     // "OrderNumber" -> "Order Number", "discountAmount" -> "Discount Amount"
@@ -4955,6 +5163,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             var map = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
+                if (IsRawGuidIdField(prop)) continue; // same rule as HumanizeJsonSnapshot — a raw id isn't a meaningful "what changed" field
                 map[prop.Name] = prop.Value.ValueKind switch
                 {
                     System.Text.Json.JsonValueKind.Array or System.Text.Json.JsonValueKind.Object => null,
@@ -6485,8 +6694,13 @@ public sealed class StockTransferReportRow
 {
     public string TransferNumber { get; init; } = "—";
     public string TransferType { get; init; } = "—";
-    public string SourceLocation { get; init; } = "—";
-    public string DestinationLocation { get; init; } = "—";
+    // Split into dedicated branch/warehouse columns (rather than one merged Source/Destination
+    // string) so branch-to-branch transfers show their own Source/Destination Branch columns
+    // distinct from Sending/Receiving Warehouse — each is "—" when not applicable to this transfer.
+    public string SourceBranch { get; init; } = "—";
+    public string DestinationBranch { get; init; } = "—";
+    public string SendingWarehouse { get; init; } = "—";
+    public string ReceivingWarehouse { get; init; } = "—";
     public string Status { get; init; } = "—";
     public string CreatedBy { get; init; } = "—";
     public string ApprovedBy { get; init; } = "—";
@@ -6526,6 +6740,59 @@ public sealed class PurchaseOrderReportRow
     public string ReceivedBy { get; init; } = "—";
     public decimal TotalAmount { get; init; }
     public List<PurchaseOrderReportItem> Items { get; init; } = [];
+}
+
+public sealed class SupplierReportRow
+{
+    public Guid SupplierId { get; init; }
+    public string SupplierName { get; init; } = "—";
+    public int PurchaseCount { get; init; }
+    public decimal TotalPurchaseAmount { get; init; }
+    public decimal PaidAmount { get; init; }
+    public decimal DueAmount { get; init; }
+    public decimal ReturnAmount { get; init; }
+    public decimal NetPurchaseAmount { get; init; }
+    public decimal AveragePurchaseValue { get; init; }
+    public DateTime LastPurchaseDate { get; init; }
+}
+
+public sealed class SupplierReportPurchaseItem
+{
+    public string ProductName { get; init; } = "—";
+    public string Sku { get; init; } = "—";
+    public string Category { get; init; } = "—";
+    public string UnitOfMeasure { get; init; } = "—";
+    public decimal Quantity { get; init; }
+    public decimal ReturnedQuantity { get; init; }
+    public decimal UnitPrice { get; init; }
+    public decimal LineTotal { get; init; }
+}
+
+public sealed class SupplierReportPurchaseRow
+{
+    public Guid Id { get; init; }
+    public string PoNumber { get; init; } = "—";
+    public DateTime PurchaseDate { get; init; }
+    public string LocationName { get; init; } = "—";
+    public string Status { get; init; } = "—";
+    public string CreatedBy { get; init; } = "—";
+    public decimal TotalAmount { get; init; }
+    public decimal PaidAmount { get; init; }
+    public decimal DueAmount { get; init; }
+    public List<SupplierReportPurchaseItem> Items { get; init; } = [];
+}
+
+public sealed class SupplierReportDetail
+{
+    public Guid SupplierId { get; init; }
+    public string SupplierName { get; init; } = "—";
+    public int PurchaseCount { get; init; }
+    public decimal TotalPurchaseAmount { get; init; }
+    public decimal PaidAmount { get; init; }
+    public decimal DueAmount { get; init; }
+    public decimal ReturnAmount { get; init; }
+    public decimal NetPurchaseAmount { get; init; }
+    public List<SupplierReportPurchaseRow> Purchases { get; init; } = [];
 }
 
 public sealed class EmployeeAuditRow

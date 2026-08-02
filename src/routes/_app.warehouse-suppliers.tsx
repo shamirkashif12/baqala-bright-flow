@@ -53,6 +53,14 @@ function WarehouseSuppliers() {
   const [paymentTermsFilter, setPaymentTermsFilter] = useState<string[]>([]);
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [form, setForm] = useState<WarehouseSupplierForm>(emptyForm);
+  // Snapshot of the form as loaded for the supplier currently being edited — lets handleSave tell
+  // an untouched legacy value apart from one the user just typed. Unused in create mode.
+  const [initialForm, setInitialForm] = useState<WarehouseSupplierForm>(emptyForm);
+  // Same "Other" reveal pattern as _app.suppliers.tsx — a category outside the fixed list should
+  // show as free text, not silently fall back to the closed dropdown with nothing selected. This
+  // component isn't remounted per dialog, so the flag is set explicitly in openCreate/openEdit
+  // rather than via a useState lazy initializer (which would only ever run once).
+  const [otherCategory, setOtherCategory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -67,12 +75,14 @@ function WarehouseSuppliers() {
 
   const openCreate = () => {
     setForm(emptyForm);
+    setInitialForm(emptyForm);
+    setOtherCategory(false);
     setError("");
     setEdit({} as Supplier);
   };
 
   const openEdit = (s: Supplier) => {
-    setForm({
+    const next: WarehouseSupplierForm = {
       name: s.name,
       contactPerson: s.contactPerson ?? "",
       contactNumber: s.contactNumber ?? "",
@@ -83,33 +93,46 @@ function WarehouseSuppliers() {
       vatNumber: s.vatNumber ?? "",
       address: s.address ?? "",
       category: s.category ?? "",
-    });
+    };
+    setForm(next);
+    setInitialForm(next);
+    setOtherCategory(!!next.category && !SUPPLIER_CATEGORIES.includes(next.category));
     setError("");
     setEdit(s);
   };
 
+  // A value that's already stored (even if malformed) predates format validation and shouldn't
+  // block saving an edit to some unrelated field — only re-check a field once the user changes it.
+  const changedAndInvalid = (value: string, original: string, isEdit: boolean, check: (v: string) => boolean) => {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    if (isEdit && trimmed === original.trim()) return false;
+    return !check(trimmed);
+  };
+
   const handleSave = async () => {
+    const isEdit = !!edit?.id;
     // Mirrors SuppliersController.ValidateRequiredForCreate — only enforced on create, same as
     // the main Suppliers page, so editing a legacy record missing these fields still works.
-    if (!edit?.id) {
+    if (!isEdit) {
       if (!form.address.trim()) { setError("Address is required."); return; }
       if (!form.category.trim()) { setError("Supplier category is required."); return; }
       if (!form.crNumber.trim()) { setError("CR number is required."); return; }
       if (!form.vatNumber.trim()) { setError("VAT number is required."); return; }
     }
-    if (form.crNumber.trim() && !isValidSaudiCr(form.crNumber)) {
+    if (changedAndInvalid(form.crNumber, initialForm.crNumber, isEdit, isValidSaudiCr)) {
       setError("Enter a valid CR number (10 digits).");
       return;
     }
-    if (form.vatNumber.trim() && !isValidSaudiVat(form.vatNumber)) {
+    if (changedAndInvalid(form.vatNumber, initialForm.vatNumber, isEdit, isValidSaudiVat)) {
       setError("Enter a valid VAT number (15 digits, starting and ending with 3).");
       return;
     }
-    if (form.contactPerson.trim() && !isValidContactPersonName(form.contactPerson)) {
+    if (changedAndInvalid(form.contactPerson, initialForm.contactPerson, isEdit, isValidContactPersonName)) {
       setError("Enter a valid contact person name (letters only).");
       return;
     }
-    if (form.contactNumber.trim() && !isValidSaudiPhone(form.contactNumber)) {
+    if (changedAndInvalid(form.contactNumber, initialForm.contactNumber, isEdit, isValidSaudiPhone)) {
       setError("Enter a valid Saudi mobile number (05XXXXXXXX).");
       return;
     }
@@ -251,10 +274,19 @@ function WarehouseSuppliers() {
             <div><Label>CR Number{!edit?.id && " *"}</Label><Input value={form.crNumber} onChange={(e) => setForm(p => ({ ...p, crNumber: e.target.value.replace(/\D/g, "").slice(0, 10) }))} className="mt-1" inputMode="numeric" maxLength={10} placeholder="10 digits" /></div>
             <div><Label>VAT Number{!edit?.id && " *"}</Label><Input value={form.vatNumber} onChange={(e) => setForm(p => ({ ...p, vatNumber: e.target.value.replace(/\D/g, "").slice(0, 15) }))} className="mt-1" inputMode="numeric" maxLength={15} placeholder="15 digits" /></div>
             <div><Label>Category{!edit?.id && " *"}</Label>
-              <Select value={form.category} onValueChange={(v) => setForm(p => ({ ...p, category: v }))}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Select category" /></SelectTrigger>
-                <SelectContent>{SUPPLIER_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
+              {otherCategory ? (
+                <div className="space-y-1 mt-1">
+                  <Input value={form.category} onChange={(e) => setForm(p => ({ ...p, category: e.target.value }))} maxLength={100} placeholder="Enter category name" autoFocus />
+                  <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherCategory(false); setForm(p => ({ ...p, category: "" })); }}>
+                    Choose from list instead
+                  </button>
+                </div>
+              ) : (
+                <Select value={form.category} onValueChange={(v) => { if (v === "Other") { setOtherCategory(true); setForm(p => ({ ...p, category: "" })); } else setForm(p => ({ ...p, category: v })); }}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>{SUPPLIER_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
             </div>
             <div className="col-span-2"><Label>Address{!edit?.id && " *"}</Label><Textarea value={form.address} onChange={(e) => setForm(p => ({ ...p, address: e.target.value }))} className="mt-1" rows={2} placeholder="Street, building, city, postal code" /></div>
           </div>
