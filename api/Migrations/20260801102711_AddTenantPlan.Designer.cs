@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260801102711_AddTenantPlan")]
+    partial class AddTenantPlan
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5102,22 +5105,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("varchar(50)")
                         .HasColumnName("billing_status");
 
-                    b.Property<int?>("BusinessId")
-                        .HasColumnType("int")
-                        .HasColumnName("business_id");
-
-                    b.Property<string>("Category")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("category");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
-
-                    b.Property<int?>("EcrId")
-                        .HasColumnType("int")
-                        .HasColumnName("ecr_id");
 
                     b.Property<string>("EcrType")
                         .IsRequired()
@@ -5130,18 +5120,9 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("longtext")
                         .HasColumnName("features_json");
 
-                    b.Property<string>("LastEventId")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("last_event_id");
-
                     b.Property<int?>("MaxBranches")
                         .HasColumnType("int")
                         .HasColumnName("max_branches");
-
-                    b.Property<int?>("MaxProducts")
-                        .HasColumnType("int")
-                        .HasColumnName("max_products");
 
                     b.Property<int?>("MaxTerminalsPerBranch")
                         .HasColumnType("int")
@@ -5168,10 +5149,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<DateTime?>("RenewsAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("renews_at");
-
-                    b.Property<int?>("SubscriptionId")
-                        .HasColumnType("int")
-                        .HasColumnName("subscription_id");
 
                     b.Property<string>("TenantId")
                         .HasMaxLength(100)

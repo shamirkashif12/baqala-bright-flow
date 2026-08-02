@@ -12,7 +12,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvironment env, IAuditService audit) : ControllerBase
+public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvironment env, IAuditService audit, ITenantPlanService tenantPlans) : ControllerBase
 {
     [AllowAnonymous]
     [HttpPost("login")]
@@ -52,7 +52,8 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         await db.SaveChangesAsync();
 
         var appRole = RoleNormalizer.ToAppRole(user.Role.Name);
-        var token = GenerateJwt(user, appRole);
+        var plan = await tenantPlans.GetCurrentPlanAsync();
+        var token = GenerateJwt(user, appRole, plan.PlanId, plan.PlanName);
 
         // FRD 16.1 "Authentication" category — successful logins were previously invisible to the
         // Employee Activity Report; only the failed-login case above was ever logged.
@@ -75,6 +76,85 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         });
     }
 
+    // Token-EXCHANGE, not dual-trust: rather than teaching every endpoint in this app to accept
+    // two different JWT issuers, a gateway-issued token (from the Tenant Admin Dashboard's own
+    // operator login, carrying subscriptionId/ecrId claims for a "PosOperator") is validated here
+    // ONCE against its own separate signing config (TenantGateway:Jwt — distinct from this app's
+    // own Jwt:Key so neither issuer's tokens are ever accepted by the other's validation), then
+    // exchanged for this app's own local JWT via the same GenerateJwt every normal login uses.
+    // From that point on the session behaves exactly like a local login.
+    //
+    // NOTE: TenantGateway:Jwt's Issuer/Audience/Key are placeholder values (see appsettings.json)
+    // until the Tenant Admin team shares the gateway's real signing configuration — this endpoint
+    // cannot accept genuine gateway tokens until then.
+    [AllowAnonymous]
+    [HttpPost("gateway-login")]
+    public async Task<IActionResult> GatewayLogin([FromBody] GatewayLoginRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.GatewayAccessToken))
+            return BadRequest(new { message = "gatewayAccessToken is required." });
+
+        var gwConfig = config.GetSection("TenantGateway:Jwt");
+        var gwKey = gwConfig["Key"];
+        if (string.IsNullOrEmpty(gwKey))
+            return StatusCode(501, new { message = "Gateway SSO is not configured on this instance yet." });
+
+        ClaimsPrincipal principal;
+        try
+        {
+            principal = new JwtSecurityTokenHandler().ValidateToken(req.GatewayAccessToken, new TokenValidationParameters
+            {
+                ValidateIssuer = !string.IsNullOrEmpty(gwConfig["Issuer"]),
+                ValidIssuer = gwConfig["Issuer"],
+                ValidateAudience = !string.IsNullOrEmpty(gwConfig["Audience"]),
+                ValidAudience = gwConfig["Audience"],
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(gwKey)),
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.FromMinutes(2),
+            }, out _);
+        }
+        catch (Exception ex)
+        {
+            return Unauthorized(new { message = "Invalid or expired gateway token.", error = ex.Message });
+        }
+
+        var email = principal.FindFirst(JwtRegisteredClaimNames.Email)?.Value ?? principal.FindFirst(ClaimTypes.Email)?.Value;
+        if (string.IsNullOrEmpty(email))
+            return Unauthorized(new { message = "Gateway token has no email claim." });
+
+        var user = await db.Users.Include(u => u.Role).Include(u => u.Branch)
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() && u.Status == "active");
+        if (user is null)
+            return NotFound(new { message = "No local account for this operator yet — provisioning may not have completed." });
+
+        user.LastLogin = DateTime.UtcNow;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        var appRole = RoleNormalizer.ToAppRole(user.Role.Name);
+        var plan = await tenantPlans.GetCurrentPlanAsync();
+        var token = GenerateJwt(user, appRole, plan.PlanId, plan.PlanName);
+
+        await audit.LogAsync("login", "User", user.Id, user.Id, user.BranchId, severity: "info",
+            module: "Authentication", employeeId: await ResolveEmployeeIdAsync(user.Id));
+
+        return Ok(new
+        {
+            token,
+            user = new
+            {
+                id = user.Id.ToString(),
+                email = user.Email,
+                fullName = user.FullName,
+                phone = user.Phone,
+                role = appRole,
+                branchId = user.BranchId?.ToString(),
+                branchName = user.Branch?.Name,
+            },
+        });
+    }
+
     // FRD 16.1 "Authentication" category — logout, since JWT auth is stateless server-side,
     // has no natural server touchpoint unless the frontend explicitly calls one before clearing
     // its local session.
@@ -92,7 +172,7 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
     private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
         userId.HasValue ? (await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync()) : null;
 
-    private string GenerateJwt(BaqalaPOS.Api.Models.User user, string appRole)
+    private string GenerateJwt(BaqalaPOS.Api.Models.User user, string appRole, string? planId, string? planTier)
     {
         var jwtConfig = config.GetSection("Jwt");
         var jwtKey = jwtConfig["Key"]
@@ -111,6 +191,8 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
             new Claim("roleId", user.RoleId.ToString()),
             new Claim("branchId", user.BranchId?.ToString() ?? ""),
             new Claim("branchName", user.Branch?.Name ?? ""),
+            new Claim("planId", planId ?? ""),
+            new Claim("planTier", planTier ?? ""),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
@@ -130,3 +212,4 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
 }
 
 public record LoginRequest(string Email, string Password);
+public record GatewayLoginRequest(string GatewayAccessToken);

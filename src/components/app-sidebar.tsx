@@ -76,6 +76,7 @@ import {
 import { useAuth, ROLE_LABELS, type AppRole } from "@/lib/auth";
 import { BaqalaLogo } from "./baqala-logo";
 import { useI18n } from "@/lib/i18n";
+import { UpgradeModal } from "./upgrade-modal";
 
 type NavItem = {
   title: string;
@@ -98,6 +99,12 @@ type NavItem = {
   // ("Coupons") — unlike the old Customers & Loyalty children (see note above), nothing here needs
   // its own permission check that `children` would bypass.
   tab?: "coupons" | "discounts" | "offers";
+  // planFeature: gated on the tenant's provisioned plan (see src/lib/use-plan-feature.ts) — an
+  // independent dimension from `module`/`roles` above, driven entirely by whatever the Tenant
+  // Admin Dashboard's provisioning payload includes for this key (no fixed tier association is
+  // hardcoded here). When present and the plan doesn't include it, the item still renders (not
+  // hidden) but locked, opening the upgrade modal instead of navigating.
+  planFeature?: string;
 };
 
 type NavGroup = { label: string; items: NavItem[] };
@@ -153,8 +160,8 @@ const navGroups: NavGroup[] = [
       { title: "Customers & Loyalty", url: "/customers",     icon: Users,          module: "Customers" },
       { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
       { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
-      { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower" },
-      { title: "Approval Centre",     url: "/reports/approval-center", icon: Gavel, module: "Reports" },
+      { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower", planFeature: "control_tower_approval_centre" },
+      { title: "Approval Centre",     url: "/reports/approval-center", icon: Gavel, module: "Reports", planFeature: "control_tower_approval_centre" },
     ],
   },
   {
@@ -163,14 +170,14 @@ const navGroups: NavGroup[] = [
       { title: "Stocks",               url: "/stocks",          icon: Boxes,         module: "Stocks" },
       // The counting tool has always existed as a tab inside /stocks; it needed a front door of
       // its own under the name the business actually uses for it.
-      { title: "Stocktaking",          url: "/stocktaking",     icon: ClipboardCheck, module: "Stocks" },
+      { title: "Stocktaking",          url: "/stocktaking",     icon: ClipboardCheck, module: "Stocks", planFeature: "stocktaking" },
       { title: "Inventory",            url: "/inventory",       icon: Package,       module: "Inventory" },
       // Gated on Inventory, matching PricingController — see the comment there on why price rules
       // deliberately don't get a permission module of their own.
-      { title: "Pricing",              url: "/pricing",         icon: TicketPercent, module: "Inventory" },
-      { title: "Expiry & Perishable",  url: "/batches",         icon: CalendarClock, module: "Batches" },
-      { title: "Batch Tracking",       url: "/batch-tracking",  icon: PackageSearch, module: "Batches" },
-      { title: "Warehouses",           url: "/warehouses",      icon: Warehouse,     module: "Warehouses" },
+      { title: "Pricing",              url: "/pricing",         icon: TicketPercent, module: "Inventory", planFeature: "pricing_promotions" },
+      { title: "Expiry & Perishable",  url: "/batches",         icon: CalendarClock, module: "Batches", planFeature: "batch_tracking" },
+      { title: "Batch Tracking",       url: "/batch-tracking",  icon: PackageSearch, module: "Batches", planFeature: "batch_tracking" },
+      { title: "Warehouses",           url: "/warehouses",      icon: Warehouse,     module: "Warehouses", planFeature: "warehouse_management" },
       { title: "Stock Transfers",      url: "/stock-transfers", icon: ArrowLeftRight, module: "Stock Transfers" },
     ],
   },
@@ -178,10 +185,11 @@ const navGroups: NavGroup[] = [
     label: "Finance",
     items: [
       { title: "Expenses",                    url: "/expenses",        icon: Wallet,       module: "Accounting & Finance" },
-      { title: "Purchase Orders",             url: "/purchase-orders", icon: ClipboardList, module: "Purchase Orders" },
+      { title: "Purchase Orders",             url: "/purchase-orders", icon: ClipboardList, module: "Purchase Orders", planFeature: "purchase_orders" },
       // No `tab` here — Promotions is just the section's parent link now that Offers has its own
       // child row below, so it stays highlighted for the whole section instead of only for Offers.
       { title: "Promotions",                  url: "/coupons",         icon: TicketPercent,  module: "Coupons",
+        planFeature: "pricing_promotions",
         children: [
           { title: "Coupons",   url: "/coupons", tab: "coupons" },
           { title: "Discounts", url: "/coupons", tab: "discounts" },
@@ -197,7 +205,7 @@ const navGroups: NavGroup[] = [
     label: "Suppliers",
     items: [
       { title: "Suppliers",              url: "/suppliers",         icon: Truck,       module: "Suppliers" },
-      { title: "Supplier Returns (RTS)", url: "/supplier-returns",  icon: RotateCcw,   module: "Supplier Returns" },
+      { title: "Supplier Returns (RTS)", url: "/supplier-returns",  icon: RotateCcw,   module: "Supplier Returns", planFeature: "supplier_returns" },
     ],
   },
   {
@@ -213,25 +221,28 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Sales",                 url: "/sales",    icon: TrendingUp,   module: "Sales" },
       { title: "Reports",               url: "/reports",  icon: FileBarChart, module: "Reports" },
-      { title: "KPI Evaluation",        url: "/kpi",      icon: Gauge,        module: "Reports" },
-      { title: "Business Intelligence", url: "/bi",       icon: BarChart3,    module: "Reports" },
+      { title: "KPI Evaluation",        url: "/kpi",      icon: Gauge,        module: "Reports", planFeature: "kpi_bi" },
+      { title: "Business Intelligence", url: "/bi",       icon: BarChart3,    module: "Reports", planFeature: "kpi_bi" },
     ],
   },
   {
     label: "Human Resources",
     items: [
+      // Employees itself stays unlocked — every login requires a linked Employee record
+      // (UsersController.Create), so the plain directory is load-bearing for Basic's own
+      // "Users & Staff Accounts" feature. Everything else in this group is genuine HRM.
       { title: "Employees",    url: "/employees",    icon: Users,        module: "Employees" },
-      { title: "Attendance",   url: "/hrm-attendance", icon: ClipboardCheck, module: "HR Attendance" },
-      { title: "Shifts",       url: "/work-shifts",  icon: Clock,        module: "HR Shifts" },
-      { title: "Leave Requests", url: "/leaves",     icon: Plane,        module: "Leave Management" },
+      { title: "Attendance",   url: "/hrm-attendance", icon: ClipboardCheck, module: "HR Attendance", planFeature: "employee_shift_management" },
+      { title: "Shifts",       url: "/work-shifts",  icon: Clock,        module: "HR Shifts", planFeature: "employee_shift_management" },
+      { title: "Leave Requests", url: "/leaves",     icon: Plane,        module: "Leave Management", planFeature: "employee_shift_management" },
       { title: "Departments",  url: "/departments",  icon: Building,     module: "HR Master Data" },
       { title: "Designations", url: "/designations", icon: IdCard,       module: "HR Master Data" },
       { title: "Holidays",     url: "/holidays",      icon: CalendarDays,module: "HR Master Data" },
       // Gated on their own HR module (not "Reports") so a Branch Manager/Supervisor who already
       // manages attendance/shifts day-to-day can reach these reports without a separate Reports
       // grant — mirrors the backend gate on HrReportsController.
-      { title: "Attendance Report",     url: "/reports/hrm-attendance",     icon: CalendarCheck2, module: "HR Attendance" },
-      { title: "Shift Closing Report",  url: "/reports/shift-closing",      icon: AlarmClockOff,  module: "HR Shifts" },
+      { title: "Attendance Report",     url: "/reports/hrm-attendance",     icon: CalendarCheck2, module: "HR Attendance", planFeature: "employee_shift_management" },
+      { title: "Shift Closing Report",  url: "/reports/shift-closing",      icon: AlarmClockOff,  module: "HR Shifts", planFeature: "employee_shift_management" },
       // Deliberately gated on "Audit Logs", not "Reports" like its siblings above — FRD 3/16
       // scope this report's user stories to admin/auditor only (EAR-01..05), unlike Attendance/
       // Shift Closing Report which Branch Manager and Supervisor are explicitly entitled to.
@@ -248,9 +259,9 @@ const navGroups: NavGroup[] = [
       { title: "Roles & Permissions",    url: "/roles",          icon: Lock,        module: "Roles" },
       // { title: "Staff & Roles",          url: "/staff",          icon: Users,       module: "Users" },
       { title: "Maintenance",            url: "/maintenance",    icon: Wrench,      roles: ["tenant_admin"] },
-      { title: "ZATCA Invoices",         url: "/zatca",          icon: ReceiptText, module: "Compliance" },
-      { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2,  module: "Compliance" },
-      { title: "Compliance",             url: "/compliance",     icon: ShieldCheck, module: "Compliance" },
+      { title: "ZATCA Invoices",         url: "/zatca",          icon: ReceiptText, module: "Compliance", planFeature: "zatca_compliance" },
+      { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2,  module: "Compliance", planFeature: "zatca_compliance" },
+      { title: "Compliance",             url: "/compliance",     icon: ShieldCheck, module: "Compliance", planFeature: "zatca_compliance" },
       { title: "POS Settings",           url: "/pos-settings",   icon: Sliders,     module: "Settings" },
       { title: "Audit Logs",             url: "/audit-logs",     icon: History,     module: "Audit Logs" },
       { title: "Plans & Pricing",        url: "/plans",          icon: Crown,       roles: ["tenant_admin"] },
@@ -265,7 +276,7 @@ export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const currentTab = useRouterState({ select: (s) => (s.location.search as { tab?: string }).tab });
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, isFeatureEnabled } = useAuth();
   const { t, dir } = useI18n();
   // Everything starts collapsed except the group holding the page we landed on.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
@@ -274,6 +285,7 @@ export function AppSidebar() {
   const [openItems, setOpenItems] = useState<Record<string, boolean>>(() => ({
     [activeParentUrl(path)]: true,
   }));
+  const [upgradeModal, setUpgradeModal] = useState<{ feature: string } | null>(null);
 
   // On every navigation, re-collapse the sidebar down to just the branch we're on.
   useEffect(() => {
@@ -314,6 +326,25 @@ export function AppSidebar() {
                 // to "offers" so the bare "/coupons" URL still highlights Promotions correctly.
                 const active = isActiveUrl(path, item.url) && (item.tab === undefined || (currentTab ?? "offers") === item.tab);
                 const itemOpen = openItems[item.url] ?? false;
+                const locked = !!item.planFeature && !isFeatureEnabled(item.planFeature);
+                if (locked) {
+                  // Still shown (not hidden like canSee's DB-permission gate above) so the tenant
+                  // can see what they're missing — greyed out, no navigation, opens the upgrade
+                  // modal instead. Children (e.g. Promotions' Coupons/Discounts/Offers tabs) don't
+                  // render at all in this state, same as if the item had none.
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton
+                        className="rounded-xl h-9 text-[13px] text-sidebar-foreground/40 cursor-pointer hover:bg-sidebar-accent/30"
+                        onClick={() => setUpgradeModal({ feature: item.title })}
+                      >
+                        <item.icon className="h-4 w-4" />
+                        <span>{t(item.title)}</span>
+                        <Lock className="h-3 w-3 ml-auto shrink-0" />
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
                 const button = (
                   <SidebarMenuButton
                     asChild
@@ -442,6 +473,13 @@ export function AppSidebar() {
           )}
         </div>
       </SidebarFooter>
+      {upgradeModal && (
+        <UpgradeModal
+          open
+          onOpenChange={(open) => !open && setUpgradeModal(null)}
+          feature={upgradeModal.feature}
+        />
+      )}
     </Sidebar>
   );
 }

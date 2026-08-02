@@ -63,6 +63,7 @@ builder.Services.AddScoped<IProductDeletionService, ProductDeletionService>();
 builder.Services.AddScoped<IDiscountCreationService, DiscountCreationService>();
 builder.Services.AddScoped<IOfferCreationService, OfferCreationService>();
 builder.Services.AddScoped<ICouponCreationService, CouponCreationService>();
+builder.Services.AddScoped<ITenantPlanService, TenantPlanService>();
 builder.Services.AddHostedService<OperationalAlertsService>();
 builder.Services.AddHostedService<UsbPrinterAutoInstallService>();
 builder.Services.AddHostedService<LoyaltyExpiryService>();
@@ -82,6 +83,7 @@ builder.Services.AddDataProtection()
     .SetApplicationName("BaqalaPOS")
     .PersistKeysToDbContext<BaqalaDbContext>();
 builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
+builder.Services.AddHttpClient<ITenantGatewayClient, TenantGatewayClient>();
 builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
 builder.Services.AddScoped<IZatcaService, ZatcaService>();
 

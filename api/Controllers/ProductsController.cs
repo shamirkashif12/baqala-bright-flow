@@ -15,6 +15,7 @@ public class ProductsController(
     IAuditService audit,
     IProductDeletionService productDeletion,
     IApprovalNotificationService approvalNotifications,
+    ITenantPlanService tenantPlans,
     ILogger<ProductsController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
@@ -103,6 +104,8 @@ public class ProductsController(
             return BadRequest(new { message = "Purchase price must be greater than zero, or left blank." });
         if (await db.Products.AnyAsync(p => p.Sku == product.Sku))
             return Conflict(new { message = $"SKU \"{product.Sku}\" is already used by another product." });
+        if (!await tenantPlans.CanCreateProductAsync())
+            return StatusCode(403, new { message = "Product limit reached for your plan. Upgrade to add more products." });
         // Discontinued products are excluded — that barcode is free to reuse once its old product
         // was soft-deleted, otherwise a re-added item is permanently blocked by its own predecessor.
         if (!string.IsNullOrWhiteSpace(product.Barcode) &&

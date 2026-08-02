@@ -22,6 +22,7 @@ namespace BaqalaPOS.Api.Controllers;
 // stock.
 [ApiController]
 [Route("api/recalls")]
+[RequirePlanFeature("batch_tracking")]
 public class RecallsController(
     BaqalaDbContext db,
     IStockMovementService stockMovements,

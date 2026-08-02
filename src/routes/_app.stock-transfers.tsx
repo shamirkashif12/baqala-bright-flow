@@ -16,7 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   ArrowRight, Warehouse, Building2, Truck, Package, RefreshCcw,
   CheckCircle2, Clock, Plus, Trash2, Eye, ArrowLeftRight, Loader2, X, Search,
-  ChevronDown, Check, ScanLine,
+  ChevronDown, Check, ScanLine, Lock,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn, localDateStr, uuid, wholeUnitQuantityError } from "@/lib/utils";
@@ -27,6 +27,8 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
+import { usePlanFeature } from "@/lib/use-plan-feature";
+import { UpgradeModal } from "@/components/upgrade-modal";
 import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
 
@@ -50,6 +52,20 @@ const TRANSFER_TYPES: { value: TransferType; label: string; description: string;
   { value: "warehouse_to_warehouse", label: "Warehouse → Warehouse", description: "Redistribute between warehouses", icon: RefreshCcw },
   { value: "warehouse_to_supplier", label: "Warehouse → Supplier (RTS)", description: "Return to supplier (defective/overstocked)", icon: Package },
 ];
+
+// Any type touching a warehouse needs warehouse_management; the supplier-return type is really
+// the RTS feature wearing this wizard's clothes (the dedicated /supplier-returns page is just
+// this same transfer type pre-filtered). branch_to_branch has no plan-feature requirement — it's
+// the one type that must always work regardless of tier. Without this, a tenant without
+// warehouse_management would pick a warehouse-involving type and hit a silently-empty warehouse
+// picker instead of a clear "this needs an upgrade" state.
+const PLAN_FEATURE_FOR_TYPE: Partial<Record<TransferType, string>> = {
+  supplier_to_warehouse: "warehouse_management",
+  warehouse_to_branch: "warehouse_management",
+  branch_to_warehouse: "warehouse_management",
+  warehouse_to_warehouse: "warehouse_management",
+  warehouse_to_supplier: "supplier_returns",
+};
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All Statuses" },
@@ -197,6 +213,43 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── Type Selector Step ───────────────────────────────────────────────────────
 
+function TransferTypeCard({
+  value, label, description, icon: Icon, selected, onSelect,
+}: {
+  value: TransferType; label: string; description: string; icon: React.ElementType;
+  selected: boolean; onSelect: (t: TransferType) => void;
+}) {
+  const requiredFeature = PLAN_FEATURE_FOR_TYPE[value];
+  const unlocked = usePlanFeature(requiredFeature ?? "");
+  const locked = !!requiredFeature && !unlocked;
+  const [showUpgrade, setShowUpgrade] = useState(false);
+
+  return (
+    <>
+      <Card
+        className={cn(
+          "cursor-pointer border-2 transition-all",
+          locked ? "opacity-60 hover:border-border/60" : "hover:border-primary/50",
+          selected === true && !locked ? "border-primary shadow-sm" : "border-border/60",
+        )}
+        onClick={() => (locked ? setShowUpgrade(true) : onSelect(value))}
+      >
+        <CardContent className="p-3 flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <div className={cn("h-7 w-7 rounded-lg flex items-center justify-center", selected && !locked ? "gradient-primary text-primary-foreground" : "bg-muted")}>
+              <Icon className="h-3.5 w-3.5" />
+            </div>
+            <span className="text-xs font-semibold leading-tight">{label}</span>
+            {locked && <Lock className="h-3 w-3 ml-auto text-muted-foreground shrink-0" />}
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-tight">{description}</p>
+        </CardContent>
+      </Card>
+      {showUpgrade && <UpgradeModal open onOpenChange={setShowUpgrade} feature={label} />}
+    </>
+  );
+}
+
 function TypeSelectorStep({
   selected,
   onSelect,
@@ -213,25 +266,16 @@ function TypeSelectorStep({
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">Select the direction of the stock transfer.</p>
       <div className="grid grid-cols-1 gap-3">
-        {visibleTypes.map(({ value, label, description, icon: Icon }) => (
-          <Card
+        {visibleTypes.map(({ value, label, description, icon }) => (
+          <TransferTypeCard
             key={value}
-            className={cn(
-              "cursor-pointer border-2 transition-all hover:border-primary/50",
-              selected === value ? "border-primary shadow-sm" : "border-border/60",
-            )}
-            onClick={() => onSelect(value)}
-          >
-            <CardContent className="p-3 flex flex-col gap-1.5">
-              <div className="flex items-center gap-2">
-                <div className={cn("h-7 w-7 rounded-lg flex items-center justify-center", selected === value ? "gradient-primary text-primary-foreground" : "bg-muted")}>
-                  <Icon className="h-3.5 w-3.5" />
-                </div>
-                <span className="text-xs font-semibold leading-tight">{label}</span>
-              </div>
-              <p className="text-[11px] text-muted-foreground leading-tight">{description}</p>
-            </CardContent>
-          </Card>
+            value={value}
+            label={label}
+            description={description}
+            icon={icon}
+            selected={selected === value}
+            onSelect={onSelect}
+          />
         ))}
       </div>
     </div>

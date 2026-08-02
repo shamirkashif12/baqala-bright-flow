@@ -14,6 +14,8 @@ const authStore: AuthState = {
   canViewModule: () => true,
   refreshPermissions: async () => {},
   updateLocalUser: () => {},
+  planInfo: null,
+  isFeatureEnabled: () => true,
 };
 
 export const getRouter = () => {

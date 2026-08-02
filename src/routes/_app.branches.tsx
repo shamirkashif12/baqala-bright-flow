@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Building2, MapPin, Phone, Plus, Search, Pencil, Trash2, ShoppingBag, Terminal, Copy, Check, Printer, Download, QrCode } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
-import { api, type Branch } from "@/lib/api";
+import { api, type Branch, type TenantPlanInfo } from "@/lib/api";
 import { toast } from "sonner";
 import { usePermission } from "@/lib/use-permission";
 import { isValidSaudiPhone, sanitizePhoneInput, PHONE_MAX_LENGTH } from "@/lib/validation";
@@ -281,6 +281,7 @@ function Branches() {
   const [viewBranch, setViewBranch] = useState<Branch | null>(null);
   const [editBranch, setEditBranch] = useState<Branch | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [planInfo, setPlanInfo] = useState<TenantPlanInfo | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -291,6 +292,7 @@ function Branches() {
       api.getOrders(),
       api.getTerminals(),
     ]);
+    api.getTenantPlan().then(setPlanInfo).catch(() => {});
     if (bs.status === "fulfilled") {
       setBranches(bs.value);
       const s: Record<string, BranchStats> = {};
@@ -321,13 +323,22 @@ function Branches() {
     || (b.city ?? "").toLowerCase().includes(q.toLowerCase())
   );
 
+  const maxBranches = planInfo?.plan.limits.maxBranches ?? null;
+  const atBranchLimit = maxBranches !== null && branches.length >= maxBranches;
+
   return (
     <PageShell
       title="Branches"
       subtitle="Multi-location management across the Kingdom"
       actions={
         canCreate ? (
-          <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5" onClick={() => setCreateOpen(true)}>
+          <Button
+            size="sm"
+            className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5"
+            onClick={() => setCreateOpen(true)}
+            disabled={atBranchLimit}
+            title={atBranchLimit ? `Branch limit reached (${maxBranches}) for your plan. Upgrade to add more branches.` : undefined}
+          >
             <Plus className="h-4 w-4" /> New Branch
           </Button>
         ) : undefined

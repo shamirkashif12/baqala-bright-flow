@@ -9,6 +9,11 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/purchase-orders")]
+// NOT gated whole-class: GetAll/GetById/GetByNumber/GetByBatchId/Receive are load-bearing for
+// Basic-tier flows outside the dedicated PO management page — the Stock Control page's GRN tab
+// (receiving goods against a PO) and the Suppliers page's PO-history tab both depend on them.
+// Only actual PO administration (creating/approving new POs, recording supplier payments) is
+// gated below; the dedicated /purchase-orders page itself still stays locked via route-guard.
 public class PurchaseOrdersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, IAuditService audit, ILogger<PurchaseOrdersController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
@@ -156,6 +161,7 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
     }
 
     [RequirePermission("Purchase Orders", PermAction.Create)]
+    [RequirePlanFeature("purchase_orders")]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreatePoRequest req)
     {
@@ -245,6 +251,7 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
     }
 
     [RequirePermission("Purchase Orders", PermAction.Approve)]
+    [RequirePlanFeature("purchase_orders")]
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdatePoStatusRequest req)
     {
@@ -476,6 +483,7 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
     }
 
     [RequirePermission("Purchase Orders", PermAction.Edit)]
+    [RequirePlanFeature("purchase_orders")]
     [HttpPost("{id:guid}/payments")]
     public async Task<IActionResult> AddPayment(Guid id, [FromBody] AddPaymentRequest req)
     {

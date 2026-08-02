@@ -15,6 +15,7 @@ import { api, type DashboardMetrics, type CashierShift, type Branch, type Invent
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { MetricCard } from "@/components/metric-card";
 import { useAuth } from "@/lib/auth";
+import { usePlanFeature } from "@/lib/use-plan-feature";
 import { ProductTour, type TourStep } from "@/components/product-tour";
 import { RESTART_DASHBOARD_TOUR_EVENT } from "@/lib/tour-bus";
 import {
@@ -317,7 +318,13 @@ function Dashboard() {
   const canViewShifts = canViewModule("Cashier Shifts");
   const canViewTerminals = canViewModule("Terminals");
   const canViewReturns = canViewModule("Returns");
-  const canViewWarehouses = canViewModule("Warehouses");
+  // Role permission alone isn't enough here — a role granted "Warehouses" view access still
+  // shouldn't trigger this widget's fetch/display when the tenant's plan doesn't include
+  // warehouse_management, or it renders a "No pending approvals" card with a dead link into a
+  // route-guard-blocked page instead of correctly hiding the whole card. usePlanFeature must be
+  // called unconditionally (rules of hooks) — combine with the permission check afterward.
+  const warehouseFeatureUnlocked = usePlanFeature("warehouse_management");
+  const canViewWarehouses = canViewModule("Warehouses") && warehouseFeatureUnlocked;
   const canViewInventory = canViewModule("Inventory");
   const canViewCost = canViewModule("Accounting & Finance");
 

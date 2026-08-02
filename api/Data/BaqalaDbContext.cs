@@ -125,6 +125,9 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     // Generic key-value settings per branch
     public DbSet<TenantSetting> TenantSettings { get; set; }
 
+    // Tenant Admin Dashboard integration — plan config pushed in for this deployed instance
+    public DbSet<TenantPlan> TenantPlans { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -176,6 +179,25 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
         modelBuilder.Entity<CompanyProfile>().HasData(new CompanyProfile
         {
             Id = CompanyProfile.SingletonId,
+            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        });
+
+        // Singleton row: one tenant-plan config for this deployed instance, unprovisioned
+        // (every Max* null → every limit check fails open) until the Tenant Dashboard calls
+        // POST /api/tenant/provision. Fixed timestamps for the same reason as the seeds above —
+        // DateTime.UtcNow here would make every `migrations add` detect a "pending model change".
+        // FeaturesJson seeds as "" rather than "{}" — this app's custom no-transaction migration
+        // runner (Program.cs) applies migrations via ExecuteSqlRawAsync(script), which treats the
+        // whole script as a composite format string; a literal '{}' with no digit inside throws
+        // "Expected an ASCII digit" (FormatException) the moment this InsertData statement runs.
+        // TenantPlanService/TenantController treat a blank FeaturesJson the same as "{}".
+        modelBuilder.Entity<TenantPlan>().HasData(new TenantPlan
+        {
+            Id = TenantPlan.SingletonId,
+            EcrType = "mart",
+            FeaturesJson = "",
+            BillingStatus = "active",
             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
         });

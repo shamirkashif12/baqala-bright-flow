@@ -9,6 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/leaves")]
+[RequirePlanFeature("employee_shift_management")]
 public class LeaveController(BaqalaDbContext db, IAuditService audit) : ControllerBase
 {
     private Guid? CallerId() =>

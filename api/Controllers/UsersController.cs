@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class UsersController(BaqalaDbContext db, IAuditService audit) : ControllerBase
+public class UsersController(BaqalaDbContext db, IAuditService audit, ITenantPlanService tenantPlans) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
@@ -188,6 +188,8 @@ public class UsersController(BaqalaDbContext db, IAuditService audit) : Controll
             return BadRequest(new { message = "The selected employee could not be found." });
         if (employee.UserId is not null)
             return Conflict(new { message = "This employee already has a linked login account." });
+        if (!await tenantPlans.CanCreateUserAsync(req.BranchId))
+            return StatusCode(403, new { message = "User limit reached for this branch under your plan. Upgrade to add more users." });
 
         var user = new User
         {

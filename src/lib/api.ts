@@ -133,6 +133,9 @@ export const api = {
     request<void>("/api/auditlogs/access-denied", { method: "POST", body: JSON.stringify({ path }) }).catch(() => {}),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }).catch(() => {}),
 
+  // Tenant plan — pushed in by the external Tenant Admin Dashboard (see api/Controllers/TenantController.cs)
+  getTenantPlan: () => request<TenantPlanInfo>("/api/tenant/plan"),
+
   // Branches
   getBranches: (status?: string) =>
     request<Branch[]>(`/api/branches${status ? `?status=${status}` : ""}`),
@@ -1147,6 +1150,20 @@ export interface Branch {
   address?: string; city?: string; contactNumber?: string;
   commercialRegistration?: string; email?: string;
   status: string; createdAt: string;
+}
+
+// Mirrors api/Services/TenantPlanService.cs's TenantPlanResponse — null limits mean "no cap on
+// this dimension" (both before a plan is ever provisioned and for an unlimited tier).
+export interface TenantPlanInfo {
+  plan: {
+    tenantId: string | null; planId: string | null; planName: string | null; ecrType: string | null;
+    limits: { maxBranches: number | null; maxTerminalsPerBranch: number | null; maxUsersPerBranch: number | null };
+    maxProducts: number | null;
+    features: Record<string, boolean>;
+    billing: { status: string | null; renewsAt: string | null };
+    provisioned: boolean;
+  };
+  usage: { branches: number; terminals: number; users: number; products: number };
 }
 
 /** Keeps only active branches — use for any dropdown/selector (POS branch switch, warehouse/PO

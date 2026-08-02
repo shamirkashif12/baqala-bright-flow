@@ -30,6 +30,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     // GetSettings below, this isn't a checkout-time dependency for every role, so it's safe to
     // gate on the "Compliance" module the dedicated /zatca page already requires.
     [RequirePermission("Compliance", PermAction.View)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpGet("zatca/invoices")]
     public async Task<IActionResult> GetInvoices([FromQuery] Guid? branchId, [FromQuery] string? status)
     {
@@ -44,6 +45,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     [RequirePermission("Compliance", PermAction.View)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpGet("zatca/invoices/{id:guid}")]
     public async Task<IActionResult> GetInvoiceById(Guid id)
     {
@@ -58,6 +60,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     [RequirePermission("Compliance", PermAction.Create)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpPost("zatca/invoices")]
     public async Task<IActionResult> CreateInvoice([FromBody] ZatcaInvoice invoice)
     {
@@ -70,6 +73,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpPatch("zatca/invoices/{id:guid}/status")]
     public async Task<IActionResult> UpdateInvoiceStatus(Guid id, [FromBody] ZatcaStatusRequest req)
     {
@@ -104,6 +108,13 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         return Ok(ZatcaSettingsDto.From(settings, identity!));
     }
 
+    // NOT plan-gated: this saves VAT registration number/seller name/address — basic tax-legal
+    // info the always-open Tax & Fees page (_app.tax-fees.tsx) needs to save at every tier — in
+    // the SAME action as the Phase2Enabled/Environment ZATCA e-invoicing toggle. Leaving this
+    // action open (rather than splitting it) mirrors the same "mixed action" call made for
+    // EmployeesController.Update: a Basic tenant flipping Phase2Enabled without ever completing
+    // onboarding (GenerateCsr/GetComplianceCsid/GetProductionCsid, all still gated below) does
+    // nothing harmful.
     [RequirePermission("Compliance", PermAction.Edit)]
     [HttpPut("zatca/settings/{branchId:guid}")]
     public async Task<IActionResult> UpsertSettings(Guid branchId, [FromBody] ZatcaSettingsUpdateRequest updated)
@@ -146,6 +157,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
 
     // ─── ZATCA Onboarding ─────────────────────────────────────────────────────
     [RequirePermission("Compliance", PermAction.Edit)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpPost("zatca/onboarding/{branchId:guid}/csr")]
     public async Task<IActionResult> GenerateCsr(Guid branchId)
     {
@@ -161,6 +173,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpPost("zatca/onboarding/{branchId:guid}/compliance-csid")]
     public async Task<IActionResult> GetComplianceCsid(Guid branchId, [FromBody] ZatcaOtpRequest req)
     {
@@ -178,6 +191,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpPost("zatca/onboarding/{branchId:guid}/production-csid")]
     public async Task<IActionResult> GetProductionCsid(Guid branchId)
     {
@@ -202,6 +216,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     // Previously had no permission check at all, unlike CreateInvoice/UpdateInvoiceStatus above —
     // any authenticated user could trigger a real government e-invoice submission.
     [RequirePermission("Compliance", PermAction.Edit)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpPost("zatca/invoices/{id:guid}/submit")]
     public async Task<IActionResult> SubmitInvoice(Guid id)
     {
@@ -238,6 +253,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
+    [RequirePlanFeature("zatca_compliance")]
     [HttpPut("company-profile")]
     public async Task<IActionResult> UpdateCompanyProfile([FromBody] CompanyProfileUpdateRequest req)
     {

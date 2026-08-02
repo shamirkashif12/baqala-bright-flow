@@ -21,11 +21,13 @@ import { toast } from "sonner";
 import {
   api, type Employee, type Department, type Designation, type Role, type WorkShift, type EmployeeShiftAssignment,
   type LeaveRequest, type LeaveType, type LeavePolicy, type EmployeeDocument, type EmployeeContract,
-  type EmployeeActivityRow, type ReportExportFormat,
+  type EmployeeActivityRow, type ReportExportFormat, type TenantPlanInfo,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
+import { usePlanFeature } from "@/lib/use-plan-feature";
+import { LockedFeatureNotice } from "@/components/locked-feature-notice";
 import { fileToCompressedDataUrl, fileToDataUrl } from "@/lib/image";
 import { localDateStr } from "@/lib/utils";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
@@ -99,7 +101,7 @@ const emptyForm: EmployeeForm = {
 
 // Module-scope — not nested inside EmployeesTab, so it never remounts on parent re-render.
 function EmployeeFormFields({
-  form, setForm, onSave, saving, branches, departments, designations, roles, leavePolicies, linkedUser, branchLocked,
+  form, setForm, onSave, saving, branches, departments, designations, roles, leavePolicies, linkedUser, branchLocked, userLimitBlocked,
 }: {
   form: EmployeeForm;
   setForm: React.Dispatch<React.SetStateAction<EmployeeForm>>;
@@ -112,6 +114,10 @@ function EmployeeFormFields({
   leavePolicies: LeavePolicy[];
   linkedUser?: { id: string; username: string; status: string };
   branchLocked: boolean;
+  // Set (to a user-facing message) when the selected branch has hit the plan's per-branch user
+  // (login account) limit — disables the "create a login" checkbox instead of letting the save
+  // silently fail against the backend's CanCreateUserAsync 403.
+  userLimitBlocked?: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const set = (k: keyof EmployeeForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -144,7 +150,7 @@ function EmployeeFormFields({
 
   const missing = !form.fullName || !form.email || !form.phone || !form.nationalId || !form.branchId || !form.hireDate || !form.currentAddress
     || fullNameInvalid || phoneInvalid || emergencyContactInvalid || nationalIdInvalid
-    || (form.hasLogin && !linkedUser && (!form.username.trim() || !form.password.trim() || form.roleId === "none"));
+    || (form.hasLogin && !linkedUser && (!!userLimitBlocked || !form.username.trim() || !form.password.trim() || form.roleId === "none"));
 
   return (
     <div className="mt-4 space-y-5">
@@ -288,10 +294,16 @@ function EmployeeFormFields({
         ) : (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Checkbox id="hasLogin" checked={form.hasLogin} onCheckedChange={v => setForm(p => ({ ...p, hasLogin: !!v }))} />
+              <Checkbox
+                id="hasLogin"
+                checked={form.hasLogin && !userLimitBlocked}
+                disabled={!!userLimitBlocked}
+                onCheckedChange={v => setForm(p => ({ ...p, hasLogin: !!v }))}
+              />
               <Label htmlFor="hasLogin" className="text-xs font-normal">Create a login account for this employee</Label>
             </div>
-            {form.hasLogin && (
+            {userLimitBlocked && <p className="text-xs text-destructive">{userLimitBlocked}</p>}
+            {form.hasLogin && !userLimitBlocked && (
               <div className="grid grid-cols-2 gap-3">
                 <FieldRow label="Username" required><Input value={form.username} onChange={set("username")} className="h-9" placeholder="firstname.lastname" /></FieldRow>
                 <FieldRow label="Password" required><Input type="password" value={form.password} onChange={set("password")} className="h-9" placeholder="••••••••" /></FieldRow>
@@ -425,6 +437,7 @@ function EmployeeCard({ employee, onView, onEdit, onEditTab, onDelete, onActivat
 
 function EmployeeShiftsSection({ employee, onChanged }: { employee: Employee; onChanged: () => void }) {
   const { canEdit } = usePermission("HR Shifts");
+  const shiftsUnlocked = usePlanFeature("employee_shift_management");
   const [history, setHistory] = useState<EmployeeShiftAssignment[]>([]);
   const [shifts, setShifts] = useState<WorkShift[]>([]);
   const [assigning, setAssigning] = useState(false);
@@ -433,9 +446,12 @@ function EmployeeShiftsSection({ employee, onChanged }: { employee: Employee; on
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!shiftsUnlocked) return;
     api.getEmployeeShiftHistory(employee.id).then(setHistory).catch(() => {});
     api.getWorkShifts({ status: "active" }).then(setShifts).catch(() => {});
-  }, [employee.id]);
+  }, [employee.id, shiftsUnlocked]);
+
+  if (!shiftsUnlocked) return <LockedFeatureNotice feature="Employee & Shift Management" />;
 
   const handleAssign = async () => {
     if (!shiftId) return;
@@ -513,6 +529,7 @@ function leaveBalances(history: LeaveRequest[], policy: Employee["leavePolicy"])
 
 function EmployeeLeavesSection({ employee }: { employee: Employee }) {
   const { canCreate, canEdit } = usePermission("Leave Management");
+  const leavesUnlocked = usePlanFeature("employee_shift_management");
   const [history, setHistory] = useState<LeaveRequest[]>([]);
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
   const [leavePolicies, setLeavePolicies] = useState<LeavePolicy[]>([]);
@@ -535,10 +552,13 @@ function EmployeeLeavesSection({ employee }: { employee: Employee }) {
 
   const reload = () => api.getEmployeeLeaves(employee.id).then(setHistory).catch(() => {});
   useEffect(() => {
+    if (!leavesUnlocked) return;
     reload();
     api.getLeaveTypes({ status: "active" }).then(setLeaveTypes).catch(() => {});
     api.getLeavePolicies({ status: "active" }).then(setLeavePolicies).catch(() => {});
-  }, [employee.id]);
+  }, [employee.id, leavesUnlocked]);
+
+  if (!leavesUnlocked) return <LockedFeatureNotice feature="Employee & Shift Management" />;
 
   const handleApply = async () => {
     if (!leaveTypeId || !reason.trim()) return;
@@ -680,6 +700,7 @@ function documentStatus(doc: EmployeeDocument): { label: string; tone: string } 
 
 function EmployeeDocumentsSection({ employee }: { employee: Employee }) {
   const { canEdit, canDelete } = usePermission("Employees");
+  const documentsUnlocked = usePlanFeature("employee_shift_management");
   const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
   const [uploading, setUploading] = useState(false);
   const [documentType, setDocumentType] = useState(DOC_TYPES()[0]);
@@ -691,7 +712,9 @@ function EmployeeDocumentsSection({ employee }: { employee: Employee }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reload = () => { api.getEmployeeDocuments(employee.id).then(setDocuments).catch(() => {}); };
-  useEffect(reload, [employee.id]);
+  useEffect(() => { if (documentsUnlocked) reload(); }, [employee.id, documentsUnlocked]);
+
+  if (!documentsUnlocked) return <LockedFeatureNotice feature="Employee & Shift Management" />;
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -815,6 +838,7 @@ function EmployeeDocumentsSection({ employee }: { employee: Employee }) {
 
 function EmployeeContractsSection({ employee }: { employee: Employee }) {
   const { canEdit } = usePermission("Employees");
+  const contractsUnlocked = usePlanFeature("employee_shift_management");
   const [contracts, setContracts] = useState<EmployeeContract[]>([]);
   const [uploading, setUploading] = useState(false);
   const [contractType, setContractType] = useState("Permanent");
@@ -828,7 +852,9 @@ function EmployeeContractsSection({ employee }: { employee: Employee }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reload = () => { api.getEmployeeContracts(employee.id).then(setContracts).catch(() => {}); };
-  useEffect(reload, [employee.id]);
+  useEffect(() => { if (contractsUnlocked) reload(); }, [employee.id, contractsUnlocked]);
+
+  if (!contractsUnlocked) return <LockedFeatureNotice feature="Employee & Shift Management" />;
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -1107,6 +1133,7 @@ function EmployeesTab() {
   const [activeTab, setActiveTab] = useState("details");
   const [form, setForm] = useState<EmployeeForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [planInfo, setPlanInfo] = useState<TenantPlanInfo | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -1119,8 +1146,16 @@ function EmployeesTab() {
     api.getRoles().then(setRoles).catch(() => {});
     api.getLeavePolicies({ status: "active" }).then(setLeavePolicies).catch(() => {});
     api.getWorkShifts({ status: "active" }).then(setShifts).catch(() => {});
+    api.getTenantPlan().then(setPlanInfo).catch(() => {});
   };
   useEffect(load, []);
+
+  // Counts existing logins (not employees) per branch — mirrors the backend's
+  // CanCreateUserAsync(branchId), which checks db.Users, not db.Employees. Every login this app
+  // creates is tied to an Employee (see api.createUser call sites), so this local count matches.
+  const maxUsersPerBranch = planInfo?.plan.limits.maxUsersPerBranch ?? null;
+  const userCountByBranch: Record<string, number> = {};
+  employees.forEach(e => { if (e.user) userCountByBranch[e.branchId] = (userCountByBranch[e.branchId] ?? 0) + 1; });
 
   const openCreate = () => {
     setActiveEmployee(null);
@@ -1480,7 +1515,16 @@ function EmployeesTab() {
               <p className="text-xs text-muted-foreground mt-2">Save Details first to unlock Documents, Leaves and Shifts.</p>
             )}
             <TabsContent value="details">
-              <EmployeeFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches} departments={departments} designations={designations} roles={roles} leavePolicies={leavePolicies} linkedUser={activeEmployee?.user} branchLocked={branchLocked} />
+              <EmployeeFormFields
+                form={form} setForm={setForm} onSave={handleSave} saving={saving} branches={branches}
+                departments={departments} designations={designations} roles={roles} leavePolicies={leavePolicies}
+                linkedUser={activeEmployee?.user} branchLocked={branchLocked}
+                userLimitBlocked={
+                  !activeEmployee?.user && form.branchId && maxUsersPerBranch !== null && (userCountByBranch[form.branchId] ?? 0) >= maxUsersPerBranch
+                    ? `User limit reached (${maxUsersPerBranch}) for ${branches.find(b => b.id === form.branchId)?.name ?? "this branch"} under your plan. Upgrade to add more logins.`
+                    : undefined
+                }
+              />
             </TabsContent>
             <TabsContent value="documents">
               {activeEmployee && <><EmployeeDocumentsSection employee={activeEmployee} /><EmployeeContractsSection employee={activeEmployee} /></>}

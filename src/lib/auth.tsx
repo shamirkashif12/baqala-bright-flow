@@ -53,6 +53,15 @@ export interface AuthUser {
   permissionsUnknown?: boolean;
 }
 
+// Tenant-wide (not per-user) — the plan pushed in via POST /api/tenant/provision. null means it
+// hasn't loaded yet or the fetch failed; isFeatureEnabled treats that the same as "unprovisioned"
+// (fail open) rather than flashing every gated nav item as locked before the real answer arrives.
+export interface TenantPlanState {
+  planName: string | null;
+  provisioned: boolean;
+  features: Record<string, boolean>;
+}
+
 export interface AuthState {
   isAuthenticated: boolean;
   user: AuthUser | null;
@@ -63,6 +72,8 @@ export interface AuthState {
   canViewModule: (module: string) => boolean;
   refreshPermissions: () => Promise<void>;
   updateLocalUser: (patch: Partial<Pick<AuthUser, "name" | "email">>) => void;
+  planInfo: TenantPlanState | null;
+  isFeatureEnabled: (key: string) => boolean;
 }
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
@@ -185,6 +196,19 @@ async function fetchPermissions(roleId: string, userId?: string): Promise<Record
   }
 }
 
+// Fetched once per hydrate/login (unlike fetchPermissions, plan changes are a rare provisioning
+// event, not something that needs poll/focus refresh). Returns null on any failure — reaching the
+// server or not says nothing about whether the plan itself allows a feature, so callers must not
+// treat "couldn't fetch" as "denied" (same reasoning as fetchPermissions above).
+async function fetchTenantPlan(): Promise<TenantPlanState | null> {
+  try {
+    const info = await api.getTenantPlan();
+    return { planName: info.plan.planName, provisioned: info.plan.provisioned, features: info.plan.features };
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -200,6 +224,7 @@ function mergePerms(u: AuthUser, perms: Record<string, RolePermFlags> | null): A
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setAuthUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [planInfo, setPlanInfo] = useState<TenantPlanState | null>(null);
 
   // Hydrate from localStorage on mount, then fetch live permissions
   useEffect(() => {
@@ -211,8 +236,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (claims) {
           const baseUser = buildUser(claims);
           if (!cancelled) setAuthUser(baseUser);
-          const perms = await fetchPermissions(baseUser.roleId, baseUser.id);
+          const [perms, plan] = await Promise.all([
+            fetchPermissions(baseUser.roleId, baseUser.id),
+            fetchTenantPlan(),
+          ]);
           if (!cancelled) setAuthUser(u => u ? mergePerms(u, perms) : null);
+          if (!cancelled) setPlanInfo(plan);
         } else {
           clearSession();
         }
@@ -248,11 +277,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const claims = parseJwt(token);
     if (claims) {
       const baseUser = buildUser(claims);
-      const perms = await fetchPermissions(baseUser.roleId, baseUser.id);
+      const [perms, plan] = await Promise.all([
+        fetchPermissions(baseUser.roleId, baseUser.id),
+        fetchTenantPlan(),
+      ]);
       setAuthUser(mergePerms(baseUser, perms));
+      setPlanInfo(plan);
     }
   }, []);
 
+  // Refreshes both the DB-permission matrix AND the tenant plan together — a plan edit from the
+  // Tenant Admin Dashboard (e.g. adding Stocktaking/Employee & Shift Management to Basic) has to
+  // reach an already-open tab the same way a permission change does, or a logged-in user would
+  // see stale locked/unlocked state until they log out and back in.
   const refreshPermissions = useCallback(async () => {
     setAuthUser(current => {
       if (!current) return current;
@@ -261,9 +298,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return current;
     });
+    fetchTenantPlan().then(setPlanInfo);
   }, []);
 
-  // Auto-refresh permissions when the tab regains focus (handles admin changing perms in another tab)
+  // Auto-refresh permissions + plan when the tab regains focus (handles an admin changing perms,
+  // or the Tenant Dashboard re-provisioning this instance, from elsewhere)
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
@@ -274,14 +313,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           return current;
         });
+        fetchTenantPlan().then(setPlanInfo);
       }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
-  // Also poll periodically — a POS terminal tab often stays focused for a whole shift,
-  // so visibilitychange alone would never re-check permissions during that session.
+  // Also poll periodically — a POS terminal tab often stays focused for a whole shift, so
+  // visibilitychange alone would never re-check permissions/plan during that session.
   useEffect(() => {
     const PERMISSIONS_POLL_MS = 60_000;
     const interval = setInterval(() => {
@@ -292,6 +332,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         return current;
       });
+      fetchTenantPlan().then(setPlanInfo);
     }, PERMISSIONS_POLL_MS);
     return () => clearInterval(interval);
   }, []);
@@ -302,6 +343,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.logout();
     clearSession();
     setAuthUser(null);
+    setPlanInfo(null);
   }, []);
 
   const updateLocalUser = useCallback((patch: Partial<Pick<AuthUser, "name" | "email">>) => {
@@ -338,8 +380,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
+  // Fails open (true) when the plan hasn't loaded yet, failed to load, or is unprovisioned —
+  // matches the backend's TenantPlanService.IsFeatureEnabledAsync, which never denies in those
+  // same cases. Once a plan IS provisioned, this is an ALLOW-LIST (mirrors the real Tenant Admin
+  // Dashboard's `enabledModules` — only what's explicitly listed is on): a key must be
+  // explicitly `true` to unlock, not merely "not `false`". Was `!== false` until this fix, which
+  // silently treated every feature the Dashboard simply never mentions as enabled — the backend
+  // was correctly blocking those, but the sidebar/route-guard had no idea and showed nothing
+  // locked at all.
+  const isFeatureEnabled = useCallback(
+    (key: string) => {
+      if (!planInfo || !planInfo.provisioned) return true;
+      return planInfo.features[key] === true;
+    },
+    [planInfo],
+  );
+
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout, loading, hasRole, canViewModule, refreshPermissions, updateLocalUser }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout, loading, hasRole, canViewModule, refreshPermissions, updateLocalUser, planInfo, isFeatureEnabled }}>
       {children}
     </AuthContext.Provider>
   );
