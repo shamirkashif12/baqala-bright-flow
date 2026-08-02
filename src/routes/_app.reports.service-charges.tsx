@@ -2,11 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -82,9 +82,7 @@ function FeeReportPage() {
     <PageShell title="Service Charges Report" subtitle="Business-configured surcharges (delivery fee, card surcharge) — not a tax. See Tobacco Excise Report for the tobacco tax.">
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         </div>
         {!lockedBranchId && (
           <FilterField label="Branch">

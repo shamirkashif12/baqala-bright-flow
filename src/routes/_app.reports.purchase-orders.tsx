@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -171,8 +171,7 @@ function PurchaseReports() {
   return (
     <PageShell title="Purchase Reports" subtitle="Complete purchase order detail — click a row to see every product">
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-        <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <FilterField label="Supplier">
           <div className="w-48">
             <SearchableMultiSelect

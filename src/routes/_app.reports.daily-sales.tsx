@@ -2,12 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { usePermission } from "@/lib/use-permission";
@@ -118,8 +118,7 @@ function DailySales() {
       subtitle="Hour-of-day sales, payment split and VAT — pick a single day, or a range to compare hourly patterns"
     >
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-36" /></FilterField>
-        <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-36" /></FilterField>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         {!lockedBranchId && (
           <FilterField label="Branch">
             <div className="w-44">

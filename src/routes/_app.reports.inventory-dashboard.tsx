@@ -2,11 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { PerformanceTierBadge } from "@/components/report-filters/performance-tier-badge";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -143,8 +143,7 @@ function InventoryDashboard() {
         <Link to="/reports/inventory-aging-performance" className="underline underline-offset-2 hover:text-foreground">Product Performance & Classification</Link>.
       </p>
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" className="h-9 w-36" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></FilterField>
-        <FilterField label="To"><Input type="date" className="h-9 w-36" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></FilterField>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         {!lockedBranchId && scope?.canFilterBranch && (
           <FilterField label="Branch">
             <div className="w-44">

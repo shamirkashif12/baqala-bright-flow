@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AuditDetailDrawer } from "@/components/audit-detail-drawer";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -140,8 +141,12 @@ function EmployeeAuditCenter() {
     // did what. The counts are the at-a-glance answer; the Details drawer has the full breakdown.
     { key: "products", label: "Products", render: r => r.itemCount > 0 ? `${r.itemCount} product${r.itemCount !== 1 ? "s" : ""}` : "—" },
     { key: "quantity", label: "Total Qty", render: r => r.totalQuantity > 0 ? String(r.totalQuantity) : "—" },
-    { key: "oldValue", label: "Old Value", className: "max-w-[220px] whitespace-normal", render: r => r.oldValueSummary ?? "—" },
-    { key: "newValue", label: "New Value", className: "max-w-[220px] whitespace-normal", render: r => r.newValueSummary ?? "—" },
+    // Truncated to one line — a summary can run long (several fields joined with commas), and
+    // letting it wrap made every row a different height, breaking the table's scan-ability. The
+    // full text is a hover away here, and always available in full (with names, not raw ids) in
+    // the Details drawer.
+    { key: "oldValue", label: "Old Value", className: "max-w-[200px]", render: r => <p className="truncate" title={r.oldValueSummary ?? undefined}>{r.oldValueSummary ?? "—"}</p> },
+    { key: "newValue", label: "New Value", className: "max-w-[200px]", render: r => <p className="truncate" title={r.newValueSummary ?? undefined}>{r.newValueSummary ?? "—"}</p> },
     { key: "branch", label: "Branch", render: r => r.branchName },
     { key: "device", label: "Device", render: r => r.deviceName },
     { key: "transaction", label: "Related Transaction", render: r => r.relatedTransaction },
@@ -159,9 +164,7 @@ function EmployeeAuditCenter() {
     <PageShell title="Employee Audit Center" subtitle="Full employee activity history for audit and misuse tracking">
       <div className="space-y-4">
         <div className="flex flex-wrap items-end gap-2">
-          <FilterField label="From"><Input type="date" value={dateFrom} max={dateTo} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={dateTo} min={dateFrom} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
           {isManagerTier && (
             <>
               <FilterField label="Branch">

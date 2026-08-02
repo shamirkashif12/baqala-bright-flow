@@ -2,10 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -186,8 +186,7 @@ function ApprovalCenter() {
   return (
     <PageShell title="Approval Center" subtitle="Every manager approval in one place — discounts, cancellations, deletions, refunds & more">
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-        <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         {!lockedBranchId && (
           <FilterField label="Branch" className="w-44">
             <SearchableMultiSelect

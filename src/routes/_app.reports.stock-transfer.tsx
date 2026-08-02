@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -192,11 +192,7 @@ function StockTransferReport() {
   return (
     <PageShell title="Stock Transfer Report" subtitle="Full history of stock movement between warehouses and branches">
       <div className="flex flex-wrap items-end gap-2">
-        <div className="flex items-center gap-1">
-          <FilterField label="From"><Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
-        </div>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <FilterField label="Transfer Type">
           <Select value={transferType} onValueChange={setTransferType}>
             <SelectTrigger className="h-9 w-48"><SelectValue placeholder="Transfer Type" /></SelectTrigger>

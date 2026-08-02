@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -208,12 +208,7 @@ function SupplierReturnsReport() {
   return (
     <PageShell title="Supplier Returns Report" subtitle="Full transaction detail for stock returned to suppliers — click a return to see every product">
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From">
-          <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
-        </FilterField>
-        <FilterField label="To">
-          <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
-        </FilterField>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <FilterField label="Supplier">
           <div className="w-44">
             <SearchableMultiSelect
@@ -343,11 +338,15 @@ function SupplierReturnsReport() {
             { key: "supplierName", label: "Supplier" },
             { key: "warehouseName", label: "Warehouse" },
             { key: "items", label: "Products", render: (r: SupplierReturnsReportRow) => `${r.items.length} item${r.items.length !== 1 ? "s" : ""}` },
+            // Summary rows can bundle multiple items; only a single-item return has one unambiguous
+            // SKU/cost to show inline — multi-item returns fall back to the Eye drawer for detail.
+            { key: "sku", label: "SKU / Code", className: "font-mono text-xs", render: (r: SupplierReturnsReportRow) => r.items.length === 1 ? r.items[0].sku : "Multiple" },
             { key: "totalQuantity", label: "Returned Qty" },
             { key: "returnReason", label: "Return Reason", className: "capitalize", render: (r: SupplierReturnsReportRow) => (r.returnReason ?? "—").replace(/_/g, " ") },
             { key: "returnedBy", label: "Created By" },
             { key: "approvedBy", label: "Approved By" },
             { key: "status", label: "Status", render: (r: SupplierReturnsReportRow) => <Badge variant="outline" className={`text-[10px] border-0 capitalize ${STATUS_CLASS[r.status] ?? "bg-muted text-muted-foreground"}`}>{r.status.replace(/_/g, " ")}</Badge> },
+            { key: "unitCost", label: "Unit Cost", render: (r: SupplierReturnsReportRow) => r.items.length === 1 ? <span><SARIcon />{fmtSAR(r.items[0].unitCost)}</span> : "—" },
             { key: "totalValue", label: "Return Value", render: (r: SupplierReturnsReportRow) => <span className="font-semibold"><SARIcon />{fmtSAR(r.totalValue)}</span> },
             { key: "view", label: "Action", render: (r: SupplierReturnsReportRow) => (
               <Button size="icon" variant="ghost" className="h-7 w-7" title="View returned products" onClick={() => setViewRts(r)}><Eye className="h-3.5 w-3.5" /></Button>
