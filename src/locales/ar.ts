@@ -2577,7 +2577,6 @@ const ar: Record<string, string> = {
   "Registered legal business name (if different)": "الاسم القانوني المسجل للنشاط (إذا كان مختلفًا)",
   "Rejection reason (required)": "سبب الرفض (مطلوب)",
   "Required only when rejecting": "مطلوب فقط عند الرفض",
-  "Returned By: Anyone": "أعاده: أي شخص",
   "Rule name…": "اسم القاعدة…",
   "SKU suffix (optional)": "لاحقة رمز الصنف SKU (اختياري)",
   "Scan a barcode to add an item…": "امسح الباركود لإضافة صنف…",

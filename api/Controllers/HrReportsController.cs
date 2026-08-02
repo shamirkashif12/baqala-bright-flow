@@ -316,6 +316,7 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
                 if (prop.Name.Equals("Items", StringComparison.OrdinalIgnoreCase)) continue; // line items — too verbose for a one-line summary
+                if (IsRawGuidIdField(prop)) continue; // e.g. "productId": "b2ee88ee-..." — meaningless without a lookup; the Details drawer resolves the real name separately
                 var value = prop.Value.ValueKind switch
                 {
                     System.Text.Json.JsonValueKind.Array => $"{prop.Value.GetArrayLength()} item(s)",
@@ -330,6 +331,16 @@ public class HrReportsController(BaqalaDbContext db, IAuditService audit) : Cont
             return parts.Count > 0 ? string.Join(", ", parts) : null;
         }
         catch { return json; }
+    }
+
+    // Mirrors ReportsController.IsRawGuidIdField — kept local for the same reason
+    // HumanizeJsonSnapshot is: a small, self-contained rule with no other cross-controller dependency.
+    private static bool IsRawGuidIdField(System.Text.Json.JsonProperty prop)
+    {
+        if (prop.Value.ValueKind != System.Text.Json.JsonValueKind.String) return false;
+        var name = prop.Name;
+        var looksLikeId = name.EndsWith("Id", StringComparison.OrdinalIgnoreCase) || name.EndsWith("By", StringComparison.OrdinalIgnoreCase);
+        return looksLikeId && Guid.TryParse(prop.Value.GetString(), out _);
     }
 
     // "TransferNumber" -> "Transfer Number", "discountAmount" -> "Discount Amount"

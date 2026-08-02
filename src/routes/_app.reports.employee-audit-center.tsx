@@ -6,13 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AuditDetailDrawer } from "@/components/audit-detail-drawer";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type EmployeeAuditRow, type Employee, type ReportExportFormat } from "@/lib/api";
+import { api, type EmployeeAuditRow, type Employee, type Terminal, type ReportExportFormat } from "@/lib/api";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
 import { toast } from "sonner";
 import { ShieldAlert, Users, Percent, Ban, Eye, X } from "lucide-react";
@@ -68,21 +69,35 @@ function EmployeeAuditCenter() {
   const [branchIds, setBranchIds] = useState<string[]>([]);
   const [employeeIds, setEmployeeIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [deviceIds, setDeviceIds] = useState<string[]>([]);
+  const [transactionTypes, setTransactionTypes] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [rows, setRows] = useState<EmployeeAuditRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Accumulates every EntityType seen across loads (not just the current, possibly filtered,
+  // result set) so picking one Transaction Type doesn't shrink the option list out from under
+  // whatever else the tenant's audit history actually contains.
+  const [transactionTypesSeen, setTransactionTypesSeen] = useState<string[]>([]);
 
   useEffect(() => {
     if (isManagerTier) api.getEmployees({ status: ["active"] }).then(setEmployees).catch(() => {});
   }, [isManagerTier]);
+  useEffect(() => { api.getTerminals().then(setTerminals).catch(() => {}); }, []);
+  useEffect(() => {
+    const seen = rows.map((r) => r.entityType).filter((t): t is string => !!t);
+    if (seen.length) setTransactionTypesSeen((prev) => Array.from(new Set([...prev, ...seen])).sort());
+  }, [rows]);
 
   const filterParams = {
     from: dateFrom, to: dateTo,
     branchId: isManagerTier ? branchIds : undefined,
     employeeId: isManagerTier ? employeeIds : undefined,
     category: categories,
+    deviceId: deviceIds.length ? deviceIds : undefined,
+    transactionType: transactionTypes.length ? transactionTypes : undefined,
     search: search || undefined,
   };
 
@@ -93,7 +108,7 @@ function EmployeeAuditCenter() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, branchIds, employeeIds, categories, search, isManagerTier]);
+  }, [dateFrom, dateTo, branchIds, employeeIds, categories, deviceIds, transactionTypes, search, isManagerTier]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -107,10 +122,10 @@ function EmployeeAuditCenter() {
   };
 
   const hasFilters = dateFrom !== firstOfMonthStr() || dateTo !== todayStr() || branchIds.length > 0
-    || employeeIds.length > 0 || categories.length > 0 || search !== "";
+    || employeeIds.length > 0 || categories.length > 0 || deviceIds.length > 0 || transactionTypes.length > 0 || search !== "";
   const clearFilters = () => {
     setDateFrom(firstOfMonthStr()); setDateTo(todayStr()); setBranchIds([]); setEmployeeIds([]);
-    setCategories([]); setSearch("");
+    setCategories([]); setDeviceIds([]); setTransactionTypes([]); setSearch("");
   };
 
   const employeeCount = useMemo(() => new Set(rows.map(r => r.employeeName)).size, [rows]);
@@ -126,8 +141,12 @@ function EmployeeAuditCenter() {
     // did what. The counts are the at-a-glance answer; the Details drawer has the full breakdown.
     { key: "products", label: "Products", render: r => r.itemCount > 0 ? `${r.itemCount} product${r.itemCount !== 1 ? "s" : ""}` : "—" },
     { key: "quantity", label: "Total Qty", render: r => r.totalQuantity > 0 ? String(r.totalQuantity) : "—" },
-    { key: "oldValue", label: "Old Value", className: "max-w-[220px] whitespace-normal", render: r => r.oldValueSummary ?? "—" },
-    { key: "newValue", label: "New Value", className: "max-w-[220px] whitespace-normal", render: r => r.newValueSummary ?? "—" },
+    // Truncated to one line — a summary can run long (several fields joined with commas), and
+    // letting it wrap made every row a different height, breaking the table's scan-ability. The
+    // full text is a hover away here, and always available in full (with names, not raw ids) in
+    // the Details drawer.
+    { key: "oldValue", label: "Old Value", className: "max-w-[200px]", render: r => <p className="truncate" title={r.oldValueSummary ?? undefined}>{r.oldValueSummary ?? "—"}</p> },
+    { key: "newValue", label: "New Value", className: "max-w-[200px]", render: r => <p className="truncate" title={r.newValueSummary ?? undefined}>{r.newValueSummary ?? "—"}</p> },
     { key: "branch", label: "Branch", render: r => r.branchName },
     { key: "device", label: "Device", render: r => r.deviceName },
     { key: "transaction", label: "Related Transaction", render: r => r.relatedTransaction },
@@ -145,9 +164,7 @@ function EmployeeAuditCenter() {
     <PageShell title="Employee Audit Center" subtitle="Full employee activity history for audit and misuse tracking">
       <div className="space-y-4">
         <div className="flex flex-wrap items-end gap-2">
-          <FilterField label="From"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
           {isManagerTier && (
             <>
               <FilterField label="Branch">
@@ -179,6 +196,26 @@ function EmployeeAuditCenter() {
                 options={CATEGORIES.map(c => ({ id: c, label: c }))}
                 selected={categories}
                 onChange={setCategories}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Device">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Devices"
+                options={terminals.map(t => ({ id: t.id, label: t.name }))}
+                selected={deviceIds}
+                onChange={setDeviceIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Transaction Type">
+            <div className="w-52">
+              <SearchableMultiSelect
+                placeholder="All Transaction Types"
+                options={transactionTypesSeen.map(t => ({ id: t, label: t.replace(/([a-z])([A-Z])/g, "$1 $2") }))}
+                selected={transactionTypes}
+                onChange={setTransactionTypes}
               />
             </div>
           </FilterField>

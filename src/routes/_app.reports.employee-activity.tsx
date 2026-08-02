@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PaginatedDataTable, FilterField, type Column } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
 import { AuditDetailDrawer } from "@/components/audit-detail-drawer";
 import { Eye, X } from "lucide-react";
@@ -100,9 +101,12 @@ function EmployeeActivityReport() {
     { key: "branch", label: "Branch", render: r => r.branchName ?? "—" },
     { key: "module", label: "Module", render: r => r.module ?? r.entityType ?? "—" },
     { key: "activityType", label: "Activity Type", render: r => <Badge variant="outline" className="text-[10px] border-0 bg-muted text-muted-foreground whitespace-nowrap">{r.activityType}</Badge> },
-    { key: "description", label: "Description", className: "max-w-[240px] whitespace-normal break-words text-xs", render: r => r.description ?? "—" },
-    { key: "oldValue", label: "Old Value", className: "max-w-[200px] whitespace-normal break-words text-xs", render: r => r.oldValueSummary ?? "—" },
-    { key: "newValue", label: "New Value", className: "max-w-[200px] whitespace-normal break-words text-xs", render: r => r.newValueSummary ?? "—" },
+    // Truncated to one line rather than wrapped — a long summary made every row a different
+    // height, breaking the table's scan-ability. Full text is a hover away; the complete
+    // breakdown (with names, not raw ids) is in the Details drawer.
+    { key: "description", label: "Description", className: "max-w-[240px] text-xs", render: r => <p className="truncate" title={r.description ?? undefined}>{r.description ?? "—"}</p> },
+    { key: "oldValue", label: "Old Value", className: "max-w-[200px] text-xs", render: r => <p className="truncate" title={r.oldValueSummary ?? undefined}>{r.oldValueSummary ?? "—"}</p> },
+    { key: "newValue", label: "New Value", className: "max-w-[200px] text-xs", render: r => <p className="truncate" title={r.newValueSummary ?? undefined}>{r.newValueSummary ?? "—"}</p> },
     { key: "performedBy", label: "Performed By", render: r => r.performedBy?.fullName ?? "—" },
     { key: "device", label: "Device / IP Address", render: r => [r.deviceName, r.ipAddress].filter(Boolean).join(" / ") || "—" },
     { key: "referenceId", label: "Reference ID", render: r => r.entityId ? `${r.entityId.slice(0, 8)}…` : "—" },
@@ -130,8 +134,7 @@ function EmployeeActivityReport() {
     <PageShell title="Employee Activity Report" subtitle="Audit trail of employee actions across HRM and POS modules" breadcrumb={["Human Resources", "Employee Activity Report"]}>
       <div className="space-y-4">
         <div className="flex flex-wrap items-end gap-2">
-          <FilterField label="From"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <FilterField label="To"><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
           {!branchLocked && (
             <FilterField label="Branch">
               <Select value={branchId} onValueChange={setBranchId}>

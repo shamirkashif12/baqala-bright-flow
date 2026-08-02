@@ -738,9 +738,9 @@ export const api = {
     request<KpiSummary>(`/api/reports/kpi-summary${toQuery(params)}`),
   getBiSummary: (params?: { branchId?: string }) =>
     request<BiSummary>(`/api/reports/bi-summary${toQuery(params)}`),
-  getDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; customerType?: string; hasTobaccoFee?: boolean }) =>
+  getDailySalesReport: (params?: { from?: string; to?: string; branchId?: string[]; terminalId?: string[]; cashierId?: string[]; paymentMethod?: string[]; orderStatus?: string; customerType?: string[]; hasTobaccoFee?: boolean }) =>
     request<DailySalesReport>(`/api/reports/daily-sales${toQuery(params)}`),
-  exportDailySalesReport: (params?: { date?: string; branchId?: string; terminalId?: string; cashierId?: string; paymentMethod?: string; orderStatus?: string; customerType?: string; hasTobaccoFee?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportDailySalesReport: (params?: { from?: string; to?: string; branchId?: string[]; terminalId?: string[]; cashierId?: string[]; paymentMethod?: string[]; orderStatus?: string; customerType?: string[]; hasTobaccoFee?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/daily-sales/export${toQuery(params)}`),
 
   getMonthlySalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; cashierId?: string; terminalId?: string; productId?: string; hasTobaccoFee?: boolean; comparePrevious?: boolean }) =>
@@ -783,10 +783,12 @@ export const api = {
   exportStockReconciliationReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; productId?: string[]; categoryId?: string[]; countedBy?: string[]; status?: string[]; varianceOnly?: boolean; countType?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/stock-reconciliation/export${toQuery(params)}`),
 
-  getProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; productStatus?: string[]; classification?: string[] }) =>
+  getProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; supplierId?: string[]; employeeId?: string[]; productStatus?: string[]; classification?: string[] }) =>
     request<ProductPerformanceReport>(`/api/reports/inventory-aging-performance${toQuery(params)}`),
-  exportProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; productStatus?: string[]; classification?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportProductPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; supplierId?: string[]; employeeId?: string[]; productStatus?: string[]; classification?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/inventory-aging-performance/export${toQuery(params)}`),
+  getProductPerformanceDetail: (productId: string, params?: { from?: string; to?: string }) =>
+    request<ProductPerformanceDetail>(`/api/reports/inventory-aging-performance/product-detail/${productId}${toQuery(params)}`),
 
   getBranchSalesReport: (params?: { from?: string; to?: string; city?: string; branchId?: string; customerType?: string; cashierId?: string; terminalId?: string; productId?: string; categoryId?: string; hasTobaccoFee?: boolean }) =>
     request<BranchSalesReport>(`/api/reports/branch-sales${toQuery(params)}`),
@@ -798,9 +800,9 @@ export const api = {
   exportTerminalReport: (params?: { from?: string; to?: string; branchId?: string; terminalId?: string; cashierId?: string; status?: string; hasTobaccoFee?: boolean; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/terminal/export${toQuery(params)}`),
 
-  getProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; productId?: string; search?: string; cashierId?: string; hasTobaccoFee?: boolean }) =>
+  getProductSalesReport: (params?: { from?: string; to?: string; branchId?: string[]; categoryId?: string[]; productId?: string[]; search?: string; cashierId?: string[]; hasTobaccoFee?: boolean }) =>
     request<ProductSalesReport>(`/api/reports/product-sales${toQuery(params)}`),
-  exportProductSalesReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; productId?: string; search?: string; cashierId?: string; hasTobaccoFee?: boolean; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+  exportProductSalesReport: (params?: { from?: string; to?: string; branchId?: string[]; categoryId?: string[]; productId?: string[]; search?: string; cashierId?: string[]; hasTobaccoFee?: boolean; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/product-sales/export${toQuery(params)}`),
 
   getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; cashierId?: string; terminalId?: string; productId?: string; hasTobaccoFee?: boolean }) =>
@@ -813,14 +815,14 @@ export const api = {
   exportSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/supplier-performance/export${toQuery(params)}`),
 
-  getSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string; productId?: string[]; returnedBy?: string[]; approvedBy?: string[] }) =>
+  getSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string[]; productId?: string[]; categoryId?: string[]; returnedBy?: string[]; approvedBy?: string[] }) =>
     request<SupplierReturnsReportRow[]>(`/api/reports/supplier-returns${toQuery(params)}`),
-  exportSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string; productId?: string[]; returnedBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string[]; productId?: string[]; categoryId?: string[]; returnedBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/supplier-returns/export${toQuery(params)}`),
 
-  getStockTransferReport: (params?: { from?: string; to?: string; transferType?: string; status?: string[]; sourceBranchId?: string[]; sourceWarehouseId?: string[]; destBranchId?: string[]; destWarehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[] }) =>
+  getStockTransferReport: (params?: { from?: string; to?: string; transferType?: string; status?: string[]; sourceBranchId?: string[]; sourceWarehouseId?: string[]; destBranchId?: string[]; destWarehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; receivedBy?: string[] }) =>
     request<StockTransferReportRow[]>(`/api/reports/stock-transfer-report${toQuery(params)}`),
-  exportStockTransferReport: (params?: { from?: string; to?: string; transferType?: string; status?: string[]; sourceBranchId?: string[]; sourceWarehouseId?: string[]; destBranchId?: string[]; destWarehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportStockTransferReport: (params?: { from?: string; to?: string; transferType?: string; status?: string[]; sourceBranchId?: string[]; sourceWarehouseId?: string[]; destBranchId?: string[]; destWarehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; receivedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/stock-transfer-report/export${toQuery(params)}`),
 
   getPurchaseOrderReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; status?: string[]; createdBy?: string[]; approvedBy?: string[]; productId?: string[] }) =>
@@ -828,9 +830,16 @@ export const api = {
   exportPurchaseOrderReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; status?: string[]; createdBy?: string[]; approvedBy?: string[]; productId?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/purchase-order-report/export${toQuery(params)}`),
 
-  getEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string }) =>
+  getSupplierReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; paymentStatus?: string[]; reason?: string[]; createdBy?: string[] }) =>
+    request<SupplierReportRow[]>(`/api/reports/supplier-report${toQuery(params)}`),
+  exportSupplierReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; paymentStatus?: string[]; reason?: string[]; createdBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/supplier-report/export${toQuery(params)}`),
+  getSupplierReportDetail: (params: { supplierId: string; from?: string; to?: string; branchId?: string[]; paymentStatus?: string[]; createdBy?: string[] }) =>
+    request<SupplierReportDetail>(`/api/reports/supplier-report/detail${toQuery(params)}`),
+
+  getEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string; deviceId?: string[]; transactionType?: string[] }) =>
     request<EmployeeAuditRow[]>(`/api/reports/employee-audit-center${toQuery(params)}`),
-  exportEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string; deviceId?: string[]; transactionType?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/employee-audit-center/export${toQuery(params)}`),
 
   // Shared by the Employee Activity Report and the Employee Audit Center — the affected products,
@@ -878,10 +887,12 @@ export const api = {
   exportFeeReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/service-charges/export${toQuery(params)}`),
 
-  getTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string }) =>
+  getTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; productId?: string }) =>
     request<TobaccoExciseReport>(`/api/reports/tobacco-excise${toQuery(params)}`),
-  exportTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportTobaccoExciseReport: (params?: { from?: string; to?: string; branchId?: string; cashierId?: string; productId?: string; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/tobacco-excise/export${toQuery(params)}`),
+  getTobaccoExciseTransactions: (params: { from?: string; to?: string; productId: string; cashierId?: string; branchId?: string }) =>
+    request<TobaccoExciseTransactionRow[]>(`/api/reports/tobacco-excise/transactions${toQuery(params)}`),
 
   getProfitMarginReport: (params?: { from?: string; to?: string; branchId?: string; groupBy?: "product" | "category" | "branch" }) =>
     request<ProfitMarginReport>(`/api/reports/profit-margin${toQuery(params)}`),
@@ -1884,6 +1895,8 @@ export interface PosSettingsRecord {
   requireReasonForVoid: boolean;
   requireManagerApprovalForRefund: boolean;
   allowNegativeStock: boolean;
+  cashierMaxDiscountPct: number;
+  managerMaxDiscountPct: number;
   // Scan tab
   beepOnScan: boolean;
   warnNearExpiry: boolean;
@@ -2292,6 +2305,18 @@ export interface ProductPerformanceReport {
   };
   rows: ProductPerformanceRow[];
 }
+export interface ProductDrillDownSaleRow {
+  date: string; branch: string; employee: string; quantity: number; netAmount: number;
+}
+export interface ProductDrillDownBatchRow {
+  location: string; locationType: string; supplier?: string | null; batchNumber?: string | null;
+  receivedDate: string; expiryDate?: string | null; remainingQuantity: number; status: string;
+}
+export interface ProductPerformanceDetail {
+  productName: string; sku: string;
+  recentSales: ProductDrillDownSaleRow[];
+  batches: ProductDrillDownBatchRow[];
+}
 
 // Which pools/filters this caller may use. Resolved server-side because the rule depends on
 // branch_warehouses, and AuthUser has no warehouse field to derive it from client-side.
@@ -2369,7 +2394,9 @@ export interface SupplierReturnsReportRow {
 }
 
 export interface StockTransferReportRow {
-  transferNumber: string; transferType: string; sourceLocation: string; destinationLocation: string; status: string;
+  transferNumber: string; transferType: string;
+  sourceBranch: string; destinationBranch: string; sendingWarehouse: string; receivingWarehouse: string;
+  status: string;
   createdBy: string; approvedBy: string; receivedBy: string; productName: string; sku: string;
   orderedQuantity: number; receivedQuantity: number; unitCost: number; totalCost: number; createdAt: string; completedDate?: string; notes?: string;
 }
@@ -2382,9 +2409,26 @@ export interface PurchaseOrderReportRow {
   createdBy: string; approvedBy: string; receivedBy: string; totalAmount: number; items: PurchaseOrderReportItem[];
 }
 
+export interface SupplierReportRow {
+  supplierId: string; supplierName: string; purchaseCount: number; totalPurchaseAmount: number; paidAmount: number;
+  dueAmount: number; returnAmount: number; netPurchaseAmount: number; averagePurchaseValue: number; lastPurchaseDate: string;
+}
+export interface SupplierReportPurchaseItem {
+  productName: string; sku: string; category: string; unitOfMeasure: string;
+  quantity: number; returnedQuantity: number; unitPrice: number; lineTotal: number;
+}
+export interface SupplierReportPurchaseRow {
+  id: string; poNumber: string; purchaseDate: string; locationName: string; status: string; createdBy: string;
+  totalAmount: number; paidAmount: number; dueAmount: number; items: SupplierReportPurchaseItem[];
+}
+export interface SupplierReportDetail {
+  supplierId: string; supplierName: string; purchaseCount: number; totalPurchaseAmount: number; paidAmount: number;
+  dueAmount: number; returnAmount: number; netPurchaseAmount: number; purchases: SupplierReportPurchaseRow[];
+}
+
 export interface EmployeeAuditRow {
   id: string; createdAt: string; employeeName: string; actionCategory: string; actionLabel: string;
-  oldValueSummary?: string; newValueSummary?: string; branchName: string; deviceName: string; relatedTransaction: string; severity: string;
+  oldValueSummary?: string; newValueSummary?: string; branchName: string; deviceName: string; relatedTransaction: string; entityType?: string; severity: string;
   itemCount: number; totalQuantity: number;
 }
 
@@ -2495,9 +2539,14 @@ export interface FeeReport {
 }
 
 export interface TobaccoExciseRow {
+  productId: string; cashierId?: string | null;
   sku: string; barcode: string; productName: string; brand: string; category: string; branch: string; employee: string;
   unitsSold: number; taxablePrice: number; exciseRate: number; exciseAmount: number; vatAmount: number;
   returnsQty: number; exciseReversal: number; netExcise: number; complianceStatus: string;
+}
+export interface TobaccoExciseTransactionRow {
+  orderNumber: string; dateTime: string; branch: string; employee: string;
+  quantity: number; taxablePrice: number; exciseAmount: number;
 }
 export interface TobaccoExciseReport {
   kpis: { exciseSalesValue: number; exciseTaxAmount: number; tobaccoUnitsSold: number; exciseRefunds: number; topTobaccoSku?: string; complianceExceptions: number };

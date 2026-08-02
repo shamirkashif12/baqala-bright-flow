@@ -2,11 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -83,9 +83,7 @@ function Discounts() {
     <PageShell title="Discount Report" subtitle="Coupon, promotion and manual discounts across periods">
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         </div>
         {!lockedBranchId && (
           <FilterField label="Branch">

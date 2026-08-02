@@ -13,7 +13,7 @@ import {
   FileBarChart, Download, TrendingUp, Calendar, Building2, ShoppingCart, Tag, Truck, Boxes,
   Ban, RotateCcw, Percent, CreditCard, ShieldCheck, DollarSign, AlertTriangle, Cigarette, Coins,
   ClipboardList, ClipboardCheck, Clock, Lock, ExternalLink, Hourglass, ArrowLeftRight, Receipt, PackageSearch, Sparkles, Gavel, ShieldAlert,
-  UserCheck, CalendarCheck, History, Gift,
+  UserCheck, CalendarCheck, History, Gift, Wallet,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/")({ component: Reports });
@@ -44,8 +44,8 @@ function firstOfMonthStr() {
 
 function buildReports(exportedBy?: string): ReportCard[] {
   return [
-    { code: "daily-sales", name: "Daily Sales", desc: "Hour-by-hour sales for any single day", icon: Calendar, color: "primary",
-      href: "/reports/daily-sales", exportFile: () => api.exportDailySalesReport({ date: todayStr(), exportedBy }) },
+    { code: "daily-sales", name: "Daily Sales", desc: "Hour-of-day sales for a day or date range", icon: Calendar, color: "primary",
+      href: "/reports/daily-sales", exportFile: () => api.exportDailySalesReport({ from: todayStr(), to: todayStr(), exportedBy }) },
     { code: "monthly-sales", name: "Monthly Sales", desc: "Trend with profit margin breakdown", icon: TrendingUp, color: "primary",
       href: "/reports/monthly-sales", exportFile: () => api.exportMonthlySalesReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "branch-sales", name: "Branch Sales", desc: "Compare performance across branches", icon: Building2, color: "primary",
@@ -62,6 +62,8 @@ function buildReports(exportedBy?: string): ReportCard[] {
       href: "/reports/supplier-performance", exportFile: () => api.exportSupplierPerformanceReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "kpi_bi" },
     { code: "supplier-returns", name: "Supplier Returns Report", desc: "Full transaction detail for stock returned to suppliers", icon: PackageSearch, color: "warning",
       href: "/reports/supplier-returns", exportFile: () => api.exportSupplierReturnsReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "supplier_returns" },
+    { code: "supplier-report", name: "Supplier Report", desc: "Per-supplier purchase totals — paid, due and returns with accurate payment tracking", icon: Wallet, color: "warning",
+      href: "/reports/supplier-report", exportFile: () => api.exportSupplierReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "stock-transfer", name: "Stock Transfer Report", desc: "Full history of stock moved between warehouses and branches", icon: ArrowLeftRight, color: "primary",
       href: "/reports/stock-transfer", exportFile: () => api.exportStockTransferReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }) },
     { code: "purchase-orders-report", name: "Purchase Reports", desc: "Complete purchase order detail, drill into every product", icon: Receipt, color: "success",
@@ -69,8 +71,10 @@ function buildReports(exportedBy?: string): ReportCard[] {
     { code: "inventory-snapshot", name: "Inventory Reports", desc: "Snapshot of stock value by branch & warehouse", icon: Boxes, color: "warning",
       href: "/reports/inventory-snapshot", exportFile: () => api.exportInventorySnapshotReport({ exportedBy }) },
     // Named for what the business calls it (Stocktaking / Inventory Count) rather than only for
-    // the reconciliation step it ends in — that mismatch is why it read as a missing report.
-    { code: "stock-reconciliation", name: "Stocktaking Report", desc: "Inventory count sessions — system vs counted quantity, variance and sign-off", icon: ClipboardCheck, color: "primary",
+    // the reconciliation step it ends in. The page title already carries the "(Inventory Count)"
+    // qualifier, but this catalog card didn't — a tester scanning the report list for "Inventory
+    // Audit" / "Stock Count" terminology found nothing matching and reported the report missing.
+    { code: "stock-reconciliation", name: "Stocktaking Report (Inventory Audit / Stock Count)", desc: "Inventory count sessions — system vs counted quantity, variance and sign-off", icon: ClipboardCheck, color: "primary",
       href: "/reports/stock-reconciliation", exportFile: () => api.exportStockReconciliationReport({ from: firstOfMonthStr(), to: todayStr(), exportedBy }), planFeature: "stocktaking" },
     // KPI dashboard rather than a tabular report — there is no row set to export, so it opts out
     // of the export affordance the others share.

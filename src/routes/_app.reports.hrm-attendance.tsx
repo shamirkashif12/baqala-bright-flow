@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { StatusBadge, FilterField } from "@/components/module-placeholder";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
 import { Eye, X } from "lucide-react";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
@@ -162,8 +162,7 @@ function HrmAttendanceReport() {
     <PageShell title="Attendance Report" subtitle="Filter and export employee attendance across dates and branches" breadcrumb={["Human Resources", "Attendance Report"]}>
       <div className="space-y-4">
         <div className="flex flex-wrap items-end gap-2">
-          <FilterField label="From"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <FilterField label="To"><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
           {!branchLocked && (
             <FilterField label="Branch">
               <Select value={branchId} onValueChange={setBranchId}>

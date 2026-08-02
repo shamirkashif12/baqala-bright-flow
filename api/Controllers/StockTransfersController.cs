@@ -597,6 +597,14 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
     [HttpPost("{id:guid}/receive")]
     public async Task<IActionResult> ReceiveTransfer(Guid id, [FromBody] ReceiveTransferRequest req)
     {
+        // Locks the transfer row for the whole receive operation — a concurrent duplicate request
+        // (double-click, retried POST) would otherwise both read Status == "in_transit", both pass
+        // the guard below, and both credit the destination a second time. Locking serializes
+        // concurrent requests on the same transfer so a second one sees the already-"completed"
+        // status once it acquires the lock. Same technique as UpdateStatus above and
+        // ZatcaService.SubmitInvoiceAsync's identity-row lock.
+        await using var tx = await db.Database.BeginTransactionAsync();
+        await db.StockTransfers.FromSqlRaw("SELECT * FROM stock_transfers WHERE id = {0} FOR UPDATE", id).FirstOrDefaultAsync();
         var transfer = await db.StockTransfers.Include(t => t.Items).FirstOrDefaultAsync(t => t.Id == id);
         if (transfer is null) return NotFound();
         if (transfer.Status != "in_transit") return BadRequest("Transfer must be in_transit to receive.");
@@ -728,6 +736,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         await SyncLinkedPoStatus(transfer);
 
         await db.SaveChangesAsync();
+        await tx.CommitAsync();
 
         if (transfer.CreatedBy != Guid.Empty)
         {
@@ -754,6 +763,15 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         if (req.Status == "cancelled" && string.IsNullOrWhiteSpace(req.CancelReason))
             return BadRequest(new { message = "A cancellation reason is required." });
 
+        // Locks the transfer row for the whole status transition — a concurrent duplicate request
+        // (double-click, retried PATCH) would otherwise both read the same pre-transition Status,
+        // both pass the same "prev != ..." guards below, and double-apply the stock move
+        // (double-restore on cancel/reject, double-credit on complete, double-deduct on ship).
+        // Locking serializes concurrent requests on the same transfer so the second one only
+        // proceeds once it can see the already-updated status. Same technique as
+        // ZatcaService.SubmitInvoiceAsync's identity-row lock.
+        await using var tx = await db.Database.BeginTransactionAsync();
+        await db.StockTransfers.FromSqlRaw("SELECT * FROM stock_transfers WHERE id = {0} FOR UPDATE", id).FirstOrDefaultAsync();
         var transfer = await db.StockTransfers.Include(t => t.Items).FirstOrDefaultAsync(t => t.Id == id);
         if (transfer is null) return NotFound();
         var prev = transfer.Status;
@@ -864,6 +882,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         }
 
         await db.SaveChangesAsync();
+        await tx.CommitAsync();
 
         if (req.Status == "completed" && prev != "completed" && transfer.CreatedBy != Guid.Empty)
         {

@@ -1708,7 +1708,7 @@ function Stocks() {
             <CardContent className="p-0">
               <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/40 text-xs text-muted-foreground uppercase sticky top-0">
+                  <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground uppercase">
                     <tr>
                       <th className="px-4 py-2 text-left">Date / Time</th>
                       <th className="px-4 py-2 text-left">Type</th>

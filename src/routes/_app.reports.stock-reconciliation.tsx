@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -125,8 +125,7 @@ function StockReconciliation() {
       subtitle="Stock review, audit and reconciliation — system vs counted quantity by count session"
     >
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From"><Input type="date" className="h-9 w-36" value={from} onChange={(e) => setFrom(e.target.value)} /></FilterField>
-        <FilterField label="To"><Input type="date" className="h-9 w-36" value={to} onChange={(e) => setTo(e.target.value)} /></FilterField>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         {!lockedBranchId && (
           <FilterField label="Branch">
             <div className="w-44">

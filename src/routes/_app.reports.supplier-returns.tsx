@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
@@ -81,7 +81,7 @@ function SupplierReturnDetailDrawer({ rts, onClose }: { rts: SupplierReturnsRepo
                 ["Return Date", fmtDateTime(rts.returnDate)],
                 ["Status", rts.status.replace(/_/g, " ")],
                 ["Return Reason", (rts.returnReason ?? "—").replace(/_/g, " ")],
-                ["Returned By", rts.returnedBy],
+                ["Created By", rts.returnedBy],
                 ["Approved By", rts.approvedBy],
                 ["Total Quantity", String(rts.totalQuantity)],
                 ["Total Value", `SAR ${rts.totalValue.toLocaleString()}`],
@@ -137,9 +137,10 @@ function SupplierReturnsReport() {
   const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [productIds, setProductIds] = useState<string[]>([]);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [returnedByIds, setReturnedByIds] = useState<string[]>([]);
   const [approvedByIds, setApprovedByIds] = useState<string[]>([]);
-  const [reason, setReason] = useState("all");
+  const [reasons, setReasons] = useState<string[]>([]);
   const [view, setView] = useState<"returns" | "lines">("returns");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -148,7 +149,10 @@ function SupplierReturnsReport() {
   const [loading, setLoading] = useState(true);
   const [viewRts, setViewRts] = useState<SupplierReturnsReportRow | null>(null);
 
-  const { products } = useReportFilterOptions(branchIds.length === 1 ? branchIds[0] : undefined, undefined);
+  const { products, categories } = useReportFilterOptions(
+    branchIds.length === 1 ? branchIds[0] : undefined,
+    categoryIds.length === 1 ? categoryIds[0] : undefined,
+  );
 
   useEffect(() => { api.getSuppliers().then(setSuppliers).catch(() => {}); }, []);
   useEffect(() => { api.getWarehouses().then(setWarehouses).catch(() => {}); }, []);
@@ -161,9 +165,10 @@ function SupplierReturnsReport() {
     branchId: branchIds.length ? branchIds : undefined,
     status: statuses.length ? statuses : undefined,
     productId: productIds.length ? productIds : undefined,
+    categoryId: categoryIds.length ? categoryIds : undefined,
     returnedBy: returnedByIds.length ? returnedByIds : undefined,
     approvedBy: approvedByIds.length ? approvedByIds : undefined,
-    reason: reason !== "all" ? reason : undefined,
+    reason: reasons.length ? reasons : undefined,
   };
 
   const load = useCallback(() => {
@@ -173,7 +178,7 @@ function SupplierReturnsReport() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, supplierIds, warehouseIds, branchIds, statuses, productIds, returnedByIds, approvedByIds, reason]);
+  }, [from, to, supplierIds, warehouseIds, branchIds, statuses, productIds, categoryIds, returnedByIds, approvedByIds, reasons]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -192,23 +197,18 @@ function SupplierReturnsReport() {
   const lineRows = flattenReturnItems(rows);
 
   const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || supplierIds.length > 0 || warehouseIds.length > 0
-    || branchIds.length > (lockedBranchId ? 1 : 0) || statuses.length > 0 || productIds.length > 0
-    || returnedByIds.length > 0 || approvedByIds.length > 0 || reason !== "all";
+    || branchIds.length > (lockedBranchId ? 1 : 0) || statuses.length > 0 || productIds.length > 0 || categoryIds.length > 0
+    || returnedByIds.length > 0 || approvedByIds.length > 0 || reasons.length > 0;
   const clearFilters = () => {
     setFrom(firstOfMonthStr()); setTo(todayStr());
     setSupplierIds([]); setWarehouseIds([]); setBranchIds(lockedBranchId ? [lockedBranchId] : []);
-    setStatuses([]); setProductIds([]); setReturnedByIds([]); setApprovedByIds([]); setReason("all");
+    setStatuses([]); setProductIds([]); setCategoryIds([]); setReturnedByIds([]); setApprovedByIds([]); setReasons([]);
   };
 
   return (
     <PageShell title="Supplier Returns Report" subtitle="Full transaction detail for stock returned to suppliers — click a return to see every product">
       <div className="flex flex-wrap items-end gap-2">
-        <FilterField label="From">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
-        </FilterField>
-        <FilterField label="To">
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
-        </FilterField>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <FilterField label="Supplier">
           <div className="w-44">
             <SearchableMultiSelect
@@ -241,6 +241,16 @@ function SupplierReturnsReport() {
             </div>
           </FilterField>
         )}
+        <FilterField label="Category">
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Categories"
+              options={categories.map((c) => ({ id: c.id, label: c.name }))}
+              selected={categoryIds}
+              onChange={setCategoryIds}
+            />
+          </div>
+        </FilterField>
         <FilterField label="Product">
           <div className="w-44">
             <SearchableMultiSelect
@@ -251,10 +261,10 @@ function SupplierReturnsReport() {
             />
           </div>
         </FilterField>
-        <FilterField label="Returned By">
+        <FilterField label="Created By">
           <div className="w-40">
             <SearchableMultiSelect
-              placeholder="Returned By: Anyone"
+              placeholder="Created By: Anyone"
               options={users.map((u) => ({ id: u.id, label: u.fullName }))}
               selected={returnedByIds}
               onChange={setReturnedByIds}
@@ -282,21 +292,24 @@ function SupplierReturnsReport() {
           </div>
         </FilterField>
         <FilterField label="Reason">
-          <Select value={reason} onValueChange={setReason}>
-            <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Reason" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Reasons</SelectItem>
-              {RETURN_REASONS.map(r => <SelectItem key={r} value={r}>{r.replace(/_/g, " ")}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="w-36">
+            <SearchableMultiSelect
+              placeholder="All Reasons"
+              options={RETURN_REASONS.map((r) => ({ id: r, label: r.replace(/_/g, " ") }))}
+              selected={reasons}
+              onChange={setReasons}
+            />
+          </div>
         </FilterField>
-        {/* Per-return (Purchase Report shape) vs per-product-line — same data, two audit questions. */}
-        <FilterField label="View">
+        {/* Per-return (Purchase Report shape) vs per-product-line — same data, two audit questions.
+            This is a row-shape toggle, not a data filter — labeled "Table Layout" (not "View") so it
+            doesn't read as a second, redundant "View" filter next to the row-detail Eye button. */}
+        <FilterField label="Table Layout">
           <Select value={view} onValueChange={(v) => setView(v as "returns" | "lines")}>
-            <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="returns">View: By Return</SelectItem>
-              <SelectItem value="lines">View: By Product</SelectItem>
+              <SelectItem value="returns">By Return (Summary)</SelectItem>
+              <SelectItem value="lines">By Product (Pricing Detail)</SelectItem>
             </SelectContent>
           </Select>
         </FilterField>
@@ -325,13 +338,17 @@ function SupplierReturnsReport() {
             { key: "supplierName", label: "Supplier" },
             { key: "warehouseName", label: "Warehouse" },
             { key: "items", label: "Products", render: (r: SupplierReturnsReportRow) => `${r.items.length} item${r.items.length !== 1 ? "s" : ""}` },
+            // Summary rows can bundle multiple items; only a single-item return has one unambiguous
+            // SKU/cost to show inline — multi-item returns fall back to the Eye drawer for detail.
+            { key: "sku", label: "SKU / Code", className: "font-mono text-xs", render: (r: SupplierReturnsReportRow) => r.items.length === 1 ? r.items[0].sku : "Multiple" },
             { key: "totalQuantity", label: "Returned Qty" },
             { key: "returnReason", label: "Return Reason", className: "capitalize", render: (r: SupplierReturnsReportRow) => (r.returnReason ?? "—").replace(/_/g, " ") },
-            { key: "returnedBy", label: "Returned By" },
+            { key: "returnedBy", label: "Created By" },
             { key: "approvedBy", label: "Approved By" },
             { key: "status", label: "Status", render: (r: SupplierReturnsReportRow) => <Badge variant="outline" className={`text-[10px] border-0 capitalize ${STATUS_CLASS[r.status] ?? "bg-muted text-muted-foreground"}`}>{r.status.replace(/_/g, " ")}</Badge> },
+            { key: "unitCost", label: "Unit Cost", render: (r: SupplierReturnsReportRow) => r.items.length === 1 ? <span><SARIcon />{fmtSAR(r.items[0].unitCost)}</span> : "—" },
             { key: "totalValue", label: "Return Value", render: (r: SupplierReturnsReportRow) => <span className="font-semibold"><SARIcon />{fmtSAR(r.totalValue)}</span> },
-            { key: "view", label: "", render: (r: SupplierReturnsReportRow) => (
+            { key: "view", label: "Action", render: (r: SupplierReturnsReportRow) => (
               <Button size="icon" variant="ghost" className="h-7 w-7" title="View returned products" onClick={() => setViewRts(r)}><Eye className="h-3.5 w-3.5" /></Button>
             ) },
           ]}
@@ -357,7 +374,7 @@ function SupplierReturnsReport() {
             ) },
             { key: "unitCost", label: "Unit Cost", render: (r: SupplierReturnLineRow) => <span><SARIcon />{fmtSAR(r.unitCost)}</span> },
             { key: "totalValue", label: "Line Value", render: (r: SupplierReturnLineRow) => <span className="font-semibold"><SARIcon />{fmtSAR(r.totalValue)}</span> },
-            { key: "returnedBy", label: "Returned By" },
+            { key: "returnedBy", label: "Created By" },
             { key: "approvedBy", label: "Approved By" },
             { key: "status", label: "Status", className: "capitalize", render: (r: SupplierReturnLineRow) => r.status.replace(/_/g, " ") },
           ]}

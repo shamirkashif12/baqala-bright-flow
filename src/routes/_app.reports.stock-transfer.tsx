@@ -1,16 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
+import { useBranch } from "@/lib/branch-context";
 import { api, type StockTransferReportRow, type ReportExportFormat, type Warehouse, type Product, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
@@ -27,6 +28,8 @@ function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+const fmtDateTime = (s: string) =>
+  new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 const TRANSFER_TYPES = ["supplier_to_warehouse", "warehouse_to_branch", "branch_to_warehouse", "branch_to_branch", "warehouse_to_warehouse"];
 const STATUSES = ["draft", "pending_approval", "approved", "in_transit", "completed", "rejected", "cancelled"];
@@ -35,7 +38,9 @@ const STATUSES = ["draft", "pending_approval", "approved", "in_transit", "comple
 // per transfer (with ordered/received totals) and the product/SKU/unit-cost breakdown moves into
 // the detail drawer behind the eye icon instead of cluttering the table with a row per SKU.
 interface StockTransferGroup {
-  transferNumber: string; transferType: string; sourceLocation: string; destinationLocation: string; status: string;
+  transferNumber: string; transferType: string;
+  sourceBranch: string; destinationBranch: string; sendingWarehouse: string; receivingWarehouse: string;
+  status: string;
   createdBy: string; approvedBy: string; receivedBy: string; createdAt: string; completedDate?: string;
   orderedQuantity: number; receivedQuantity: number; totalCost: number;
   items: StockTransferReportRow[];
@@ -46,8 +51,10 @@ function groupByTransfer(rows: StockTransferReportRow[]): StockTransferGroup[] {
     let g = groups.get(r.transferNumber);
     if (!g) {
       g = {
-        transferNumber: r.transferNumber, transferType: r.transferType, sourceLocation: r.sourceLocation,
-        destinationLocation: r.destinationLocation, status: r.status, createdBy: r.createdBy, approvedBy: r.approvedBy,
+        transferNumber: r.transferNumber, transferType: r.transferType,
+        sourceBranch: r.sourceBranch, destinationBranch: r.destinationBranch,
+        sendingWarehouse: r.sendingWarehouse, receivingWarehouse: r.receivingWarehouse,
+        status: r.status, createdBy: r.createdBy, approvedBy: r.approvedBy,
         receivedBy: r.receivedBy, createdAt: r.createdAt, completedDate: r.completedDate,
         orderedQuantity: 0, receivedQuantity: 0, totalCost: 0, items: [],
       };
@@ -71,10 +78,15 @@ function StockTransferDetailDrawer({ group, onClose }: { group: StockTransferGro
         {group && (
           <div className="mt-2 space-y-4 text-sm">
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <div><span className="text-muted-foreground">Source</span><p className="font-medium">{group.sourceLocation}</p></div>
-              <div><span className="text-muted-foreground">Destination</span><p className="font-medium">{group.destinationLocation}</p></div>
+              <div><span className="text-muted-foreground">Source Branch</span><p className="font-medium">{group.sourceBranch}</p></div>
+              <div><span className="text-muted-foreground">Destination Branch</span><p className="font-medium">{group.destinationBranch}</p></div>
+              <div><span className="text-muted-foreground">Sending Warehouse</span><p className="font-medium">{group.sendingWarehouse}</p></div>
+              <div><span className="text-muted-foreground">Receiving Warehouse</span><p className="font-medium">{group.receivingWarehouse}</p></div>
+              <div><span className="text-muted-foreground">Transfer Date & Time</span><p className="font-medium">{fmtDateTime(group.createdAt)}</p></div>
+              <div><span className="text-muted-foreground">Completed</span><p className="font-medium">{group.completedDate ? fmtDateTime(group.completedDate) : "—"}</p></div>
               <div><span className="text-muted-foreground">Created By</span><p className="font-medium">{group.createdBy}</p></div>
               <div><span className="text-muted-foreground">Approved By</span><p className="font-medium">{group.approvedBy}</p></div>
+              <div><span className="text-muted-foreground">Received By</span><p className="font-medium">{group.receivedBy}</p></div>
               <div><span className="text-muted-foreground">Status</span><p className="font-medium capitalize">{group.status.replace(/_/g, " ")}</p></div>
             </div>
             <div>
@@ -114,17 +126,22 @@ function StockTransferReport() {
   const [to, setTo] = useState(todayStr());
   const [transferType, setTransferType] = useState("all");
   const [statuses, setStatuses] = useState<string[]>([]);
+  const [sourceBranchIds, setSourceBranchIds] = useState<string[]>([]);
   const [sourceWarehouseIds, setSourceWarehouseIds] = useState<string[]>([]);
+  const [destBranchIds, setDestBranchIds] = useState<string[]>([]);
   const [destWarehouseIds, setDestWarehouseIds] = useState<string[]>([]);
   const [productIds, setProductIds] = useState<string[]>([]);
   const [createdByIds, setCreatedByIds] = useState<string[]>([]);
   const [approvedByIds, setApprovedByIds] = useState<string[]>([]);
+  const [receivedByIds, setReceivedByIds] = useState<string[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [rows, setRows] = useState<StockTransferReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewTransfer, setViewTransfer] = useState<StockTransferGroup | null>(null);
+
+  const { branches } = useBranch();
 
   useEffect(() => { api.getWarehouses().then(setWarehouses).catch(() => {}); }, []);
   useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
@@ -134,11 +151,14 @@ function StockTransferReport() {
     from, to,
     transferType: transferType !== "all" ? transferType : undefined,
     status: statuses.length ? statuses : undefined,
+    sourceBranchId: sourceBranchIds.length ? sourceBranchIds : undefined,
     sourceWarehouseId: sourceWarehouseIds.length ? sourceWarehouseIds : undefined,
+    destBranchId: destBranchIds.length ? destBranchIds : undefined,
     destWarehouseId: destWarehouseIds.length ? destWarehouseIds : undefined,
     productId: productIds.length ? productIds : undefined,
     createdBy: createdByIds.length ? createdByIds : undefined,
     approvedBy: approvedByIds.length ? approvedByIds : undefined,
+    receivedBy: receivedByIds.length ? receivedByIds : undefined,
   };
 
   const load = useCallback(() => {
@@ -148,17 +168,18 @@ function StockTransferReport() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, transferType, statuses, sourceWarehouseIds, destWarehouseIds, productIds, createdByIds, approvedByIds]);
+  }, [from, to, transferType, statuses, sourceBranchIds, sourceWarehouseIds, destBranchIds, destWarehouseIds, productIds, createdByIds, approvedByIds, receivedByIds]);
 
   useEffect(() => { load(); }, [load]);
 
   const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || transferType !== "all"
-    || statuses.length > 0 || sourceWarehouseIds.length > 0 || destWarehouseIds.length > 0
-    || productIds.length > 0 || createdByIds.length > 0 || approvedByIds.length > 0;
+    || statuses.length > 0 || sourceBranchIds.length > 0 || sourceWarehouseIds.length > 0
+    || destBranchIds.length > 0 || destWarehouseIds.length > 0
+    || productIds.length > 0 || createdByIds.length > 0 || approvedByIds.length > 0 || receivedByIds.length > 0;
   const clearFilters = () => {
     setFrom(firstOfMonthStr()); setTo(todayStr()); setTransferType("all");
-    setStatuses([]); setSourceWarehouseIds([]); setDestWarehouseIds([]);
-    setProductIds([]); setCreatedByIds([]); setApprovedByIds([]);
+    setStatuses([]); setSourceBranchIds([]); setSourceWarehouseIds([]); setDestBranchIds([]); setDestWarehouseIds([]);
+    setProductIds([]); setCreatedByIds([]); setApprovedByIds([]); setReceivedByIds([]);
   };
 
   const handleExport = async (format: ReportExportFormat) => {
@@ -177,11 +198,7 @@ function StockTransferReport() {
   return (
     <PageShell title="Stock Transfer Report" subtitle="Full history of stock movement between warehouses and branches">
       <div className="flex flex-wrap items-end gap-2">
-        <div className="flex items-center gap-1">
-          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
-        </div>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <FilterField label="Transfer Type">
           <Select value={transferType} onValueChange={setTransferType}>
             <SelectTrigger className="h-9 w-48"><SelectValue placeholder="Transfer Type" /></SelectTrigger>
@@ -201,6 +218,16 @@ function StockTransferReport() {
             />
           </div>
         </FilterField>
+        <FilterField label="Source Branch">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Any Source Branch"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={sourceBranchIds}
+              onChange={setSourceBranchIds}
+            />
+          </div>
+        </FilterField>
         <FilterField label="Source Warehouse">
           <div className="w-44">
             <SearchableMultiSelect
@@ -208,6 +235,16 @@ function StockTransferReport() {
               options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
               selected={sourceWarehouseIds}
               onChange={setSourceWarehouseIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Destination Branch">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Any Destination Branch"
+              options={branches.map((b) => ({ id: b.id, label: b.name }))}
+              selected={destBranchIds}
+              onChange={setDestBranchIds}
             />
           </div>
         </FilterField>
@@ -251,6 +288,16 @@ function StockTransferReport() {
             />
           </div>
         </FilterField>
+        <FilterField label="Received By">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="Received By: Anyone"
+              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+              selected={receivedByIds}
+              onChange={setReceivedByIds}
+            />
+          </div>
+        </FilterField>
         {hasFilters && (
           <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
             <X className="h-3.5 w-3.5" /> Clear Filters
@@ -273,8 +320,10 @@ function StockTransferReport() {
           columns={[
             { key: "transferNumber", label: "Transfer Number" },
             { key: "transferType", label: "Type", className: "capitalize", render: (g: StockTransferGroup) => g.transferType.replace(/_/g, " ") },
-            { key: "sourceLocation", label: "Source" },
-            { key: "destinationLocation", label: "Destination" },
+            { key: "sourceBranch", label: "Source Branch" },
+            { key: "destinationBranch", label: "Destination Branch" },
+            { key: "sendingWarehouse", label: "Sending Warehouse" },
+            { key: "receivingWarehouse", label: "Receiving Warehouse" },
             { key: "status", label: "Status", className: "capitalize", render: (g: StockTransferGroup) => g.status.replace(/_/g, " ") },
             { key: "createdBy", label: "Created By" },
             { key: "approvedBy", label: "Approved By" },
@@ -282,9 +331,9 @@ function StockTransferReport() {
             { key: "orderedQuantity", label: "Quantity Ordered" },
             { key: "receivedQuantity", label: "Quantity Received" },
             { key: "totalCost", label: "Total Cost", render: (g: StockTransferGroup) => <span className="font-semibold"><SARIcon />{fmtSAR(g.totalCost)}</span> },
-            { key: "createdAt", label: "Created At", render: (g: StockTransferGroup) => new Date(g.createdAt).toLocaleDateString("en-SA") },
-            { key: "completedDate", label: "Completed At", render: (g: StockTransferGroup) => g.completedDate ? new Date(g.completedDate).toLocaleDateString("en-SA") : "—" },
-            { key: "view", label: "", render: (g: StockTransferGroup) => (
+            { key: "createdAt", label: "Transfer Date & Time", render: (g: StockTransferGroup) => fmtDateTime(g.createdAt) },
+            { key: "completedDate", label: "Completed Date & Time", render: (g: StockTransferGroup) => g.completedDate ? fmtDateTime(g.completedDate) : "—" },
+            { key: "view", label: "Action", render: (g: StockTransferGroup) => (
               <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewTransfer(g)}><Eye className="h-3.5 w-3.5" /></Button>
             ) },
           ]}

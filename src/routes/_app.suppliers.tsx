@@ -24,7 +24,7 @@ import { usePermission } from "@/lib/use-permission";
 import {
   isValidSaudiCr, isValidSaudiPhone, isValidSaudiVat, isValidContactPersonName,
   isValidBankAccountNumber, isValidSaudiIban,
-  sanitizePhoneInput, sanitizeNameInput, sanitizeDigitsInput, sanitizeIbanInput,
+  sanitizePhoneInput, sanitizeNameInput, sanitizeDigitsInput, sanitizeIbanInput, phoneSearchCore,
   PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH, BANK_ACCOUNT_MAX_LENGTH, IBAN_MAX_LENGTH,
 } from "@/lib/validation";
 import { fileToDataUrl } from "@/lib/image";
@@ -88,11 +88,17 @@ const FORMAT_VALIDATORS: { key: keyof SupplierForm; check: (v: string) => boolea
   { key: "bankIban", check: isValidSaudiIban, message: "Enter a valid Saudi IBAN (SA followed by 22 digits)." },
 ];
 
-function validateSupplierFormats(form: SupplierForm): SupplierFormErrors {
+// `original` is the record as loaded from the server (edit mode only). A value that's already
+// stored — malformed or not — was valid enough to exist before this format check was added; it's
+// only re-checked once the user actually changes it. Without this, saving an unrelated field (e.g.
+// Notes) on any legacy supplier whose phone/CR/bank details predate these rules would be blocked.
+function validateSupplierFormats(form: SupplierForm, original?: SupplierForm): SupplierFormErrors {
   const errors: SupplierFormErrors = {};
   for (const f of FORMAT_VALIDATORS) {
     const value = form[f.key]?.trim();
-    if (value && !f.check(value)) errors[f.key] = f.message;
+    if (!value) continue;
+    if (original && value === original[f.key]?.trim()) continue;
+    if (!f.check(value)) errors[f.key] = f.message;
   }
   return errors;
 }
@@ -140,6 +146,10 @@ function SupplierFormFields({
   // the user has typed anything. Previously the dropdown and a free-text override were both shown
   // at once, which read as two separate, redundant city fields.
   const [otherCity, setOtherCity] = useState(() => !!form.city && !SAUDI_CITIES.includes(form.city));
+  // Same "Other" reveal pattern as City — a supplier category outside the fixed list (e.g. an old
+  // record, or one saved before this field existed) should show as free text, not silently fall
+  // back to the closed dropdown with nothing selected.
+  const [otherCategory, setOtherCategory] = useState(() => !!form.category && !SUPPLIER_CATEGORIES.includes(form.category));
   const clearError = (k: keyof SupplierForm) =>
     setErrors(prev => (prev[k] ? { ...prev, [k]: undefined } : prev));
   const set = (k: keyof SupplierForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -194,12 +204,24 @@ function SupplierFormFields({
         <FieldRow label={label("Address", true)} error={errors.address}><Textarea value={form.address} onChange={set("address")} rows={2} placeholder="Street, building, city, postal code" required={req} className={errCls("address")} /></FieldRow>
       </div>
       <FieldRow label={label("Category", true)} error={errors.category}>
-        <Select value={form.category} onValueChange={setS("category")}>
-          <SelectTrigger className={`h-9 ${errCls("category")}`}><SelectValue placeholder="Select category" /></SelectTrigger>
-          <SelectContent>
-            {SUPPLIER_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        {otherCategory ? (
+          <div className="space-y-1">
+            <Input value={form.category} onChange={set("category")} className={`h-9 ${errCls("category")}`} placeholder="Enter category name" maxLength={100} autoFocus />
+            <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => { setOtherCategory(false); setS("category")(""); }}>
+              Choose from list instead
+            </button>
+          </div>
+        ) : (
+          <Select
+            value={form.category}
+            onValueChange={v => { if (v === "Other") { setOtherCategory(true); setS("category")(""); } else setS("category")(v); }}
+          >
+            <SelectTrigger className={`h-9 ${errCls("category")}`}><SelectValue placeholder="Select category" /></SelectTrigger>
+            <SelectContent>
+              {SUPPLIER_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
       </FieldRow>
       <FieldRow label="Supply Channel">
         <Select value={form.supplyType} onValueChange={setS("supplyType")}>
@@ -266,6 +288,7 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
   const [documents, setDocuments] = useState<SupplierDocument[]>([]);
   const [uploading, setUploading] = useState(false);
   const [documentType, setDocumentType] = useState(SUPPLIER_DOC_TYPES[0]);
+  const [otherDocumentName, setOtherDocumentName] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [file, setFile] = useState<{ name: string; url: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -287,12 +310,18 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
 
   const handleUpload = async () => {
     if (!file) return;
+    if (documentType === "Other" && !otherDocumentName.trim()) {
+      toast.error("Enter a name for this document.");
+      return;
+    }
     setSaving(true);
     try {
-      await api.uploadSupplierDocument(supplier.id, { documentType, fileName: file.name, fileUrl: file.url, expiryDate: expiryDate || undefined });
+      const resolvedType = documentType === "Other" ? otherDocumentName.trim() : documentType;
+      await api.uploadSupplierDocument(supplier.id, { documentType: resolvedType, fileName: file.name, fileUrl: file.url, expiryDate: expiryDate || undefined });
       setUploading(false);
       setFile(null);
       setExpiryDate("");
+      setOtherDocumentName("");
       reload();
     } catch (e: any) {
       toast.error(e?.message || "Failed to upload document.");
@@ -325,14 +354,17 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>{SUPPLIER_DOC_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
           </Select>
+          {documentType === "Other" && (
+            <Input value={otherDocumentName} onChange={e => setOtherDocumentName(e.target.value)} placeholder="Document name" className="h-9" autoFocus />
+          )}
           <Input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} placeholder="Expiry date (optional)" className="h-9" />
           <Button size="sm" variant="outline" className="w-full" onClick={() => fileInputRef.current?.click()}>{file ? file.name : "Choose File (PDF/JPG/PNG)"}</Button>
           <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleFile} />
           <div className="flex gap-2">
-            <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!file || saving} onClick={handleUpload}>
+            <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0" disabled={!file || saving || (documentType === "Other" && !otherDocumentName.trim())} onClick={handleUpload}>
               {saving ? "Uploading…" : "Save"}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => { setUploading(false); setFile(null); }}>Cancel</Button>
+            <Button size="sm" variant="outline" onClick={() => { setUploading(false); setFile(null); setOtherDocumentName(""); }}>Cancel</Button>
           </div>
         </div>
       )}
@@ -735,10 +767,17 @@ function SuppliersTab() {
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [supplyTypeFilter, setSupplyTypeFilter] = useState<string[]>([]);
+  const [cityFilter, setCityFilter] = useState<string[]>([]);
+  const [paymentTermsFilter, setPaymentTermsFilter] = useState<string[]>([]);
   const [viewSupplier, setViewSupplier] = useState<Supplier | null>(null);
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
+  // Snapshot of the form as loaded for the supplier currently being edited — lets handleSave tell
+  // an untouched legacy value apart from one the user just typed. Unused in create mode.
+  const [initialForm, setInitialForm] = useState<SupplierForm>(emptyForm);
   const [formErrors, setFormErrors] = useState<SupplierFormErrors>({});
   const [saving, setSaving] = useState(false);
 
@@ -754,18 +793,23 @@ function SuppliersTab() {
   const openEdit = (s: Supplier) => {
     setEditSupplier(s);
     setFormErrors({});
-    setForm({
+    const next: SupplierForm = {
       name: s.name, contactPerson: s.contactPerson ?? "", contactNumber: s.contactNumber ?? "", email: s.email ?? "", city: s.city ?? "",
       supplyType: s.supplyType ?? "warehouse", status: s.status,
       legalName: s.legalName ?? "", crNumber: s.crNumber ?? "", vatNumber: s.vatNumber ?? "", address: s.address ?? "", category: s.category ?? "",
       paymentTerms: s.paymentTerms ?? "", creditLimit: s.creditLimit != null ? String(s.creditLimit) : "",
       bankName: s.bankName ?? "", bankAccountHolder: s.bankAccountHolder ?? "", bankAccountNumber: s.bankAccountNumber ?? "", bankIban: s.bankIban ?? "",
       notes: s.notes ?? "",
-    });
+    };
+    setForm(next);
+    setInitialForm(next);
   };
 
   const handleSave = async () => {
-    const clientErrors = { ...(editSupplier ? {} : validateSupplierForm(form)), ...validateSupplierFormats(form) };
+    const clientErrors = {
+      ...(editSupplier ? {} : validateSupplierForm(form)),
+      ...validateSupplierFormats(form, editSupplier ? initialForm : undefined),
+    };
     if (Object.keys(clientErrors).length > 0) {
       setFormErrors(clientErrors);
       toast.error("Please fix the highlighted fields.");
@@ -807,9 +851,25 @@ function SuppliersTab() {
   const activeSuppliers = suppliers.filter(s => s.status === "active").length;
 
   const filtered = suppliers.filter(s => {
-    const mq = !q || s.name.toLowerCase().includes(q.toLowerCase()) || s.supplierCode.toLowerCase().includes(q.toLowerCase()) || (s.city?.toLowerCase().includes(q.toLowerCase()) ?? false);
+    const needle = q.toLowerCase();
+    // Phone numbers are stored in whatever format they were entered (local "05…" or
+    // international "+966…") — comparing raw substrings misses a search for one format against
+    // data stored in the other, so also compare their shared subscriber-number core.
+    const needleCore = phoneSearchCore(q);
+    const mq = !q
+      || s.name.toLowerCase().includes(needle)
+      || s.supplierCode.toLowerCase().includes(needle)
+      || (s.city?.toLowerCase().includes(needle) ?? false)
+      || (s.contactNumber?.toLowerCase().includes(needle) ?? false)
+      || (needleCore.length >= 4 && !!s.contactNumber && phoneSearchCore(s.contactNumber).includes(needleCore))
+      || (s.crNumber?.toLowerCase().includes(needle) ?? false)
+      || (s.vatNumber?.toLowerCase().includes(needle) ?? false);
     const ms = !(statusFilter.length && !statusFilter.includes(s.status));
-    return mq && ms;
+    const mc = !(categoryFilter.length && !categoryFilter.includes(s.category ?? ""));
+    const mt = !(supplyTypeFilter.length && !supplyTypeFilter.includes(s.supplyType ?? ""));
+    const mcity = !(cityFilter.length && !cityFilter.includes(s.city ?? ""));
+    const mpt = !(paymentTermsFilter.length && !paymentTermsFilter.includes(s.paymentTerms ?? ""));
+    return mq && ms && mc && mt && mcity && mpt;
   });
 
   return (
@@ -825,7 +885,7 @@ function SuppliersTab() {
 
       {/* Filters + Actions */}
       <div className="flex flex-wrap items-center gap-2">
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code, city…" className="h-9 w-60" />
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code, city, phone, CR/VAT…" className="h-9 w-60" />
         <div className="w-36">
           <SearchableMultiSelect
             placeholder="All Statuses"
@@ -835,6 +895,42 @@ function SuppliersTab() {
             ]}
             selected={statusFilter}
             onChange={setStatusFilter}
+          />
+        </div>
+        <div className="w-40">
+          <SearchableMultiSelect
+            placeholder="All Categories"
+            options={SUPPLIER_CATEGORIES.map(c => ({ id: c, label: c }))}
+            selected={categoryFilter}
+            onChange={setCategoryFilter}
+          />
+        </div>
+        <div className="w-44">
+          <SearchableMultiSelect
+            placeholder="All Supply Channels"
+            options={[
+              { id: "warehouse", label: "Warehouse" },
+              { id: "both", label: "Both (Direct + Warehouse)" },
+              { id: "mart_to_mart", label: "Mart to Mart" },
+            ]}
+            selected={supplyTypeFilter}
+            onChange={setSupplyTypeFilter}
+          />
+        </div>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Cities"
+            options={SAUDI_CITIES.map(c => ({ id: c, label: c }))}
+            selected={cityFilter}
+            onChange={setCityFilter}
+          />
+        </div>
+        <div className="w-36">
+          <SearchableMultiSelect
+            placeholder="All Payment Terms"
+            options={PAYMENT_TERMS_OPTIONS.map(t => ({ id: t, label: t }))}
+            selected={paymentTermsFilter}
+            onChange={setPaymentTermsFilter}
           />
         </div>
         <div className="flex-1" />

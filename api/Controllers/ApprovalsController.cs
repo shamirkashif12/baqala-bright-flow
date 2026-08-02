@@ -335,7 +335,12 @@ public class ApprovalsController(
                     var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments)
                         .FirstOrDefaultAsync(o => o.Id == pending.EntityId);
                     if (order is null) return NotFound(new { message = "The order this request was for no longer exists." });
-                    if (order.OrderStatus != "cancelled")
+                    // "refunded" means a return already restocked some or all of this order's items
+                    // (ReturnsController.Complete) — VoidAsync unconditionally restores every line's
+                    // full original quantity with no awareness of returns, so voiding on top of that
+                    // would add those units back to stock a second time. Skipped the same as an
+                    // already-"cancelled" order.
+                    if (order.OrderStatus is not ("cancelled" or "refunded"))
                         await orderVoidService.VoidAsync(order, pending.Reason);
                     break;
 
@@ -351,7 +356,21 @@ public class ApprovalsController(
 
                 case "item_deletion":
                     if (pending.EntityType == "Category")
-                        await productDeletion.DeleteCategoryAsync(pending.EntityId!.Value, actorId);
+                    {
+                        // Left as "pending" (not marked approved/rejected below) on a conflict, so
+                        // once products/subcategories are reassigned the approver can just retry
+                        // the same request instead of it having been silently lost to a 500.
+                        var outcome = await productDeletion.DeleteCategoryAsync(pending.EntityId!.Value, actorId);
+                        switch (outcome)
+                        {
+                            case CategoryDeletionOutcome.HasSubcategories:
+                                return Conflict(new { message = "Cannot delete a category that has subcategories. Delete or reassign them first." });
+                            case CategoryDeletionOutcome.HasProducts:
+                                return Conflict(new { message = "Cannot delete this category while products are still assigned to it. Reassign those products first." });
+                            case CategoryDeletionOutcome.NotFound:
+                                return NotFound(new { message = "This category no longer exists." });
+                        }
+                    }
                     else
                         await productDeletion.DeleteProductAsync(pending.EntityId!.Value, actorId, pending.BranchId);
                     break;

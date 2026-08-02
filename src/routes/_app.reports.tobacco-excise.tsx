@@ -2,20 +2,21 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { api, type TobaccoExciseReport as TobaccoExciseData, type TobaccoExciseRow, type ReportExportFormat, type User } from "@/lib/api";
+import { api, type TobaccoExciseReport as TobaccoExciseData, type TobaccoExciseRow, type TobaccoExciseTransactionRow, type ReportExportFormat, type User, type Product } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Cigarette, Coins, Package, RotateCcw, Tag, AlertTriangle, X } from "lucide-react";
+import { Cigarette, Coins, Package, RotateCcw, Tag, AlertTriangle, X, Eye } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/tobacco-excise")({ component: TobaccoExcise });
@@ -29,6 +30,61 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Drill-down behind one aggregated Product+Cashier row — same on-demand, scoped-by-id pattern as
+// the Inventory Aging & Product Performance and Employee Audit Center drawers. The row itself sums
+// an entire period, so it can't show which individual transactions made up that total.
+function TobaccoExciseTransactionsDrawer({ row, from, to, onClose }: { row: TobaccoExciseRow | null; from: string; to: string; onClose: () => void }) {
+  const [rows, setRows] = useState<TobaccoExciseTransactionRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!row) { setRows(null); return; }
+    setLoading(true);
+    api.getTobaccoExciseTransactions({ from, to, productId: row.productId, cashierId: row.cashierId ?? undefined })
+      .then(setRows)
+      .catch(() => toast.error("Failed to load transactions"))
+      .finally(() => setLoading(false));
+  }, [row, from, to]);
+
+  return (
+    <Sheet open={!!row} onOpenChange={(v) => !v && onClose()}>
+      <SheetContent className="w-[560px] overflow-y-auto">
+        {row && (
+          <>
+            <SheetHeader className="pb-4 border-b border-border/60">
+              <SheetTitle className="text-base">{row.productName}</SheetTitle>
+              <p className="text-xs text-muted-foreground">{row.sku} · Sold by {row.employee}</p>
+            </SheetHeader>
+            <div className="mt-4">
+              {loading ? (
+                <div className="text-muted-foreground text-sm py-4">Loading…</div>
+              ) : !rows || rows.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No transactions in the selected date range.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {rows.map((t, idx) => (
+                    <div key={idx} className="rounded-xl border border-border/40 px-3 py-2.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-medium">{t.orderNumber}</span>
+                        <span className="font-semibold"><SARIcon />{fmtSAR(t.exciseAmount)}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-muted-foreground">
+                        <span>{new Date(t.dateTime).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                        <span>{t.branch}</span>
+                        <span>Qty {t.quantity}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function TobaccoExcise() {
   const { user } = useAuth();
   const { canExport } = usePermission("Reports");
@@ -39,9 +95,12 @@ function TobaccoExcise() {
   const [to, setTo] = useState(todayStr());
   const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
   const [cashierId, setCashierId] = useState("all");
+  const [productId, setProductId] = useState("all");
   const [cashiers, setCashiers] = useState<User[]>([]);
+  const [tobaccoProducts, setTobaccoProducts] = useState<Product[]>([]);
   const [data, setData] = useState<TobaccoExciseData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [drillDownRow, setDrillDownRow] = useState<TobaccoExciseRow | null>(null);
 
   useEffect(() => {
     api.getUsers({ branchId: branchId !== "all" ? branchId : undefined })
@@ -53,16 +112,21 @@ function TobaccoExcise() {
     setCashierId("all");
   }, [branchId]);
 
+  useEffect(() => {
+    api.getProducts({ status: "active" }).then((p) => setTobaccoProducts(p.filter((x) => x.isTobacco))).catch(() => {});
+  }, []);
+
   const load = useCallback(() => {
     setLoading(true);
     api.getTobaccoExciseReport({
       from, to, branchId: branchId !== "all" ? branchId : undefined,
       cashierId: cashierId !== "all" ? cashierId : undefined,
+      productId: productId !== "all" ? productId : undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [from, to, branchId, cashierId]);
+  }, [from, to, branchId, cashierId, productId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -70,7 +134,8 @@ function TobaccoExcise() {
     try {
       const blob = await api.exportTobaccoExciseReport({
         from, to, branchId: branchId !== "all" ? branchId : undefined,
-        cashierId: cashierId !== "all" ? cashierId : undefined, exportedBy: user?.id, format,
+        cashierId: cashierId !== "all" ? cashierId : undefined,
+        productId: productId !== "all" ? productId : undefined, exportedBy: user?.id, format,
       });
       downloadBlob(blob, `tobacco-excise-${from}-to-${to}.${format}`);
     } catch (e) {
@@ -82,18 +147,16 @@ function TobaccoExcise() {
   const fmt = (n: number) => fmtSAR(n);
   const chartData = (data?.rows ?? []).slice(0, 10).map((r) => ({ name: r.sku, excise: r.exciseAmount }));
 
-  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchId !== (lockedBranchId ?? "all") || cashierId !== "all";
+  const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchId !== (lockedBranchId ?? "all") || cashierId !== "all" || productId !== "all";
   const clearFilters = () => {
-    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchId(lockedBranchId ?? "all"); setCashierId("all");
+    setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchId(lockedBranchId ?? "all"); setCashierId("all"); setProductId("all");
   };
 
   return (
     <PageShell title="Tobacco Excise Report" subtitle="Excise tax calculations on regulated tobacco products">
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex items-center gap-1">
-          <FilterField label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></FilterField>
-          <span className="text-xs text-muted-foreground">–</span>
-          <FilterField label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></FilterField>
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         </div>
         {!lockedBranchId && (
           <FilterField label="Branch">
@@ -112,6 +175,15 @@ function TobaccoExcise() {
             <SelectContent>
               <SelectItem value="all">All Employees</SelectItem>
               {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Product">
+          <Select value={productId} onValueChange={setProductId}>
+            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Products</SelectItem>
+              {tobaccoProducts.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
             </SelectContent>
           </Select>
         </FilterField>
@@ -169,6 +241,11 @@ function TobaccoExcise() {
             { key: "exciseAmount", label: "Excise Amount", render: (r: TobaccoExciseRow) => <span className="font-semibold"><SARIcon />{fmt(r.exciseAmount)}</span> },
             { key: "netExcise", label: "Net Excise", render: (r: TobaccoExciseRow) => <><SARIcon />{fmt(r.netExcise)}</> },
             { key: "complianceStatus", label: "Compliance Status", render: (r: TobaccoExciseRow) => <StatusBadge status={r.complianceStatus} /> },
+            { key: "action", label: "Action", render: (r: TobaccoExciseRow) => (
+              <Button size="icon" variant="ghost" className="h-7 w-7" title="View transactions" onClick={() => setDrillDownRow(r)}>
+                <Eye className="h-3.5 w-3.5" />
+              </Button>
+            ) },
           ]}
           rows={data?.rows ?? []}
         />
@@ -179,6 +256,7 @@ function TobaccoExcise() {
           <span>Net Excise: <SARIcon />{fmt((data?.rows ?? []).reduce((s, r) => s + r.netExcise, 0))}</span>
         </div>
       )}
+      <TobaccoExciseTransactionsDrawer row={drillDownRow} from={from} to={to} onClose={() => setDrillDownRow(null)} />
     </PageShell>
   );
 }

@@ -2,14 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/metric-card";
-import { PaginatedDataTable } from "@/components/module-placeholder";
+import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
+import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -27,18 +27,24 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+const PAYMENT_METHODS = [
+  { id: "cash", label: "Cash" }, { id: "card", label: "Card" }, { id: "wallet", label: "Wallet" }, { id: "qr", label: "QR" },
+];
+const CUSTOMER_TYPES = [{ id: "registered", label: "Registered" }, { id: "walk-in", label: "Walk-in" }];
+
 function DailySales() {
   const { user } = useAuth();
   const { canExport } = usePermission("Reports");
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
   const { branches } = useBranch();
 
-  const [date, setDate] = useState(todayStr());
-  const [branchId, setBranchId] = useState(lockedBranchId ?? "all");
-  const [terminalId, setTerminalId] = useState("all");
-  const [cashierId, setCashierId] = useState("all");
-  const [paymentMethod, setPaymentMethod] = useState("all");
-  const [customerType, setCustomerType] = useState("all");
+  const [from, setFrom] = useState(todayStr());
+  const [to, setTo] = useState(todayStr());
+  const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [terminalIds, setTerminalIds] = useState<string[]>([]);
+  const [cashierIds, setCashierIds] = useState<string[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
+  const [customerTypes, setCustomerTypes] = useState<string[]>([]);
   const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<DailySalesReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,53 +52,57 @@ function DailySales() {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [cashiers, setCashiers] = useState<User[]>([]);
 
+  const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
+
   useEffect(() => {
-    api.getTerminals({ branchId: branchId !== "all" ? [branchId] : undefined }).then(setTerminals).catch(() => {});
-    api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setCashiers(u.filter((x) => x.status === "active" && x.roleName === "Cashier"))).catch(() => {});
-    setTerminalId("all");
-    setCashierId("all");
-  }, [branchId]);
+    api.getTerminals({ branchId: branchIds.length ? branchIds : undefined }).then(setTerminals).catch(() => {});
+    api.getUsers({ branchId: scopedBranchId }).then((u) => setCashiers(u.filter((x) => x.status === "active" && x.roleName === "Cashier"))).catch(() => {});
+    setTerminalIds([]);
+    setCashierIds([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchIds.join(",")]);
 
   const load = useCallback(() => {
     setLoading(true);
     api.getDailySalesReport({
-      date,
-      branchId: branchId !== "all" ? branchId : undefined,
-      terminalId: terminalId !== "all" ? terminalId : undefined,
-      cashierId: cashierId !== "all" ? cashierId : undefined,
-      paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
-      customerType: customerType !== "all" ? customerType : undefined,
+      from, to,
+      branchId: branchIds.length ? branchIds : undefined,
+      terminalId: terminalIds.length ? terminalIds : undefined,
+      cashierId: cashierIds.length ? cashierIds : undefined,
+      paymentMethod: paymentMethods.length ? paymentMethods : undefined,
+      customerType: customerTypes.length ? customerTypes : undefined,
       hasTobaccoFee: hasTobaccoFee || undefined,
     })
       .then(setData)
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, [date, branchId, terminalId, cashierId, paymentMethod, customerType, hasTobaccoFee]);
+  }, [from, to, branchIds, terminalIds, cashierIds, paymentMethods, customerTypes, hasTobaccoFee]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
       const blob = await api.exportDailySalesReport({
-        date, branchId: branchId !== "all" ? branchId : undefined,
-        terminalId: terminalId !== "all" ? terminalId : undefined,
-        cashierId: cashierId !== "all" ? cashierId : undefined,
-        paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
-        customerType: customerType !== "all" ? customerType : undefined,
+        from, to,
+        branchId: branchIds.length ? branchIds : undefined,
+        terminalId: terminalIds.length ? terminalIds : undefined,
+        cashierId: cashierIds.length ? cashierIds : undefined,
+        paymentMethod: paymentMethods.length ? paymentMethods : undefined,
+        customerType: customerTypes.length ? customerTypes : undefined,
         hasTobaccoFee: hasTobaccoFee || undefined,
         exportedBy: user?.id, format,
       });
-      downloadBlob(blob, `daily-sales-${date}.${format}`);
+      downloadBlob(blob, `daily-sales-${from}-to-${to}.${format}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
     }
   };
 
-  const hasFilters = date !== todayStr() || branchId !== (lockedBranchId ?? "all") || terminalId !== "all"
-    || cashierId !== "all" || paymentMethod !== "all" || customerType !== "all" || hasTobaccoFee !== false;
+  const hasFilters = from !== todayStr() || to !== todayStr() || branchIds.length !== (lockedBranchId ? 1 : 0)
+    || terminalIds.length > 0 || cashierIds.length > 0 || paymentMethods.length > 0 || customerTypes.length > 0 || hasTobaccoFee !== false;
   const clearFilters = () => {
-    setDate(todayStr()); setBranchId(lockedBranchId ?? "all"); setTerminalId("all"); setCashierId("all");
-    setPaymentMethod("all"); setCustomerType("all"); setHasTobaccoFee(false);
+    setFrom(todayStr()); setTo(todayStr()); setBranchIds(lockedBranchId ? [lockedBranchId] : []); setTerminalIds([]); setCashierIds([]);
+    setPaymentMethods([]); setCustomerTypes([]); setHasTobaccoFee(false);
   };
 
   const kpis = data?.kpis;
@@ -105,51 +115,62 @@ function DailySales() {
   return (
     <PageShell
       title="Daily Sales"
-      subtitle="Hour-by-hour sales, payment split and VAT for a single business day"
+      subtitle="Hour-of-day sales, payment split and VAT — pick a single day, or a range to compare hourly patterns"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-9 w-40" />
+      <div className="flex flex-wrap items-end gap-2">
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         {!lockedBranchId && (
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <FilterField label="Branch">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+          </FilterField>
         )}
-        <Select value={terminalId} onValueChange={setTerminalId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Terminal" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Terminals</SelectItem>
-            {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={cashierId} onValueChange={setCashierId}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Cashier" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Cashiers</SelectItem>
-            {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Payment Method" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Methods</SelectItem>
-            <SelectItem value="cash">Cash</SelectItem>
-            <SelectItem value="card">Card</SelectItem>
-            <SelectItem value="wallet">Wallet</SelectItem>
-            <SelectItem value="qr">QR</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={customerType} onValueChange={setCustomerType}>
-          <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Customer Type" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Customers</SelectItem>
-            <SelectItem value="registered">Registered</SelectItem>
-            <SelectItem value="walk-in">Walk-in</SelectItem>
-          </SelectContent>
-        </Select>
+        <FilterField label="Terminal">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Terminals"
+              options={terminals.map((t) => ({ id: t.id, label: t.name }))}
+              selected={terminalIds}
+              onChange={setTerminalIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Cashier">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Cashiers"
+              options={cashiers.map((c) => ({ id: c.id, label: c.fullName }))}
+              selected={cashierIds}
+              onChange={setCashierIds}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Payment Method">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Methods"
+              options={PAYMENT_METHODS}
+              selected={paymentMethods}
+              onChange={setPaymentMethods}
+            />
+          </div>
+        </FilterField>
+        <FilterField label="Customer Type">
+          <div className="w-40">
+            <SearchableMultiSelect
+              placeholder="All Customers"
+              options={CUSTOMER_TYPES}
+              selected={customerTypes}
+              onChange={setCustomerTypes}
+            />
+          </div>
+        </FilterField>
         <label className="flex items-center gap-1.5 text-sm px-2">
           <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
           Tobacco fee only
@@ -216,8 +237,8 @@ function DailySales() {
           </div>
           {visibleRows.length === 0 ? (
             <Card className="p-8 border-border/60 shadow-card text-center">
-              <p className="text-sm font-medium">No transactions recorded for this day</p>
-              <p className="text-xs text-muted-foreground mt-1">Try a different date or clear the filters above.</p>
+              <p className="text-sm font-medium">No transactions recorded for this date range</p>
+              <p className="text-xs text-muted-foreground mt-1">Try a different date range or clear the filters above.</p>
             </Card>
           ) : (
             <PaginatedDataTable

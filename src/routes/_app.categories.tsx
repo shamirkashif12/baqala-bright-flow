@@ -7,15 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Plus, Pencil, Trash2, Loader2, Tag, CheckCircle2, Search,
+  Plus, Pencil, Trash2, Loader2, Tag, CheckCircle2, Search, X,
   ToggleLeft, ToggleRight, Clock, ChevronRight, ChevronDown, Layers, CornerDownRight, FolderPlus,
 } from "lucide-react";
 import { api, type Category } from "@/lib/api";
 import { RoleGate } from "@/components/role-gate";
+import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/categories")({
@@ -158,6 +159,12 @@ function DeleteDialog({ category, onClose, onDone }: {
   const [error, setError] = useState("");
   const [reason, setReason] = useState("");
 
+  // Dialog visibility is driven by `!!category` on an instance that stays mounted, so a stale
+  // error from a previous attempt would otherwise still be showing the next time it's reopened.
+  useEffect(() => {
+    if (category) { setError(""); setReason(""); }
+  }, [category]);
+
   const handleDelete = async () => {
     if (!category) return;
     setDeleting(true); setError("");
@@ -204,9 +211,43 @@ function DeleteDialog({ category, onClose, onDone }: {
   );
 }
 
+// ─── Reject Reason Dialog ─────────────────────────────────────────────────────
+
+function RejectDialog({ category, onClose, onSubmit, submitting }: {
+  category: Category | null; onClose: () => void;
+  onSubmit: (reason: string) => void; submitting: boolean;
+}) {
+  const [reason, setReason] = useState("");
+  useEffect(() => { if (category) setReason(""); }, [category]);
+
+  return (
+    <Dialog open={!!category} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>Reject Deletion Request</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Reject deleting <span className="font-semibold text-foreground">{category?.name}</span>?
+          It stays exactly as it is — nothing is removed.
+        </p>
+        <div className="mt-1">
+          <Label className="text-xs">Reason (required)</Label>
+          <Textarea className="resize-none text-sm h-16 mt-1" placeholder="Why is this deletion being rejected?"
+            value={reason} onChange={e => setReason(e.target.value)} />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button variant="destructive" onClick={() => onSubmit(reason.trim())} disabled={submitting || !reason.trim()}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Reject
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 function CategoriesPage() {
+  const { canApprove } = usePermission("Inventory");
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -217,6 +258,8 @@ function CategoriesPage() {
   const [addParentId, setAddParentId] = useState<string | undefined>(undefined);
   const [editItem, setEditItem] = useState<Category | null>(null);
   const [deleteItem, setDeleteItem] = useState<Category | null>(null);
+  const [rejectItem, setRejectItem] = useState<Category | null>(null);
+  const [decidingId, setDecidingId] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -228,6 +271,31 @@ function CategoriesPage() {
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
+
+  // Inline approve/reject on the pending badge itself — mirrors Purchase Orders/Inventory
+  // write-offs, so an approver can act right where the deletion was requested instead of
+  // being routed to the Approval Center for something this small.
+  const handleApprove = async (cat: Category) => {
+    if (!cat.pendingApproval) return;
+    setDecidingId(cat.id);
+    try {
+      await api.decideApproval(cat.pendingApproval.id, true);
+      toast.success(`"${cat.name}" deleted.`);
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to approve."); }
+    finally { setDecidingId(null); }
+  };
+  const handleReject = async (reason: string) => {
+    if (!rejectItem?.pendingApproval || !reason.trim()) return;
+    setDecidingId(rejectItem.id);
+    try {
+      await api.decideApproval(rejectItem.pendingApproval.id, false, reason);
+      toast.success(`Deletion of "${rejectItem.name}" rejected.`);
+      setRejectItem(null);
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to reject."); }
+    finally { setDecidingId(null); }
+  };
 
   const topCategories = useMemo(
     () => categories.filter(c => !c.parentId).slice().sort((a, b) => a.sortOrder - b.sortOrder),
@@ -362,6 +430,18 @@ function CategoriesPage() {
                         <Clock className="h-2.5 w-2.5" />Deletion Pending
                       </Badge>
                     )}
+                    {top.pendingApproval && canApprove && (
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" className="h-6 px-2 text-[11px] gradient-primary text-primary-foreground border-0"
+                          onClick={() => handleApprove(top)} disabled={decidingId === top.id}>
+                          {decidingId === top.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-6 px-2 text-[11px] border-destructive/50 text-destructive hover:bg-destructive/10"
+                          onClick={() => setRejectItem(top)} disabled={decidingId === top.id}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => openAdd(top.id)}>
@@ -393,6 +473,18 @@ function CategoriesPage() {
                           <Clock className="h-2.5 w-2.5" />Deletion Pending
                         </Badge>
                       )}
+                      {c.pendingApproval && canApprove && (
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" className="h-6 px-2 text-[11px] gradient-primary text-primary-foreground border-0"
+                            onClick={() => handleApprove(c)} disabled={decidingId === c.id}>
+                            {decidingId === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-6 px-2 text-[11px] border-destructive/50 text-destructive hover:bg-destructive/10"
+                            onClick={() => setRejectItem(c)} disabled={decidingId === c.id}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit"
@@ -422,6 +514,7 @@ function CategoriesPage() {
       <CategoryDialog open={addOpen || !!editItem} onClose={closeDialogs}
         editing={editItem} presetParentId={editItem ? undefined : addParentId} categories={categories} onDone={load} />
       <DeleteDialog category={deleteItem} onClose={() => setDeleteItem(null)} onDone={load} />
+      <RejectDialog category={rejectItem} onClose={() => setRejectItem(null)} onSubmit={handleReject} submitting={!!decidingId} />
     </PageShell>
   );
 }

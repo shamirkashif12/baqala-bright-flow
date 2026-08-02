@@ -51,18 +51,20 @@ public class SuppliersController(BaqalaDbContext db, IAuditService audit) : Cont
 
     // CR/VAT/phone were only checked for presence, never format — a supplier could be saved with
     // e.g. a 4-digit "CR number" and nothing downstream (ZATCA invoicing, PO display) would catch
-    // it until it silently failed somewhere else. Checked on both Create and Update (unlike the
-    // presence check above, format applies even when editing a legacy supplier that already has a
-    // value — an existing value should still be a valid one).
-    private static string? ValidateFormats(Supplier supplier)
+    // it until it silently failed somewhere else. Checked on both Create and Update, but on Update
+    // only for fields that actually changed vs. `original` — a value that's already stored (even if
+    // malformed) predates this check and shouldn't block saving an edit to some unrelated field.
+    private static string? ValidateFormats(Supplier supplier, Supplier? original = null)
     {
-        if (!ContactValidation.IsValidSaudiPhone(supplier.ContactNumber)) return "Enter a valid Saudi mobile number (05XXXXXXXX).";
-        if (!ContactValidation.IsValidSaudiCr(supplier.CrNumber)) return "Enter a valid CR number (10 digits).";
-        if (!ContactValidation.IsValidSaudiVat(supplier.VatNumber)) return "Enter a valid VAT number (15 digits, starting and ending with 3).";
-        if (!ContactValidation.IsValidContactPersonName(supplier.ContactPerson)) return "Enter a valid contact person name (letters only).";
-        if (!ContactValidation.IsValidContactPersonName(supplier.BankAccountHolder)) return "Enter a valid account holder name (letters only).";
-        if (!ContactValidation.IsValidBankAccountNumber(supplier.BankAccountNumber)) return "Enter a valid bank account number (digits only).";
-        if (!ContactValidation.IsValidSaudiIban(supplier.BankIban)) return "Enter a valid Saudi IBAN (SA followed by 22 digits).";
+        bool Changed(Func<Supplier, string?> get) => original is null || get(supplier) != get(original);
+
+        if (Changed(s => s.ContactNumber) && !ContactValidation.IsValidSaudiPhone(supplier.ContactNumber)) return "Enter a valid Saudi mobile number (05XXXXXXXX).";
+        if (Changed(s => s.CrNumber) && !ContactValidation.IsValidSaudiCr(supplier.CrNumber)) return "Enter a valid CR number (10 digits).";
+        if (Changed(s => s.VatNumber) && !ContactValidation.IsValidSaudiVat(supplier.VatNumber)) return "Enter a valid VAT number (15 digits, starting and ending with 3).";
+        if (Changed(s => s.ContactPerson) && !ContactValidation.IsValidContactPersonName(supplier.ContactPerson)) return "Enter a valid contact person name (letters only).";
+        if (Changed(s => s.BankAccountHolder) && !ContactValidation.IsValidContactPersonName(supplier.BankAccountHolder)) return "Enter a valid account holder name (letters only).";
+        if (Changed(s => s.BankAccountNumber) && !ContactValidation.IsValidBankAccountNumber(supplier.BankAccountNumber)) return "Enter a valid bank account number (digits only).";
+        if (Changed(s => s.BankIban) && !ContactValidation.IsValidSaudiIban(supplier.BankIban)) return "Enter a valid Saudi IBAN (SA followed by 22 digits).";
         return null;
     }
 
@@ -97,7 +99,7 @@ public class SuppliersController(BaqalaDbContext db, IAuditService audit) : Cont
     {
         var supplier = await db.Suppliers.FindAsync(id);
         if (supplier is null) return NotFound();
-        if (ValidateFormats(updated) is { } formatError) return BadRequest(new { message = formatError });
+        if (ValidateFormats(updated, supplier) is { } formatError) return BadRequest(new { message = formatError });
         supplier.Name = updated.Name;
         supplier.WarehouseName = updated.WarehouseName;
         supplier.ContactPerson = updated.ContactPerson;
