@@ -2053,9 +2053,26 @@ public static class DataSeeder
             db.ShiftCashMovements.RemoveRange(db.ShiftCashMovements.Where(m => m.ShiftId == shiftId));
         await db.SaveChangesAsync();
 
+        // One at a time with its own try/catch, not a bulk RemoveRange+single SaveChangesAsync:
+        // this was written assuming every non-cashier shift is pure test junk with nothing else
+        // pointing at it, but Order.ShiftId can still reference one for real (a supervisor who
+        // covered a till). A bulk save aborts entirely on the first FK violation and re-throws on
+        // every restart; skipping just the shift that's still actually referenced (same pattern as
+        // PatchRemoveTestBranchesAsync above) lets the rest of the cleanup proceed.
         foreach (var shiftId in shiftIds)
-            db.CashierShifts.RemoveRange(db.CashierShifts.Where(s => s.Id == shiftId));
-        await db.SaveChangesAsync();
+        {
+            var shift = await db.CashierShifts.FindAsync(shiftId);
+            if (shift is null) continue;
+            db.CashierShifts.Remove(shift);
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                db.Entry(shift).State = EntityState.Unchanged;
+            }
+        }
     }
 
     // Earlier dummy/test data seeded orders with no line items at all — not a
