@@ -24,6 +24,18 @@ export function isValidSaudiVat(vat: string): boolean {
 }
 
 export const PHONE_MAX_LENGTH = 15;
+
+// Reduces a Saudi phone number to its bare 9-digit subscriber number, stripping whichever prefix
+// it's using (leading "0" for local 05XXXXXXXX, or "966" country code for +9665XXXXXXXX) — so a
+// number stored as "+966501234567" and a search for the same number typed locally as "0501234567"
+// resolve to the same "501234567" core instead of failing a plain substring match. Used for
+// phone-field search only; format validation still goes through isValidSaudiPhone above.
+export function phoneSearchCore(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (digits.startsWith("966")) return digits.slice(3);
+  if (digits.startsWith("0")) return digits.slice(1);
+  return digits;
+}
 export const CONTACT_PERSON_MAX_LENGTH = 100;
 
 // Letters only (Latin or Arabic script) plus the punctuation real names use (space, hyphen,

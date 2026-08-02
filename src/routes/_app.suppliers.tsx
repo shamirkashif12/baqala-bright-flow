@@ -24,7 +24,7 @@ import { usePermission } from "@/lib/use-permission";
 import {
   isValidSaudiCr, isValidSaudiPhone, isValidSaudiVat, isValidContactPersonName,
   isValidBankAccountNumber, isValidSaudiIban,
-  sanitizePhoneInput, sanitizeNameInput, sanitizeDigitsInput, sanitizeIbanInput,
+  sanitizePhoneInput, sanitizeNameInput, sanitizeDigitsInput, sanitizeIbanInput, phoneSearchCore,
   PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH, BANK_ACCOUNT_MAX_LENGTH, IBAN_MAX_LENGTH,
 } from "@/lib/validation";
 import { fileToDataUrl } from "@/lib/image";
@@ -822,11 +822,16 @@ function SuppliersTab() {
 
   const filtered = suppliers.filter(s => {
     const needle = q.toLowerCase();
+    // Phone numbers are stored in whatever format they were entered (local "05…" or
+    // international "+966…") — comparing raw substrings misses a search for one format against
+    // data stored in the other, so also compare their shared subscriber-number core.
+    const needleCore = phoneSearchCore(q);
     const mq = !q
       || s.name.toLowerCase().includes(needle)
       || s.supplierCode.toLowerCase().includes(needle)
       || (s.city?.toLowerCase().includes(needle) ?? false)
       || (s.contactNumber?.toLowerCase().includes(needle) ?? false)
+      || (needleCore.length >= 4 && !!s.contactNumber && phoneSearchCore(s.contactNumber).includes(needleCore))
       || (s.crNumber?.toLowerCase().includes(needle) ?? false)
       || (s.vatNumber?.toLowerCase().includes(needle) ?? false);
     const ms = !(statusFilter.length && !statusFilter.includes(s.status));

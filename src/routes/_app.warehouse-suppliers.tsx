@@ -16,7 +16,7 @@ import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
 import {
   isValidContactPersonName, isValidSaudiPhone, isValidSaudiCr, isValidSaudiVat,
-  sanitizeNameInput, sanitizePhoneInput, PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH,
+  sanitizeNameInput, sanitizePhoneInput, phoneSearchCore, PHONE_MAX_LENGTH, CONTACT_PERSON_MAX_LENGTH,
 } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/warehouse-suppliers")({ component: WarehouseSuppliers });
@@ -141,11 +141,15 @@ function WarehouseSuppliers() {
 
   const filtered = suppliers.filter(s => {
     const needle = q.trim().toLowerCase();
+    // See phoneSearchCore: matches "05…" search terms against "+966…"-formatted stored numbers
+    // (and vice versa) that a plain substring check would otherwise miss.
+    const needleCore = phoneSearchCore(needle);
     const mq = !needle
       || s.name.toLowerCase().includes(needle)
       || s.supplierCode.toLowerCase().includes(needle)
       || (s.city?.toLowerCase().includes(needle) ?? false)
       || (s.contactNumber?.toLowerCase().includes(needle) ?? false)
+      || (needleCore.length >= 4 && !!s.contactNumber && phoneSearchCore(s.contactNumber).includes(needleCore))
       || (s.crNumber?.toLowerCase().includes(needle) ?? false)
       || (s.vatNumber?.toLowerCase().includes(needle) ?? false);
     const ms = !(statusFilter.length && !statusFilter.includes(s.status));
