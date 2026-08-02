@@ -11,42 +11,36 @@ namespace BaqalaPOS.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropForeignKey(
-                name: "FK_inventory_batches_branches_branch_id",
-                table: "inventory_batches");
+            // warehouse_id is a brand-new column added here, referencing `warehouses` (created in
+            // an earlier migration) — same class of bug MigrationCollationHelper exists for: this
+            // migration used a plain AddForeignKey instead of the collation-matching variant, and
+            // MySQL rejects the FK outright ("Referencing column and referenced column ... are
+            // incompatible") whenever the server's ambient default collation drifted between the
+            // two migrations' run times. Also made every statement idempotent — same no-transaction
+            // partial-failure risk as every other migration in this file that's been patched.
+            migrationBuilder.DropForeignKeyIfExists("inventory_batches", "FK_inventory_batches_branches_branch_id");
 
-            migrationBuilder.AlterColumn<Guid>(
-                name: "branch_id",
-                table: "inventory_batches",
-                type: "char(36)",
-                nullable: true,
-                oldClrType: typeof(Guid),
-                oldType: "char(36)");
+            migrationBuilder.Sql("ALTER TABLE `inventory_batches` MODIFY `branch_id` char(36) NULL;");
 
-            migrationBuilder.AddColumn<Guid>(
-                name: "warehouse_id",
-                table: "inventory_batches",
-                type: "char(36)",
-                nullable: true);
+            migrationBuilder.AddColumnIfNotExists("inventory_batches", "warehouse_id", "char(36) NULL");
+            migrationBuilder.CreateIndexIfNotExists("IX_inventory_batches_warehouse_id", "inventory_batches", "warehouse_id");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_inventory_batches_warehouse_id",
-                table: "inventory_batches",
-                column: "warehouse_id");
-
-            migrationBuilder.AddForeignKey(
+            migrationBuilder.AddForeignKeyIfNotExists(
                 name: "FK_inventory_batches_branches_branch_id",
                 table: "inventory_batches",
                 column: "branch_id",
                 principalTable: "branches",
-                principalColumn: "id");
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT");
 
-            migrationBuilder.AddForeignKey(
+            migrationBuilder.AddForeignKeyWithMatchedCollationIfNotExists(
                 name: "FK_inventory_batches_warehouses_warehouse_id",
                 table: "inventory_batches",
                 column: "warehouse_id",
                 principalTable: "warehouses",
-                principalColumn: "id");
+                principalColumn: "id",
+                onDeleteSql: "RESTRICT",
+                nullable: true);
         }
 
         /// <inheritdoc />
