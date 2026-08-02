@@ -154,10 +154,8 @@ function InventoryDashboard() {
     <PageShell title="Inventory Aging" subtitle="Product age, days since last movement, slow-moving and dead stock">
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground -mt-2">
         <Info className="h-3.5 w-3.5" />
-        Looking for sales velocity, units sold and turnover ranking instead? See{" "}
+        Looking for sales velocity, turnover and profitability instead? See{" "}
         <Link to="/reports/inventory-aging-performance" className="underline underline-offset-2 hover:text-foreground">Product Performance & Classification</Link>.
-        {" "}For a dedicated margin breakdown, see{" "}
-        <Link to="/reports/profit-margin" className="underline underline-offset-2 hover:text-foreground">Profit Margin</Link>.
       </p>
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
         <div className="flex flex-wrap items-end gap-2">
@@ -357,13 +355,9 @@ function InventoryDashboard() {
                 ),
               },
               { key: "onHandQty", label: "On Hand" },
+              // Profitability (Gross Profit / Margin %) is already covered by the Product
+              // Performance and Profit Margin reports — intentionally not duplicated here.
               ...(canViewCost ? [{ key: "stockValue", label: "Stock Value", render: (r: InventoryAgingRow) => <><SARIcon />{fmt(r.stockValue)}</> }] : []),
-              ...(canViewCost
-                ? [
-                    { key: "grossProfit", label: "Gross Profit", render: (r: InventoryAgingRow) => <><SARIcon />{fmt(r.grossProfit)}</> },
-                    { key: "marginPct", label: "Margin %", render: (r: InventoryAgingRow) => (r.marginPct != null ? `${r.marginPct}%` : "N/A") },
-                  ]
-                : []),
               {
                 key: "productAgeDays", label: "Age in Stock",
                 // Null means no batch record exists for this product here — the stock row alone

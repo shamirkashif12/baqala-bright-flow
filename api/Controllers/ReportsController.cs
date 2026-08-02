@@ -1399,7 +1399,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             result.Kpis.WastageValue = 0;
             result.DeadStockValue = 0;
             foreach (var b in result.Aging) b.StockValue = 0;
-            foreach (var r in result.AgingRows) { r.StockValue = 0; r.GrossProfit = 0; r.MarginPct = null; }
+            foreach (var r in result.AgingRows) r.StockValue = 0;
         }
         return Ok(result);
     }
@@ -1563,11 +1563,10 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         // uses (composite sales+turnover+margin+recency score — see ProductPerformanceThresholds),
         // computed with this report's own filters so a product's tier can never disagree between
         // the two pages. Keyed by product, since the score is a per-product figure, not per-location.
+        // Profitability itself is already covered by the Product Performance and Profit Margin
+        // reports (Gross Profit / Margin % columns there) — not duplicated onto this row.
         var perf = await BuildProductPerformanceAsync(rangeFrom, rangeToExclusive, branchIds, warehouseIds, categoryIds, productIdFilters, supplierIds, employeeIds, productStatuses, []);
-        // Profitability (gross profit / margin %) is carried through from the same composite build
-        // rather than recomputed, so the two reports can never disagree on a product's numbers —
-        // this is the FRD's "profitability" dimension surfaced directly on the aging row.
-        var classificationByProduct = perf.Rows.ToDictionary(r => r.ProductId, r => (r.Classification, r.PerformanceScore, r.GrossProfit, r.MarginPct));
+        var classificationByProduct = perf.Rows.ToDictionary(r => r.ProductId, r => (r.Classification, r.PerformanceScore));
 
         var agingRows = snapshot
             .Where(r => r.OnHandQty > 0)
@@ -1581,8 +1580,7 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                     ? (int)(nowUtc - received).TotalDays
                     : null;
                 var unitsMoved = soldLookup.TryGetValue(r.ProductId, out var u) ? u : 0;
-                var (tier, score, grossProfit, marginPct) = classificationByProduct.TryGetValue(r.ProductId, out var c)
-                    ? c : ("Slow Moving Products", 0m, 0m, (decimal?)null);
+                var (tier, score) = classificationByProduct.TryGetValue(r.ProductId, out var c) ? c : ("Slow Moving Products", 0m);
                 return new InventoryAgingRow
                 {
                     ProductId = r.ProductId,
@@ -1594,8 +1592,6 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
                     LocationType = r.LocationType,
                     OnHandQty = r.OnHandQty,
                     StockValue = r.StockCostValue,
-                    GrossProfit = grossProfit,
-                    MarginPct = marginPct,
                     ProductAgeDays = ageDays,
                     DaysSinceLastMovement = daysSince,
                     LastMovementDate = lastMovement,
@@ -6164,10 +6160,8 @@ public sealed class InventoryAgingRow
     public string LocationType { get; init; } = "";
     public decimal OnHandQty { get; init; }
     public decimal StockValue { get; set; }
-    // Profitability (FRD §INV-007) — same per-product gross profit / margin the Product Performance
-    // report computes, carried through rather than recomputed so the two reports never disagree.
-    public decimal GrossProfit { get; set; }
-    public decimal? MarginPct { get; set; }
+    // Profitability (FRD §INV-007) is already covered by the Product Performance and Profit
+    // Margin reports (Gross Profit / Margin % columns there) — intentionally not duplicated here.
     // Age of the oldest batch still holding stock here. Null when no batch record exists — the
     // stock row alone cannot say when the goods arrived.
     public int? ProductAgeDays { get; init; }

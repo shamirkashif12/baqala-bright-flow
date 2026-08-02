@@ -132,8 +132,6 @@ function InventoryAgingPerformance() {
         <Info className="h-3.5 w-3.5" />
         Looking for batch age or days-since-last-movement instead? See{" "}
         <Link to="/reports/inventory-dashboard" className="underline underline-offset-2 hover:text-foreground">Inventory Aging</Link>.
-        {" "}For the full transaction ledger across every product, see{" "}
-        <Link to="/reports/stock-movement-history" className="underline underline-offset-2 hover:text-foreground">Stock Movement History</Link>.
       </p>
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
         <div className="flex flex-wrap items-end gap-2">

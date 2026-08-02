@@ -131,11 +131,8 @@ function StockMovementHistory() {
     >
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground -mt-2">
         <Info className="h-3.5 w-3.5" />
-        This is the full ledger across every product. For one product's own history alongside its
-        sales and batches, use the drill-down (Eye icon) on{" "}
-        <Link to="/reports/inventory-dashboard" className="underline underline-offset-2 hover:text-foreground">Inventory Aging</Link>
-        {" "}or{" "}
-        <Link to="/reports/inventory-aging-performance" className="underline underline-offset-2 hover:text-foreground">Product Performance</Link>.
+        For one product's own history, use the drill-down (Eye icon) on{" "}
+        <Link to="/reports/inventory-dashboard" className="underline underline-offset-2 hover:text-foreground">Inventory Aging</Link>.
       </p>
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
         <div className="flex flex-wrap items-end gap-2">

@@ -2230,9 +2230,8 @@ export interface InventoryAgingRow {
   productStatus: string;
   location: string; locationType: "branch" | "warehouse";
   onHandQty: number; stockValue: number;
-  // Profitability (FRD §INV-007) — carried through from the same per-product score the Product
-  // Performance report computes, so the two reports never disagree.
-  grossProfit: number; marginPct?: number | null;
+  // Profitability (FRD §INV-007) is already covered by the Product Performance and Profit Margin
+  // reports (Gross Profit / Margin % columns there) — intentionally not duplicated on this row.
   // Null when no batch record exists — the stock row alone can't say when goods arrived.
   productAgeDays?: number | null;
   daysSinceLastMovement: number;

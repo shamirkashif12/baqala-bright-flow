@@ -79,11 +79,9 @@ function buildReports(exportedBy?: string): ReportCard[] {
     // KPI dashboard rather than a tabular report — there is no row set to export, so it opts out
     // of the export affordance the others share.
     //
-    // Two reports over the same underlying classification, split by what they're FOR: this one is
-    // "is this stock physically stale" (age/days-since-movement, ranked by location), the next is
-    // "is this product a business performer" (sales velocity/turnover/margin, ranked catalog-wide).
-    // Both cross-link to each other and to Stock Movement History in-page — see the info banner on
-    // each report — since the split reads as two similarly-named reports otherwise.
+    // Split from the next report by what they're FOR: this one is "is this stock physically
+    // stale" (age/days-since-movement, per location), the next is "is this product a business
+    // performer" (sales/turnover/margin, catalog-wide). Each links to the other in-page.
     { code: "inventory-dashboard", name: "Inventory Aging (by Stock Age & Location)", desc: "Physical staleness per location — product age, days since movement, slow-moving & dead stock, with drill-down", icon: Hourglass, color: "primary",
       href: "/reports/inventory-dashboard" },
     { code: "inventory-aging-performance", name: "Product Performance (by Sales & Turnover)", desc: "Business ranking per product — Star/High/Average/Slow performers & Dead Stock by sales, turnover & profitability, with drill-down", icon: Sparkles, color: "success",
