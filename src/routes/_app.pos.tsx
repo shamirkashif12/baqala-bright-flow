@@ -2310,8 +2310,19 @@ function POS() {
                     <button
                       key={p.sku}
                       type="button"
-                      onMouseDown={(e) => { e.preventDefault(); if (!blocked) addToCart(p); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${blocked ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/60"}`}
+                      title={blocked ? (outOfStock ? "Out of stock — click to Stock In" : "Expired — click to Stock In") : undefined}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (blocked) {
+                          setStockInInitialProduct(p);
+                          setStockInOpen(true);
+                          return;
+                        }
+                        addToCart(p);
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${
+                        blocked ? "opacity-70 hover:bg-destructive/5 cursor-pointer" : "hover:bg-muted/60"
+                      }`}
                     >
                       {p.imageUrl ? (
                         <img src={p.imageUrl} alt="" className="h-9 w-9 rounded-md border border-border/60 object-cover shrink-0" />
@@ -2328,12 +2339,12 @@ function POS() {
                       </div>
                       {expired && (
                         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
-                          Expired
+                          Expired · Tap to Stock In
                         </span>
                       )}
                       {!expired && stock !== undefined && (
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${outOfStock ? "bg-destructive/15 text-destructive" : stock <= 5 ? "bg-warning/20 text-warning-foreground" : "bg-success/15 text-success"}`}>
-                          <Package className="h-2.5 w-2.5 inline mr-0.5" />{stock}
+                          <Package className="h-2.5 w-2.5 inline mr-0.5" />{outOfStock ? "Out of stock · Tap to Stock In" : stock}
                         </span>
                       )}
                       <span className="font-bold text-primary tabular-nums w-20 text-right">
