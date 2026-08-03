@@ -791,7 +791,7 @@ function BranchCard({ branch, terminals, users, activeShifts }: {
           className={buttonVariants({ variant: "ghost", size: "sm" })}>
           Shifts
         </Link>
-        <Link to="/orders"
+        <Link to="/orders" search={{ orderId: undefined }}
           className={buttonVariants({ variant: "ghost", size: "sm" })}>
           Orders
         </Link>

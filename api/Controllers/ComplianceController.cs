@@ -237,6 +237,14 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         {
             return BadRequest(new { error = ex.Message });
         }
+        // ZatcaApiClient rethrows HttpRequestException once its 3 retries are exhausted; left
+        // uncaught this fell through to the generic "Something went wrong" 500 handler, which
+        // told the caller nothing about why (e.g. no network route to ZATCA's gateway from this
+        // environment) — surface something actionable instead.
+        catch (HttpRequestException ex)
+        {
+            return BadRequest(new { error = $"Could not reach ZATCA's servers: {ex.Message}" });
+        }
     }
 
     // ─── Company Profile ──────────────────────────────────────────────────────

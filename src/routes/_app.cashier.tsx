@@ -368,7 +368,7 @@ function CashierWorkspace() {
             <p className="font-semibold text-sm flex items-center gap-2">
               <Clock className="h-4 w-4 text-muted-foreground" /> Today's Orders
             </p>
-            <Link to="/orders" className="text-xs text-primary hover:underline">View all →</Link>
+            <Link to="/orders" search={{ orderId: undefined }} className="text-xs text-primary hover:underline">View all →</Link>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

@@ -4,6 +4,7 @@ import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { MetricCard } from "@/components/metric-card";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
+import { OrderInvoiceDialog } from "@/components/order-invoice-dialog";
 import { ShieldCheck, RefreshCw, FileWarning, QrCode, Loader2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ function Zatca() {
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [viewing, setViewing] = useState<ZatcaInvoice | null>(null);
   const companyHeader = useCompanyHeader();
 
   function load() {
@@ -59,11 +61,17 @@ function Zatca() {
   async function retrySubmit(id: string) {
     setSubmittingId(id);
     try {
-      await api.submitZatcaInvoice(id);
+      const updated = await api.submitZatcaInvoice(id);
       toast.success("Invoice submitted to ZATCA");
       load();
-    } catch {
-      toast.error("ZATCA submission failed");
+      // Keep the detail dialog (if open on this invoice) showing the fresh status/QR instead of
+      // the stale pre-submit snapshot.
+      setViewing(v => (v && v.id === id ? updated : v));
+    } catch (e) {
+      // Previously always showed a generic "ZATCA submission failed" regardless of cause — the
+      // actual reason (not onboarded, ZATCA validation rejection, no network route to ZATCA's
+      // gateway) is in e.message and was being silently discarded here.
+      toast.error(e instanceof Error ? e.message : "ZATCA submission failed");
     } finally {
       setSubmittingId(null);
     }
@@ -186,15 +194,56 @@ function Zatca() {
             { key: "zatcaStatus", label: "Status", render: (r) => <StatusBadge status={r.zatcaStatus} /> },
             {
               key: "_a", label: "", render: (r) => r.zatcaStatus !== "accepted" ? (
-                <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => retrySubmit(r.id)} disabled={submittingId === r.id}>
+                <Button
+                  size="sm" variant="outline" className="h-7 gap-1"
+                  onClick={(e) => { e.stopPropagation(); retrySubmit(r.id); }}
+                  disabled={submittingId === r.id}
+                >
                   {submittingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}Submit
                 </Button>
               ) : null,
             },
           ]}
           rows={filtered}
+          onRowClick={setViewing}
         />
       )}
+
+      {/* Single invoice view — reuses the same Tax Invoice receipt (real order items, VAT
+          breakdown, print) that Sales links to, since a ZatcaInvoice row previously only carried
+          its own totals with no line items at all. Adds the ZATCA-specific status/rejection-reason
+          banner and a Submit action on top, and prefers the real signed QR (qrCodeValue) over the
+          receipt's own Phase-1 fallback whenever ZATCA has actually returned one. */}
+      <OrderInvoiceDialog
+        orderId={viewing?.orderId ?? null}
+        onClose={() => setViewing(null)}
+        qrCodeOverride={viewing?.qrCodeValue}
+        banner={viewing && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">ZATCA Status</span>
+              <StatusBadge status={viewing.zatcaStatus} />
+            </div>
+            {viewing.zatcaStatus === "rejected" && viewing.zatcaResponse && (
+              <div>
+                <p className="text-xs font-semibold text-destructive mb-1">ZATCA response</p>
+                <pre className="text-[10px] bg-destructive/5 border border-destructive/20 rounded-lg p-2 max-h-32 overflow-auto whitespace-pre-wrap break-all">{viewing.zatcaResponse}</pre>
+              </div>
+            )}
+          </div>
+        )}
+        footerExtra={viewing && viewing.zatcaStatus !== "accepted" && (
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            disabled={submittingId === viewing.id}
+            onClick={() => retrySubmit(viewing.id)}
+          >
+            {submittingId === viewing.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Submit
+          </Button>
+        )}
+      />
     </PageShell>
   );
 }
