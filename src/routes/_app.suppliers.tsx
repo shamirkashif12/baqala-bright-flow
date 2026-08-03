@@ -13,6 +13,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
@@ -309,6 +313,7 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
   const [expiryDate, setExpiryDate] = useState("");
   const [file, setFile] = useState<{ name: string; url: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteDocId, setDeleteDocId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reload = () => { api.getSupplierDocuments(supplier.id).then(setDocuments).catch(() => {}); };
@@ -348,12 +353,13 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
   };
 
   const handleDelete = async (docId: string) => {
-    if (!confirm("Delete this document?")) return;
     try {
       await api.deleteSupplierDocument(supplier.id, docId);
       reload();
     } catch (e: any) {
       toast.error(e?.message || "Failed to delete document.");
+    } finally {
+      setDeleteDocId(null);
     }
   };
 
@@ -399,13 +405,25 @@ function SupplierDocumentsSection({ supplier }: { supplier: Supplier }) {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Badge variant="outline" className={`text-[10px] border-0 ${st.tone}`}>{st.label}</Badge>
-                  {canDelete && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => handleDelete(d.id)}><Trash2 className="h-3 w-3" /></Button>}
+                  {canDelete && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => setDeleteDocId(d.id)}><Trash2 className="h-3 w-3" /></Button>}
                 </div>
               </div>
             );
           })}
         </div>
       )}
+      <AlertDialog open={deleteDocId !== null} onOpenChange={(open) => { if (!open) setDeleteDocId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+            <AlertDialogDescription>This document will be permanently removed from this supplier.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteDocId && handleDelete(deleteDocId)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -790,6 +808,7 @@ function SuppliersTab() {
   const [paymentTermsFilter, setPaymentTermsFilter] = useState<string[]>([]);
   const [viewSupplier, setViewSupplier] = useState<Supplier | null>(null);
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
+  const [deleteSupplier, setDeleteSupplier] = useState<Supplier | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
   // Snapshot of the form as loaded for the supplier currently being edited — lets handleSave tell
@@ -855,12 +874,13 @@ function SuppliersTab() {
   };
 
   const handleDelete = async (s: Supplier) => {
-    if (!confirm(`Deactivate supplier "${s.name}"?`)) return;
     try {
       await api.deleteSupplier(s.id);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to delete supplier.");
+    } finally {
+      setDeleteSupplier(null);
     }
   };
 
@@ -988,7 +1008,7 @@ function SuppliersTab() {
                       <div className="flex gap-1 justify-end">
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewSupplier(s)}><Eye className="h-3.5 w-3.5" /></Button>
                         {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(s)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => handleDelete(s)}><Trash2 className="h-3.5 w-3.5" /></Button>}
+                        {canDelete && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setDeleteSupplier(s)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                       </div>
                     </td>
                   </tr>
@@ -1028,6 +1048,21 @@ function SuppliersTab() {
           <SupplierFormFields form={form} setForm={setForm} onSave={handleSave} saving={saving} mode="create" errors={formErrors} setErrors={setFormErrors} />
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteSupplier} onOpenChange={v => { if (!v) setDeleteSupplier(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate supplier?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteSupplier && <>"{deleteSupplier.name}" will be marked inactive and hidden from selection when creating new purchase orders.</>}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteSupplier && handleDelete(deleteSupplier)}>Deactivate</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
