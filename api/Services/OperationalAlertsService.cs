@@ -196,9 +196,16 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
         var now = DateTime.UtcNow;
         var horizon = now.AddDays(NearExpiryDays);
 
+        // Status == "expired" is included here too, not just active/near_expiry: a batch can
+        // reach "expired" status with RemainingQuantity still > 0 through a path other than this
+        // scan's own write-off transition below (e.g. seeded/imported data whose Status was set
+        // directly) — if we only matched non-expired statuses, that batch would be invisible to
+        // this query forever and its leftover quantity would never be reconciled out of on-hand.
+        // RemainingQuantity > 0 is what keeps this idempotent (a processed batch is zeroed below),
+        // not the Status filter.
         var batches = await db.InventoryBatches
             .Include(b => b.Product)
-            .Where(b => b.Status != "expired" && b.Status != "consumed" && b.RemainingQuantity > 0
+            .Where(b => b.Status != "consumed" && b.RemainingQuantity > 0
                 && b.ExpiryDate != null && b.ExpiryDate <= horizon)
             .ToListAsync(ct);
 

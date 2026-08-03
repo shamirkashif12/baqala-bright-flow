@@ -1916,6 +1916,16 @@ function Inventory() {
           const expiryMap = new Map<string, string>();
           allBatchesRef.current.forEach(batch => {
             if (!batch.expiryDate || batch.remainingQuantity <= 0) return;
+            // Skip batches that are themselves already expired (by status, or by date if the
+            // periodic write-off scan hasn't reached them yet) — same rule batch-expand-row.tsx
+            // uses to exclude them from "tracked" on-hand. An already-expired batch isn't
+            // relevant to current stock, so it shouldn't get to be "the" nearest-expiry date
+            // shown for a row whose real on-hand is backed by fine, active batches.
+            if (batch.status === "expired") return;
+            const expiry = new Date(batch.expiryDate);
+            const now = new Date();
+            if (Date.UTC(expiry.getUTCFullYear(), expiry.getUTCMonth(), expiry.getUTCDate())
+              < Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) return;
             const key = `${batch.productId}:${batch.branchId}`;
             const existing = expiryMap.get(key);
             if (!existing || new Date(batch.expiryDate) < new Date(existing)) {
