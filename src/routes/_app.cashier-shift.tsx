@@ -22,6 +22,7 @@ import { useAuth, type AuthUser } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
 import { SARIcon, fmtSAR } from "@/lib/currency";
+import { getPosBranchId } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/cashier-shift")({ component: Shift });
 
@@ -331,9 +332,14 @@ function CheckInDialog({ onSuccess, currentUser }: { onSuccess: () => void; curr
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
-  // Pre-fill and lock fields when the logged-in user is a cashier
+  // Pre-fill and lock fields when the logged-in user is a cashier. A Tenant Admin isn't locked to
+  // one branch, but defaulting to whatever branch they last had POS open on (same sessionStorage
+  // key POS itself persists) means the branch this dialog opens against matches the branch they
+  // were actually trying to check into — left blank, it previously required them to manually
+  // re-pick the right branch out of every branch in the tenant, and picking the wrong one there
+  // is exactly what let a check-in appear to "apply" to a branch the admin never intended.
   const [cashierId, setCashierId] = useState(isCashierUser ? (currentUser?.id ?? "") : "");
-  const [branchId, setBranchId] = useState(isCashierUser ? (currentUser?.branchId ?? "") : "");
+  const [branchId, setBranchId] = useState(isCashierUser ? (currentUser?.branchId ?? "") : (getPosBranchId(currentUser) ?? ""));
   const [terminalId, setTerminalId] = useState("");
   const [openingAmount, setOpeningAmount] = useState("500");
   const [submitting, setSubmitting] = useState(false);

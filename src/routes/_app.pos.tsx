@@ -743,7 +743,16 @@ function POS() {
   // even opening the payment dialog) was fully usable with no shift at all. `!loading` avoids a
   // one-frame flash of this gate for a cashier who legitimately IS checked in, before their shift
   // has finished loading.
-  const needsCheckIn = !loading && needsActiveShift && !activeShift;
+  //
+  // A Tenant Admin's open shift is fetched with no branch filter (see loadCore/focus/branch-change
+  // effects below — a cashier can only ever hold one open shift at all, so that fetch is correct as
+  // written). But `activeShift` alone doesn't say WHICH branch that shift is at — an admin who
+  // checked in at Branch A, then switched this page's branch dropdown to Branch B, still had
+  // `activeShift` set, so this gate silently disappeared and let them sell on Branch B against a
+  // shift that was never opened there. Only treat the shift as satisfying this branch's gate when
+  // its BranchId actually matches the branch currently selected on this page.
+  const shiftForBranch = activeShift && branch && activeShift.branchId === branch.id ? activeShift : null;
+  const needsCheckIn = !loading && needsActiveShift && !shiftForBranch;
 
   // ─── Active Offers & Discounts ────────────────────────────────────────────────
   const [allActiveOffers, setActiveOffers] = useState<Offer[]>([]);
@@ -2049,7 +2058,7 @@ function POS() {
     // authoritative check. Other roles structurally can't open a shift at all, so they're never
     // gated here; the server logs that override in the audit log since the resulting order has
     // no ShiftId to reconcile against.
-    if (needsActiveShift && !activeShift)
+    if (needsActiveShift && !shiftForBranch)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
 
     // Discount policy cap (POS Settings → CashierMaxDiscountPct / ManagerMaxDiscountPct) — was
@@ -2084,7 +2093,7 @@ function POS() {
       source: "pos",
       branchId: branch.id,
       customerId: customer?.id,
-      cashierId: activeShift?.cashierId ?? user?.id,
+      cashierId: shiftForBranch?.cashierId ?? user?.id,
       subtotal,
       discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal + loyaltyDiscount,
       loyaltyPointsRedeemed: Math.min(redeemPoints, maxRedeemablePoints),
@@ -2205,7 +2214,7 @@ function POS() {
   return (
     <PageShell
       title="POS Checkout"
-      subtitle={`${branch?.name ?? "Loading…"} · ${activeShift ? `Cashier: ${activeShift.cashier?.fullName ?? "Active shift"}` : "No active shift"}`}
+      subtitle={`${branch?.name ?? "Loading…"} · ${shiftForBranch ? `Cashier: ${shiftForBranch.cashier?.fullName ?? "Active shift"}` : "No active shift"}`}
       actions={
         <>
           <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
@@ -2758,7 +2767,11 @@ function POS() {
                 </button>
               </div>
             ))}
-            {!(isRestrictedCashier && !posPerms.cashierCanCoupon) && (
+            {/* Only one manual discount is allowed per order — stacking multiple manual
+                discounts (e.g. two 100% ones) let the discretionary-discount cap and the
+                tobacco excise floor both be bypassed by piling up entries. Existing entry
+                must be removed (× above) before another can be added. */}
+            {manualDiscounts.length === 0 && !(isRestrictedCashier && !posPerms.cashierCanCoupon) && (
               <div className="flex gap-1.5">
                 <Select value={manualDiscountKind} onValueChange={(v) => setManualDiscountKind(v as "percentage" | "fixed")}>
                   <SelectTrigger className="h-8 text-xs w-24"><SelectValue /></SelectTrigger>
@@ -3017,7 +3030,7 @@ function POS() {
           <DialogHeader><DialogTitle>Order Summary</DialogTitle></DialogHeader>
           <div className="space-y-2 text-sm">
             <Row k="Branch" v={branch?.name ?? "—"} />
-            <Row k="Cashier" v={activeShift?.cashier?.fullName ?? "—"} />
+            <Row k="Cashier" v={shiftForBranch?.cashier?.fullName ?? "—"} />
             <Row k="Customer" v={customer?.fullName ?? "Walk-in"} />
             <Row k="Status" v="In progress" />
             {appliedCoupon && <Row k="Coupon" v={<>{appliedCoupon.code} (−<SARIcon />{couponDiscount.toFixed(2)})</>} />}
@@ -3059,7 +3072,7 @@ function POS() {
         onOpenChange={setPayOpen}
         total={total}
         cardSurchargeAmount={cardSurchargeTotal}
-        availableCash={activeShift ? activeShift.openingAmount + activeShift.cashSales : null}
+        availableCash={shiftForBranch ? shiftForBranch.openingAmount + shiftForBranch.cashSales : null}
         onCharge={handleCharge}
         onDone={onPaymentDone}
       />
