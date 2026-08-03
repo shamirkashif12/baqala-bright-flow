@@ -188,6 +188,14 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         {
             return BadRequest(new { error = ex.Message });
         }
+        // Same gap as SubmitInvoice below: ZatcaApiClient rethrows HttpRequestException once its
+        // retries are exhausted, which — left uncaught — fell through to the generic 500 handler
+        // and told the caller nothing about why onboarding is stuck (e.g. no network route to
+        // ZATCA's gateway from this environment).
+        catch (HttpRequestException ex)
+        {
+            return BadRequest(new { error = $"Could not reach ZATCA's servers: {ex.Message}" });
+        }
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
@@ -209,6 +217,10 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { error = ex.Message });
+        }
+        catch (HttpRequestException ex)
+        {
+            return BadRequest(new { error = $"Could not reach ZATCA's servers: {ex.Message}" });
         }
     }
 
