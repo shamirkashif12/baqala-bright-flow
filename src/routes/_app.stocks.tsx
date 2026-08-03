@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
@@ -716,6 +717,10 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [sessionBranchFilters, setSessionBranchFilters] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [sessionDateFrom, setSessionDateFrom] = useState("");
+  const [sessionDateTo, setSessionDateTo] = useState("");
+
   const [startOpen, setStartOpen] = useState(false);
   // Warehouse counts are tenant_admin-only (there's no warehouse-scoped role to review/approve
   // them), so a branch-locked user never sees the toggle — they can only ever count their branch.
@@ -741,13 +746,20 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
 
   const load = () => {
     setLoading(true);
-    api.getStockCounts({ branchId: lockedBranchId ?? undefined }).then(setSessions).catch(() => {}).finally(() => setLoading(false));
+    api.getStockCounts({
+      branchId: sessionBranchFilters.length ? sessionBranchFilters : undefined,
+      from: sessionDateFrom || undefined,
+      to: sessionDateTo ? sessionDateTo + "T23:59:59" : undefined,
+    }).then(setSessions).catch(() => {}).finally(() => setLoading(false));
   };
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionBranchFilters, sessionDateFrom, sessionDateTo]);
+  useEffect(() => {
     api.getProducts().then(setProducts).catch(() => {});
     api.getCategories().then(setCategories).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const openSession = (id: string) => {
     api.getStockCount(id).then(s => {
@@ -1014,11 +1026,37 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-2 flex-wrap">
         <p className="text-sm text-muted-foreground">Physical stock counts — snapshot system quantity, scan what's actually on the shelf, submit for review, then final approval reconciles the variance.</p>
         {canCreate && (
-          <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => setStartOpen(true)}>
+          <Button size="sm" className="gap-1.5 gradient-primary text-primary-foreground border-0 shrink-0" onClick={() => setStartOpen(true)}>
             <PlayCircle className="h-3.5 w-3.5" /> Start New Count
+          </Button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {!lockedBranchId && (
+          <div className="w-44">
+            <SearchableMultiSelect
+              placeholder="All Branches"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={sessionBranchFilters}
+              onChange={setSessionBranchFilters}
+            />
+          </div>
+        )}
+        <div className="flex items-center gap-1">
+          <Input type="date" className="h-9 w-36" value={sessionDateFrom} onChange={e => setSessionDateFrom(e.target.value)} title="Started from" />
+          <span className="text-xs text-muted-foreground">–</span>
+          <Input type="date" className="h-9 w-36" value={sessionDateTo} onChange={e => setSessionDateTo(e.target.value)} title="Started to" />
+        </div>
+        {((!lockedBranchId && sessionBranchFilters.length > 0) || sessionDateFrom || sessionDateTo) && (
+          <Button
+            variant="ghost" size="sm" className="h-9 gap-1 text-muted-foreground"
+            onClick={() => { if (!lockedBranchId) setSessionBranchFilters([]); setSessionDateFrom(""); setSessionDateTo(""); }}
+          >
+            <X className="h-3.5 w-3.5" />Clear Filters
           </Button>
         )}
       </div>
@@ -1172,16 +1210,35 @@ function Stocks() {
   // Sub-tab filters — passed to BE when tab is active
   const [siBranch, setSiBranch] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
   const [siStatus, setSiStatus] = useState<string[]>([]);
+  const [siDateFrom, setSiDateFrom] = useState("");
+  const [siDateTo, setSiDateTo] = useState("");
   const [grnStatus, setGrnStatus] = useState<string[]>([]);
+  const [grnBranch, setGrnBranch] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [grnWarehouse, setGrnWarehouse] = useState<string[]>([]);
   const [dlStatus, setDlStatus] = useState<string[]>([]);
+  const [dlBranch, setDlBranch] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [dlWarehouse, setDlWarehouse] = useState<string[]>([]);
+  const [soBranch, setSoBranch] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [soWarehouse, setSoWarehouse] = useState<string[]>([]);
+  const [wsBranch, setWsBranch] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [wsWarehouse, setWsWarehouse] = useState<string[]>([]);
   const [mvBranch, setMvBranch] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [mvWarehouse, setMvWarehouse] = useState<string[]>([]);
   const [mvType, setMvType] = useState("all");
 
-  // Per-tab date filters (FE-side since BE doesn't expose date range params)
+  // Per-tab date filters. GRN/Delivery filter FE-side (BE has no date range params for those
+  // endpoints); Stock-Out/Wastage/Movement now filter server-side via InventoryAdjustments'/
+  // StockMovements' from/to params.
   const [grnDateFrom, setGrnDateFrom] = useState("");
   const [grnDateTo, setGrnDateTo] = useState("");
   const [dlDateFrom, setDlDateFrom] = useState("");
   const [dlDateTo, setDlDateTo] = useState("");
+  const [soDateFrom, setSoDateFrom] = useState("");
+  const [soDateTo, setSoDateTo] = useState("");
+  const [wsDateFrom, setWsDateFrom] = useState("");
+  const [wsDateTo, setWsDateTo] = useState("");
+  const [mvDateFrom, setMvDateFrom] = useState("");
+  const [mvDateTo, setMvDateTo] = useState("");
 
   // ── Per-section fetch functions ──────────────────────────────────────────────
 
@@ -1212,6 +1269,8 @@ function Stocks() {
     const bt = await api.getBatches({
       branchId: siBranch.length ? siBranch : undefined,
       status: siStatus.length ? siStatus : undefined,
+      from: siDateFrom || undefined,
+      to: siDateTo ? siDateTo + "T23:59:59" : undefined,
     }).catch(() => null);
     if (bt) setBatches(bt); else setLoadError(true);
     setTabLoading(false);
@@ -1219,7 +1278,13 @@ function Stocks() {
 
   async function fetchReductions() {
     setTabLoading(true);
-    const rd = await api.getAdjustments({ adjustmentType: "reduction" }).catch(() => null);
+    const rd = await api.getAdjustments({
+      adjustmentType: "reduction",
+      branchId: soBranch.length ? soBranch : undefined,
+      warehouseId: soWarehouse.length ? soWarehouse : undefined,
+      from: soDateFrom || undefined,
+      to: soDateTo ? soDateTo + "T23:59:59" : undefined,
+    }).catch(() => null);
     if (rd) setReductions(rd); else setLoadError(true);
     setTabLoading(false);
   }
@@ -1228,7 +1293,12 @@ function Stocks() {
     setTabLoading(true);
     // Wastage now spans five types (damage/spoilage/expired/theft/other), so fetch all adjustments
     // and keep just the write-off set rather than the single-type call this tab used before.
-    const dm = await api.getAdjustments().catch(() => null);
+    const dm = await api.getAdjustments({
+      branchId: wsBranch.length ? wsBranch : undefined,
+      warehouseId: wsWarehouse.length ? wsWarehouse : undefined,
+      from: wsDateFrom || undefined,
+      to: wsDateTo ? wsDateTo + "T23:59:59" : undefined,
+    }).catch(() => null);
     if (dm) setDamages(dm.filter(a => (WASTAGE_TYPES as readonly string[]).includes(a.adjustmentType))); else setLoadError(true);
     setTabLoading(false);
   }
@@ -1237,6 +1307,8 @@ function Stocks() {
     setTabLoading(true);
     const po = await api.getPurchaseOrders({
       status: grnStatus.length ? grnStatus : undefined,
+      branchId: grnBranch.length ? grnBranch : undefined,
+      warehouseId: grnWarehouse.length ? grnWarehouse : undefined,
     }).catch(() => null);
     if (po) setPurchaseOrders(po); else setLoadError(true);
     setTabLoading(false);
@@ -1247,6 +1319,8 @@ function Stocks() {
     const dl = await api.getStockTransfers({
       transferType: "warehouse_to_branch",
       status: dlStatus.length ? dlStatus : undefined,
+      branchId: dlBranch.length ? dlBranch : undefined,
+      warehouseId: dlWarehouse.length ? dlWarehouse : undefined,
     }).catch(() => null);
     if (dl) setDeliveries(dl); else setLoadError(true);
     setTabLoading(false);
@@ -1256,7 +1330,10 @@ function Stocks() {
     setTabLoading(true);
     const mv = await api.getStockMovements({
       branchId: mvBranch.length ? mvBranch : undefined,
+      warehouseId: mvWarehouse.length ? mvWarehouse : undefined,
       movementType: mvType !== "all" ? mvType : undefined,
+      from: mvDateFrom || undefined,
+      to: mvDateTo ? mvDateTo + "T23:59:59" : undefined,
       limit: 500,
     }).catch(() => null);
     if (mv) setMovements(mv); else setLoadError(true);
@@ -1273,9 +1350,12 @@ function Stocks() {
     else if (tab === "movement") fetchMovement();
   }
 
-  // Mount: only fetch branches (for filter dropdowns) + expiring count metric
+  // Mount: fetch branches + warehouses (for filter dropdowns) + expiring count metric.
+  // Warehouses used to be lazy-loaded only when a create/adjust dialog first opened, but the
+  // GRN/Delivery/Stock-Out/Wastage/Movement tab filters need the list up front.
   useEffect(() => {
     api.getBranches().then(br => setBranches(excludeDisabledBranches(br ?? []))).catch(() => {});
+    api.getWarehouses().then(wh => setWarehouses(wh ?? [])).catch(() => {});
     api.getExpiringBatches(undefined, 30).then(bt => setExpiringSoonCount(bt?.length ?? 0)).catch(() => {});
   }, []);
 
@@ -1284,18 +1364,24 @@ function Stocks() {
     if (lockedBranchId) {
       setOverviewBranchIds([lockedBranchId]);
       setSiBranch([lockedBranchId]);
+      setGrnBranch([lockedBranchId]);
+      setDlBranch([lockedBranchId]);
+      setSoBranch([lockedBranchId]);
+      setWsBranch([lockedBranchId]);
+      setMvBranch([lockedBranchId]);
     }
   }, [lockedBranchId]);
 
-  // Lazy-load products/suppliers/warehouses only when a form dialog is first opened
-  const metadataLoaded = products.length > 0 || suppliers.length > 0 || warehouses.length > 0;
+  // Lazy-load products/suppliers only when a form dialog is first opened. Warehouses are no
+  // longer part of this lazy set — they're fetched eagerly on mount now that the tab filter bars
+  // need the list up front — so they're intentionally excluded from both the gate and the refetch.
+  const metadataLoaded = products.length > 0 || suppliers.length > 0;
   function ensureDialogMetadata() {
     if (metadataLoaded) return;
-    Promise.allSettled([api.getProducts(), api.getSuppliers(), api.getWarehouses()])
-      .then(([pr, su, wh]) => {
+    Promise.allSettled([api.getProducts(), api.getSuppliers()])
+      .then(([pr, su]) => {
         if (pr.status === "fulfilled") setProducts(pr.value ?? []);
         if (su.status === "fulfilled") setSuppliers(su.value ?? []);
-        if (wh.status === "fulfilled") setWarehouses(wh.value ?? []);
       });
   }
 
@@ -1310,7 +1396,14 @@ function Stocks() {
     else if (tab === "delivery") fetchDeliveries();
     else if (tab === "wastage") fetchDamages();
     else if (tab === "movement") fetchMovement();
-  }, [tab, siBranch, siStatus, grnStatus, dlStatus, mvBranch, mvType]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    tab, siBranch, siStatus, siDateFrom, siDateTo,
+    grnStatus, grnBranch, grnWarehouse,
+    dlStatus, dlBranch, dlWarehouse,
+    soBranch, soWarehouse, soDateFrom, soDateTo,
+    wsBranch, wsWarehouse, wsDateFrom, wsDateTo,
+    mvBranch, mvWarehouse, mvType, mvDateFrom, mvDateTo,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = search.toLowerCase();
   // Branch/Category/search are all applied client-side over the unfiltered fetch (see
@@ -1482,10 +1575,15 @@ function Stocks() {
                     onChange={setSiStatus}
                   />
                 </div>
-                {((!lockedBranchId && siBranch.length > 0) || siStatus.length > 0) && (
+                <div className="flex items-center gap-1">
+                  <Input type="date" className="h-9 w-36" value={siDateFrom} onChange={e => setSiDateFrom(e.target.value)} title="Received from" />
+                  <span className="text-xs text-muted-foreground">–</span>
+                  <Input type="date" className="h-9 w-36" value={siDateTo} onChange={e => setSiDateTo(e.target.value)} title="Received to" />
+                </div>
+                {((!lockedBranchId && siBranch.length > 0) || siStatus.length > 0 || siDateFrom || siDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
-                    onClick={() => { if (!lockedBranchId) setSiBranch([]); setSiStatus([]); }}
+                    onClick={() => { if (!lockedBranchId) setSiBranch([]); setSiStatus([]); setSiDateFrom(""); setSiDateTo(""); }}
                   >
                     <X className="h-3.5 w-3.5" />Clear Filters
                   </Button>
@@ -1538,9 +1636,38 @@ function Stocks() {
         {/* ── Stock-Out ── */}
         <TabsContent value="stock-out">
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Stock-Out Records</CardTitle>
-              <div onClick={ensureDialogMetadata}><ManualStockOutDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {!lockedBranchId && (
+                  <div className="w-36">
+                    <SearchableMultiSelect
+                      placeholder="Branch"
+                      options={branches.map(b => ({ id: b.id, label: b.name }))}
+                      selected={soBranch}
+                      onChange={setSoBranch}
+                    />
+                  </div>
+                )}
+                <div className="w-36">
+                  <SearchableMultiSelect
+                    placeholder="Warehouse"
+                    options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                    selected={soWarehouse}
+                    onChange={setSoWarehouse}
+                  />
+                </div>
+                <DateRangeField from={soDateFrom} to={soDateTo} onFromChange={setSoDateFrom} onToChange={setSoDateTo} className="h-8 w-32" />
+                {((!lockedBranchId && soBranch.length > 0) || soWarehouse.length > 0 || soDateFrom || soDateTo) && (
+                  <Button
+                    variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
+                    onClick={() => { if (!lockedBranchId) setSoBranch([]); setSoWarehouse([]); setSoDateFrom(""); setSoDateTo(""); }}
+                  >
+                    <X className="h-3.5 w-3.5" />Clear Filters
+                  </Button>
+                )}
+                <div onClick={ensureDialogMetadata}><ManualStockOutDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <AdjustmentTable rows={reductions} branches={branches} loading={tabLoading} />
@@ -1554,6 +1681,24 @@ function Stocks() {
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Goods Received Notes</CardTitle>
               <div className="flex items-center gap-2 flex-wrap">
+                {!lockedBranchId && (
+                  <div className="w-36">
+                    <SearchableMultiSelect
+                      placeholder="Branch"
+                      options={branches.map(b => ({ id: b.id, label: b.name }))}
+                      selected={grnBranch}
+                      onChange={setGrnBranch}
+                    />
+                  </div>
+                )}
+                <div className="w-36">
+                  <SearchableMultiSelect
+                    placeholder="Warehouse"
+                    options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                    selected={grnWarehouse}
+                    onChange={setGrnWarehouse}
+                  />
+                </div>
                 <div className="w-40">
                   <SearchableMultiSelect
                     placeholder="Status"
@@ -1567,12 +1712,11 @@ function Stocks() {
                     onChange={setGrnStatus}
                   />
                 </div>
-                <Input type="date" className="h-8 w-36 text-xs" value={grnDateFrom} onChange={e => setGrnDateFrom(e.target.value)} title="From" />
-                <Input type="date" className="h-8 w-36 text-xs" value={grnDateTo} onChange={e => setGrnDateTo(e.target.value)} title="To" />
-                {(grnStatus.length > 0 || grnDateFrom || grnDateTo) && (
+                <DateRangeField from={grnDateFrom} to={grnDateTo} onFromChange={setGrnDateFrom} onToChange={setGrnDateTo} className="h-8 w-32" />
+                {(grnStatus.length > 0 || (!lockedBranchId && grnBranch.length > 0) || grnWarehouse.length > 0 || grnDateFrom || grnDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
-                    onClick={() => { setGrnStatus([]); setGrnDateFrom(""); setGrnDateTo(""); }}
+                    onClick={() => { setGrnStatus([]); if (!lockedBranchId) setGrnBranch([]); setGrnWarehouse([]); setGrnDateFrom(""); setGrnDateTo(""); }}
                   >
                     <X className="h-3.5 w-3.5" />Clear Filters
                   </Button>
@@ -1627,7 +1771,25 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Store Deliveries</CardTitle>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {!lockedBranchId && (
+                  <div className="w-36">
+                    <SearchableMultiSelect
+                      placeholder="Branch"
+                      options={branches.map(b => ({ id: b.id, label: b.name }))}
+                      selected={dlBranch}
+                      onChange={setDlBranch}
+                    />
+                  </div>
+                )}
+                <div className="w-36">
+                  <SearchableMultiSelect
+                    placeholder="Warehouse"
+                    options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                    selected={dlWarehouse}
+                    onChange={setDlWarehouse}
+                  />
+                </div>
                 <div className="w-36">
                   <SearchableMultiSelect
                     placeholder="Status"
@@ -1641,12 +1803,11 @@ function Stocks() {
                     onChange={setDlStatus}
                   />
                 </div>
-                <Input type="date" className="h-8 w-36 text-xs" value={dlDateFrom} onChange={e => setDlDateFrom(e.target.value)} title="From" />
-                <Input type="date" className="h-8 w-36 text-xs" value={dlDateTo} onChange={e => setDlDateTo(e.target.value)} title="To" />
-                {(dlStatus.length > 0 || dlDateFrom || dlDateTo) && (
+                <DateRangeField from={dlDateFrom} to={dlDateTo} onFromChange={setDlDateFrom} onToChange={setDlDateTo} className="h-8 w-32" />
+                {(dlStatus.length > 0 || (!lockedBranchId && dlBranch.length > 0) || dlWarehouse.length > 0 || dlDateFrom || dlDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
-                    onClick={() => { setDlStatus([]); setDlDateFrom(""); setDlDateTo(""); }}
+                    onClick={() => { setDlStatus([]); if (!lockedBranchId) setDlBranch([]); setDlWarehouse([]); setDlDateFrom(""); setDlDateTo(""); }}
                   >
                     <X className="h-3.5 w-3.5" />Clear Filters
                   </Button>
@@ -1662,9 +1823,38 @@ function Stocks() {
         {/* ── Wastage ── */}
         <TabsContent value="wastage">
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Wastage & Damage</CardTitle>
-              <div onClick={ensureDialogMetadata}><WastageDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {!lockedBranchId && (
+                  <div className="w-36">
+                    <SearchableMultiSelect
+                      placeholder="Branch"
+                      options={branches.map(b => ({ id: b.id, label: b.name }))}
+                      selected={wsBranch}
+                      onChange={setWsBranch}
+                    />
+                  </div>
+                )}
+                <div className="w-36">
+                  <SearchableMultiSelect
+                    placeholder="Warehouse"
+                    options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                    selected={wsWarehouse}
+                    onChange={setWsWarehouse}
+                  />
+                </div>
+                <DateRangeField from={wsDateFrom} to={wsDateTo} onFromChange={setWsDateFrom} onToChange={setWsDateTo} className="h-8 w-32" />
+                {((!lockedBranchId && wsBranch.length > 0) || wsWarehouse.length > 0 || wsDateFrom || wsDateTo) && (
+                  <Button
+                    variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
+                    onClick={() => { if (!lockedBranchId) setWsBranch([]); setWsWarehouse([]); setWsDateFrom(""); setWsDateTo(""); }}
+                  >
+                    <X className="h-3.5 w-3.5" />Clear Filters
+                  </Button>
+                )}
+                <div onClick={ensureDialogMetadata}><WastageDialog branches={branches} products={products} onDone={refreshCurrentTab} /></div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <AdjustmentTable rows={damages} branches={branches} loading={tabLoading} onReviewed={refreshCurrentTab} />
@@ -1688,6 +1878,14 @@ function Stocks() {
                     />
                   </div>
                 )}
+                <div className="w-40">
+                  <SearchableMultiSelect
+                    placeholder="All Warehouses"
+                    options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                    selected={mvWarehouse}
+                    onChange={setMvWarehouse}
+                  />
+                </div>
                 <Select value={mvType} onValueChange={setMvType}>
                   <SelectTrigger className="h-8 w-52"><SelectValue placeholder="All Movement Types" /></SelectTrigger>
                   <SelectContent>
@@ -1695,10 +1893,11 @@ function Stocks() {
                     {MOVEMENT_TYPES.map(t => <SelectItem key={t} value={t}>{movementMeta(t).label}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                {((!lockedBranchId && mvBranch.length > 0) || mvType !== "all") && (
+                <DateRangeField from={mvDateFrom} to={mvDateTo} onFromChange={setMvDateFrom} onToChange={setMvDateTo} className="h-8 w-32" />
+                {((!lockedBranchId && mvBranch.length > 0) || mvWarehouse.length > 0 || mvType !== "all" || mvDateFrom || mvDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
-                    onClick={() => { if (!lockedBranchId) setMvBranch([]); setMvType("all"); }}
+                    onClick={() => { if (!lockedBranchId) setMvBranch([]); setMvWarehouse([]); setMvType("all"); setMvDateFrom(""); setMvDateTo(""); }}
                   >
                     <X className="h-3.5 w-3.5" />Clear Filters
                   </Button>

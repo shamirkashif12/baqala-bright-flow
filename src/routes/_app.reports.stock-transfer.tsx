@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
@@ -9,6 +10,7 @@ import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -16,7 +18,8 @@ import { api, type StockTransferReportRow, type ReportExportFormat, type Warehou
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { ArrowLeftRight, Boxes, CheckCircle, DollarSign, Eye, X } from "lucide-react";
+import { ArrowLeftRight, Boxes, CheckCircle, DollarSign, Eye, X, SlidersHorizontal, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/reports/stock-transfer")({ component: StockTransferReport });
 
@@ -140,6 +143,7 @@ function StockTransferReport() {
   const [rows, setRows] = useState<StockTransferReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewTransfer, setViewTransfer] = useState<StockTransferGroup | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { branches } = useBranch();
 
@@ -194,117 +198,135 @@ function StockTransferReport() {
   const totalCost = rows.reduce((s, r) => s + r.totalCost, 0);
   const groups = groupByTransfer(rows);
   const completedCount = groups.filter(g => g.status === "completed").length;
+  const advancedFilterCount = (transferType !== "all" ? 1 : 0) + destBranchIds.length + destWarehouseIds.length
+    + productIds.length + createdByIds.length + approvedByIds.length + receivedByIds.length;
 
   return (
     <PageShell title="Stock Transfer Report" subtitle="Full history of stock movement between warehouses and branches">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        <FilterField label="Transfer Type">
-          <Select value={transferType} onValueChange={setTransferType}>
-            <SelectTrigger className="h-9 w-48"><SelectValue placeholder="Transfer Type" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              {TRANSFER_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Status">
-          <div className="w-36">
-            <SearchableMultiSelect
-              placeholder="All Statuses"
-              options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
-              selected={statuses}
-              onChange={setStatuses}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Source Branch">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="Any Source Branch"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={sourceBranchIds}
-              onChange={setSourceBranchIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Source Warehouse">
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="Any Source Warehouse"
-              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              selected={sourceWarehouseIds}
-              onChange={setSourceWarehouseIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Destination Branch">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="Any Destination Branch"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={destBranchIds}
-              onChange={setDestBranchIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Destination Warehouse">
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="Any Destination Warehouse"
-              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              selected={destWarehouseIds}
-              onChange={setDestWarehouseIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Product">
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Products"
-              options={products.map((p) => ({ id: p.id, label: p.name }))}
-              selected={productIds}
-              onChange={setProductIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Created By">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="Created By: Anyone"
-              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-              selected={createdByIds}
-              onChange={setCreatedByIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Approved By">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="Approved By: Anyone"
-              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-              selected={approvedByIds}
-              onChange={setApprovedByIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Received By">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="Received By: Anyone"
-              options={users.map((u) => ({ id: u.id, label: u.fullName }))}
-              selected={receivedByIds}
-              onChange={setReceivedByIds}
-            />
-          </div>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          <FilterField label="Status">
+            <div className="w-36">
+              <SearchableMultiSelect
+                placeholder="All Statuses"
+                options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
+                selected={statuses}
+                onChange={setStatuses}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Source Branch">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Any Source Branch"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={sourceBranchIds}
+                onChange={setSourceBranchIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Source Warehouse">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="Any Source Warehouse"
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={sourceWarehouseIds}
+                onChange={setSourceWarehouseIds}
+              />
+            </div>
+          </FilterField>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Transfer Type">
+            <Select value={transferType} onValueChange={setTransferType}>
+              <SelectTrigger className="h-9 w-48"><SelectValue placeholder="Transfer Type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                {TRANSFER_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Destination Branch">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Any Destination Branch"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={destBranchIds}
+                onChange={setDestBranchIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Destination Warehouse">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="Any Destination Warehouse"
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={destWarehouseIds}
+                onChange={setDestWarehouseIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Product">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Products"
+                options={products.map((p) => ({ id: p.id, label: p.name }))}
+                selected={productIds}
+                onChange={setProductIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Created By">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Created By: Anyone"
+                options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+                selected={createdByIds}
+                onChange={setCreatedByIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Approved By">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Approved By: Anyone"
+                options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+                selected={approvedByIds}
+                onChange={setApprovedByIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Received By">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="Received By: Anyone"
+                options={users.map((u) => ({ id: u.id, label: u.fullName }))}
+                selected={receivedByIds}
+                onChange={setReceivedByIds}
+              />
+            </div>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Transfers" value={String(groups.length)} icon={ArrowLeftRight} accent="primary" />

@@ -3,19 +3,22 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { api, type AuditLog, type AuditTrailReport as AuditTrailData, type AuditTrailRow, type Product, type ReportExportFormat, type User } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { downloadBlob } from "@/lib/csv-export";
 import { describeChanges } from "@/lib/audit-changes";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { ShieldAlert, KeyRound, Wrench, Settings, Download, ArrowRight, X } from "lucide-react";
+import { ShieldAlert, KeyRound, Wrench, Settings, Download, ArrowRight, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/audit-trail")({ component: AuditTrail });
@@ -83,6 +86,7 @@ function AuditTrail() {
   const [users, setUsers] = useState<User[]>([]);
   const [data, setData] = useState<AuditTrailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   // Order snapshots reference products by id only, so the diff needs a name lookup to render
   // "Item added — Laban 1L" instead of a truncated GUID. Loaded once, not per filter change.
   const [productMap, setProductMap] = useState<Map<string, Product>>(new Map());
@@ -130,75 +134,92 @@ function AuditTrail() {
     setFrom(sevenDaysAgoStr()); setTo(todayStr()); setSeverity("all"); setModule("all");
     setBranchId(defaultBranchId); setUserId("all");
   };
+  const advancedFilterCount = (module !== "all" ? 1 : 0) + (userId !== "all" ? 1 : 0);
 
   return (
     <PageShell title="Audit Trail Report" subtitle="Read-only log of critical system events and changes">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        <FilterField label="Severity">
-          <Select value={severity} onValueChange={setSeverity}>
-            <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Severity" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Severity</SelectItem>
-              <SelectItem value="info">Info</SelectItem>
-              <SelectItem value="warning">Warning</SelectItem>
-              <SelectItem value="critical">Critical</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Module">
-          <Select value={module} onValueChange={setModule}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Module" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Modules</SelectItem>
-              {/* These are matched verbatim against audit_logs.entity_type, so every option must be
-                  a string some controller actually writes. "ZatcaSettings" and "TaxFeeRule" were
-                  listed here but are written by nothing, while six real modules — CashierShift and
-                  Product among them — had no option at all and were unfilterable. */}
-              <SelectItem value="Order">Order</SelectItem>
-              <SelectItem value="Product">Product</SelectItem>
-              <SelectItem value="InventoryAdjustment">Inventory Adjustment / Wastage</SelectItem>
-              <SelectItem value="InventoryBatch">Stock Received</SelectItem>
-              <SelectItem value="StockTransfer">Stock Transfer / Supplier Return</SelectItem>
-              <SelectItem value="PurchaseOrder">Purchase Receipt</SelectItem>
-              <SelectItem value="StockCount">Stock Count / Reconciliation</SelectItem>
-              <SelectItem value="CustomerReturn">Return / Refund</SelectItem>
-              <SelectItem value="CashierShift">Cashier Shift</SelectItem>
-              <SelectItem value="User">User</SelectItem>
-              <SelectItem value="Branch">Branch</SelectItem>
-              <SelectItem value="PosSettings">POS Settings</SelectItem>
-              <SelectItem value="ZatcaInvoice">ZATCA Invoice</SelectItem>
-              <SelectItem value="Report">Report Export</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          <FilterField label="Severity">
+            <Select value={severity} onValueChange={setSeverity}>
+              <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Severity" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="all">All Severity</SelectItem>
+                <SelectItem value="info">Info</SelectItem>
+                <SelectItem value="warning">Warning</SelectItem>
+                <SelectItem value="critical">Critical</SelectItem>
               </SelectContent>
             </Select>
           </FilterField>
-        )}
-        <FilterField label="Employee">
-          <Select value={userId} onValueChange={setUserId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Branch" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Module">
+            <Select value={module} onValueChange={setModule}>
+              <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Module" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Modules</SelectItem>
+                {/* These are matched verbatim against audit_logs.entity_type, so every option must be
+                    a string some controller actually writes. "ZatcaSettings" and "TaxFeeRule" were
+                    listed here but are written by nothing, while six real modules — CashierShift and
+                    Product among them — had no option at all and were unfilterable. */}
+                <SelectItem value="Order">Order</SelectItem>
+                <SelectItem value="Product">Product</SelectItem>
+                <SelectItem value="InventoryAdjustment">Inventory Adjustment / Wastage</SelectItem>
+                <SelectItem value="InventoryBatch">Stock Received</SelectItem>
+                <SelectItem value="StockTransfer">Stock Transfer / Supplier Return</SelectItem>
+                <SelectItem value="PurchaseOrder">Purchase Receipt</SelectItem>
+                <SelectItem value="StockCount">Stock Count / Reconciliation</SelectItem>
+                <SelectItem value="CustomerReturn">Return / Refund</SelectItem>
+                <SelectItem value="CashierShift">Cashier Shift</SelectItem>
+                <SelectItem value="User">User</SelectItem>
+                <SelectItem value="Branch">Branch</SelectItem>
+                <SelectItem value="PosSettings">POS Settings</SelectItem>
+                <SelectItem value="ZatcaInvoice">ZATCA Invoice</SelectItem>
+                <SelectItem value="Report">Report Export</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Employee">
+            <Select value={userId} onValueChange={setUserId}>
+              <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Employee" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Critical Events" value={String(kpis?.criticalEvents ?? 0)} icon={ShieldAlert} accent="destructive" />

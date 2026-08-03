@@ -8,6 +8,8 @@ import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -15,9 +17,10 @@ import { api, type PaymentMethodsReport, type PaymentMethodRow, type ReportExpor
 import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Banknote, CreditCard, Wallet, Clock, RotateCcw, DollarSign, Cigarette, X } from "lucide-react";
+import { Banknote, CreditCard, Wallet, Clock, RotateCcw, DollarSign, Cigarette, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/payment-methods")({ component: PaymentMethods });
@@ -49,6 +52,7 @@ function PaymentMethods() {
   const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<PaymentMethodsReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { employees, terminals } = useReportFilterOptions(branchId);
 
@@ -97,66 +101,83 @@ function PaymentMethods() {
     setFrom(todayStr()); setTo(todayStr()); setBranchId(lockedBranchId ?? "all");
     setPaymentMethod("all"); setCashierId("all"); setTerminalId("all"); setHasTobaccoFee(false);
   };
+  const advancedFilterCount = (cashierId !== "all" ? 1 : 0) + (terminalId !== "all" ? 1 : 0) + (hasTobaccoFee ? 1 : 0);
 
   return (
     <PageShell
       title="Payment Methods"
       subtitle="Settlement values and transaction split by cash, card and wallet"
     >
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+          <FilterField label="Payment Method">
+            <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Payment Method" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="all">All Methods</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="card">Card</SelectItem>
+                <SelectItem value="wallet">Wallet</SelectItem>
+                <SelectItem value="qr">QR</SelectItem>
               </SelectContent>
             </Select>
           </FilterField>
-        )}
-        <FilterField label="Payment Method">
-          <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Payment Method" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Methods</SelectItem>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="card">Card</SelectItem>
-              <SelectItem value="wallet">Wallet</SelectItem>
-              <SelectItem value="qr">QR</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Employee">
-          <Select value={cashierId} onValueChange={setCashierId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Device">
-          <Select value={terminalId} onValueChange={setTerminalId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Device" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Devices</SelectItem>
-              {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <label className="flex items-center gap-1.5 text-sm px-2">
-          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
-          Tobacco fee only
-        </label>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Employee">
+            <Select value={cashierId} onValueChange={setCashierId}>
+              <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Employee" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Device">
+            <Select value={terminalId} onValueChange={setTerminalId}>
+              <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Device" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Devices</SelectItem>
+                {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <label className="flex items-center gap-1.5 text-sm px-2">
+            <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+            Tobacco fee only
+          </label>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Cash Collected" value={<><SARIcon />{fmt(kpis?.cashCollected ?? 0)}</>} icon={Banknote} accent="primary" />

@@ -10,13 +10,15 @@ import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField, type Column } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { api, type EmployeeAuditRow, type Employee, type Terminal, type ReportExportFormat } from "@/lib/api";
 import { downloadBlob, exportFileExtension } from "@/lib/csv-export";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { ShieldAlert, Users, Percent, Ban, Eye, X } from "lucide-react";
+import { ShieldAlert, Users, Percent, Ban, Eye, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/employee-audit-center")({ component: EmployeeAuditCenter });
 
@@ -77,6 +79,7 @@ function EmployeeAuditCenter() {
   const [rows, setRows] = useState<EmployeeAuditRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   // Accumulates every EntityType seen across loads (not just the current, possibly filtered,
   // result set) so picking one Transaction Type doesn't shrink the option list out from under
   // whatever else the tenant's audit history actually contains.
@@ -127,6 +130,7 @@ function EmployeeAuditCenter() {
     setDateFrom(firstOfMonthStr()); setDateTo(todayStr()); setBranchIds([]); setEmployeeIds([]);
     setCategories([]); setDeviceIds([]); setTransactionTypes([]); setSearch("");
   };
+  const advancedFilterCount = categories.length + deviceIds.length + transactionTypes.length;
 
   const employeeCount = useMemo(() => new Set(rows.map(r => r.employeeName)).size, [rows]);
   const discountCount = useMemo(() => rows.filter(r => r.actionCategory === "Gave Discount").length, [rows]);
@@ -163,72 +167,82 @@ function EmployeeAuditCenter() {
   return (
     <PageShell title="Employee Audit Center" subtitle="Full employee activity history for audit and misuse tracking">
       <div className="space-y-4">
-        <div className="flex flex-wrap items-end gap-2">
-          <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
-          {isManagerTier && (
-            <>
-              <FilterField label="Branch">
-                <div className="w-40">
-                  <SearchableMultiSelect
-                    placeholder="All Branches"
-                    options={branches.map(b => ({ id: b.id, label: b.name }))}
-                    selected={branchIds}
-                    onChange={setBranchIds}
-                  />
-                </div>
-              </FilterField>
-              <FilterField label="Employee">
-                <div className="w-48">
-                  <SearchableMultiSelect
-                    placeholder="All Employees"
-                    options={employees.map(e => ({ id: e.id, label: e.fullName }))}
-                    selected={employeeIds}
-                    onChange={setEmployeeIds}
-                  />
-                </div>
-              </FilterField>
-            </>
-          )}
-          <FilterField label="Activity Type">
-            <div className="w-48">
+        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+            {isManagerTier && (
+              <>
+                <FilterField label="Branch">
+                  <div className="w-40">
+                    <SearchableMultiSelect
+                      placeholder="All Branches"
+                      options={branches.map(b => ({ id: b.id, label: b.name }))}
+                      selected={branchIds}
+                      onChange={setBranchIds}
+                    />
+                  </div>
+                </FilterField>
+                <FilterField label="Employee">
+                  <div className="w-48">
+                    <SearchableMultiSelect
+                      placeholder="All Employees"
+                      options={employees.map(e => ({ id: e.id, label: e.fullName }))}
+                      selected={employeeIds}
+                      onChange={setEmployeeIds}
+                    />
+                  </div>
+                </FilterField>
+              </>
+            )}
+            <FilterField label="Search">
+              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employee or action…" className="h-9 w-56" />
+            </FilterField>
+
+            <CollapsibleTrigger asChild>
+              <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                Advanced
+                {advancedFilterCount > 0 && (
+                  <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+                )}
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+              </Button>
+            </CollapsibleTrigger>
+            {hasFilters && (
+              <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5" /> Clear Filters
+              </Button>
+            )}
+            <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
+          </div>
+
+          <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+            <FilterField label="Activity Type">
               <SearchableMultiSelect
                 placeholder="All Activity Types"
                 options={CATEGORIES.map(c => ({ id: c, label: c }))}
                 selected={categories}
                 onChange={setCategories}
               />
-            </div>
-          </FilterField>
-          <FilterField label="Device">
-            <div className="w-44">
+            </FilterField>
+            <FilterField label="Device">
               <SearchableMultiSelect
                 placeholder="All Devices"
                 options={terminals.map(t => ({ id: t.id, label: t.name }))}
                 selected={deviceIds}
                 onChange={setDeviceIds}
               />
-            </div>
-          </FilterField>
-          <FilterField label="Transaction Type">
-            <div className="w-52">
+            </FilterField>
+            <FilterField label="Transaction Type">
               <SearchableMultiSelect
                 placeholder="All Transaction Types"
                 options={transactionTypesSeen.map(t => ({ id: t, label: t.replace(/([a-z])([A-Z])/g, "$1 $2") }))}
                 selected={transactionTypes}
                 onChange={setTransactionTypes}
               />
-            </div>
-          </FilterField>
-          <FilterField label="Search">
-            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employee or action…" className="h-9 w-56" />
-          </FilterField>
-          {hasFilters && (
-            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-              <X className="h-3.5 w-3.5" /> Clear Filters
-            </Button>
-          )}
-          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} formats={["excel", "pdf"]} /></div>
-        </div>
+            </FilterField>
+          </CollapsibleContent>
+        </Collapsible>
 
         <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
           <MetricCard label="Total Activities" value={String(rows.length)} icon={ShieldAlert} accent="primary" />

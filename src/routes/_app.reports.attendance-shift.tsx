@@ -3,11 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -15,7 +17,7 @@ import { api, type AttendanceShiftReport as AttendanceShiftData, type Attendance
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { DoorOpen, DoorClosed, Wallet, Clock3, AlertTriangle, X } from "lucide-react";
+import { DoorOpen, DoorClosed, Wallet, Clock3, AlertTriangle, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +49,7 @@ function AttendanceShift() {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [data, setData] = useState<AttendanceShiftData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then((u) => setStaff(u.filter((x) => x.status === "active"))).catch(() => {});
@@ -99,66 +102,83 @@ function AttendanceShift() {
     setFrom(todayStr()); setTo(todayStr()); setBranchId(defaultBranchId);
     setStatus("all"); setStaffId("all"); setRoleId("all"); setTerminalId("all");
   };
+  const advancedFilterCount = (staffId !== "all" ? 1 : 0) + (roleId !== "all" ? 1 : 0) + (terminalId !== "all" ? 1 : 0);
 
   return (
     <PageShell title="Attendance / Shift Report" subtitle="Cashier shift status, cash variance and staff hours">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+          <FilterField label="Status">
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Shift Status" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="open">Open</SelectItem>
+                <SelectItem value="closed">Closed</SelectItem>
               </SelectContent>
             </Select>
           </FilterField>
-        )}
-        <FilterField label="Status">
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Shift Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="open">Open</SelectItem>
-              <SelectItem value="closed">Closed</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Staff">
-          <Select value={staffId} onValueChange={setStaffId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Staff" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Staff</SelectItem>
-              {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Role">
-          <Select value={roleId} onValueChange={setRoleId}>
-            <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Role" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Roles</SelectItem>
-              {roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Terminal">
-          <Select value={terminalId} onValueChange={setTerminalId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Terminal" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Terminals</SelectItem>
-              {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Staff">
+            <Select value={staffId} onValueChange={setStaffId}>
+              <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Staff" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Staff</SelectItem>
+                {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Role">
+            <Select value={roleId} onValueChange={setRoleId}>
+              <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Role" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Roles</SelectItem>
+                {roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Terminal">
+            <Select value={terminalId} onValueChange={setTerminalId}>
+              <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Terminal" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Terminals</SelectItem>
+                {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Open Shifts" value={String(kpis?.openShifts ?? 0)} icon={DoorOpen} accent="warning" />

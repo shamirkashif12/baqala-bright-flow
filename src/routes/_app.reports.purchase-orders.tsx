@@ -9,6 +9,7 @@ import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { api, type PurchaseOrderReportRow, type ReportExportFormat, type Supplier, type Warehouse, type User } from "@/lib/api";
@@ -17,7 +18,8 @@ import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Receipt, ClipboardCheck, Boxes, DollarSign, Eye, X } from "lucide-react";
+import { Receipt, ClipboardCheck, Boxes, DollarSign, Eye, X, SlidersHorizontal, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/reports/purchase-orders")({ component: PurchaseReports });
 
@@ -48,13 +50,16 @@ function PurchaseOrderDetailDrawer({ po, onClose }: { po: PurchaseOrderReportRow
           <>
             <SheetHeader className="pb-4 border-b border-border/60">
               <SheetTitle className="text-base font-mono">{po.poNumber}</SheetTitle>
-              <p className="text-xs text-muted-foreground">{po.supplierName} · {po.locationName}</p>
+              <p className="text-xs text-muted-foreground">{po.supplierName} · {po.branchName} · {po.warehouseName}</p>
             </SheetHeader>
             <div className="mt-4 space-y-3">
               {([
+                ["Branch", po.branchName],
+                ["Warehouse", po.warehouseName],
                 ["Purchase Date", new Date(po.purchaseDate).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })],
                 ["Status", po.status.replace(/_/g, " ")],
                 ["Payment Status", po.paymentStatus.replace(/_/g, " ")],
+                ["Requested By", po.requestedBy],
                 ["Created By", po.createdBy],
                 ["Approved By", po.approvedBy],
                 ["Received By", po.receivedBy],
@@ -112,6 +117,7 @@ function PurchaseReports() {
   const [rows, setRows] = useState<PurchaseOrderReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewPo, setViewPo] = useState<PurchaseOrderReportRow | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { products } = useReportFilterOptions(branchIds.length === 1 ? branchIds[0] : undefined, undefined);
 
@@ -164,93 +170,102 @@ function PurchaseReports() {
     }
   };
 
+  const advancedFilterCount = supplierIds.length + productIds.length + createdByIds.length + approvedByIds.length;
   const totalValue = rows.reduce((s, r) => s + r.totalAmount, 0);
   const fullyReceivedCount = rows.filter(r => r.status === "fully_received").length;
   const totalItems = rows.reduce((s, r) => s + r.items.length, 0);
 
   return (
     <PageShell title="Purchase Reports" subtitle="Complete purchase order detail — click a row to see every product">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        <FilterField label="Supplier">
-          <div className="w-48">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <div className="w-40">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Warehouse">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Warehouses"
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={warehouseIds}
+                onChange={setWarehouseIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Status">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="All Statuses"
+                options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
+                selected={statuses}
+                onChange={setStatuses}
+              />
+            </div>
+          </FilterField>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Supplier">
             <SearchableMultiSelect
               placeholder="All Suppliers"
               options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
               selected={supplierIds}
               onChange={setSupplierIds}
             />
-          </div>
-        </FilterField>
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <div className="w-40">
-              <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
-              />
-            </div>
           </FilterField>
-        )}
-        <FilterField label="Warehouse">
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Warehouses"
-              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              selected={warehouseIds}
-              onChange={setWarehouseIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Status">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="All Statuses"
-              options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
-              selected={statuses}
-              onChange={setStatuses}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Product">
-          <div className="w-48">
+          <FilterField label="Product">
             <SearchableMultiSelect
               placeholder="All Products"
               options={products.map((p) => ({ id: p.id, label: p.name }))}
               selected={productIds}
               onChange={setProductIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Created By">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Created By">
             <SearchableMultiSelect
               placeholder="Created By: Anyone"
               options={users.map((u) => ({ id: u.id, label: u.fullName }))}
               selected={createdByIds}
               onChange={setCreatedByIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Approved By">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Approved By">
             <SearchableMultiSelect
               placeholder="Approved By: Anyone"
               options={users.map((u) => ({ id: u.id, label: u.fullName }))}
               selected={approvedByIds}
               onChange={setApprovedByIds}
             />
-          </div>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Purchase Orders" value={String(rows.length)} icon={Receipt} accent="primary" />
@@ -266,10 +281,12 @@ function PurchaseReports() {
           columns={[
             { key: "poNumber", label: "PO Number" },
             { key: "supplierName", label: "Supplier" },
-            { key: "locationName", label: "Warehouse" },
+            { key: "branchName", label: "Branch" },
+            { key: "warehouseName", label: "Warehouse" },
             { key: "purchaseDate", label: "Purchase Date", render: (r: PurchaseOrderReportRow) => new Date(r.purchaseDate).toLocaleDateString("en-SA") },
             { key: "status", label: "Status", render: (r: PurchaseOrderReportRow) => <Badge variant="outline" className={`text-[10px] border-0 capitalize ${STATUS_CLASS[r.status] ?? "bg-muted text-muted-foreground"}`}>{r.status.replace(/_/g, " ")}</Badge> },
             { key: "paymentStatus", label: "Payment", className: "capitalize", render: (r: PurchaseOrderReportRow) => r.paymentStatus.replace(/_/g, " ") },
+            { key: "requestedBy", label: "Requested By" },
             { key: "createdBy", label: "Created By" },
             { key: "approvedBy", label: "Approved By" },
             { key: "receivedBy", label: "Received By" },

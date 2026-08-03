@@ -8,6 +8,7 @@ import { SearchableMultiSelect } from "@/components/report-filters/searchable-mu
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -17,8 +18,9 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Boxes, Package, PackageCheck, PackageX, AlertTriangle, X } from "lucide-react";
+import { Boxes, Package, PackageCheck, PackageX, AlertTriangle, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/inventory-snapshot")({ component: InventorySnapshot });
@@ -36,6 +38,7 @@ function InventorySnapshot() {
   const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [locationType, setLocationType] = useState("all");
   const [isTobacco, setIsTobacco] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [data, setData] = useState<InventorySnapshotReport | null>(null);
   const [loading, setLoading] = useState(true);
   // Which pools this user may see. Null until loaded — the filter bar renders nothing
@@ -92,6 +95,8 @@ function InventorySnapshot() {
     setWarehouseIds([]); setLocationType("all"); setIsTobacco(false);
   };
 
+  const advancedFilterCount = productIds.length + (locationType !== "all" ? 1 : 0) + (isTobacco ? 1 : 0);
+
   const kpis = data?.kpis;
   const fmt = (n: number) => fmtSAR(n);
   // Keyed by locationId, not name — two locations can share a display name, and merging them
@@ -109,82 +114,98 @@ function InventorySnapshot() {
       title="Inventory Reports"
       subtitle="Current stock snapshot, stock value and reserved quantity across branches and warehouses"
     >
-      <div className="flex flex-wrap items-end gap-2">
-        {/* Branch and Warehouse are shown per the caller's stock pool, resolved server-side: a
-            branch user (e.g. cashier) sees no warehouse control because they hold no warehouse
-            stock, and a warehouse user sees no branch control for the mirror reason. */}
-        {!lockedBranchId && scope?.canFilterBranch && (
-          <FilterField label="Branch">
-            <div className="w-44">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          {/* Branch and Warehouse are shown per the caller's stock pool, resolved server-side: a
+              branch user (e.g. cashier) sees no warehouse control because they hold no warehouse
+              stock, and a warehouse user sees no branch control for the mirror reason. */}
+          {!lockedBranchId && scope?.canFilterBranch && (
+            <FilterField label="Branch">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          {scope?.canFilterWarehouse && (
+            <FilterField label="Warehouse">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Warehouses"
+                  options={scope.warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                  selected={warehouseIds}
+                  onChange={setWarehouseIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Category">
+            <div className="w-40">
               <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
+                placeholder="All Categories"
+                options={categories.map((c) => ({ id: c.id, label: c.name }))}
+                selected={categoryIds}
+                onChange={setCategoryIds}
               />
             </div>
           </FilterField>
-        )}
-        {scope?.canFilterWarehouse && (
-          <FilterField label="Warehouse">
-            <div className="w-44">
-              <SearchableMultiSelect
-                placeholder="All Warehouses"
-                options={scope.warehouses.map((w) => ({ id: w.id, label: w.name }))}
-                selected={warehouseIds}
-                onChange={setWarehouseIds}
-              />
-            </div>
-          </FilterField>
-        )}
-        {showLocationType && (
-          <FilterField label="Location Type">
-            <Select value={locationType} onValueChange={setLocationType}>
-              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="All Locations" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Branches & Warehouses</SelectItem>
-                <SelectItem value="branch">Branches only</SelectItem>
-                <SelectItem value="warehouse">Warehouses only</SelectItem>
-              </SelectContent>
-            </Select>
-          </FilterField>
-        )}
-        <FilterField label="Category">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="All Categories"
-              options={categories.map((c) => ({ id: c.id, label: c.name }))}
-              selected={categoryIds}
-              onChange={setCategoryIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Product">
-          <div className="w-44">
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {data?.snapshotAt && (
+            <span className="text-xs text-muted-foreground">
+              Snapshot as of {new Date(data.snapshotAt).toLocaleString("en-SA", { dateStyle: "medium", timeStyle: "short" })}
+            </span>
+          )}
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          {showLocationType && (
+            <FilterField label="Location Type">
+              <Select value={locationType} onValueChange={setLocationType}>
+                <SelectTrigger className="h-9 w-full"><SelectValue placeholder="All Locations" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Branches & Warehouses</SelectItem>
+                  <SelectItem value="branch">Branches only</SelectItem>
+                  <SelectItem value="warehouse">Warehouses only</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+          <FilterField label="Product">
             <SearchableMultiSelect
               placeholder="All Products"
               options={products.map((p) => ({ id: p.id, label: p.name }))}
               selected={productIds}
               onChange={setProductIds}
             />
+          </FilterField>
+          <div className="flex items-end pb-0.5">
+            <label className="flex items-center gap-1.5 text-sm px-2">
+              <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
+              Tobacco only
+            </label>
           </div>
-        </FilterField>
-        <label className="flex items-center gap-1.5 text-sm px-2">
-          <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
-          Tobacco only
-        </label>
-        {data?.snapshotAt && (
-          <span className="text-xs text-muted-foreground">
-            Snapshot as of {new Date(data.snapshotAt).toLocaleString("en-SA", { dateStyle: "medium", timeStyle: "short" })}
-          </span>
-        )}
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         {canViewCost && <MetricCard label="Total Stock Value" value={<><SARIcon />{fmt(kpis?.totalStockValue ?? 0)}</>} icon={Boxes} accent="primary" />}

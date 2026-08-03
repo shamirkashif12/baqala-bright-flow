@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -1122,6 +1123,8 @@ function PurchaseOrders() {
   const [dateTo, setDateTo] = useState("");
   const [createdBy, setCreatedBy] = useState<string[]>([]);
   const [approvedBy, setApprovedBy] = useState<string[]>([]);
+  const [branchIds, setBranchIds] = useState<string[]>([]);
+  const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
@@ -1129,14 +1132,17 @@ function PurchaseOrders() {
   const [receiveTarget, setReceiveTarget] = useState<PurchaseOrder | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // createdBy/approvedBy are sent as query params — filtered in the database, not client-side —
-  // so they cover the full dataset rather than whatever page happens to already be loaded.
+  // createdBy/approvedBy/branchIds/warehouseIds are sent as query params — filtered in the
+  // database, not client-side — so they cover the full dataset rather than whatever page happens
+  // to already be loaded.
   const load = useCallback(() => {
     setLoading(true);
     Promise.allSettled([
       api.getPurchaseOrders({
         createdBy: createdBy.length ? createdBy : undefined,
         approvedBy: approvedBy.length ? approvedBy : undefined,
+        branchId: branchIds.length ? branchIds : undefined,
+        warehouseId: warehouseIds.length ? warehouseIds : undefined,
       }),
       api.getCreditNotes(),
       api.getStockTransfers({ transferType: "warehouse_to_supplier" }),
@@ -1150,7 +1156,7 @@ function PurchaseOrders() {
         setSupplierTransfers(stRes.value.filter(t => !t.purchaseOrderId));
       }
     }).finally(() => setLoading(false));
-  }, [createdBy, approvedBy]);
+  }, [createdBy, approvedBy, branchIds, warehouseIds]);
 
   useEffect(() => {
     api.getSuppliers().then(setSuppliers);
@@ -1315,6 +1321,22 @@ function PurchaseOrders() {
           </TabsList>
           <div className="flex items-center gap-1">
             <Input className="h-9 w-48 bg-muted/50" placeholder="Search PO # or supplier…" value={search} onChange={e => setSearch(e.target.value)} />
+            <div className="w-36">
+              <SearchableMultiSelect
+                placeholder="Branch"
+                options={branches.map(b => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </div>
+            <div className="w-36">
+              <SearchableMultiSelect
+                placeholder="Warehouse"
+                options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+                selected={warehouseIds}
+                onChange={setWarehouseIds}
+              />
+            </div>
             <div className="w-40">
               <SearchableMultiSelect
                 placeholder="Created By"
@@ -1331,10 +1353,7 @@ function PurchaseOrders() {
                 onChange={setApprovedBy}
               />
             </div>
-            <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
-            <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-            <span className="text-xs text-muted-foreground">–</span>
-            <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="h-9 w-32" />
             {(dateFrom || dateTo) && (
               <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
                 <X className="h-3.5 w-3.5" />

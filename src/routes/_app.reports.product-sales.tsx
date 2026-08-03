@@ -4,11 +4,13 @@ import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -17,9 +19,10 @@ import { api, type ProductSalesReport as ProductSalesData, type ProductSalesRow,
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Tag, Boxes, Wallet, Percent, PackageX, RotateCcw, Cigarette, X } from "lucide-react";
+import { Tag, Boxes, Wallet, Percent, PackageX, RotateCcw, Cigarette, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/reports/product-sales")({ component: ProductSales });
 
@@ -49,6 +52,7 @@ function ProductSales() {
   const [hasTobaccoFee, setHasTobaccoFee] = useState(false);
   const [data, setData] = useState<ProductSalesData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { categories, products, employees } = useReportFilterOptions(
     branchIds.length === 1 ? branchIds[0] : undefined,
@@ -103,75 +107,93 @@ function ProductSales() {
     setCategoryIds([]); setProductIds([]); setCashierIds([]); setSearch(""); setHasTobaccoFee(false);
   };
 
+  const advancedFilterCount = categoryIds.length + productIds.length + cashierIds.length + (hasTobaccoFee ? 1 : 0);
+
   return (
     <PageShell title="Product Sales" subtitle="SKU-level sales, velocity, dead stock and returns">
-      <div className="flex flex-wrap items-end gap-2">
-        {/* This report already covers "Top Selling Items (Daily/Monthly)" — Top SKU card, Top
-            Products chart, and a sortable table with product name/units sold/net sales — it just
-            needed a one-click way to switch the range instead of hand-picking dates every time. */}
-        <FilterField label="Period">
-          <div className="flex gap-1">
-            <Button type="button" size="sm" variant="outline" className="h-9 text-xs" onClick={() => { setFrom(todayStr()); setTo(todayStr()); }}>Today</Button>
-            <Button type="button" size="sm" variant="outline" className="h-9 text-xs" onClick={() => { setFrom(firstOfMonthStr()); setTo(todayStr()); }}>This Month</Button>
-          </div>
-        </FilterField>
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          {/* This report already covers "Top Selling Items (Daily/Monthly)" — Top SKU card, Top
+              Products chart, and a sortable table with product name/units sold/net sales — it just
+              needed a one-click way to switch the range instead of hand-picking dates every time. */}
+          <FilterField label="Period">
+            <div className="flex gap-1">
+              <Button type="button" size="sm" variant="outline" className="h-9 text-xs" onClick={() => { setFrom(todayStr()); setTo(todayStr()); }}>Today</Button>
+              <Button type="button" size="sm" variant="outline" className="h-9 text-xs" onClick={() => { setFrom(firstOfMonthStr()); setTo(todayStr()); }}>This Month</Button>
+            </div>
+          </FilterField>
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Search">
+            <Input placeholder="Search SKU, barcode or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />
+          </FilterField>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Category">
             <div className="w-44">
               <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
+                placeholder="All Categories"
+                options={categories.map((c) => ({ id: c.id, label: c.name }))}
+                selected={categoryIds}
+                onChange={setCategoryIds}
               />
             </div>
           </FilterField>
-        )}
-        <FilterField label="Category">
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Categories"
-              options={categories.map((c) => ({ id: c.id, label: c.name }))}
-              selected={categoryIds}
-              onChange={setCategoryIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Product">
-          <div className="w-52">
-            <SearchableMultiSelect
-              placeholder="All Products"
-              options={products.map((p) => ({ id: p.id, label: p.name }))}
-              selected={productIds}
-              onChange={setProductIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Employee">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="All Employees"
-              options={employees.map((c) => ({ id: c.id, label: c.fullName }))}
-              selected={cashierIds}
-              onChange={setCashierIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Search">
-          <Input placeholder="Search SKU, barcode or name" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-48" />
-        </FilterField>
-        <label className="flex items-center gap-1.5 text-sm px-2">
-          <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
-          Tobacco fee only
-        </label>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          <FilterField label="Product">
+            <div className="w-52">
+              <SearchableMultiSelect
+                placeholder="All Products"
+                options={products.map((p) => ({ id: p.id, label: p.name }))}
+                selected={productIds}
+                onChange={setProductIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Employee">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="All Employees"
+                options={employees.map((c) => ({ id: c.id, label: c.fullName }))}
+                selected={cashierIds}
+                onChange={setCashierIds}
+              />
+            </div>
+          </FilterField>
+          <label className="flex items-center gap-1.5 text-sm px-2">
+            <Checkbox checked={hasTobaccoFee} onCheckedChange={(v) => setHasTobaccoFee(v === true)} />
+            Tobacco fee only
+          </label>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Top SKU" value={kpis?.topSku ?? "—"} icon={Tag} accent="primary" />

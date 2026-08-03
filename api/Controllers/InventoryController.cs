@@ -164,7 +164,7 @@ public class InventoryController(
     [HttpGet("batches")]
     public async Task<IActionResult> GetBatches(
         [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? warehouseId, [FromQuery] Guid? productId, [FromQuery] string[]? status,
-        [FromQuery] string? locationType)
+        [FromQuery] string? locationType, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var (role, callerBranchId) = GetCallerContext();
         // Only clobber branchId onto a branch-scoped request — a caller explicitly asking for a
@@ -185,6 +185,8 @@ public class InventoryController(
         if (locationType == "branch" && !hasBranchFilter) query = query.Where(b => b.BranchId != null);
         else if (locationType == "warehouse" && !hasWarehouseFilter) query = query.Where(b => b.WarehouseId != null);
         if (productId.HasValue) query = query.Where(b => b.ProductId == productId);
+        if (from.HasValue) query = query.Where(b => b.ReceivedDate >= from.Value);
+        if (to.HasValue) query = query.Where(b => b.ReceivedDate <= to.Value);
 
         // branchId/warehouseId/status are arrays — never `.Contains()` a Guid[]/string[] directly
         // against a DbSet-backed IQueryable on this repo's MySQL provider (see the
@@ -381,13 +383,14 @@ public class InventoryController(
     // tables was.
     [HttpGet("movements")]
     public async Task<IActionResult> GetMovements(
-        [FromQuery] Guid? productId, [FromQuery] Guid[]? branchId, [FromQuery] Guid? warehouseId,
+        [FromQuery] Guid? productId, [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? warehouseId,
         [FromQuery] Guid? batchId, [FromQuery] string? movementType, [FromQuery] DateTime? from, [FromQuery] DateTime? to,
         [FromQuery] int limit = 200)
     {
         // Mirrors GetBatches/GetStock above — don't clobber branchId onto an explicit warehouse query.
         var (role, callerBranchId) = GetCallerContext();
-        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && !warehouseId.HasValue) branchId = [callerBranchId.Value];
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && warehouseId is not { Length: > 0 })
+            branchId = [callerBranchId.Value];
 
         var query = db.StockMovements
             .Include(m => m.Product)
@@ -397,7 +400,6 @@ public class InventoryController(
             .Include(m => m.CreatedByUser)
             .AsQueryable();
         if (productId.HasValue) query = query.Where(m => m.ProductId == productId);
-        if (warehouseId.HasValue) query = query.Where(m => m.WarehouseId == warehouseId);
         if (batchId.HasValue) query = query.Where(m => m.BatchId == batchId);
         if (!string.IsNullOrEmpty(movementType)) query = query.Where(m => m.MovementType == movementType);
         if (from.HasValue) query = query.Where(m => m.CreatedAt >= from);
@@ -405,9 +407,10 @@ public class InventoryController(
 
         // CreatedByUser was serialized whole (email, username, phone, status, last login) with no
         // permission gate at all; the frontend type (src/lib/api.ts) only ever reads id+fullName.
-        // branchId is an array (multi-select filter) — never `.Contains()` a Guid[] directly
-        // against a DbSet-backed IQueryable on this repo's MySQL provider (ef-mysql-inlist-gotcha
-        // memory), so it's applied in-memory after materializing, with Take() moved after it.
+        // branchId/warehouseId are arrays (multi-select filters) — never `.Contains()` a Guid[]
+        // directly against a DbSet-backed IQueryable on this repo's MySQL provider
+        // (ef-mysql-inlist-gotcha memory), so applied in-memory after materializing, with Take()
+        // moved after it.
         var all = await query.OrderByDescending(m => m.CreatedAt)
             .Select(m => new
             {
@@ -418,18 +421,20 @@ public class InventoryController(
             }).ToListAsync();
         var scoped = all.AsEnumerable();
         if (branchId is { Length: > 0 }) scoped = scoped.Where(m => m.BranchId.HasValue && branchId.Contains(m.BranchId.Value));
+        if (warehouseId is { Length: > 0 }) scoped = scoped.Where(m => m.WarehouseId.HasValue && warehouseId.Contains(m.WarehouseId.Value));
         var movements = scoped.Take(Math.Clamp(limit, 1, 1000)).ToList();
         return Ok(movements);
     }
 
     [HttpGet("adjustments")]
     public async Task<IActionResult> GetAdjustments(
-        [FromQuery] Guid? branchId, [FromQuery] Guid? warehouseId, [FromQuery] Guid? batchId,
+        [FromQuery] Guid[]? branchId, [FromQuery] Guid[]? warehouseId, [FromQuery] Guid? batchId,
         [FromQuery] string? adjustmentType, [FromQuery] Guid? productId, [FromQuery] Guid? adjustedBy,
-        [FromQuery] string? approvalStatus)
+        [FromQuery] string? approvalStatus, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var (role, callerBranchId) = GetCallerContext();
-        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && !warehouseId.HasValue) branchId = callerBranchId;
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && warehouseId is not { Length: > 0 })
+            branchId = [callerBranchId.Value];
 
         var query = db.InventoryAdjustments
             .Include(a => a.Product)
@@ -439,16 +444,14 @@ public class InventoryController(
             .Include(a => a.AdjustedByUser)
             .Include(a => a.ApprovedByUser)
             .AsQueryable();
-        if (branchId.HasValue) query = query.Where(a => a.BranchId == branchId);
-        if (warehouseId.HasValue) query = query.Where(a => a.WarehouseId == warehouseId);
         if (batchId.HasValue) query = query.Where(a => a.BatchId == batchId);
         if (productId.HasValue) query = query.Where(a => a.ProductId == productId);
         if (adjustedBy.HasValue) query = query.Where(a => a.AdjustedBy == adjustedBy);
         if (!string.IsNullOrEmpty(adjustmentType)) query = query.Where(a => a.AdjustmentType == adjustmentType);
         if (!string.IsNullOrEmpty(approvalStatus)) query = query.Where(a => a.ApprovalStatus == approvalStatus);
+        if (from.HasValue) query = query.Where(a => a.CreatedAt >= from);
+        if (to.HasValue) query = query.Where(a => a.CreatedAt <= to);
 
-        // Branch scoping is applied at the top of the method (branchId is forced to the caller's
-        // branch for non-admins), so the query is already restricted here.
         // Same redaction as GetMovements above — AdjustedByUser/ApprovedByUser were serialized whole.
         var adjustments = await query.OrderByDescending(a => a.CreatedAt)
             .Select(a => new
@@ -460,7 +463,14 @@ public class InventoryController(
                 AdjustedByUser = a.AdjustedByUser == null ? null : new { a.AdjustedByUser.Id, a.AdjustedByUser.FullName },
                 ApprovedByUser = a.ApprovedByUser == null ? null : new { a.ApprovedByUser.Id, a.ApprovedByUser.FullName },
             }).ToListAsync();
-        return Ok(adjustments);
+
+        // branchId/warehouseId are multi-select arrays — never `.Contains()` a Guid[] directly
+        // against a DbSet-backed IQueryable on this repo's MySQL provider (ef-mysql-inlist-gotcha
+        // memory), so applied in-memory after materializing, same pattern as GetMovements above.
+        var scoped = adjustments.AsEnumerable();
+        if (branchId is { Length: > 0 }) scoped = scoped.Where(a => a.BranchId.HasValue && branchId.Contains(a.BranchId.Value));
+        if (warehouseId is { Length: > 0 }) scoped = scoped.Where(a => a.WarehouseId.HasValue && warehouseId.Contains(a.WarehouseId.Value));
+        return Ok(scoped.ToList());
     }
 
     // This single endpoint is reached from three different pages, each gated on its own module

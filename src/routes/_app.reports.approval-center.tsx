@@ -11,12 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useBranch } from "@/lib/branch-context";
 import { useAuth } from "@/lib/auth";
 import { api, type ApprovalRow } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Clock, CheckCircle2, XCircle, X } from "lucide-react";
+import { Clock, CheckCircle2, XCircle, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/approval-center")({ component: ApprovalCenter });
 
@@ -110,6 +112,7 @@ function ApprovalCenter() {
   const [review, setReview] = useState<ApprovalRow | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
 
@@ -182,50 +185,67 @@ function ApprovalCenter() {
     setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchIds(defaultBranchIds);
     setStatuses(["pending"]); setTypes([]);
   };
+  const advancedFilterCount = types.length;
 
   return (
     <PageShell title="Approval Center" subtitle="Every manager approval in one place — discounts, cancellations, deletions, refunds & more">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch" className="w-44">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch" className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                selected={branchIds}
+                onChange={setBranchIds}
+              />
+            </FilterField>
+          )}
+          <FilterField label="Status" className="w-44">
             <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map((b) => ({ id: b.id, label: b.name }))}
-              selected={branchIds}
-              onChange={setBranchIds}
+              placeholder="All Statuses"
+              options={[
+                { id: "pending", label: "Pending" },
+                { id: "pending_review", label: "Pending Review" },
+                { id: "pending_approval", label: "Pending Approval" },
+                { id: "approved", label: "Approved" },
+                { id: "completed", label: "Completed" },
+                { id: "rejected", label: "Rejected" },
+              ]}
+              selected={statuses}
+              onChange={setStatuses}
             />
           </FilterField>
-        )}
-        <FilterField label="Status" className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Statuses"
-            options={[
-              { id: "pending", label: "Pending" },
-              { id: "pending_review", label: "Pending Review" },
-              { id: "pending_approval", label: "Pending Approval" },
-              { id: "approved", label: "Approved" },
-              { id: "completed", label: "Completed" },
-              { id: "rejected", label: "Rejected" },
-            ]}
-            selected={statuses}
-            onChange={setStatuses}
-          />
-        </FilterField>
-        <FilterField label="Type" className="w-52">
-          <SearchableMultiSelect
-            placeholder="All Types"
-            options={Object.entries(REQUEST_TYPE_LABELS).map(([id, label]) => ({ id, label }))}
-            selected={types}
-            onChange={setTypes}
-          />
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-      </div>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Type">
+            <SearchableMultiSelect
+              placeholder="All Types"
+              options={Object.entries(REQUEST_TYPE_LABELS).map(([id, label]) => ({ id, label }))}
+              selected={types}
+              onChange={setTypes}
+            />
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Pending" value={String(pendingCount)} icon={Clock} accent="warning" />

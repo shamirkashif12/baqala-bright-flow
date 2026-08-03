@@ -3,11 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
@@ -15,7 +17,7 @@ import { api, type CashierSalesReport, type CashierSalesRow, type ReportExportFo
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Trophy, Wallet, RotateCcw, Ban, X } from "lucide-react";
+import { Trophy, Wallet, RotateCcw, Ban, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +45,7 @@ function CashierSales() {
   const [cashiers, setCashiers] = useState<User[]>([]);
   const [data, setData] = useState<CashierSalesReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     api.getTerminals({ branchId: branchId !== "all" ? [branchId] : undefined }).then(setTerminals).catch(() => {});
@@ -89,50 +92,67 @@ function CashierSales() {
     setFrom(todayStr()); setTo(todayStr()); setBranchId(defaultBranchId);
     setTerminalId("all"); setCashierId("all");
   };
+  const advancedFilterCount = (terminalId !== "all" ? 1 : 0) + (cashierId !== "all" ? 1 : 0);
 
   return (
     <PageShell
       title="Cashier Sales"
       subtitle="Cashier-level shift performance, cash variance and productivity"
     >
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Terminal">
+            <Select value={terminalId} onValueChange={setTerminalId}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Terminal" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="all">All Terminals</SelectItem>
+                {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </FilterField>
-        )}
-        <FilterField label="Terminal">
-          <Select value={terminalId} onValueChange={setTerminalId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Terminal" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Terminals</SelectItem>
-              {terminals.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Cashier">
-          <Select value={cashierId} onValueChange={setCashierId}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Cashier" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Cashiers</SelectItem>
-              {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          <FilterField label="Cashier">
+            <Select value={cashierId} onValueChange={setCashierId}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Cashier" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Cashiers</SelectItem>
+                {cashiers.map((c) => <SelectItem key={c.id} value={c.id}>{c.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Top Cashier" value={kpis?.topCashier ?? "—"} icon={Trophy} accent="primary" />

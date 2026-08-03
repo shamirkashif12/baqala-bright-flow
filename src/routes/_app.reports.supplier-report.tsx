@@ -9,14 +9,16 @@ import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
-import { api, type SupplierReportRow, type SupplierReportDetail, type ReportExportFormat, type Supplier, type User } from "@/lib/api";
+import { api, type SupplierReportRow, type SupplierReportDetail, type ReportExportFormat, type Supplier, type User, type Warehouse } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Truck, DollarSign, Wallet, AlertTriangle, Eye, X } from "lucide-react";
+import { Truck, DollarSign, Wallet, AlertTriangle, Eye, X, SlidersHorizontal, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/reports/supplier-report")({ component: SupplierReport });
 
@@ -146,34 +148,41 @@ function SupplierReport() {
   const [to, setTo] = useState(todayStr());
   const [supplierIds, setSupplierIds] = useState<string[]>([]);
   const [branchIds, setBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
+  const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [paymentStatuses, setPaymentStatuses] = useState<string[]>([]);
   const [reasons, setReasons] = useState<string[]>([]);
   const [createdByIds, setCreatedByIds] = useState<string[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [rows, setRows] = useState<SupplierReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewSupplier, setViewSupplier] = useState<SupplierReportRow | null>(null);
   const [detail, setDetail] = useState<SupplierReportDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => { api.getSuppliers().then(setSuppliers).catch(() => {}); }, []);
   useEffect(() => { api.getUsers().then(setUsers).catch(() => {}); }, []);
+  useEffect(() => { api.getWarehouses().then(setWarehouses).catch(() => {}); }, []);
 
   const filterParams = {
     from, to,
     supplierId: supplierIds.length ? supplierIds : undefined,
     branchId: branchIds.length ? branchIds : undefined,
+    warehouseId: warehouseIds.length ? warehouseIds : undefined,
     paymentStatus: paymentStatuses.length ? paymentStatuses : undefined,
     reason: reasons.length ? reasons : undefined,
     createdBy: createdByIds.length ? createdByIds : undefined,
   };
 
   const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || supplierIds.length > 0
-    || (!lockedBranchId && branchIds.length > 0) || paymentStatuses.length > 0 || reasons.length > 0 || createdByIds.length > 0;
+    || (!lockedBranchId && branchIds.length > 0) || warehouseIds.length > 0
+    || paymentStatuses.length > 0 || reasons.length > 0 || createdByIds.length > 0;
   const clearFilters = () => {
     setFrom(firstOfMonthStr()); setTo(todayStr()); setSupplierIds([]);
     if (!lockedBranchId) setBranchIds([]);
+    setWarehouseIds([]);
     setPaymentStatuses([]); setReasons([]); setCreatedByIds([]);
   };
 
@@ -184,7 +193,7 @@ function SupplierReport() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load report"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, supplierIds, branchIds, paymentStatuses, reasons, createdByIds]);
+  }, [from, to, supplierIds, branchIds, warehouseIds, paymentStatuses, reasons, createdByIds]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -194,6 +203,7 @@ function SupplierReport() {
     api.getSupplierReportDetail({
       supplierId: viewSupplier.supplierId, from, to,
       branchId: branchIds.length ? branchIds : undefined,
+      warehouseId: warehouseIds.length ? warehouseIds : undefined,
       paymentStatus: paymentStatuses.length ? paymentStatuses : undefined,
       createdBy: createdByIds.length ? createdByIds : undefined,
     })
@@ -212,6 +222,7 @@ function SupplierReport() {
     }
   };
 
+  const advancedFilterCount = paymentStatuses.length + reasons.length + createdByIds.length;
   const supplierCount = rows.length;
   const totalPurchase = rows.reduce((s, r) => s + r.totalPurchaseAmount, 0);
   const totalPaid = rows.reduce((s, r) => s + r.paidAmount, 0);
@@ -219,67 +230,87 @@ function SupplierReport() {
 
   return (
     <PageShell title="Supplier Report" subtitle="Supplier-level purchase totals with accurate payment tracking — click a supplier to see every purchase">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        <FilterField label="Supplier">
-          <div className="w-48">
-            <SearchableMultiSelect
-              placeholder="All Suppliers"
-              options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
-              selected={supplierIds}
-              onChange={setSupplierIds}
-            />
-          </div>
-        </FilterField>
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <div className="w-40">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          <FilterField label="Supplier">
+            <div className="w-48">
               <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
+                placeholder="All Suppliers"
+                options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+                selected={supplierIds}
+                onChange={setSupplierIds}
               />
             </div>
           </FilterField>
-        )}
-        <FilterField label="Payment Status">
-          <div className="w-40">
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <div className="w-40">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Warehouse">
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="All Warehouses"
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={warehouseIds}
+                onChange={setWarehouseIds}
+              />
+            </div>
+          </FilterField>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Payment Status">
             <SearchableMultiSelect
               placeholder="All Payment Statuses"
               options={PAYMENT_STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
               selected={paymentStatuses}
               onChange={setPaymentStatuses}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Reason">
-          <div className="w-36">
+          </FilterField>
+          <FilterField label="Reason">
             <SearchableMultiSelect
               placeholder="All Reasons"
               options={RETURN_REASONS.map((r) => ({ id: r, label: r.replace(/_/g, " ") }))}
               selected={reasons}
               onChange={setReasons}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Created By">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Created By">
             <SearchableMultiSelect
               placeholder="Created By: Anyone"
               options={users.map((u) => ({ id: u.id, label: u.fullName }))}
               selected={createdByIds}
               onChange={setCreatedByIds}
             />
-          </div>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Suppliers" value={String(supplierCount)} icon={Truck} accent="primary" />

@@ -14,11 +14,13 @@ import { useBranch } from "@/lib/branch-context";
 import { api, type StockReconciliationReport as ReconData, type StockReconciliationRow, type ReportExportFormat } from "@/lib/api";
 import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { ClipboardCheck, ListChecks, Scale, Target, TrendingDown, X } from "lucide-react";
+import { ClipboardCheck, ListChecks, Scale, Target, TrendingDown, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/_app/reports/stock-reconciliation")({ component: StockReconciliation });
 
@@ -63,6 +65,7 @@ function StockReconciliation() {
   const [varianceOnly, setVarianceOnly] = useState(false);
   const [data, setData] = useState<ReconData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
   const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
@@ -105,6 +108,8 @@ function StockReconciliation() {
     setCategoryIds([]); setProductIds([]); setCountedByIds([]);
     setCountType("all"); setStatuses([]); setVarianceOnly(false);
   };
+  const advancedFilterCount = categoryIds.length + productIds.length + countedByIds.length
+    + (countType !== "all" ? 1 : 0) + (varianceOnly ? 1 : 0);
 
   const handleExport = async (format: ReportExportFormat) => {
     try {
@@ -121,103 +126,113 @@ function StockReconciliation() {
 
   return (
     <PageShell
-      title="Stocktaking Report (Inventory Count)"
+      title="Stocktaking Report (Inventory Audit / Stock Count)"
       subtitle="Stock review, audit and reconciliation — system vs counted quantity by count session"
     >
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          {/* Warehouse stock-takes are reviewed/approved by tenant_admin only (no warehouse-scoped
+              role exists yet), so this filter is only meaningful for the same admin view as Branch. */}
+          {!lockedBranchId && (
+            <FilterField label="Warehouse">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Warehouses"
+                  options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                  selected={warehouseIds}
+                  onChange={setWarehouseIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Status">
             <div className="w-44">
               <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
+                placeholder="All Statuses"
+                options={STATUS_OPTIONS}
+                selected={statuses}
+                onChange={setStatuses}
               />
             </div>
           </FilterField>
-        )}
-        {/* Warehouse stock-takes are reviewed/approved by tenant_admin only (no warehouse-scoped
-            role exists yet), so this filter is only meaningful for the same admin view as Branch. */}
-        {!lockedBranchId && (
-          <FilterField label="Warehouse">
-            <div className="w-44">
-              <SearchableMultiSelect
-                placeholder="All Warehouses"
-                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-                selected={warehouseIds}
-                onChange={setWarehouseIds}
-              />
-            </div>
-          </FilterField>
-        )}
-        <FilterField label="Category">
-          <div className="w-40">
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Category">
             <SearchableMultiSelect
               placeholder="All Categories"
               options={categories.map((c) => ({ id: c.id, label: c.name }))}
               selected={categoryIds}
               onChange={setCategoryIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Product">
-          <div className="w-44">
+          </FilterField>
+          <FilterField label="Product">
             <SearchableMultiSelect
               placeholder="All Products"
               options={products.map((p) => ({ id: p.id, label: p.name }))}
               selected={productIds}
               onChange={setProductIds}
             />
-          </div>
-        </FilterField>
-        {/* Matches either end of a session — whoever started the count or performed/signed it off. */}
-        <FilterField label="Employee">
-          <div className="w-40">
+          </FilterField>
+          {/* Matches either end of a session — whoever started the count or performed/signed it off. */}
+          <FilterField label="Employee">
             <SearchableMultiSelect
               placeholder="All Employees"
               options={employees.map((u) => ({ id: u.id, label: u.fullName }))}
               selected={countedByIds}
               onChange={setCountedByIds}
             />
-          </div>
-        </FilterField>
-        {/* The FRD's three named filters — Stock Review / Stock Audit / Inventory Reconciliation.
-            They all describe a StockCount session; count_type is what tells them apart. Kept
-            single-select — it's a fixed 3-value intent field, not a location/entity list. */}
-        <FilterField label="Count Type">
-          <Select value={countType} onValueChange={setCountType}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Count Type" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Count Types</SelectItem>
-              <SelectItem value="review">Stock Review</SelectItem>
-              <SelectItem value="audit">Stock Audit</SelectItem>
-              <SelectItem value="reconciliation">Inventory Reconciliation</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Status">
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Statuses"
-              options={STATUS_OPTIONS}
-              selected={statuses}
-              onChange={setStatuses}
-            />
-          </div>
-        </FilterField>
-        <label className="flex items-center gap-1.5 text-sm px-2">
-          <Checkbox checked={varianceOnly} onCheckedChange={(v) => setVarianceOnly(v === true)} />
-          Variance only
-        </label>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          </FilterField>
+          {/* The FRD's three named filters — Stock Review / Stock Audit / Inventory Reconciliation.
+              They all describe a StockCount session; count_type is what tells them apart. Kept
+              single-select — it's a fixed 3-value intent field, not a location/entity list. */}
+          <FilterField label="Count Type">
+            <Select value={countType} onValueChange={setCountType}>
+              <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Count Type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Count Types</SelectItem>
+                <SelectItem value="review">Stock Review</SelectItem>
+                <SelectItem value="audit">Stock Audit</SelectItem>
+                <SelectItem value="reconciliation">Inventory Reconciliation</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <label className="flex items-center gap-1.5 text-sm px-2">
+            <Checkbox checked={varianceOnly} onCheckedChange={(v) => setVarianceOnly(v === true)} />
+            Variance only
+          </label>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Count Sessions" value={String(kpis?.sessionCount ?? 0)} icon={ClipboardCheck} accent="primary" />

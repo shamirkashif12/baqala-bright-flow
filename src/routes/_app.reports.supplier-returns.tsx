@@ -10,6 +10,7 @@ import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { api, type SupplierReturnsReportRow, type SupplierReturnsReportItem, type ReportExportFormat, type Supplier, type Warehouse, type User } from "@/lib/api";
@@ -18,7 +19,8 @@ import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { PackageSearch, Truck, RotateCcw, DollarSign, Eye, X } from "lucide-react";
+import { PackageSearch, Truck, RotateCcw, DollarSign, Eye, X, SlidersHorizontal, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/reports/supplier-returns")({ component: SupplierReturnsReport });
 
@@ -148,6 +150,7 @@ function SupplierReturnsReport() {
   const [rows, setRows] = useState<SupplierReturnsReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewRts, setViewRts] = useState<SupplierReturnsReportRow | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { products, categories } = useReportFilterOptions(
     branchIds.length === 1 ? branchIds[0] : undefined,
@@ -191,6 +194,7 @@ function SupplierReturnsReport() {
     }
   };
 
+  const advancedFilterCount = categoryIds.length + productIds.length + returnedByIds.length + approvedByIds.length + reasons.length;
   const totalValue = rows.reduce((s, r) => s + r.totalValue, 0);
   const totalQty = rows.reduce((s, r) => s + r.totalQuantity, 0);
   const supplierCount = new Set(rows.map(r => r.supplierName)).size;
@@ -207,119 +211,125 @@ function SupplierReturnsReport() {
 
   return (
     <PageShell title="Supplier Returns Report" subtitle="Full transaction detail for stock returned to suppliers — click a return to see every product">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        <FilterField label="Supplier">
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Suppliers"
-              options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
-              selected={supplierIds}
-              onChange={setSupplierIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Warehouse">
-          <div className="w-44">
-            <SearchableMultiSelect
-              placeholder="All Warehouses"
-              options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-              selected={warehouseIds}
-              onChange={setWarehouseIds}
-            />
-          </div>
-        </FilterField>
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <div className="w-40">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          <FilterField label="Supplier">
+            <div className="w-44">
               <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
+                placeholder="All Suppliers"
+                options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+                selected={supplierIds}
+                onChange={setSupplierIds}
               />
             </div>
           </FilterField>
-        )}
-        <FilterField label="Category">
-          <div className="w-44">
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <div className="w-40">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Warehouse">
+            <div className="w-44">
+              <SearchableMultiSelect
+                placeholder="All Warehouses"
+                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                selected={warehouseIds}
+                onChange={setWarehouseIds}
+              />
+            </div>
+          </FilterField>
+          <FilterField label="Status">
+            <div className="w-36">
+              <SearchableMultiSelect
+                placeholder="All Statuses"
+                options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
+                selected={statuses}
+                onChange={setStatuses}
+              />
+            </div>
+          </FilterField>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {/* Per-return (Purchase Report shape) vs per-product-line — same data, two audit questions.
+              This is a row-shape toggle, not a data filter — labeled "Table Layout" (not "View") so it
+              doesn't read as a second, redundant "View" filter next to the row-detail Eye button. */}
+          <FilterField label="Table Layout">
+            <Select value={view} onValueChange={(v) => setView(v as "returns" | "lines")}>
+              <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="returns">By Return (Summary)</SelectItem>
+                <SelectItem value="lines">By Product (Pricing Detail)</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Category">
             <SearchableMultiSelect
               placeholder="All Categories"
               options={categories.map((c) => ({ id: c.id, label: c.name }))}
               selected={categoryIds}
               onChange={setCategoryIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Product">
-          <div className="w-44">
+          </FilterField>
+          <FilterField label="Product">
             <SearchableMultiSelect
               placeholder="All Products"
               options={products.map((p) => ({ id: p.id, label: p.name }))}
               selected={productIds}
               onChange={setProductIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Created By">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Created By">
             <SearchableMultiSelect
               placeholder="Created By: Anyone"
               options={users.map((u) => ({ id: u.id, label: u.fullName }))}
               selected={returnedByIds}
               onChange={setReturnedByIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Approved By">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Approved By">
             <SearchableMultiSelect
               placeholder="Approved By: Anyone"
               options={users.map((u) => ({ id: u.id, label: u.fullName }))}
               selected={approvedByIds}
               onChange={setApprovedByIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Status">
-          <div className="w-36">
-            <SearchableMultiSelect
-              placeholder="All Statuses"
-              options={STATUSES.map((s) => ({ id: s, label: s.replace(/_/g, " ") }))}
-              selected={statuses}
-              onChange={setStatuses}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Reason">
-          <div className="w-36">
+          </FilterField>
+          <FilterField label="Reason">
             <SearchableMultiSelect
               placeholder="All Reasons"
               options={RETURN_REASONS.map((r) => ({ id: r, label: r.replace(/_/g, " ") }))}
               selected={reasons}
               onChange={setReasons}
             />
-          </div>
-        </FilterField>
-        {/* Per-return (Purchase Report shape) vs per-product-line — same data, two audit questions.
-            This is a row-shape toggle, not a data filter — labeled "Table Layout" (not "View") so it
-            doesn't read as a second, redundant "View" filter next to the row-detail Eye button. */}
-        <FilterField label="Table Layout">
-          <Select value={view} onValueChange={(v) => setView(v as "returns" | "lines")}>
-            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="returns">By Return (Summary)</SelectItem>
-              <SelectItem value="lines">By Product (Pricing Detail)</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Total Returns" value={String(rows.length)} icon={PackageSearch} accent="primary" />

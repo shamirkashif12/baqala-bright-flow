@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { PerformanceTierBadge } from "@/components/report-filters/performance-tier-badge";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
+import { ProductDrillDownDrawer } from "@/components/report-filters/product-drill-down-drawer";
 import { MetricCard } from "@/components/metric-card";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
@@ -19,9 +20,11 @@ import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PaginatedDataTable, FilterField } from "@/components/module-placeholder";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SARIcon, fmtSAR } from "@/lib/currency";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { TrendingDown, Hourglass, Sparkles, TrendingUp, Minus, PackageX, X, Info } from "lucide-react";
+import { TrendingDown, Hourglass, Sparkles, TrendingUp, Minus, PackageX, X, Info, SlidersHorizontal, ChevronDown, Eye } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/inventory-dashboard")({ component: InventoryDashboard });
@@ -64,20 +67,24 @@ function InventoryDashboard() {
   const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [productIds, setProductIds] = useState<string[]>([]);
+  const [supplierIds, setSupplierIds] = useState<string[]>([]);
+  const [employeeIds, setEmployeeIds] = useState<string[]>([]);
   const [productStatuses, setProductStatuses] = useState<string[]>([]);
   const [classifications, setClassifications] = useState<string[]>([]);
   const [ageBuckets, setAgeBuckets] = useState<string[]>([]);
   const [locationTypeFilter, setLocationTypeFilter] = useState<string>("all");
   const [deadOnly, setDeadOnly] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [data, setData] = useState<InventoryDashboardReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [drillDownProductId, setDrillDownProductId] = useState<string | null>(null);
   // Same server-resolved scope the Inventory report uses, so both pages agree on which pools and
   // filters this user has.
   const [scope, setScope] = useState<InventorySnapshotScope | null>(null);
 
   const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
   const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
-  const { categories, products } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
+  const { categories, products, suppliers, employees } = useReportFilterOptions(scopedBranchId, scopedCategoryId);
 
   useEffect(() => { api.getInventorySnapshotScope().then(setScope).catch(() => {}); }, []);
 
@@ -92,11 +99,13 @@ function InventoryDashboard() {
     warehouseId: warehouseIds.length ? warehouseIds : undefined,
     categoryId: categoryIds.length ? categoryIds : undefined,
     productId: productIds.length ? productIds : undefined,
+    supplierId: supplierIds.length ? supplierIds : undefined,
+    employeeId: employeeIds.length ? employeeIds : undefined,
     productStatus: productStatuses.length ? productStatuses : undefined,
     classification: classifications.length ? classifications : undefined,
     ageBucket: ageBuckets.length ? ageBuckets : undefined,
     locationType: locationTypeFilter !== "all" ? locationTypeFilter : undefined,
-  }), [branchIds, warehouseIds, categoryIds, productIds, productStatuses, classifications, ageBuckets, locationTypeFilter]);
+  }), [branchIds, warehouseIds, categoryIds, productIds, supplierIds, employeeIds, productStatuses, classifications, ageBuckets, locationTypeFilter]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -109,13 +118,19 @@ function InventoryDashboard() {
   useEffect(() => { load(); }, [load]);
 
   const hasFilters = from !== firstOfMonthStr() || to !== todayStr() || branchIds.length !== (lockedBranchId ? 1 : 0)
-    || warehouseIds.length > 0 || categoryIds.length > 0 || productIds.length > 0 || productStatuses.length > 0
+    || warehouseIds.length > 0 || categoryIds.length > 0 || productIds.length > 0 || supplierIds.length > 0
+    || employeeIds.length > 0 || productStatuses.length > 0
     || classifications.length > 0 || ageBuckets.length > 0 || locationTypeFilter !== "all" || deadOnly !== false;
   const clearFilters = () => {
     setFrom(firstOfMonthStr()); setTo(todayStr()); setBranchIds(lockedBranchId ? [lockedBranchId] : []);
-    setWarehouseIds([]); setCategoryIds([]); setProductIds([]); setProductStatuses([]); setClassifications([]);
+    setWarehouseIds([]); setCategoryIds([]); setProductIds([]); setSupplierIds([]); setEmployeeIds([]);
+    setProductStatuses([]); setClassifications([]);
     setAgeBuckets([]); setLocationTypeFilter("all"); setDeadOnly(false);
   };
+
+  const advancedFilterCount = productIds.length + supplierIds.length + employeeIds.length
+    + productStatuses.length + classifications.length
+    + ageBuckets.length + (locationTypeFilter !== "all" ? 1 : 0);
 
   const dw = data?.dataWindow;
   const fmt = (n: number) => fmtSAR(n);
@@ -142,98 +157,122 @@ function InventoryDashboard() {
         Looking for sales velocity, turnover and profitability instead? See{" "}
         <Link to="/reports/inventory-aging-performance" className="underline underline-offset-2 hover:text-foreground">Product Performance & Classification</Link>.
       </p>
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && scope?.canFilterBranch && (
-          <FilterField label="Branch">
-            <div className="w-44">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && scope?.canFilterBranch && (
+            <FilterField label="Branch">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          {scope?.canFilterWarehouse && (
+            <FilterField label="Warehouse">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Warehouses"
+                  options={scope.warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                  selected={warehouseIds}
+                  onChange={setWarehouseIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Category">
+            <div className="w-40">
               <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
+                placeholder="All Categories"
+                options={categories.map((c) => ({ id: c.id, label: c.name }))}
+                selected={categoryIds}
+                onChange={setCategoryIds}
               />
             </div>
           </FilterField>
-        )}
-        {scope?.canFilterWarehouse && (
-          <FilterField label="Warehouse">
-            <div className="w-44">
-              <SearchableMultiSelect
-                placeholder="All Warehouses"
-                options={scope.warehouses.map((w) => ({ id: w.id, label: w.name }))}
-                selected={warehouseIds}
-                onChange={setWarehouseIds}
-              />
-            </div>
-          </FilterField>
-        )}
-        <FilterField label="Category">
-          <div className="w-40">
-            <SearchableMultiSelect
-              placeholder="All Categories"
-              options={categories.map((c) => ({ id: c.id, label: c.name }))}
-              selected={categoryIds}
-              onChange={setCategoryIds}
-            />
-          </div>
-        </FilterField>
-        <FilterField label="Product">
-          <div className="w-48">
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Product">
             <SearchableMultiSelect
               placeholder="All Products"
               options={products.map((p) => ({ id: p.id, label: p.name }))}
               selected={productIds}
               onChange={setProductIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Product Status">
-          <div className="w-44">
+          </FilterField>
+          <FilterField label="Supplier">
+            <SearchableMultiSelect
+              placeholder="All Suppliers"
+              options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+              selected={supplierIds}
+              onChange={setSupplierIds}
+            />
+          </FilterField>
+          <FilterField label="Employee">
+            <SearchableMultiSelect
+              placeholder="All Employees"
+              options={employees.map((e) => ({ id: e.id, label: e.fullName }))}
+              selected={employeeIds}
+              onChange={setEmployeeIds}
+            />
+          </FilterField>
+          <FilterField label="Product Status">
             <SearchableMultiSelect
               placeholder="All Product Statuses"
               options={PRODUCT_STATUSES}
               selected={productStatuses}
               onChange={setProductStatuses}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Classification">
-          <div className="w-48">
+          </FilterField>
+          <FilterField label="Classification">
             <SearchableMultiSelect
               placeholder="All Statuses (Aging)"
               options={CLASSIFICATIONS}
               selected={classifications}
               onChange={setClassifications}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Age Bucket">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Age Bucket">
             <SearchableMultiSelect
               placeholder="All Age Buckets"
               options={AGE_BUCKETS}
               selected={ageBuckets}
               onChange={setAgeBuckets}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Location Type">
-          <Select value={locationTypeFilter} onValueChange={setLocationTypeFilter}>
-            <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Branch & Warehouse</SelectItem>
-              <SelectItem value="branch">Branch only</SelectItem>
-              <SelectItem value="warehouse">Warehouse only</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-      </div>
+          </FilterField>
+          <FilterField label="Location Type">
+            <Select value={locationTypeFilter} onValueChange={setLocationTypeFilter}>
+              <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Branch & Warehouse</SelectItem>
+                <SelectItem value="branch">Branch only</SelectItem>
+                <SelectItem value="warehouse">Warehouse only</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Star Products" value={String(data?.kpis.starCount ?? 0)} icon={Sparkles} accent="success" />
@@ -316,6 +355,8 @@ function InventoryDashboard() {
                 ),
               },
               { key: "onHandQty", label: "On Hand" },
+              // Profitability (Gross Profit / Margin %) is already covered by the Product
+              // Performance and Profit Margin reports — intentionally not duplicated here.
               ...(canViewCost ? [{ key: "stockValue", label: "Stock Value", render: (r: InventoryAgingRow) => <><SARIcon />{fmt(r.stockValue)}</> }] : []),
               {
                 key: "productAgeDays", label: "Age in Stock",
@@ -353,6 +394,14 @@ function InventoryDashboard() {
                 key: "classification", label: "Status",
                 render: (r: InventoryAgingRow) => <PerformanceTierBadge tier={r.classification} />,
               },
+              {
+                key: "action", label: "Action",
+                render: (r: InventoryAgingRow) => (
+                  <Button size="icon" variant="ghost" className="h-7 w-7" title="View sales, batch & movement detail" onClick={() => setDrillDownProductId(r.productId)}>
+                    <Eye className="h-3.5 w-3.5" />
+                  </Button>
+                ),
+              },
             ]}
             rows={agingRows}
           />
@@ -363,6 +412,7 @@ function InventoryDashboard() {
           {dw?.ledgerStart ? new Date(dw.ledgerStart).toLocaleDateString("en-SA", { dateStyle: "medium" }) : "(ledger empty)"} onward.
         </p>
       </Card>
+      <ProductDrillDownDrawer productId={drillDownProductId} from={from} to={to} onClose={() => setDrillDownProductId(null)} />
     </PageShell>
   );
 }
