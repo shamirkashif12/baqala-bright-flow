@@ -291,6 +291,7 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
 
     // Receive stock against PO — updates item received quantities + creates InventoryBatch + updates stock
     [RequirePermission("Purchase Orders", PermAction.Edit)]
+    [RequirePlanFeature("purchase_orders")]
     [HttpPost("{id:guid}/receive")]
     public async Task<IActionResult> Receive(Guid id, [FromBody] List<ReceiveItemRequest> items)
     {
