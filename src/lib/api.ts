@@ -275,7 +275,7 @@ export const api = {
   // already explains the stock needs transferring out first).
   deleteInventoryStock: (id: string) =>
     request<void>(`/api/inventory/stock/${id}`, { method: "DELETE" }),
-  getBatches: (params?: { branchId?: string[]; warehouseId?: string[]; productId?: string; status?: string[]; locationType?: "branch" | "warehouse" }) =>
+  getBatches: (params?: { branchId?: string[]; warehouseId?: string[]; productId?: string; status?: string[]; locationType?: "branch" | "warehouse"; from?: string; to?: string }) =>
     request<InventoryBatch[]>(`/api/inventory/batches${toQuery(params)}`),
   getExpiringBatches: (branchId?: string, daysAhead = 30, warehouseId?: string) => {
     const q = new URLSearchParams({ ...(branchId && { branchId }), ...(warehouseId && { warehouseId }), daysAhead: String(daysAhead) }).toString();
@@ -290,10 +290,8 @@ export const api = {
       `/api/inventory/batches/fefo-warnings?branchId=${branchId}`),
   adjustInventory: (data: AdjustInventoryPayload) =>
     request<{ id: string }>("/api/inventory/adjustments", { method: "POST", body: JSON.stringify(data) }),
-  getAdjustments: (params?: { branchId?: string; warehouseId?: string; batchId?: string; adjustmentType?: string; productId?: string; adjustedBy?: string; approvalStatus?: string }) => {
-    const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v))).toString();
-    return request<InventoryAdjustment[]>(`/api/inventory/adjustments${q ? `?${q}` : ""}`);
-  },
+  getAdjustments: (params?: { branchId?: string[]; warehouseId?: string[]; batchId?: string; adjustmentType?: string; productId?: string; adjustedBy?: string; approvalStatus?: string; from?: string; to?: string }) =>
+    request<InventoryAdjustment[]>(`/api/inventory/adjustments${toQuery(params)}`),
   // Sign-off on a held write-off (FRD §2.3). A pending write-off hasn't touched stock: APPROVE
   // applies the deduction now; REJECT leaves stock on hand. (Legacy rows deducted before gating
   // shipped are given back via a compensating movement on reject.) Reason is required to reject.
@@ -301,11 +299,11 @@ export const api = {
     request<InventoryAdjustment>(`/api/inventory/adjustments/${id}/approval`, {
       method: "PATCH", body: JSON.stringify({ approved, reason }),
     }),
-  getStockMovements: (params?: { productId?: string; branchId?: string[]; warehouseId?: string; batchId?: string; movementType?: string; from?: string; to?: string; limit?: number }) =>
+  getStockMovements: (params?: { productId?: string; branchId?: string[]; warehouseId?: string[]; batchId?: string; movementType?: string; from?: string; to?: string; limit?: number }) =>
     request<StockMovement[]>(`/api/inventory/movements${toQuery(params)}`),
 
   // Stock Counts (Stocking Review)
-  getStockCounts: (params?: { branchId?: string; warehouseId?: string; status?: string }) =>
+  getStockCounts: (params?: { branchId?: string[]; warehouseId?: string; status?: string; from?: string; to?: string }) =>
     request<StockCount[]>(`/api/stock-counts${toQuery(params)}`),
   getStockCount: (id: string) => request<StockCount>(`/api/stock-counts/${id}`),
   // countType records WHY the count is being run (review | audit | reconciliation) — the FRD's
@@ -556,7 +554,7 @@ export const api = {
     request<WarehouseStock[]>(`/api/warehouses/${warehouseId}/stock`),
 
   // Purchase Orders
-  getPurchaseOrders: (params?: { supplierId?: string; warehouseId?: string; branchId?: string; createdBy?: string[]; approvedBy?: string[]; productId?: string; status?: string[]; paymentStatus?: string }) =>
+  getPurchaseOrders: (params?: { supplierId?: string; warehouseId?: string | string[]; branchId?: string | string[]; createdBy?: string[]; approvedBy?: string[]; productId?: string; status?: string[]; paymentStatus?: string }) =>
     request<PurchaseOrder[]>(`/api/purchase-orders${toQuery(params)}`),
   getPurchaseOrder: (id: string) => request<PurchaseOrder>(`/api/purchase-orders/${id}`),
   getPurchaseOrderByNumber: (number: string) =>
@@ -770,7 +768,7 @@ export const api = {
   getInventorySnapshotScope: () =>
     request<InventorySnapshotScope>("/api/reports/inventory-snapshot/scope"),
 
-  getInventoryDashboardReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; locationType?: string; productId?: string[]; productStatus?: string[]; classification?: string[]; ageBucket?: string[]; moverLimit?: number }) =>
+  getInventoryDashboardReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; locationType?: string; productId?: string[]; supplierId?: string[]; employeeId?: string[]; productStatus?: string[]; classification?: string[]; ageBucket?: string[]; moverLimit?: number }) =>
     request<InventoryDashboardReport>(`/api/reports/inventory-dashboard${toQuery(params)}`),
 
   // FRD §2.1 — the "Stock Review" / "Stock Audit" / "Inventory Reconciliation" filters all describe
@@ -790,6 +788,11 @@ export const api = {
   getProductPerformanceDetail: (productId: string, params?: { from?: string; to?: string }) =>
     request<ProductPerformanceDetail>(`/api/reports/inventory-aging-performance/product-detail/${productId}${toQuery(params)}`),
 
+  getStockMovementHistoryReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; supplierId?: string[]; employeeId?: string[]; movementType?: string[] }) =>
+    request<StockMovementHistoryReport>(`/api/reports/stock-movement-history${toQuery(params)}`),
+  exportStockMovementHistoryReport: (params?: { from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; categoryId?: string[]; productId?: string[]; supplierId?: string[]; employeeId?: string[]; movementType?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+    requestBlob(`/api/reports/stock-movement-history/export${toQuery(params)}`),
+
   getBranchSalesReport: (params?: { from?: string; to?: string; city?: string; branchId?: string; customerType?: string; cashierId?: string; terminalId?: string; productId?: string; categoryId?: string; hasTobaccoFee?: boolean }) =>
     request<BranchSalesReport>(`/api/reports/branch-sales${toQuery(params)}`),
   exportBranchSalesReport: (params?: { from?: string; to?: string; city?: string; branchId?: string; customerType?: string; cashierId?: string; terminalId?: string; productId?: string; categoryId?: string; hasTobaccoFee?: boolean; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
@@ -805,14 +808,14 @@ export const api = {
   exportProductSalesReport: (params?: { from?: string; to?: string; branchId?: string[]; categoryId?: string[]; productId?: string[]; search?: string; cashierId?: string[]; hasTobaccoFee?: boolean; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/product-sales/export${toQuery(params)}`),
 
-  getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; cashierId?: string; terminalId?: string; productId?: string; hasTobaccoFee?: boolean }) =>
+  getCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; categoryId?: string[]; cashierId?: string[]; terminalId?: string[]; productId?: string[]; hasTobaccoFee?: boolean }) =>
     request<CategoryPerformanceReport>(`/api/reports/category-performance${toQuery(params)}`),
-  exportCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string; categoryId?: string; cashierId?: string; terminalId?: string; productId?: string; hasTobaccoFee?: boolean; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
+  exportCategoryPerformanceReport: (params?: { from?: string; to?: string; branchId?: string[]; categoryId?: string[]; cashierId?: string[]; terminalId?: string[]; productId?: string[]; hasTobaccoFee?: boolean; exportedBy?: string; includeMargin?: boolean; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/category-performance/export${toQuery(params)}`),
 
-  getSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[] }) =>
+  getSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[] }) =>
     request<SupplierPerformanceReport>(`/api/reports/supplier-performance${toQuery(params)}`),
-  exportSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportSupplierPerformanceReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; productId?: string[]; createdBy?: string[]; approvedBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/supplier-performance/export${toQuery(params)}`),
 
   getSupplierReturnsReport: (params?: { from?: string; to?: string; supplierId?: string[]; warehouseId?: string[]; branchId?: string[]; status?: string[]; reason?: string[]; productId?: string[]; categoryId?: string[]; returnedBy?: string[]; approvedBy?: string[] }) =>
@@ -830,11 +833,11 @@ export const api = {
   exportPurchaseOrderReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; status?: string[]; createdBy?: string[]; approvedBy?: string[]; productId?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/purchase-order-report/export${toQuery(params)}`),
 
-  getSupplierReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; paymentStatus?: string[]; reason?: string[]; createdBy?: string[] }) =>
+  getSupplierReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; paymentStatus?: string[]; reason?: string[]; createdBy?: string[] }) =>
     request<SupplierReportRow[]>(`/api/reports/supplier-report${toQuery(params)}`),
-  exportSupplierReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; paymentStatus?: string[]; reason?: string[]; createdBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
+  exportSupplierReport: (params?: { from?: string; to?: string; supplierId?: string[]; branchId?: string[]; warehouseId?: string[]; paymentStatus?: string[]; reason?: string[]; createdBy?: string[]; exportedBy?: string; format?: ReportExportFormat }) =>
     requestBlob(`/api/reports/supplier-report/export${toQuery(params)}`),
-  getSupplierReportDetail: (params: { supplierId: string; from?: string; to?: string; branchId?: string[]; paymentStatus?: string[]; createdBy?: string[] }) =>
+  getSupplierReportDetail: (params: { supplierId: string; from?: string; to?: string; branchId?: string[]; warehouseId?: string[]; paymentStatus?: string[]; createdBy?: string[] }) =>
     request<SupplierReportDetail>(`/api/reports/supplier-report/detail${toQuery(params)}`),
 
   getEmployeeAuditCenter: (params?: { from?: string; to?: string; branchId?: string[]; employeeId?: string[]; category?: string[]; search?: string; deviceId?: string[]; transactionType?: string[] }) =>
@@ -2227,6 +2230,8 @@ export interface InventoryAgingRow {
   productStatus: string;
   location: string; locationType: "branch" | "warehouse";
   onHandQty: number; stockValue: number;
+  // Profitability (FRD §INV-007) is already covered by the Product Performance and Profit Margin
+  // reports (Gross Profit / Margin % columns there) — intentionally not duplicated on this row.
   // Null when no batch record exists — the stock row alone can't say when goods arrived.
   productAgeDays?: number | null;
   daysSinceLastMovement: number;
@@ -2255,6 +2260,23 @@ export interface InventoryDashboardReport {
   deadStockSkus: number;
   deadStockValue: number;
   dataWindow: InventoryDataWindow;
+}
+
+// FRD §INV-007 — one row per stock_movements ledger entry, exposed as its own filterable,
+// exportable report rather than only an embedded product drill-down.
+export interface StockMovementHistoryRow {
+  id: string; createdAt: string; productId: string; sku: string; productName: string; category: string;
+  location: string; locationType: "branch" | "warehouse";
+  movementType: string;
+  quantity: number; quantityBefore?: number | null; quantityAfter?: number | null;
+  value: number;
+  supplier?: string | null; batchNumber?: string | null;
+  referenceType?: string | null; referenceNumber?: string | null; notes?: string | null;
+  createdBy?: string | null; createdById?: string | null;
+}
+export interface StockMovementHistoryReport {
+  kpis: { totalMovements: number; inboundQty: number; outboundQty: number; netValue: number };
+  rows: StockMovementHistoryRow[];
 }
 
 export interface StockReconciliationRow {
@@ -2405,8 +2427,8 @@ export interface PurchaseOrderReportItem {
   productName: string; sku: string; orderedQuantity: number; receivedQuantity: number; unitCost: number; subtotal: number;
 }
 export interface PurchaseOrderReportRow {
-  id: string; poNumber: string; supplierName: string; locationName: string; purchaseDate: string; status: string; paymentStatus: string;
-  createdBy: string; approvedBy: string; receivedBy: string; totalAmount: number; items: PurchaseOrderReportItem[];
+  id: string; poNumber: string; supplierName: string; branchName: string; warehouseName: string; purchaseDate: string; status: string; paymentStatus: string;
+  requestedBy: string; createdBy: string; approvedBy: string; receivedBy: string; totalAmount: number; items: PurchaseOrderReportItem[];
 }
 
 export interface SupplierReportRow {

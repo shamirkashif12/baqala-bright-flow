@@ -18,6 +18,7 @@ public class WarehousesController(BaqalaDbContext db, IAuditService audit) : Con
     private async Task<Guid?> ResolveEmployeeIdAsync(Guid? userId) =>
         userId.HasValue ? await db.Employees.Where(e => e.UserId == userId).Select(e => (Guid?)e.Id).FirstOrDefaultAsync() : null;
 
+    [RequirePermission("Warehouses", PermAction.View)]
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -29,6 +30,7 @@ public class WarehousesController(BaqalaDbContext db, IAuditService audit) : Con
         return Ok(warehouses);
     }
 
+    [RequirePermission("Warehouses", PermAction.View)]
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
@@ -100,6 +102,7 @@ public class WarehousesController(BaqalaDbContext db, IAuditService audit) : Con
         return NoContent();
     }
 
+    [RequirePermission("Warehouses", PermAction.View)]
     [HttpGet("{id:guid}/stock")]
     public async Task<IActionResult> GetStock(Guid id)
     {

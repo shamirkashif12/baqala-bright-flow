@@ -3,19 +3,22 @@ import { useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricCard } from "@/components/metric-card";
 import { PaginatedDataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
 import { ReportExportButton } from "@/components/report-export-button";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
 import { api, type ReturnsRefundsReport as ReturnsRefundsData, type ReturnRefundRow, type ReportExportFormat, type Product, type User } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { RotateCcw, Wallet, Receipt, Clock, X } from "lucide-react";
+import { RotateCcw, Wallet, Receipt, Clock, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/returns-refunds")({ component: ReturnsRefunds });
@@ -50,6 +53,7 @@ function ReturnsRefunds() {
   const [users, setUsers] = useState<User[]>([]);
   const [data, setData] = useState<ReturnsRefundsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => { api.getProducts().then(setProducts).catch(() => {}); }, []);
   useEffect(() => { api.getUsers({ branchId: branchId !== "all" ? branchId : undefined }).then(setUsers).catch(() => {}); }, [branchId]);
@@ -73,6 +77,8 @@ function ReturnsRefunds() {
     setRefundMethod("all"); setStatus("all"); setCustomerType("all"); setReason("all");
     setProductId("all"); setProcessedBy("all");
   };
+  const advancedFilterCount = (refundMethod !== "all" ? 1 : 0) + (customerType !== "all" ? 1 : 0)
+    + (reason !== "all" ? 1 : 0) + (productId !== "all" ? 1 : 0) + (processedBy !== "all" ? 1 : 0);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -106,92 +112,108 @@ function ReturnsRefunds() {
 
   return (
     <PageShell title="Return / Refund Report" subtitle="Customer returns, refunds and VAT reversal">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-9 w-44"><SelectValue placeholder="All Branches" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          )}
+          <FilterField label="Status">
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
               </SelectContent>
             </Select>
           </FilterField>
-        )}
-        <FilterField label="Refund Method">
-          <Select value={refundMethod} onValueChange={setRefundMethod}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Refund Method" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Methods</SelectItem>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="store_credit">Store Credit</SelectItem>
-              <SelectItem value="original_payment">Original Payment</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Status">
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="approved">Approved</SelectItem>
-              <SelectItem value="rejected">Rejected</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Customer Type">
-          <Select value={customerType} onValueChange={setCustomerType}>
-            <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Customer Type" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Customers</SelectItem>
-              <SelectItem value="registered">Registered</SelectItem>
-              <SelectItem value="walk-in">Walk-in</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Reason">
-          <Select value={reason} onValueChange={setReason}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Reason" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Reasons</SelectItem>
-              <SelectItem value="Damaged packaging">Damaged packaging</SelectItem>
-              <SelectItem value="Wrong item received">Wrong item received</SelectItem>
-              <SelectItem value="Expired product">Expired product</SelectItem>
-              <SelectItem value="Quality issue">Quality issue</SelectItem>
-              <SelectItem value="Customer changed mind">Customer changed mind</SelectItem>
-              <SelectItem value="Duplicate purchase">Duplicate purchase</SelectItem>
-              <SelectItem value="Other">Other</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Product">
-          <Select value={productId} onValueChange={setProductId}>
-            <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Products</SelectItem>
-              {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Employee">
-          <Select value={processedBy} onValueChange={setProcessedBy}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FilterField>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Refund Method">
+            <Select value={refundMethod} onValueChange={setRefundMethod}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Refund Method" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Methods</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="store_credit">Store Credit</SelectItem>
+                <SelectItem value="original_payment">Original Payment</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Customer Type">
+            <Select value={customerType} onValueChange={setCustomerType}>
+              <SelectTrigger className="h-9 w-36"><SelectValue placeholder="Customer Type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Customers</SelectItem>
+                <SelectItem value="registered">Registered</SelectItem>
+                <SelectItem value="walk-in">Walk-in</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Reason">
+            <Select value={reason} onValueChange={setReason}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Reason" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Reasons</SelectItem>
+                <SelectItem value="Damaged packaging">Damaged packaging</SelectItem>
+                <SelectItem value="Wrong item received">Wrong item received</SelectItem>
+                <SelectItem value="Expired product">Expired product</SelectItem>
+                <SelectItem value="Quality issue">Quality issue</SelectItem>
+                <SelectItem value="Customer changed mind">Customer changed mind</SelectItem>
+                <SelectItem value="Duplicate purchase">Duplicate purchase</SelectItem>
+                <SelectItem value="Other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Product">
+            <Select value={productId} onValueChange={setProductId}>
+              <SelectTrigger className="h-9 w-44"><SelectValue placeholder="Product" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Products</SelectItem>
+                {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Employee">
+            <Select value={processedBy} onValueChange={setProcessedBy}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Employee" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         <MetricCard label="Return Count" value={String(kpis?.returnCount ?? 0)} icon={RotateCcw} accent="primary" />

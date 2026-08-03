@@ -14,7 +14,8 @@ import {
   Plus, Search, Star, Phone, Mail, ShoppingBag, TrendingUp,
   ChevronRight, Loader2, ArrowUpCircle, ArrowDownCircle, Gift, X, Clock, RefreshCcw,
 } from "lucide-react";
-import { api, type Customer, type LoyaltyTransaction, type LoyaltyProgram, type Order } from "@/lib/api";
+import { api, type Customer, type CustomerTier, type LoyaltyTransaction, type LoyaltyProgram, type Order } from "@/lib/api";
+import { TierSingleSelect } from "@/components/tier-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
@@ -344,12 +345,7 @@ function CustomerForm({ editing, onSaved, onCancel }: {
       </CFormField>
       <div className="grid grid-cols-2 gap-3">
         <CFormField label="Tier">
-          <Select value={form.tier} onValueChange={v => setForm(p => ({ ...p, tier: v }))}>
-            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {TIER_META_BASE.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <TierSingleSelect value={form.tier as CustomerTier} onChange={v => setForm(p => ({ ...p, tier: v }))} />
         </CFormField>
         <CFormField label="Status">
           <Select value={form.status} onValueChange={v => setForm(p => ({ ...p, status: v }))}>

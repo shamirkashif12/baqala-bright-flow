@@ -16,6 +16,7 @@ namespace BaqalaPOS.Api.Controllers;
 // three NEW request types backed by ApprovalRequest.
 [ApiController]
 [Route("api/approvals")]
+[RequirePlanFeature("control_tower_approval_centre")]
 public class ApprovalsController(
     BaqalaDbContext db,
     IAuditService audit,

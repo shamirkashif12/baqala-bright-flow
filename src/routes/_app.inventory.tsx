@@ -15,7 +15,9 @@ import {
   Plus, Minus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
   ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft, X, Lock,
+  SlidersHorizontal,
 } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { TierMultiSelect } from "@/components/tier-multi-select";
@@ -27,7 +29,7 @@ import { usePlanFeature } from "@/lib/use-plan-feature";
 import { LockedFeatureNotice } from "@/components/locked-feature-notice";
 import { fileToCompressedDataUrl } from "@/lib/image";
 import { useCompanyHeader } from "@/lib/use-company-header";
-import { localDateStr } from "@/lib/utils";
+import { localDateStr, cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/inventory")({ component: Inventory });
@@ -1842,6 +1844,9 @@ function Inventory() {
   const [productFilters, setProductFilters] = useState<string[]>([]);
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
+  const [updatedFrom, setUpdatedFrom] = useState("");
+  const [updatedTo, setUpdatedTo] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [viewItem, setViewItem] = useState<StockItem | null>(null);
   const [adjustItem, setAdjustItem] = useState<StockItem | null>(null);
@@ -1911,6 +1916,16 @@ function Inventory() {
           const expiryMap = new Map<string, string>();
           allBatchesRef.current.forEach(batch => {
             if (!batch.expiryDate || batch.remainingQuantity <= 0) return;
+            // Skip batches that are themselves already expired (by status, or by date if the
+            // periodic write-off scan hasn't reached them yet) — same rule batch-expand-row.tsx
+            // uses to exclude them from "tracked" on-hand. An already-expired batch isn't
+            // relevant to current stock, so it shouldn't get to be "the" nearest-expiry date
+            // shown for a row whose real on-hand is backed by fine, active batches.
+            if (batch.status === "expired") return;
+            const expiry = new Date(batch.expiryDate);
+            const now = new Date();
+            if (Date.UTC(expiry.getUTCFullYear(), expiry.getUTCMonth(), expiry.getUTCDate())
+              < Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) return;
             const key = `${batch.productId}:${batch.branchId}`;
             const existing = expiryMap.get(key);
             if (!existing || new Date(batch.expiryDate) < new Date(existing)) {
@@ -2004,8 +2019,12 @@ function Inventory() {
     const mp = productFilters.length === 0 || productFilters.includes(s.productId);
     const mef = !expiryFrom || (!!s.expiryDate && s.expiryDate >= expiryFrom);
     const met = !expiryTo || (!!s.expiryDate && s.expiryDate <= expiryTo + "T23:59:59");
-    return mq && mc && mb && mp && mef && met;
-  }), [stock, q, categoryFilters, branchFilters, productFilters, expiryFrom, expiryTo]);
+    const muf = !updatedFrom || (!!s.lastUpdated && s.lastUpdated >= updatedFrom);
+    const mut = !updatedTo || (!!s.lastUpdated && s.lastUpdated <= updatedTo + "T23:59:59");
+    return mq && mc && mb && mp && mef && met && muf && mut;
+  }), [stock, q, categoryFilters, branchFilters, productFilters, expiryFrom, expiryTo, updatedFrom, updatedTo]);
+
+  const advancedFilterCount = productFilters.length + (expiryFrom ? 1 : 0) + (expiryTo ? 1 : 0) + (updatedFrom ? 1 : 0) + (updatedTo ? 1 : 0);
 
   // Metrics
   const totalSKUs = stock.length;
@@ -2119,52 +2138,79 @@ function Inventory() {
       </div>
 
       {/* ── Filters + Search ── */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-56">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></span>
-          <Input className="h-9 pl-9 bg-muted/40" placeholder="Search by item name, SKU, barcode…" value={q} onChange={e => setQ(e.target.value)} />
-        </div>
-        <div className="w-44">
-          <SearchableMultiSelect
-            placeholder="All Categories"
-            options={categories.map(c => ({ id: c.name, label: c.name }))}
-            selected={categoryFilters}
-            onChange={setCategoryFilters}
-          />
-        </div>
-        <div className="w-48">
-          <SearchableMultiSelect
-            placeholder="All Products"
-            options={productOptions.map(p => ({ id: p.id, label: p.name }))}
-            selected={productFilters}
-            onChange={setProductFilters}
-          />
-        </div>
-        {!lockedBranchId && (
-          <div className="w-40">
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-56">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></span>
+            <Input className="h-9 pl-9 bg-muted/40" placeholder="Search by item name, SKU, barcode…" value={q} onChange={e => setQ(e.target.value)} />
+          </div>
+          <div className="w-44">
             <SearchableMultiSelect
-              placeholder="All Branches"
-              options={branches.map(b => ({ id: b.id, label: b.name }))}
-              selected={branchFilters}
-              onChange={setBranchFilters}
+              placeholder="All Categories"
+              options={categories.map(c => ({ id: c.name, label: c.name }))}
+              selected={categoryFilters}
+              onChange={setCategoryFilters}
             />
           </div>
-        )}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
-          <Input type="date" className="h-9 w-36" value={expiryFrom} onChange={e => setExpiryFrom(e.target.value)} title="Expiry from" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={expiryTo} onChange={e => setExpiryTo(e.target.value)} title="Expiry to" />
-          {(expiryFrom || expiryTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" title="Clear expiry filter" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
+          {!lockedBranchId && (
+            <div className="w-40">
+              <SearchableMultiSelect
+                placeholder="All Branches"
+                options={branches.map(b => ({ id: b.id, label: b.name }))}
+                selected={branchFilters}
+                onChange={setBranchFilters}
+              />
+            </div>
           )}
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          <Button variant="outline" className="h-9 gap-1.5 ml-auto" onClick={() => exportCSV(filtered, companyHeader)} disabled={filtered.length === 0}>
+            <Download className="h-4 w-4" />Export ({filtered.length})
+          </Button>
         </div>
-        <Button variant="outline" className="h-9 gap-1.5 ml-auto" onClick={() => exportCSV(filtered, companyHeader)} disabled={filtered.length === 0}>
-          <Download className="h-4 w-4" />Export ({filtered.length})
-        </Button>
-      </div>
+
+        <CollapsibleContent className="flex flex-wrap items-center gap-3 pt-3 border-t border-border/50">
+          <div className="w-48">
+            <SearchableMultiSelect
+              placeholder="All Products"
+              options={productOptions.map(p => ({ id: p.id, label: p.name }))}
+              selected={productFilters}
+              onChange={setProductFilters}
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
+            <Input type="date" className="h-9 w-36" value={expiryFrom} onChange={e => setExpiryFrom(e.target.value)} title="Expiry from" />
+            <span className="text-xs text-muted-foreground">–</span>
+            <Input type="date" className="h-9 w-36" value={expiryTo} onChange={e => setExpiryTo(e.target.value)} title="Expiry to" />
+            {(expiryFrom || expiryTo) && (
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" title="Clear expiry filter" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Last Updated:</span>
+            <Input type="date" className="h-9 w-36" value={updatedFrom} onChange={e => setUpdatedFrom(e.target.value)} title="Last updated from" />
+            <span className="text-xs text-muted-foreground">–</span>
+            <Input type="date" className="h-9 w-36" value={updatedTo} onChange={e => setUpdatedTo(e.target.value)} title="Last updated to" />
+            {(updatedFrom || updatedTo) && (
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" title="Clear last-updated filter" onClick={() => { setUpdatedFrom(""); setUpdatedTo(""); }}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       <IncomingTransfersBanner transfers={incomingTransfers} onReceive={setReceiveTransferTarget} />
 

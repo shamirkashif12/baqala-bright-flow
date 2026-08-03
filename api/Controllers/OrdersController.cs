@@ -460,9 +460,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // Terminal binding: derive the shift/terminal from the cashier's actual open shift
         // server-side rather than trusting client input (which never sent these at all) —
         // otherwise a sale has no verifiable link back to the terminal/shift that rang it up.
-        // FR-SLS-05: only the Cashier role's cash drawer needs shift reconciliation — shifts
-        // are a Cashier-only concept in this system (see ShiftsController/CheckInDialog), so
-        // Branch Manager/Supervisor covering a register deliberately check out without one.
+        // FR-CHK-06: Cashier, Branch Manager, and Tenant Administrator accounts can all hold a
+        // shift (see ShiftsController.OpenShift / CheckInDialog's checkInRoles) — checking those
+        // roles out before a sale must block it the same as a Cashier, otherwise a checked-out
+        // manager/admin could ring up sales with no shift to reconcile against.
         CashierShift? activeShift = null;
         string? checkoutWithoutShiftRole = null;
         if (order.CashierId.HasValue)
@@ -470,9 +471,14 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             // A cashier should only ever have one open shift (ShiftsController.OpenShift rejects
             // opening a second one) — ordered defensively in case stale data still has more than
             // one, so a sale always binds to whichever shift the cashier most recently checked
-            // into rather than an arbitrary row the database happens to return first.
+            // into rather than an arbitrary row the database happens to return first. Also scoped
+            // to this order's own branch: a Tenant Admin's open shift can be at a different branch
+            // than the one they're currently selling from (e.g. checked in at Branch A, then
+            // switched the POS page to Branch B) — binding the sale to a shift/terminal opened at
+            // a different branch would silently corrupt that shift's totals and the terminal
+            // assignment, so treat that the same as having no active shift at all.
             activeShift = await db.CashierShifts
-                .Where(s => s.CashierId == order.CashierId && s.Status == "open")
+                .Where(s => s.CashierId == order.CashierId && s.Status == "open" && s.BranchId == order.BranchId)
                 .OrderByDescending(s => s.OpenedAt)
                 .FirstOrDefaultAsync();
             if (activeShift is not null)
@@ -484,11 +490,13 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             {
                 var cashierUser = await db.Users.Include(u => u.Role)
                     .FirstOrDefaultAsync(u => u.Id == order.CashierId);
-                if (cashierUser?.Role?.Name == "Cashier")
-                    return BadRequest(new { message = "No active shift found for this cashier — check in before processing sales." });
+                var cashierAppRole = cashierUser?.Role?.Name is { } roleName ? RoleNormalizer.ToAppRole(roleName) : null;
+                if (cashierAppRole is "cashier" or "branch_manager" or "tenant_admin")
+                    return BadRequest(new { message = "No active shift found for you at this terminal — check in before processing sales." });
 
-                // Elevated-role override taken — the sale proceeds with no ShiftId to
-                // reconcile against, so log who did it (see audit entry after save below).
+                // A role that structurally can't hold a shift at all (not in CheckInDialog's
+                // list) rang up a sale — the sale proceeds with no ShiftId to reconcile against,
+                // so log who did it (see audit entry after save below).
                 checkoutWithoutShiftRole = cashierUser?.Role?.Name ?? "Unknown role";
             }
         }
@@ -574,6 +582,13 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             _ => tobaccoProductIds.Count > 0, // "all"/"branch"
         };
 
+        // Only one manual (basket-wide, no DiscountId) discount is allowed per order — the POS UI
+        // enforces this too, but that's a client convenience, not the guarantee. Stacking manual
+        // discounts (e.g. two 100% ones) is how the discretionary-discount cap above and the
+        // tobacco excise floor below could both be walked around by piling up entries.
+        if (order.Discounts.Count(d => d.DiscountId is null) > 1)
+            return BadRequest(new { message = "Only one manual discount is allowed per order." });
+
         var validatedDiscountTotal = 0m;
         var anyRuleReference = appliedCoupon != null;
         var referencedRuleCount = appliedCoupon != null ? 1 : 0;
@@ -590,6 +605,12 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 if (tobaccoProductIds.Count > 0)
                     return BadRequest(new { message = $"\"{d.Name}\" cannot be applied — tobacco items are not eligible for discounts." });
                 validatedDiscountTotal += d.Amount;
+                // A manual discount used to skip the whole anyRuleReference recompute block below
+                // (that flag only ever considered a coupon or a named Discount row), so an order
+                // discounted ONLY via a manual discount left order.DiscountAmount/TaxAmount/
+                // TotalAmount/TobaccoFeeAmount exactly as the client sent them — completely
+                // unvalidated, tobacco excise included. Must be set here too.
+                anyRuleReference = true;
                 continue;
             }
             anyRuleReference = true;
@@ -673,6 +694,28 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
             validatedDiscountTotal += order.LoyaltyDiscountAmount;
 
             order.DiscountAmount = Math.Min(validatedDiscountTotal, order.Subtotal);
+
+            // Tobacco excise (TaxFeeRules "tobacco_excise") is a statutory per-unit floor — it must
+            // hold no matter how many discounts (manual, coupon, or Rules Engine, stacked or not)
+            // chip away at a tobacco item's net price, and regardless of whatever TobaccoFeeAmount
+            // the client itself computed and sent. Recomputed here from each tobacco item's own
+            // post-discount net price (never trusted from the client) now that order.DiscountAmount
+            // above is final, mirroring OrderEditService's edit-order recompute.
+            var (minExciseAmount, excisePercentage) = await ResolveTobaccoExciseConfigAsync();
+            var hasTobaccoItem = false;
+            var recomputedTobaccoFee = 0m;
+            foreach (var item in order.Items)
+            {
+                var itemProduct = await db.Products.FindAsync(item.ProductId);
+                if (itemProduct is not { IsTobacco: true } || item.Quantity <= 0) continue;
+                hasTobaccoItem = true;
+                var itemDiscountShare = order.Subtotal > 0 ? item.TotalPrice / order.Subtotal * order.DiscountAmount : 0m;
+                var netUnitPrice = Math.Max(0, (item.TotalPrice - itemDiscountShare) / item.Quantity);
+                item.TobaccoFeeAmount = item.Quantity * CalcTobaccoFee(netUnitPrice, minExciseAmount, excisePercentage);
+                recomputedTobaccoFee += item.TobaccoFeeAmount;
+            }
+            if (hasTobaccoItem) order.TobaccoFeeAmount = recomputedTobaccoFee;
+
             var taxableBase = Math.Max(0, order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount);
             order.TaxAmount = Math.Round(taxableBase * 0.15m, 2);
             order.TotalAmount = order.Subtotal - order.DiscountAmount + order.TobaccoFeeAmount + order.TaxAmount + order.CustomFeeAmount;

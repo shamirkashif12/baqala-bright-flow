@@ -17,7 +17,8 @@ namespace BaqalaPOS.Api.Controllers;
 [RequirePlanFeature("stocktaking")]
 public class StockCountsController(
     BaqalaDbContext db, IAuditService audit, IStockAlertService stockAlerts,
-    IStockMovementService stockMovements, ILogger<StockCountsController> logger) : ControllerBase
+    IStockMovementService stockMovements, IBatchConsumptionService batchConsumption,
+    ILogger<StockCountsController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id)
@@ -36,16 +37,24 @@ public class StockCountsController(
         .Include(c => c.Category);
 
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] Guid? branchId, [FromQuery] Guid? warehouseId, [FromQuery] string? status)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] Guid[]? branchId, [FromQuery] Guid? warehouseId, [FromQuery] string? status,
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var (callerRole, callerBranchId) = GetCallerContext();
-        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = callerBranchId;
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue) branchId = [callerBranchId.Value];
 
         var query = WithIncludes().AsQueryable();
-        if (branchId.HasValue) query = query.Where(c => c.BranchId == branchId);
         if (warehouseId.HasValue) query = query.Where(c => c.WarehouseId == warehouseId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(c => c.Status == status);
-        return Ok(await query.OrderByDescending(c => c.StartedAt).ToListAsync());
+        if (from.HasValue) query = query.Where(c => c.StartedAt >= from.Value);
+        if (to.HasValue) query = query.Where(c => c.StartedAt <= to.Value);
+
+        // branchId is an array — never `.Contains()` a Guid[] directly against a DbSet-backed
+        // IQueryable on this repo's MySQL provider (ef-mysql-inlist-gotcha), filter in-memory.
+        var all = await query.OrderByDescending(c => c.StartedAt).ToListAsync();
+        if (branchId is { Length: > 0 }) all = [.. all.Where(c => c.BranchId.HasValue && branchId.Contains(c.BranchId.Value))];
+        return Ok(all);
     }
 
     [HttpGet("{id:guid}")]
@@ -315,6 +324,18 @@ public class StockCountsController(
                     notes: $"Stocking review reconciliation (session {count.Id})",
                     createdBy: approverId,
                     quantityBefore: quantityBefore, quantityAfter: stock.Quantity);
+
+                // A shrinkage count (variance < 0) only ever touched the aggregate row above —
+                // nothing kept any batch's RemainingQuantity in sync with it, so a product could
+                // read qty=0 here while its batch drill-down still showed stock untouched (same gap
+                // InventoryController.Adjust had before it got this same fix). A count that finds
+                // MORE stock than expected (variance > 0) is deliberately left alone: there's no
+                // specific lot the surplus can be attributed to, matching Adjust's increase case.
+                if (variance < 0)
+                {
+                    try { await batchConsumption.ConsumeFefoAsync(item.ProductId, count.BranchId, warehouseId: null, Math.Abs(variance)); }
+                    catch (Exception ex) { logger.LogError(ex, "Batch consumption failed after stock count {CountId} approval for product {ProductId}", count.Id, item.ProductId); }
+                }
             }
             else
             {
@@ -333,6 +354,12 @@ public class StockCountsController(
                     notes: $"Stocking review reconciliation (session {count.Id})",
                     createdBy: approverId,
                     quantityBefore: quantityBefore, quantityAfter: stock.Quantity);
+
+                if (variance < 0)
+                {
+                    try { await batchConsumption.ConsumeFefoAsync(item.ProductId, branchId: null, count.WarehouseId, Math.Abs(variance)); }
+                    catch (Exception ex) { logger.LogError(ex, "Batch consumption failed after stock count {CountId} approval for product {ProductId}", count.Id, item.ProductId); }
+                }
             }
         }
         db.InventoryAdjustments.AddRange(adjustments);

@@ -210,12 +210,11 @@ public static class DataSeeder
             });
         }
 
-        // Compliance rules (RulesEngine) are seeded below via SeedRulesEngineAsync's fuller
-        // catalog, not here — this used to insert 5 ad-hoc rows directly, which satisfied that
-        // call's `!await db.RulesEngine.AnyAsync()` guard before it ever ran, so the real catalog
-        // (including "Block sale of expired items" and "No discount on tobacco items") never
-        // seeded on a fresh install. See PatchSeedComplianceRulesAsync for the already-seeded-DB
-        // backfill.
+        // Compliance rules (RulesEngine) are seeded below via SeedRulesEngineAsync's catalog, not
+        // here — this used to insert 5 ad-hoc rows directly, which satisfied that call's `!await
+        // db.RulesEngine.AnyAsync()` guard before it ever ran, so the real catalog (the return-
+        // window rules and "No discount on tobacco items") never seeded on a fresh install. See
+        // PatchSeedComplianceRulesAsync for the already-seeded-DB backfill.
 
         // ─── Audit Logs (initial seed events) ────────────────────────────────
         db.AuditLogs.AddRange(
@@ -1751,50 +1750,63 @@ public static class DataSeeder
         var uAdmin = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
         if (uAdmin is null) return;
 
+        // Only rules with no dedicated real feature behind them live here — everything else this
+        // catalog used to include (expired-item blocking, approval thresholds, cash-variance
+        // review, VIP/tier pricing, loyalty points, coupon validation, custom fees) is now actually
+        // enforced natively by its own feature (PosSettings thresholds, LoyaltyProgram,
+        // Coupon/CustomerCoupons, TaxFeeRule, etc.) with zero reads of this table — keeping those
+        // as RulesEngine rows too was redundant and, worse, implied an admin could toggle real
+        // behavior from the Rules Engine page that this table was never actually wired to control.
+        // "No discount on tobacco items" is the one exception that genuinely is read from here
+        // (OrdersController's tobaccoRuleActive check) — everything else below has no enforcement
+        // anywhere in the codebase, so removing these two return-window rows would silently delete
+        // the only place that intent is even described.
         db.RulesEngine.AddRange(
-            // FR-RET: Return Rules
+            // FR-RET: Return Rules — no enforcement code reads PosSettings.ReturnWindowDays or any
+            // perishable-hours equivalent yet; these stay as the only record of the intended policy.
             new RulesEngine { Id = Guid.NewGuid(), RuleName = "Max return period — 7 days", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"condition\":\"Days since purchase ≤ 7\",\"action\":\"Allow return with valid receipt\"}", Priority = 100, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
             new RulesEngine { Id = Guid.NewGuid(), RuleName = "Perishables — 24h return window", RuleType = "return", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Perishable AND hours since purchase ≤ 24\",\"action\":\"Allow return with inspection\"}", Priority = 95, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Block sale of expired items", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"condition\":\"Batch expiry date < today\",\"action\":\"Block sale and alert cashier\"}", Priority = 90, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
 
-            // FR-APR: Approval Rules
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Manager approval — refund > SAR 100", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"Refund amount > 100\",\"action\":\"Require manager PIN approval\"}", Priority = 85, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Supervisor approval — void or discount > SAR 50", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"Void or discount amount > 50\",\"action\":\"Require supervisor override PIN\"}", Priority = 80, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Cash variance > SAR 200 — manager review", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"End-of-shift cash variance > 200\",\"action\":\"Flag shift for manager review before close\"}", Priority = 75, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-
-            // FR-DSC: Discount & Loyalty Rules
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "VIP customer — 10% automatic discount", RuleType = "discount", AppliesTo = "customer_tier", RuleConfig = "{\"condition\":\"Customer tier = VIP or Platinum\",\"action\":\"Apply 10% discount automatically\"}", Priority = 70, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Loyalty points — 1 point per SAR spent", RuleType = "discount", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order payment status = paid\",\"action\":\"Award 1 loyalty point per SAR spent\"}", Priority = 60, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "No discount on tobacco items", RuleType = "discount", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Tobacco\",\"action\":\"Block all discount applications on tobacco SKUs\"}", Priority = 55, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-
-            // FR-COUP: Coupon Acceptance Rules
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Coupon — single use per customer", RuleType = "coupon", AppliesTo = "all", RuleConfig = "{\"condition\":\"Customer has not used this coupon before\",\"action\":\"Accept coupon and mark as used for this customer\"}", Priority = 50, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Coupon — validate active date range", RuleType = "coupon", AppliesTo = "all", RuleConfig = "{\"condition\":\"Current date between coupon startDate and endDate\",\"action\":\"Accept coupon if within validity window\"}", Priority = 45, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-
-            // FR-FEE: Custom Fee Rules
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Delivery service fee — SAR 10", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order channel = Delivery\",\"action\":\"Add SAR 10 delivery service fee to order total\"}", Priority = 40, IsActive = true, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-            new RulesEngine { Id = Guid.NewGuid(), RuleName = "Eid week — 5% holiday surcharge", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Date falls within Eid holiday week\",\"action\":\"Add 5% surcharge to all orders\"}", Priority = 35, IsActive = false, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+            // FR-DSC: Discount Rules
+            // Inactive by default: discounts ARE allowed on tobacco, floored at the statutory
+            // excise minimum rather than blocked outright (see OrdersController's tobaccoRuleActive
+            // check and pos.tsx's calcTobaccoFee/tobaccoNetPriceAfterAllDiscounts) — an admin can
+            // still flip this on via the Rules Engine page if a stricter no-discount policy is wanted.
+            new RulesEngine { Id = Guid.NewGuid(), RuleName = "No discount on tobacco items", RuleType = "discount", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Tobacco\",\"action\":\"Block all discount applications on tobacco SKUs\"}", Priority = 55, IsActive = false, CreatedBy = uAdmin.Id, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
         );
         await db.SaveChangesAsync();
     }
 
     // Fresh-database seeding (above, in SeedAsync) used to insert 5 ad-hoc "compliance rules"
-    // directly, then call SeedRulesEngineAsync's fuller 14-rule catalog only `if
+    // directly, then call SeedRulesEngineAsync's fuller catalog only `if
     // (!await db.RulesEngine.AnyAsync())` — a guard that was already false by the time it ran,
     // since the 5 ad-hoc rows had just been saved moments earlier in the same seed pass. So the
-    // richer catalog (which is what FR-ADM-06/the Rules Engine screen was actually designed
-    // around — e.g. "Block sale of expired items" and "No discount on tobacco items") never
+    // richer catalog (what FR-ADM-06/the Rules Engine screen was actually designed around) never
     // seeded on any environment that went through that path, including this one. The early
-    // AddRange is removed for future fresh installs; this patch backfills already-seeded DBs:
-    // it drops the 4 old ad-hoc rows whose concept the fuller catalog supersedes under a
-    // different name, then inserts whichever of the 14 intended rules aren't present yet
-    // (checked by exact RuleName, so an admin's own edits/renames are left alone).
+    // AddRange is removed for future fresh installs; this patch backfills already-seeded DBs.
+    //
+    // The catalog used to carry 14 rows, but 10 of them described behavior a dedicated feature
+    // already enforces natively with zero reads of this table — expired-item blocking
+    // (OrdersController), approval thresholds and cash-variance review (PosSettings + Approval
+    // Center), VIP/tier pricing (Pricing Rules), loyalty points (LoyaltyProgram), coupon
+    // validation (Coupon/CustomerCoupons), and custom fees (TaxFeeRule/Service Charges). Keeping
+    // them here was redundant and implied an admin could toggle real behavior from the Rules
+    // Engine page that this table was never actually wired to control. This patch also removes
+    // those 10 by name from any DB that already has them (same mechanism as the older
+    // supersededNames cleanup below), then backfills whichever of the 3 remaining rules aren't
+    // present yet (checked by exact RuleName, so an admin's own edits/renames are left alone).
     public static async Task PatchSeedComplianceRulesAsync(BaqalaDbContext db)
     {
         var supersededNames = new[]
         {
             "Auto-block expired items", "Require manager approval for refund > 100 SAR",
             "Max return period 7 days", "Loyalty points on paid orders",
+            // Redundant with a dedicated feature — see the comment above.
+            "Block sale of expired items", "Manager approval — refund > SAR 100",
+            "Supervisor approval — void or discount > SAR 50", "Cash variance > SAR 200 — manager review",
+            "VIP customer — 10% automatic discount", "Loyalty points — 1 point per SAR spent",
+            "Coupon — single use per customer", "Coupon — validate active date range",
+            "Delivery service fee — SAR 10", "Eid week — 5% holiday surcharge",
         };
         // Materialize then filter in memory — a parameterized array .Contains() inside a live EF
         // Where() fails to type-map on this MySQL provider (same gotcha as elsewhere in this file).
@@ -1807,26 +1819,21 @@ public static class DataSeeder
         }
 
         var existingNames = allRules.Select(r => r.RuleName).Except(toRemove.Select(r => r.RuleName)).ToHashSet();
-        if (existingNames.Count >= 14) return; // already fully seeded
+        if (existingNames.Count >= 3) return; // already fully seeded
 
         var uAdmin = await db.Users.FirstOrDefaultAsync(u => u.Username == "abdullah.alfaisal");
         if (uAdmin is null) return;
 
         var intended = new[]
         {
+            // No enforcement code reads PosSettings.ReturnWindowDays or a perishable-hours
+            // equivalent yet — these two stay as the only record of the intended policy.
             new RulesEngine { RuleName = "Max return period — 7 days", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"condition\":\"Days since purchase ≤ 7\",\"action\":\"Allow return with valid receipt\"}", Priority = 100 },
             new RulesEngine { RuleName = "Perishables — 24h return window", RuleType = "return", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Perishable AND hours since purchase ≤ 24\",\"action\":\"Allow return with inspection\"}", Priority = 95 },
-            new RulesEngine { RuleName = "Block sale of expired items", RuleType = "return", AppliesTo = "all", RuleConfig = "{\"condition\":\"Batch expiry date < today\",\"action\":\"Block sale and alert cashier\"}", Priority = 90 },
-            new RulesEngine { RuleName = "Manager approval — refund > SAR 100", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"Refund amount > 100\",\"action\":\"Require manager PIN approval\"}", Priority = 85 },
-            new RulesEngine { RuleName = "Supervisor approval — void or discount > SAR 50", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"Void or discount amount > 50\",\"action\":\"Require supervisor override PIN\"}", Priority = 80 },
-            new RulesEngine { RuleName = "Cash variance > SAR 200 — manager review", RuleType = "approval", AppliesTo = "all", RuleConfig = "{\"condition\":\"End-of-shift cash variance > 200\",\"action\":\"Flag shift for manager review before close\"}", Priority = 75 },
-            new RulesEngine { RuleName = "VIP customer — 10% automatic discount", RuleType = "discount", AppliesTo = "customer_tier", RuleConfig = "{\"condition\":\"Customer tier = VIP or Platinum\",\"action\":\"Apply 10% discount automatically\"}", Priority = 70 },
-            new RulesEngine { RuleName = "Loyalty points — 1 point per SAR spent", RuleType = "discount", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order payment status = paid\",\"action\":\"Award 1 loyalty point per SAR spent\"}", Priority = 60 },
-            new RulesEngine { RuleName = "No discount on tobacco items", RuleType = "discount", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Tobacco\",\"action\":\"Block all discount applications on tobacco SKUs\"}", Priority = 55 },
-            new RulesEngine { RuleName = "Coupon — single use per customer", RuleType = "coupon", AppliesTo = "all", RuleConfig = "{\"condition\":\"Customer has not used this coupon before\",\"action\":\"Accept coupon and mark as used for this customer\"}", Priority = 50 },
-            new RulesEngine { RuleName = "Coupon — validate active date range", RuleType = "coupon", AppliesTo = "all", RuleConfig = "{\"condition\":\"Current date between coupon startDate and endDate\",\"action\":\"Accept coupon if within validity window\"}", Priority = 45 },
-            new RulesEngine { RuleName = "Delivery service fee — SAR 10", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Order channel = Delivery\",\"action\":\"Add SAR 10 delivery service fee to order total\"}", Priority = 40 },
-            new RulesEngine { RuleName = "Eid week — 5% holiday surcharge", RuleType = "custom_fee", AppliesTo = "all", RuleConfig = "{\"condition\":\"Date falls within Eid holiday week\",\"action\":\"Add 5% surcharge to all orders\"}", Priority = 35, IsActive = false },
+            // IsActive explicitly false — RulesEngine.IsActive defaults to true, which would
+            // otherwise re-enable the tobacco discount block this patch is meant to backfill
+            // inactive (see the fresh-seed copy of this same rule above for why).
+            new RulesEngine { RuleName = "No discount on tobacco items", RuleType = "discount", AppliesTo = "category", RuleConfig = "{\"condition\":\"Category = Tobacco\",\"action\":\"Block all discount applications on tobacco SKUs\"}", Priority = 55, IsActive = false },
         };
         foreach (var rule in intended.Where(r => !existingNames.Contains(r.RuleName)))
         {

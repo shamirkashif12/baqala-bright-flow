@@ -731,6 +731,11 @@ function POS() {
   // real settings load.
   const [posPerms, setPosPerms] = useState({ cashierCanCoupon: true, cashierCanHoldOrder: true, allowNegativeStock: false, cashierMaxDiscountPct: 5, managerMaxDiscountPct: 25 });
   const isRestrictedCashier = user?.role === "cashier";
+  // Cashier, Branch Manager, and Tenant Administrator accounts can all hold a shift (mirrors
+  // ShiftsController.OpenShift's role check and CheckInDialog's checkInRoles) — any of them
+  // checking out must be gated from using POS, not just the literal "cashier" role. Other roles
+  // (Supervisor, etc.) structurally can't open a shift at all, so they're never gated on one.
+  const needsActiveShift = user?.role === "cashier" || user?.role === "branch_manager" || user?.role === "tenant_admin";
   const navigate = useNavigate();
   const search = Route.useSearch();
   // Enforcement previously existed only at the very last step (handleCharge threw if a cashier had
@@ -738,7 +743,16 @@ function POS() {
   // even opening the payment dialog) was fully usable with no shift at all. `!loading` avoids a
   // one-frame flash of this gate for a cashier who legitimately IS checked in, before their shift
   // has finished loading.
-  const needsCheckIn = !loading && isRestrictedCashier && !activeShift;
+  //
+  // A Tenant Admin's open shift is fetched with no branch filter (see loadCore/focus/branch-change
+  // effects below — a cashier can only ever hold one open shift at all, so that fetch is correct as
+  // written). But `activeShift` alone doesn't say WHICH branch that shift is at — an admin who
+  // checked in at Branch A, then switched this page's branch dropdown to Branch B, still had
+  // `activeShift` set, so this gate silently disappeared and let them sell on Branch B against a
+  // shift that was never opened there. Only treat the shift as satisfying this branch's gate when
+  // its BranchId actually matches the branch currently selected on this page.
+  const shiftForBranch = activeShift && branch && activeShift.branchId === branch.id ? activeShift : null;
+  const needsCheckIn = !loading && needsActiveShift && !shiftForBranch;
 
   // ─── Active Offers & Discounts ────────────────────────────────────────────────
   const [allActiveOffers, setActiveOffers] = useState<Offer[]>([]);
@@ -882,7 +896,7 @@ function POS() {
     // (switch or initial mount) rather than clearing them, so a tab reload or branch switch
     // doesn't lose bills a cashier put on hold earlier in the day.
     try {
-      const savedHolds = sessionStorage.getItem(`pos_holds_${branch.id}`);
+      const savedHolds = localStorage.getItem(`pos_holds_${branch.id}`);
       setHolds(savedHolds ? (JSON.parse(savedHolds) as typeof holds) : []);
     } catch { setHolds([]); }
 
@@ -962,15 +976,29 @@ function POS() {
     sessionStorage.setItem(`pos_cart_${branch.id}`, JSON.stringify(cart));
   }, [cart]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Persist held orders to session storage (survives tab navigation/reload) ─
-  // Previously held only in React state — a reload or crash silently lost every
-  // parked bill with no warning. Also read by the Cashier Workspace dashboard's
-  // "Held Orders" tile (see _app.cashier.tsx) instead of the dead `pos_holds`
-  // localStorage key nothing used to write.
+  // ─── Persist held orders to localStorage (survives tab navigation/reload, and is shared with
+  // the dedicated Held Orders screen / Cashier Workspace tile, which each open in their own tab) ─
+  // Previously held only in React state — a reload or crash silently lost every parked bill with
+  // no warning. sessionStorage (the original choice) is scoped per-tab, so a bill held here never
+  // showed up on the separate Held Orders screen unless it happened to be the very same tab;
+  // localStorage is shared across every tab on this origin, which is what those screens need.
   useEffect(() => {
     if (!branch) return;
-    sessionStorage.setItem(`pos_holds_${branch.id}`, JSON.stringify(holds));
+    localStorage.setItem(`pos_holds_${branch.id}`, JSON.stringify(holds));
   }, [holds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The Held Orders screen (or another POS tab) can resume/discard a bill from its own tab,
+  // mutating the same localStorage key — pick that up live here too, the same way it picks up
+  // holds created in this tab, so both screens always agree.
+  useEffect(() => {
+    if (!branch) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== `pos_holds_${branch.id}`) return;
+      try { setHolds(e.newValue ? (JSON.parse(e.newValue) as typeof holds) : []); } catch { /* ignore malformed value */ }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [branch]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // ─── Resolved pricing (FRD §12) ─────────────────────────────────────────────
@@ -1348,11 +1376,6 @@ function POS() {
     if (!prod.discount || prod.discount <= 0) return price;
     return Math.max(0, prod.discountType === "percentage" ? price * (1 - prod.discount / 100) : price - prod.discount);
   }
-  // Same "tobacco items are not eligible for discounts" carve-out named Discounts/Coupons are
-  // refused for server-side (skipped entirely when the Rules Engine rule is inactive) — Manual
-  // discount has no rule row to check it against, so it's gated here at the point of adding it
-  // instead (server also refuses it as of the OrdersController fix).
-  const cartHasTobacco = displayCart.some(ci => products.find(p => p.id === ci.productId)?.isTobacco);
   const couponDiscount = (() => {
     if (!appliedCoupon) return 0;
     const raw = appliedCoupon.type === "percentage"
@@ -2029,13 +2052,13 @@ function POS() {
   ) => {
     if (!branch) throw new Error("No branch configured");
     if (!cart.length) throw new Error("Cart is empty");
-    // FR-SLS-05 (deliberate exception, not a gap): a shift's cash drawer is a
-    // Cashier-only concept — the check-in flow (CheckInDialog) only ever lists
-    // Cashier-role accounts, so Branch Manager/Supervisor structurally can't open
-    // one. They can ring up a sale covering a register without checking in first;
-    // the server records this override in the audit log since the resulting order
-    // has no ShiftId to reconcile against (see OrdersController.Create).
-    if (user?.role === "cashier" && !activeShift)
+    // FR-CHK-06: Cashier, Branch Manager, and Tenant Administrator accounts can all hold a shift
+    // (CheckInDialog's checkInRoles / ShiftsController.OpenShift) — any of them must be blocked
+    // from charging without one, mirrored server-side in OrdersController.Create as the
+    // authoritative check. Other roles structurally can't open a shift at all, so they're never
+    // gated here; the server logs that override in the audit log since the resulting order has
+    // no ShiftId to reconcile against.
+    if (needsActiveShift && !shiftForBranch)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
 
     // Discount policy cap (POS Settings → CashierMaxDiscountPct / ManagerMaxDiscountPct) — was
@@ -2070,7 +2093,7 @@ function POS() {
       source: "pos",
       branchId: branch.id,
       customerId: customer?.id,
-      cashierId: activeShift?.cashierId ?? user?.id,
+      cashierId: shiftForBranch?.cashierId ?? user?.id,
       subtotal,
       discountAmount: couponDiscount + totalAutoDiscount + productDiscountTotal + loyaltyDiscount,
       loyaltyPointsRedeemed: Math.min(redeemPoints, maxRedeemablePoints),
@@ -2191,7 +2214,7 @@ function POS() {
   return (
     <PageShell
       title="POS Checkout"
-      subtitle={`${branch?.name ?? "Loading…"} · ${activeShift ? `Cashier: ${activeShift.cashier?.fullName ?? "Active shift"}` : "No active shift"}`}
+      subtitle={`${branch?.name ?? "Loading…"} · ${shiftForBranch ? `Cashier: ${shiftForBranch.cashier?.fullName ?? "Active shift"}` : "No active shift"}`}
       actions={
         <>
           <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
@@ -2287,8 +2310,19 @@ function POS() {
                     <button
                       key={p.sku}
                       type="button"
-                      onMouseDown={(e) => { e.preventDefault(); if (!blocked) addToCart(p); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${blocked ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/60"}`}
+                      title={blocked ? (outOfStock ? "Out of stock — click to Stock In" : "Expired — click to Stock In") : undefined}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (blocked) {
+                          setStockInInitialProduct(p);
+                          setStockInOpen(true);
+                          return;
+                        }
+                        addToCart(p);
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${
+                        blocked ? "opacity-70 hover:bg-destructive/5 cursor-pointer" : "hover:bg-muted/60"
+                      }`}
                     >
                       {p.imageUrl ? (
                         <img src={p.imageUrl} alt="" className="h-9 w-9 rounded-md border border-border/60 object-cover shrink-0" />
@@ -2305,12 +2339,12 @@ function POS() {
                       </div>
                       {expired && (
                         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
-                          Expired
+                          Expired · Tap to Stock In
                         </span>
                       )}
                       {!expired && stock !== undefined && (
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${outOfStock ? "bg-destructive/15 text-destructive" : stock <= 5 ? "bg-warning/20 text-warning-foreground" : "bg-success/15 text-success"}`}>
-                          <Package className="h-2.5 w-2.5 inline mr-0.5" />{stock}
+                          <Package className="h-2.5 w-2.5 inline mr-0.5" />{outOfStock ? "Out of stock · Tap to Stock In" : stock}
                         </span>
                       )}
                       <span className="font-bold text-primary tabular-nums w-20 text-right">
@@ -2744,7 +2778,11 @@ function POS() {
                 </button>
               </div>
             ))}
-            {!(isRestrictedCashier && !posPerms.cashierCanCoupon) && (
+            {/* Only one manual discount is allowed per order — stacking multiple manual
+                discounts (e.g. two 100% ones) let the discretionary-discount cap and the
+                tobacco excise floor both be bypassed by piling up entries. Existing entry
+                must be removed (× above) before another can be added. */}
+            {manualDiscounts.length === 0 && !(isRestrictedCashier && !posPerms.cashierCanCoupon) && (
               <div className="flex gap-1.5">
                 <Select value={manualDiscountKind} onValueChange={(v) => setManualDiscountKind(v as "percentage" | "fixed")}>
                   <SelectTrigger className="h-8 text-xs w-24"><SelectValue /></SelectTrigger>
@@ -2766,13 +2804,10 @@ function POS() {
                   onClick={() => {
                     const value = Number(manualDiscountValue);
                     if (!Number.isFinite(value) || value <= 0) return;
-                    if (cartHasTobacco) {
-                      toast.error("Cannot apply a discount", {
-                        description: "Tobacco items in this order are not eligible for discounts.",
-                        duration: 4000,
-                      });
-                      return;
-                    }
+                    // Tobacco items are discountable, same as anything else — tobaccoNetPriceAfterAllDiscounts
+                    // (via orderLevelDiscountForItem, which already includes manualDiscountSavings) floors
+                    // the recalculated excise at the statutory minimum, so a 100% discount never drops a
+                    // tobacco line's tax below what the law requires. See calcTobaccoFee above.
                     const candidateSaving = manualDiscountKind === "percentage" ? subtotal * (value / 100) : Math.min(value, subtotal);
                     const overPct = discountCapExceededPct(candidateSaving);
                     if (overPct !== null) {
@@ -3006,7 +3041,7 @@ function POS() {
           <DialogHeader><DialogTitle>Order Summary</DialogTitle></DialogHeader>
           <div className="space-y-2 text-sm">
             <Row k="Branch" v={branch?.name ?? "—"} />
-            <Row k="Cashier" v={activeShift?.cashier?.fullName ?? "—"} />
+            <Row k="Cashier" v={shiftForBranch?.cashier?.fullName ?? "—"} />
             <Row k="Customer" v={customer?.fullName ?? "Walk-in"} />
             <Row k="Status" v="In progress" />
             {appliedCoupon && <Row k="Coupon" v={<>{appliedCoupon.code} (−<SARIcon />{couponDiscount.toFixed(2)})</>} />}
@@ -3048,7 +3083,7 @@ function POS() {
         onOpenChange={setPayOpen}
         total={total}
         cardSurchargeAmount={cardSurchargeTotal}
-        availableCash={activeShift ? activeShift.openingAmount + activeShift.cashSales : null}
+        availableCash={shiftForBranch ? shiftForBranch.openingAmount + shiftForBranch.cashSales : null}
         onCharge={handleCharge}
         onDone={onPaymentDone}
       />

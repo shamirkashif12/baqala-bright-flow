@@ -15,14 +15,16 @@ import { api, type WasteSpoilageReport as WasteSpoilageData, type WasteSpoilageR
 import { useReportFilterOptions } from "@/lib/use-report-filters";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { downloadBlob } from "@/lib/csv-export";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Ban, AlertTriangle, Tag, Percent, Clock, CheckCircle2, XCircle, Eye, X } from "lucide-react";
+import { Ban, AlertTriangle, Tag, Percent, Clock, CheckCircle2, XCircle, Eye, X, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 export const Route = createFileRoute("/_app/reports/waste-spoilage")({ component: WasteSpoilage });
@@ -65,6 +67,7 @@ function WasteSpoilage() {
   const [review, setReview] = useState<WasteSpoilageRow | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const scopedBranchId = branchIds.length === 1 ? branchIds[0] : undefined;
   const scopedCategoryId = categoryIds.length === 1 ? categoryIds[0] : undefined;
@@ -160,78 +163,94 @@ function WasteSpoilage() {
     setWarehouseIds([]); setReason("all"); setCategoryIds([]); setProductIds([]); setAdjustedByIds([]);
     setApprovalStatuses([]); setIsTobacco(false);
   };
+  const advancedFilterCount = categoryIds.length + productIds.length + adjustedByIds.length
+    + approvalStatuses.length + (isTobacco ? 1 : 0);
 
   return (
     <PageShell title="Waste / Spoilage Report" subtitle="Expired, damaged and written-off stock">
-      <div className="flex flex-wrap items-end gap-2">
-        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        {!lockedBranchId && (
-          <FilterField label="Branch">
-            <div className="w-44">
-              <SearchableMultiSelect
-                placeholder="All Branches"
-                options={branches.map((b) => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
-              />
-            </div>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="rounded-xl border border-border/60 bg-card p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!lockedBranchId && (
+            <FilterField label="Branch">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Branches"
+                  options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                  selected={branchIds}
+                  onChange={setBranchIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          {!lockedBranchId && (
+            <FilterField label="Warehouse">
+              <div className="w-44">
+                <SearchableMultiSelect
+                  placeholder="All Warehouses"
+                  options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+                  selected={warehouseIds}
+                  onChange={setWarehouseIds}
+                />
+              </div>
+            </FilterField>
+          )}
+          <FilterField label="Reason">
+            <Select value={reason} onValueChange={setReason}>
+              <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Reason" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Reasons</SelectItem>
+                <SelectItem value="waste">Waste</SelectItem>
+                <SelectItem value="damage">Damage</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
+              </SelectContent>
+            </Select>
           </FilterField>
-        )}
-        {!lockedBranchId && (
-          <FilterField label="Warehouse">
-            <div className="w-44">
-              <SearchableMultiSelect
-                placeholder="All Warehouses"
-                options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-                selected={warehouseIds}
-                onChange={setWarehouseIds}
-              />
-            </div>
-          </FilterField>
-        )}
-        <FilterField label="Reason">
-          <Select value={reason} onValueChange={setReason}>
-            <SelectTrigger className="h-9 w-40"><SelectValue placeholder="Reason" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Reasons</SelectItem>
-              <SelectItem value="waste">Waste</SelectItem>
-              <SelectItem value="damage">Damage</SelectItem>
-              <SelectItem value="expired">Expired</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterField>
-        <FilterField label="Category">
-          <div className="w-40">
+
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Advanced
+              {advancedFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 min-w-4 rounded-full px-1 text-[10px] leading-none">{advancedFilterCount}</Badge>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+            </Button>
+          </CollapsibleTrigger>
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
+          <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
+        </div>
+
+        <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
+          <FilterField label="Category">
             <SearchableMultiSelect
               placeholder="All Categories"
               options={categories.map((c) => ({ id: c.id, label: c.name }))}
               selected={categoryIds}
               onChange={setCategoryIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Product">
-          <div className="w-44">
+          </FilterField>
+          <FilterField label="Product">
             <SearchableMultiSelect
               placeholder="All Products"
               options={products.map((p) => ({ id: p.id, label: p.name }))}
               selected={productIds}
               onChange={setProductIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Employee">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Employee">
             <SearchableMultiSelect
               placeholder="All Employees"
               options={users.map((u) => ({ id: u.id, label: u.fullName }))}
               selected={adjustedByIds}
               onChange={setAdjustedByIds}
             />
-          </div>
-        </FilterField>
-        <FilterField label="Approval">
-          <div className="w-40">
+          </FilterField>
+          <FilterField label="Approval">
             <SearchableMultiSelect
               placeholder="All Approvals"
               options={[
@@ -242,19 +261,13 @@ function WasteSpoilage() {
               selected={approvalStatuses}
               onChange={setApprovalStatuses}
             />
-          </div>
-        </FilterField>
-        <label className="flex items-center gap-1.5 text-sm px-2">
-          <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
-          Tobacco only
-        </label>
-        {hasFilters && (
-          <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Clear Filters
-          </Button>
-        )}
-        <div className="ml-auto"><ReportExportButton onExport={handleExport} disabled={!canExport} /></div>
-      </div>
+          </FilterField>
+          <label className="flex items-center gap-1.5 text-sm px-2">
+            <Checkbox checked={isTobacco} onCheckedChange={(v) => setIsTobacco(v === true)} />
+            Tobacco only
+          </label>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         {canViewCost && <MetricCard label="Total Write-off Value" value={<><SARIcon />{fmt(kpis?.totalWriteOffValue ?? 0)}</>} icon={Ban} accent="destructive" />}

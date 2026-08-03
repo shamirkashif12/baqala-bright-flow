@@ -9,7 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import * as SelectPrimitive from "@radix-ui/react-select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
@@ -543,9 +545,15 @@ function ItemsStep({
     updateItem(i, patch);
   };
 
+  // Surface SKU/available-qty/price inline in the dropdown itself — this data is already fetched
+  // (poItems from the source location, or the full product list), it just wasn't being rendered
+  // until after a product was selected.
   const availableOptions = poItems
-    ? poItems.map(pi => ({ value: pi.productId, label: pi.productName }))
-    : products.map(p => ({ value: p.id, label: p.name }));
+    ? poItems.map(pi => ({
+        value: pi.productId, label: pi.productName,
+        sku: products.find(p => p.id === pi.productId)?.sku, maxQty: pi.maxQty, price: pi.unitCost,
+      }))
+    : products.map(p => ({ value: p.id, label: p.name, sku: p.sku, maxQty: undefined as number | undefined, price: p.costPrice }));
 
   const netAmount = items
     .filter(i => i.productId)
@@ -715,9 +723,35 @@ function ItemsStep({
                         <SelectValue placeholder="Select product" />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableOptions.map(p => (
-                          <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                        ))}
+                        {availableOptions.map(p => {
+                          const detail = [
+                            p.sku ? `SKU ${p.sku}` : null,
+                            p.maxQty !== undefined ? `Avail ${p.maxQty}` : null,
+                            p.price ? `SAR ${p.price.toFixed(2)}` : null,
+                          ].filter(Boolean).join(" · ");
+                          // Raw Radix Item here instead of the shared SelectItem: the shared
+                          // component wraps its entire children in ItemText, which Radix mirrors
+                          // verbatim into the closed trigger — a two-line block would blow up the
+                          // trigger's compact layout. Keeping the detail line as a sibling of
+                          // ItemText (not inside it) means it only ever renders in the dropdown list.
+                          return (
+                            <SelectPrimitive.Item
+                              key={p.value}
+                              value={p.value}
+                              className="relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                            >
+                              <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
+                                <SelectPrimitive.ItemIndicator>
+                                  <Check className="h-4 w-4" />
+                                </SelectPrimitive.ItemIndicator>
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <SelectPrimitive.ItemText className="block truncate">{p.label}</SelectPrimitive.ItemText>
+                                {detail && <span className="block truncate text-[10px] text-muted-foreground">{detail}</span>}
+                              </div>
+                            </SelectPrimitive.Item>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
@@ -2246,10 +2280,7 @@ function StockTransfers() {
               />
             </div>
             <div className="flex items-center gap-1">
-              <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
-              <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-              <span className="text-xs text-muted-foreground">–</span>
-              <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+              <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="h-9 w-36" />
               {(dateFrom || dateTo) && (
                 <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
                   <X className="h-3.5 w-3.5" />
