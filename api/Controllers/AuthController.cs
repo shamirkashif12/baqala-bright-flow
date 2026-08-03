@@ -84,9 +84,10 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
     // exchanged for this app's own local JWT via the same GenerateJwt every normal login uses.
     // From that point on the session behaves exactly like a local login.
     //
-    // NOTE: TenantGateway:Jwt's Issuer/Audience/Key are placeholder values (see appsettings.json)
-    // until the Tenant Admin team shares the gateway's real signing configuration — this endpoint
-    // cannot accept genuine gateway tokens until then.
+    // NOTE: the real signing key/issuer/audience come from TenantPlan (set by this instance's
+    // very first /pos/users/provision call — see RequireGatewaySignatureAttribute's bootstrap
+    // path and TenantPlanService.ApplyProvisionAsync), not appsettings.json. Config values remain
+    // a fallback for local/dev testing only, matching the same convention as the webhook secret.
     [AllowAnonymous]
     [HttpPost("gateway-login")]
     public async Task<IActionResult> GatewayLogin([FromBody] GatewayLoginRequest req)
@@ -94,8 +95,11 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         if (string.IsNullOrWhiteSpace(req.GatewayAccessToken))
             return BadRequest(new { message = "gatewayAccessToken is required." });
 
+        var plan = await tenantPlans.GetCurrentPlanAsync();
         var gwConfig = config.GetSection("TenantGateway:Jwt");
-        var gwKey = gwConfig["Key"];
+        var gwKey = !string.IsNullOrWhiteSpace(plan.GatewayJwtKey) ? plan.GatewayJwtKey : gwConfig["Key"];
+        var gwIssuer = !string.IsNullOrWhiteSpace(plan.GatewayJwtIssuer) ? plan.GatewayJwtIssuer : gwConfig["Issuer"];
+        var gwAudience = !string.IsNullOrWhiteSpace(plan.GatewayJwtAudience) ? plan.GatewayJwtAudience : gwConfig["Audience"];
         if (string.IsNullOrEmpty(gwKey))
             return StatusCode(501, new { message = "Gateway SSO is not configured on this instance yet." });
 
@@ -104,10 +108,10 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         {
             principal = new JwtSecurityTokenHandler().ValidateToken(req.GatewayAccessToken, new TokenValidationParameters
             {
-                ValidateIssuer = !string.IsNullOrEmpty(gwConfig["Issuer"]),
-                ValidIssuer = gwConfig["Issuer"],
-                ValidateAudience = !string.IsNullOrEmpty(gwConfig["Audience"]),
-                ValidAudience = gwConfig["Audience"],
+                ValidateIssuer = !string.IsNullOrEmpty(gwIssuer),
+                ValidIssuer = gwIssuer,
+                ValidateAudience = !string.IsNullOrEmpty(gwAudience),
+                ValidAudience = gwAudience,
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(gwKey)),
                 ValidateLifetime = true,
@@ -133,7 +137,6 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         await db.SaveChangesAsync();
 
         var appRole = RoleNormalizer.ToAppRole(user.Role.Name);
-        var plan = await tenantPlans.GetCurrentPlanAsync();
         var token = GenerateJwt(user, appRole, plan.PlanId, plan.PlanName);
 
         await audit.LogAsync("login", "User", user.Id, user.Id, user.BranchId, severity: "info",

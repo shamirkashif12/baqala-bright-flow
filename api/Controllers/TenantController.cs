@@ -39,9 +39,11 @@ public class TenantController(
     // POST /pos/users/provision — first-time business setup. Absolute route (leading "/") so it
     // ignores this controller's "api/tenant" prefix, matching the exact path the Dashboard calls.
     // Verified by X-Signature (RequireGatewaySignatureAttribute), not a bearer token — no
-    // authenticated caller exists yet at this point.
+    // authenticated caller exists yet at this point. AllowBootstrap: a never-provisioned instance
+    // has no secret to check a signature against yet — this one call is let through unsigned so
+    // its body can deliver the per-client secrets this instance uses from then on.
     [AllowAnonymous]
-    [RequireGatewaySignature]
+    [RequireGatewaySignature(AllowBootstrap = true)]
     [HttpPost("/pos/users/provision")]
     public async Task<IActionResult> ProvisionFromGateway([FromBody] GatewayProvisionRequest req)
     {
