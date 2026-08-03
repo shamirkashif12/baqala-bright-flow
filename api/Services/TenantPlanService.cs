@@ -71,6 +71,16 @@ public class TenantPlanService(BaqalaDbContext db) : ITenantPlanService
         plan.EcrId = req.EcrId;
         plan.SubscriptionId = req.SubscriptionId;
         ApplyCommon(plan, req.PlanName, req.Category, req.EnabledModules, req.Limits, status: "active");
+        // Only ever set from empty — a value already stored here (from a genuine first call)
+        // must never be silently replaced by whatever a later/retried payload happens to carry.
+        if (string.IsNullOrWhiteSpace(plan.WebhookSharedSecret) && !string.IsNullOrWhiteSpace(req.WebhookSharedSecret))
+            plan.WebhookSharedSecret = req.WebhookSharedSecret;
+        if (string.IsNullOrWhiteSpace(plan.GatewayJwtKey) && !string.IsNullOrWhiteSpace(req.GatewayJwtKey))
+            plan.GatewayJwtKey = req.GatewayJwtKey;
+        if (string.IsNullOrWhiteSpace(plan.GatewayJwtIssuer) && !string.IsNullOrWhiteSpace(req.GatewayJwtIssuer))
+            plan.GatewayJwtIssuer = req.GatewayJwtIssuer;
+        if (string.IsNullOrWhiteSpace(plan.GatewayJwtAudience) && !string.IsNullOrWhiteSpace(req.GatewayJwtAudience))
+            plan.GatewayJwtAudience = req.GatewayJwtAudience;
         plan.LastEventId = req.EventId;
         plan.ProvisionedAt = DateTime.UtcNow;
         plan.UpdatedAt = DateTime.UtcNow;
@@ -234,6 +244,16 @@ public class GatewayProvisionRequest
     public List<GatewayModule>? EnabledModules { get; set; }
     public GatewayLimits? Limits { get; set; }
     public DateTime? Timestamp { get; set; }
+
+    // Present only on a fresh, never-provisioned instance's very first call — see
+    // RequireGatewaySignatureAttribute's bootstrap path. This instance has no pre-shared secret
+    // yet, so the Dashboard hands over the ones it generated for this specific client right here,
+    // instead of a human ever typing them into appsettings.json. Ignored (never overwrites an
+    // already-set value) on any call after the first.
+    public string? WebhookSharedSecret { get; set; }
+    public string? GatewayJwtKey { get; set; }
+    public string? GatewayJwtIssuer { get; set; }
+    public string? GatewayJwtAudience { get; set; }
 }
 
 // POST /pos/entitlements/update — plan/module/limit changes for an already-provisioned business.

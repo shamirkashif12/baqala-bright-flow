@@ -83,6 +83,23 @@ public class TenantPlan
     [MaxLength(100), Column("last_event_id")]
     public string? LastEventId { get; set; }
 
+    // Per-instance secrets, established by the Dashboard's very first /pos/users/provision call
+    // rather than a pre-shared appsettings.json value — see RequireGatewaySignatureAttribute's
+    // bootstrap path. Null until that first call; once set, every subsequent gateway-signed
+    // request or gateway-login token exchange is checked against these, never appsettings.json,
+    // for this specific instance. Config values remain a fallback for local/dev testing only.
+    [MaxLength(200), Column("webhook_shared_secret")]
+    public string? WebhookSharedSecret { get; set; }
+
+    [MaxLength(200), Column("gateway_jwt_key")]
+    public string? GatewayJwtKey { get; set; }
+
+    [MaxLength(200), Column("gateway_jwt_issuer")]
+    public string? GatewayJwtIssuer { get; set; }
+
+    [MaxLength(200), Column("gateway_jwt_audience")]
+    public string? GatewayJwtAudience { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
