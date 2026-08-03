@@ -71,6 +71,10 @@ export interface AuthState {
   hasRole: (role: AppRole | AppRole[]) => boolean;
   canViewModule: (module: string) => boolean;
   refreshPermissions: () => Promise<void>;
+  // SSO handoff from the Tenant Admin Dashboard's "Launch" button — exchanges a short-lived
+  // gateway JWT (proves the operator's identity to the Dashboard, signed with a key shared
+  // out-of-band, see AuthController.GatewayLogin) for this app's own normal session token.
+  gatewayLogin: (gatewayAccessToken: string) => Promise<void>;
   updateLocalUser: (patch: Partial<Pick<AuthUser, "name" | "email">>) => void;
   planInfo: TenantPlanState | null;
   isFeatureEnabled: (key: string) => boolean;
@@ -286,6 +290,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const gatewayLogin = useCallback(async (gatewayAccessToken: string) => {
+    const res = await fetch(`${API_BASE}/api/auth/gateway-login`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ gatewayAccessToken }),
+    });
+
+    if (!res.ok) {
+      let message = "Single sign-on failed.";
+      try {
+        const body = (await res.json()) as { message?: string };
+        if (body.message) message = body.message;
+      } catch { /* ignore */ }
+      throw new Error(message);
+    }
+
+    const { token } = (await res.json()) as { token: string };
+    localStorage.setItem(TOKEN_KEY, token);
+    stampSession();
+
+    const claims = parseJwt(token);
+    if (claims) {
+      const baseUser = buildUser(claims);
+      const [perms, plan] = await Promise.all([
+        fetchPermissions(baseUser.roleId, baseUser.id),
+        fetchTenantPlan(),
+      ]);
+      setAuthUser(mergePerms(baseUser, perms));
+      setPlanInfo(plan);
+    }
+  }, []);
+
   // Refreshes both the DB-permission matrix AND the tenant plan together — a plan edit from the
   // Tenant Admin Dashboard (e.g. adding Stocktaking/Employee & Shift Management to Basic) has to
   // reach an already-open tab the same way a permission change does, or a logged-in user would
@@ -397,7 +433,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout, loading, hasRole, canViewModule, refreshPermissions, updateLocalUser, planInfo, isFeatureEnabled }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, gatewayLogin, logout, loading, hasRole, canViewModule, refreshPermissions, updateLocalUser, planInfo, isFeatureEnabled }}>
       {children}
     </AuthContext.Provider>
   );

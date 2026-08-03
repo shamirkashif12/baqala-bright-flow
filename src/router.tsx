@@ -9,6 +9,7 @@ const authStore: AuthState = {
   user: null,
   loading: true,
   login: async () => {},
+  gatewayLogin: async () => {},
   logout: () => {},
   hasRole: () => false,
   canViewModule: () => true,
