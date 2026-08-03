@@ -152,8 +152,8 @@ function ZatcaSettings() {
       const updated = await api.updateZatcaSettings(branch.id, zatca);
       setZatca(updated);
       toast.success("ZATCA settings saved");
-    } catch {
-      toast.error("Failed to save ZATCA settings");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save ZATCA settings");
     } finally {
       setSaving(false);
     }
@@ -169,9 +169,9 @@ function ZatcaSettings() {
       const updated = await api.updateZatcaSettings(branch.id, next);
       setZatca(updated);
       toast.success(v ? "ZATCA Phase 2 enabled — applied to all branches" : "ZATCA Phase 2 disabled — applied to all branches");
-    } catch {
+    } catch (e) {
       setZatca(previous);
-      toast.error("Failed to update ZATCA Phase 2 status");
+      toast.error(e instanceof Error ? e.message : "Failed to update ZATCA Phase 2 status");
     } finally {
       setSaving(false);
     }
@@ -185,8 +185,8 @@ function ZatcaSettings() {
       setCsr(result.csr);
       toast.success("CSR generated — paste it into the ZATCA Fatoora portal to get an OTP");
       loadSettings();
-    } catch {
-      toast.error("Failed to generate CSR");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to generate CSR");
     } finally {
       setCsrBusy(false);
     }
@@ -204,8 +204,10 @@ function ZatcaSettings() {
       } else {
         toast.error(result.error ?? "Failed to obtain compliance CSID");
       }
-    } catch {
-      toast.error("Failed to obtain compliance CSID");
+    } catch (e) {
+      // Previously a hardcoded generic message regardless of cause — the actual reason (e.g. no
+      // network route to ZATCA's gateway from this environment) is in e.message.
+      toast.error(e instanceof Error ? e.message : "Failed to obtain compliance CSID");
     } finally {
       setOtpBusy(false);
     }
@@ -223,8 +225,8 @@ function ZatcaSettings() {
       } else {
         toast.error(result.error ?? "Compliance tests failed — see results below");
       }
-    } catch {
-      toast.error("Failed to run onboarding to production");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to run onboarding to production");
     } finally {
       setProdBusy(false);
     }
@@ -548,7 +550,16 @@ function ZatcaSettings() {
       </Tabs>
 
       <Card className="p-4 border-border/60 shadow-card text-xs flex items-center justify-between flex-wrap gap-2">
-        <span className="text-muted-foreground">Last successful sync to ZATCA Fatoora · <span className="font-semibold text-foreground">Today 14:42:08 · 142 invoices cleared</span></span>
+        {/* Was a hardcoded "Today 14:42:08 · 142 invoices cleared" regardless of actual state —
+            misleading here of all places, since this page is exactly where someone would come to
+            understand why an order ISN'T showing up on the ZATCA invoice history. Orders only
+            start generating real ZATCA invoices once onboarding reaches production_ready
+            (OrdersController.Create's auto-submit block checks that status exactly). */}
+        <span className="text-muted-foreground">
+          {zatca.onboardingStatus === "production_ready"
+            ? "ZATCA Phase 2 onboarding complete — new orders submit automatically."
+            : `Not yet submitting to ZATCA — onboarding is at "${zatca.onboardingStatus?.replace(/_/g, " ") ?? "not started"}". Complete the steps above first.`}
+        </span>
         <Link to="/zatca" className="text-primary font-semibold hover:underline">Open ZATCA invoice history →</Link>
       </Card>
     </PageShell>

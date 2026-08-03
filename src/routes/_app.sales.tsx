@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
+import { OrderInvoiceDialog } from "@/components/order-invoice-dialog";
 import { Wallet, Receipt, Percent, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Order, type Branch } from "@/lib/api";
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/_app/sales")({ component: Sales });
 function Sales() {
   const { user } = useAuth();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
+  const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -151,7 +153,20 @@ function Sales() {
       ) : (
         <DataTable
           columns={[
-            { key: "orderNumber", label: "Invoice", render: (r: Order) => <span className="font-mono text-sm font-semibold">{r.orderNumber}</span> },
+            {
+              key: "orderNumber", label: "Invoice", render: (r: Order) => (
+                // Opens the same Tax Invoice view shown right after a sale completes at the POS
+                // (items, VAT breakdown, ZATCA QR) — Sales previously had no way to see a single
+                // invoice at all.
+                <button
+                  type="button"
+                  className="font-mono text-sm font-semibold text-primary hover:underline"
+                  onClick={() => setViewingOrderId(r.id)}
+                >
+                  {r.orderNumber}
+                </button>
+              ),
+            },
             { key: "createdAt", label: "Date / Time", render: (r: Order) => new Date(r.createdAt).toLocaleString("en-SA", { dateStyle: "short", timeStyle: "short" }) },
             { key: "branch", label: "Branch", render: (r: Order) => r.branch?.name ?? "—" },
             { key: "cashier", label: "Cashier", render: (r: Order) => r.cashier?.fullName ?? "—" },
@@ -163,6 +178,8 @@ function Sales() {
           rows={filtered}
         />
       )}
+
+      <OrderInvoiceDialog orderId={viewingOrderId} onClose={() => setViewingOrderId(null)} />
     </PageShell>
   );
 }

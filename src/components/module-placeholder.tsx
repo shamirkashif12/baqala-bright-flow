@@ -21,7 +21,7 @@ export function FilterField({ label, className, children }: { label: string; cla
   );
 }
 
-export function DataTable({ columns, rows, emptyMessage = "No records match the current filters." }: { columns: Column[]; rows: any[]; emptyMessage?: string }) {
+export function DataTable({ columns, rows, emptyMessage = "No records match the current filters.", onRowClick }: { columns: Column[]; rows: any[]; emptyMessage?: string; onRowClick?: (row: any) => void }) {
   return (
     <Card className="overflow-hidden border-border/60 shadow-card">
       <div className="overflow-x-auto">
@@ -51,7 +51,11 @@ export function DataTable({ columns, rows, emptyMessage = "No records match the 
               </tr>
             ) : (
               rows.map((r, i) => (
-                <tr key={i} className="border-b border-border/40 hover:bg-muted/30 transition-colors last:border-0">
+                <tr
+                  key={i}
+                  className={cn("border-b border-border/40 hover:bg-muted/30 transition-colors last:border-0", onRowClick && "cursor-pointer")}
+                  onClick={onRowClick ? () => onRowClick(r) : undefined}
+                >
                   {columns.map((c) => (
                     <td key={c.key} className={cn("px-4 py-3.5 align-middle", c.className)}>
                       {c.render ? c.render(r) : r[c.key]}

@@ -73,8 +73,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let msg = text;
     let body: unknown;
     try {
-      const parsed = JSON.parse(text) as { message?: string; title?: string };
-      msg = parsed.message ?? parsed.title ?? text;
+      // Controllers are inconsistent about which field carries the human-readable reason
+      // (BadRequest(new { error = ... }) vs { message = ... } vs ASP.NET's own { title = ... }
+      // ProblemDetails) — check all three, or callers reading err.message get the raw JSON blob.
+      const parsed = JSON.parse(text) as { message?: string; error?: string; title?: string };
+      msg = parsed.message ?? parsed.error ?? parsed.title ?? text;
       body = parsed;
     } catch { /* not JSON */ }
     const err = new Error(msg || res.statusText) as Error & { status?: number; body?: unknown };

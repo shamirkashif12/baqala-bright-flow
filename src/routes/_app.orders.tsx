@@ -28,7 +28,14 @@ import { useCompanyHeader } from "@/lib/use-company-header";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { AddressMapPreview } from "@/components/address-map-picker";
 
-export const Route = createFileRoute("/_app/orders")({ component: Orders });
+export const Route = createFileRoute("/_app/orders")({
+  // Lets other pages (e.g. Sales) deep-link straight to a specific order's detail sheet instead of
+  // duplicating the receipt/print/refund UI that already lives here.
+  validateSearch: (search) => ({
+    orderId: (search.orderId as string) || undefined,
+  }),
+  component: Orders,
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const ORDER_STATUSES = ["pending", "processing", "ready_to_deliver", "delivered", "completed", "cancelled", "refunded"];
@@ -1112,7 +1119,10 @@ function POSTab() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Seeded from ?orderId= so a link from Sales (or anywhere else) opens straight to that order's
+  // detail sheet instead of landing on the bare list.
+  const { orderId: linkedOrderId } = Route.useSearch();
+  const [selectedId, setSelectedId] = useState<string | null>(linkedOrderId ?? null);
   // Approval Center work that concerns THIS list — a queued cancellation/modification is invisible
   // on the order itself otherwise, which is exactly what made managers miss these requests.
   const { canApprove: canApproveOrders } = usePermission("Orders");
