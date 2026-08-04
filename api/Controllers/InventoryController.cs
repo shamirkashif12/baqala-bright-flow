@@ -694,6 +694,137 @@ public class InventoryController(
     }
 
     /// <summary>
+    /// Pack breaking — converts on-hand cartons/cases into on-hand loose units, e.g. breaking
+    /// 1 carton of a dozen eggs into 12 individual eggs. Only valid for a "pack" product that has
+    /// a LooseUnitProductId configured (set on the product itself, Inventory → edit product).
+    /// Draws down the pack product's batches FEFO (same picking the sale/adjustment paths use) and
+    /// creates a proportional batch on the loose product inheriting the consumed batch's expiry,
+    /// so an expiry-sensitive good split out of a broken pack stays honestly tracked instead of
+    /// silently losing its expiry the moment it's split out.
+    /// </summary>
+    [HttpPost("break-pack")]
+    public async Task<IActionResult> BreakPack([FromBody] BreakPackRequest req)
+    {
+        if (!await PermissionCheck.HasPermissionAsync(User, db, "Inventory", PermAction.Edit)
+            && !await PermissionCheck.HasPermissionAsync(User, db, "Stocks", PermAction.Create))
+            return StatusCode(403, new { message = "You do not have permission to adjust stock." });
+
+        var packProduct = await db.Products.FindAsync(req.PackProductId);
+        if (packProduct is null) return NotFound(new { message = "Pack product not found." });
+        if (packProduct.SaleUnitType != "pack")
+            return BadRequest(new { message = $"\"{packProduct.Name}\" is not sold as a pack." });
+        if (packProduct.LooseUnitProductId is null)
+            return BadRequest(new { message = $"\"{packProduct.Name}\" has no loose-unit product configured to break into." });
+
+        var looseProduct = await db.Products.FindAsync(packProduct.LooseUnitProductId);
+        if (looseProduct is null) return NotFound(new { message = "Linked loose-unit product not found." });
+
+        // A carton is always broken as a whole unit — reuses the same check every other
+        // stock-quantity write endpoint applies, since a pack product is never weight-based.
+        var packsQtyError = QuantityValidation.ValidateWholeUnit(packProduct, req.Packs, "Packs to break");
+        if (packsQtyError is not null) return BadRequest(new { message = packsQtyError });
+        if (req.Packs <= 0) return BadRequest(new { message = "Packs to break must be greater than zero." });
+
+        var packStock = await db.InventoryStocks
+            .FirstOrDefaultAsync(s => s.ProductId == req.PackProductId && s.BranchId == req.BranchId);
+        if (packStock is null || req.Packs > packStock.Quantity)
+            return BadRequest(new { message = $"Cannot break {req.Packs} pack(s) — only {packStock?.Quantity ?? 0} on hand at this branch." });
+
+        var itemsPerPack = packProduct.ItemsPerPack ?? 1;
+        var unitsProduced = req.Packs * itemsPerPack;
+        var actingUserId = CallerId();
+
+        // FEFO draw-down of the pack's own batches — empty when the pack isn't batch-tracked at
+        // this branch, which is fine (falls back to the aggregate-only move below).
+        var consumed = await batchConsumption.ConsumeFefoAsync(req.PackProductId, req.BranchId, warehouseId: null, req.Packs);
+
+        var packQuantityBefore = packStock.Quantity;
+        packStock.Quantity -= req.Packs;
+        packStock.LastUpdated = DateTime.UtcNow;
+        packStock.UpdatedAt = DateTime.UtcNow;
+
+        var looseStock = await db.InventoryStocks
+            .FirstOrDefaultAsync(s => s.ProductId == looseProduct.Id && s.BranchId == req.BranchId);
+        if (looseStock is null)
+        {
+            looseStock = new InventoryStock
+            {
+                Id = Guid.NewGuid(),
+                ProductId = looseProduct.Id,
+                BranchId = req.BranchId,
+                Quantity = 0,
+                LastUpdated = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.InventoryStocks.Add(looseStock);
+        }
+        var looseQuantityBefore = looseStock.Quantity;
+        looseStock.Quantity += unitsProduced;
+        looseStock.LastUpdated = DateTime.UtcNow;
+        looseStock.UpdatedAt = DateTime.UtcNow;
+
+        // Each consumed pack batch hands its expiry down to a proportional new batch on the loose
+        // product — a carton expiring Friday means the eggs pulled out of it still expire Friday.
+        foreach (var c in consumed)
+        {
+            var sourceBatch = await db.InventoryBatches.FindAsync(c.BatchId);
+            db.InventoryBatches.Add(new InventoryBatch
+            {
+                Id = Guid.NewGuid(),
+                ProductId = looseProduct.Id,
+                BranchId = req.BranchId,
+                BatchNumber = c.BatchNumber is null ? null : $"{c.BatchNumber}-BRK",
+                Quantity = c.Quantity * itemsPerPack,
+                RemainingQuantity = c.Quantity * itemsPerPack,
+                PurchaseCost = c.UnitCost,
+                ExpiryDate = sourceBatch?.ExpiryDate,
+                ReceivedDate = DateTime.UtcNow,
+                Status = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+
+        var referenceNumber = $"BRK-{Guid.NewGuid().ToString("N")[..8]}";
+        stockMovements.Record(
+            packProduct.Id, req.BranchId, warehouseId: null, movementType: "pack_break_out", quantity: -req.Packs,
+            referenceType: "PackBreak", referenceNumber: referenceNumber, notes: $"Broken into {looseProduct.Name}",
+            createdBy: actingUserId, quantityBefore: packQuantityBefore, quantityAfter: packStock.Quantity);
+        stockMovements.Record(
+            looseProduct.Id, req.BranchId, warehouseId: null, movementType: "pack_break_in", quantity: unitsProduced,
+            referenceType: "PackBreak", referenceNumber: referenceNumber, notes: $"From breaking {packProduct.Name}",
+            createdBy: actingUserId, quantityBefore: looseQuantityBefore, quantityAfter: looseStock.Quantity);
+
+        await db.SaveChangesAsync();
+
+        try
+        {
+            await audit.LogAsync(
+                action: "break_pack",
+                entityType: "Product",
+                entityId: packProduct.Id,
+                userId: actingUserId,
+                branchId: req.BranchId,
+                notes: $"{packProduct.Name} → {looseProduct.Name}",
+                details: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    PackProductId = packProduct.Id, PackProductName = packProduct.Name,
+                    LooseProductId = looseProduct.Id, LooseProductName = looseProduct.Name,
+                    req.Packs, ItemsPerPack = itemsPerPack, UnitsProduced = unitsProduced,
+                }),
+                severity: "info");
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for break-pack on product {ProductId}", packProduct.Id); }
+
+        return Ok(new
+        {
+            packStock = new { productId = packProduct.Id, branchId = req.BranchId, quantity = packStock.Quantity },
+            looseStock = new { productId = looseProduct.Id, branchId = req.BranchId, quantity = looseStock.Quantity },
+        });
+    }
+
+    /// <summary>
     /// FRD §2.3 — sign-off on a held write-off. A pending wastage adjustment has NOT touched on-hand
     /// yet (StockApplied=false), same maker-checker gate as a stock transfer: APPROVING applies the
     /// deduction now; REJECTING just records the decision and leaves stock untouched. Legacy rows
@@ -844,6 +975,12 @@ public record AdjustRequest(
     string? Reason,
     Guid? AdjustedBy,
     Guid? BatchId = null
+);
+
+public record BreakPackRequest(
+    Guid PackProductId,
+    Guid BranchId,
+    decimal Packs
 );
 
 public record ReceiveBatchRequest(

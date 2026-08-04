@@ -44,6 +44,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   transfer_restore: "Transfer Restore",
   sale: "Sale",
   expired: "Expiry Write-off",
+  pack_break_out: "Pack Broken",
+  pack_break_in: "From Broken Pack",
 };
 
 function fmtDate(d?: string) {

@@ -3209,6 +3209,10 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("int")
                         .HasColumnName("items_per_pack");
 
+                    b.Property<Guid?>("LooseUnitProductId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("loose_unit_product_id");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -3266,6 +3270,8 @@ namespace BaqalaPOS.Api.Migrations
                         .IsUnique();
 
                     b.HasIndex("CategoryId");
+
+                    b.HasIndex("LooseUnitProductId");
 
                     b.HasIndex("Sku")
                         .IsUnique();
@@ -6916,7 +6922,14 @@ namespace BaqalaPOS.Api.Migrations
                         .WithMany("Products")
                         .HasForeignKey("CategoryId");
 
+                    b.HasOne("BaqalaPOS.Api.Models.Product", "LooseUnitProduct")
+                        .WithMany()
+                        .HasForeignKey("LooseUnitProductId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Category");
+
+                    b.Navigation("LooseUnitProduct");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ProductImage", b =>
