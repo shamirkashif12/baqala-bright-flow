@@ -29,15 +29,29 @@ export const EN_KEYS: ReadonlySet<string> = new Set(Object.keys(en));
 // Reverse index: any translated string (in any language) → its English key.
 // Lets the auto-translator map a node that currently shows Arabic/Urdu back to
 // its English source so it can re-translate when switching between languages.
+// Only unambiguous mappings are kept. A translated string is dropped when it
+// could mean more than one thing:
+//   - it is itself an English key (de translates "Batch" to "Charge", and
+//     "Charge" is a key in its own right), or
+//   - two different keys translate to it in the same language.
+// Guessing wrong here made text visibly flicker: a node resolved to the wrong
+// key, got rewritten, then resolved back again. Leaving a string untranslated is
+// the safer failure.
 const reverseIndex: Map<string, string> = (() => {
   const map = new Map<string, string>();
+  const ambiguous = new Set<string>();
   for (const lang of Object.keys(dictionaries) as Lang[]) {
     const d = dictionaries[lang];
     for (const key of Object.keys(d)) {
       const value = d[key];
-      if (value && !map.has(value)) map.set(value, key);
+      if (!value || value === key) continue;
+      if (EN_KEYS.has(value)) { ambiguous.add(value); continue; }
+      const seen = map.get(value);
+      if (seen === undefined) map.set(value, key);
+      else if (seen !== key) ambiguous.add(value);
     }
   }
+  for (const v of ambiguous) map.delete(v);
   return map;
 })();
 

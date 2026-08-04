@@ -67,7 +67,7 @@ function KPI() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 border-b text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-3 font-semibold">Cashier</th>
                       <th className="px-3 py-3 font-semibold">Terminal</th>
                       <th className="px-3 py-3 font-semibold">Orders</th>
@@ -110,7 +110,7 @@ function KPI() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 border-b text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-3 font-semibold">Terminal</th>
                       <th className="px-3 py-3 font-semibold">Branch</th>
                       <th className="px-3 py-3 font-semibold">Assigned Cashier</th>
@@ -177,7 +177,7 @@ function KPI() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 border-b text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-3 font-semibold">Branch</th>
                       <th className="px-3 py-3 font-semibold">City</th>
                       <th className="px-3 py-3 font-semibold">Status</th>

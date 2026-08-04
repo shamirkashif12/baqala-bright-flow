@@ -309,7 +309,7 @@ function MultiSelect({
       <PopoverContent className="w-72 p-2 max-h-60 overflow-y-auto">
         {options.map(opt => (
           <button key={opt.value} type="button" onClick={() => toggle(opt.value)}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-left">
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-start">
             <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${value.includes(opt.value) ? "bg-primary border-primary" : "border-input"}`}>
               {value.includes(opt.value) && <Check className="h-3 w-3 text-primary-foreground" />}
             </div>
@@ -1747,13 +1747,13 @@ function ViewTransferSheet({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/60">
-                      <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Product</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Batch #</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Expiry</th>
-                      <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Requested</th>
-                      <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Approved</th>
-                      <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Received</th>
-                      <th className="text-right py-2 px-2 text-xs font-medium text-muted-foreground">Unit Cost</th>
+                      <th className="text-start py-2 px-2 text-xs font-medium text-muted-foreground">Product</th>
+                      <th className="text-start py-2 px-2 text-xs font-medium text-muted-foreground">Batch #</th>
+                      <th className="text-start py-2 px-2 text-xs font-medium text-muted-foreground">Expiry</th>
+                      <th className="text-end py-2 px-2 text-xs font-medium text-muted-foreground">Requested</th>
+                      <th className="text-end py-2 px-2 text-xs font-medium text-muted-foreground">Approved</th>
+                      <th className="text-end py-2 px-2 text-xs font-medium text-muted-foreground">Received</th>
+                      <th className="text-end py-2 px-2 text-xs font-medium text-muted-foreground">Unit Cost</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1762,10 +1762,10 @@ function ViewTransferSheet({
                         <td className="py-2 px-2 font-medium">{item.product?.name ?? item.productId}</td>
                         <td className="py-2 px-2 font-mono text-xs text-muted-foreground">{item.batch?.batchNumber ?? "—"}</td>
                         <td className="py-2 px-2 text-xs text-muted-foreground">{(item.batch?.expiryDate ?? item.expiryDate) ? new Date((item.batch?.expiryDate ?? item.expiryDate)!).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
-                        <td className="py-2 px-2 text-right">{item.requestedQuantity}</td>
-                        <td className="py-2 px-2 text-right">{item.approvedQuantity ?? "—"}</td>
-                        <td className="py-2 px-2 text-right">{item.receivedQuantity ?? "—"}</td>
-                        <td className="py-2 px-2 text-right">{item.unitCost != null ? <span className="flex items-center gap-0.5 justify-end"><SARIcon />{item.unitCost.toFixed(2)}</span> : "—"}</td>
+                        <td className="py-2 px-2 text-end">{item.requestedQuantity}</td>
+                        <td className="py-2 px-2 text-end">{item.approvedQuantity ?? "—"}</td>
+                        <td className="py-2 px-2 text-end">{item.receivedQuantity ?? "—"}</td>
+                        <td className="py-2 px-2 text-end">{item.unitCost != null ? <span className="flex items-center gap-0.5 justify-end"><SARIcon />{item.unitCost.toFixed(2)}</span> : "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1774,8 +1774,8 @@ function ViewTransferSheet({
                     return total > 0 ? (
                       <tfoot>
                         <tr className="border-t-2 border-border/60 bg-muted/30">
-                          <td colSpan={6} className="py-2 px-2 text-xs font-semibold text-right text-muted-foreground">Total</td>
-                          <td className="py-2 px-2 text-right font-semibold text-sm">
+                          <td colSpan={6} className="py-2 px-2 text-xs font-semibold text-end text-muted-foreground">Total</td>
+                          <td className="py-2 px-2 text-end font-semibold text-sm">
                             <span className="flex items-center gap-0.5 justify-end"><SARIcon />{total.toFixed(2)}</span>
                           </td>
                         </tr>
@@ -1964,13 +1964,13 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border/60 bg-muted/30">
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">PO / Transfer #</th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Supplier</th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Warehouse</th>
+                  <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">PO / Transfer #</th>
+                  <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Supplier</th>
+                  <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Warehouse</th>
                   <th className="text-center py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</th>
-                  <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
+                  <th className="text-end py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
+                  <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                  <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
                 </tr>
               </thead>
               <tbody>
@@ -1989,7 +1989,7 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
                     <td className="py-3 px-4 text-center">
                       <span className="text-sm font-medium">{po.items?.length ?? 0}</span>
                     </td>
-                    <td className="py-3 px-4 text-right">
+                    <td className="py-3 px-4 text-end">
                       <span className="text-sm font-semibold flex items-center gap-0.5 justify-end">
                         <SARIcon />{po.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                       </span>
@@ -2021,7 +2021,7 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
                       <td className="py-3 px-4 text-center">
                         <span className="text-sm font-medium">{t.items?.length ?? 0}</span>
                       </td>
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-3 px-4 text-end">
                         {total > 0
                           ? <span className="text-sm font-semibold flex items-center gap-0.5 justify-end"><SARIcon />{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
                           : <span className="text-muted-foreground">—</span>}
@@ -2314,17 +2314,17 @@ function StockTransfers() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/60 bg-muted/30">
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Transfer #</th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Source</th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Destination</th>
+                      <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Transfer #</th>
+                      <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
+                      <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Source</th>
+                      <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Destination</th>
                       <th className="text-center py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</th>
-                      <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Created By</th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approved By</th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
-                      <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
+                      <th className="text-end py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
+                      <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Created By</th>
+                      <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approved By</th>
+                      <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                      <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
+                      <th className="text-end py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2364,7 +2364,7 @@ function StockTransfers() {
                             <span className="text-sm font-medium">{t.items?.length ?? 0}</span>
                             {isBatch && <span className="ml-1 text-[10px] text-muted-foreground">×{group.length}</span>}
                           </td>
-                          <td className="py-3 px-4 text-right">
+                          <td className="py-3 px-4 text-end">
                             {grandTotal > 0
                               ? <span className="flex items-center gap-0.5 justify-end font-semibold text-sm">
                                   <SARIcon />{grandTotal.toFixed(2)}

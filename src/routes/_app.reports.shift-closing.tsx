@@ -183,7 +183,7 @@ function ShiftClosingReport() {
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between border-b border-border/40 pb-1.5">
                   <span className="text-muted-foreground">{k}</span>
-                  <span className="font-medium text-right max-w-[60%]">{v}</span>
+                  <span className="font-medium text-end max-w-[60%]">{v}</span>
                 </div>
               ))}
               <div className="flex justify-between pt-1">

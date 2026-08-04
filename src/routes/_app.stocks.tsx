@@ -966,12 +966,12 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left">
+                <tr className="bg-muted/40 border-b border-border/60 text-start">
                   <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
                   <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">SKU</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">System Qty</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Counted Qty</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Variance</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-end">System Qty</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-end">Counted Qty</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-end">Variance</th>
                 </tr>
               </thead>
               <tbody>
@@ -981,11 +981,11 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
                     <tr key={item.id} className="border-b border-border/40 last:border-0">
                       <td className="px-4 py-2 font-medium">{item.product?.name ?? "Unknown"}</td>
                       <td className="px-4 py-2 text-muted-foreground text-xs">{item.product?.sku}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{item.systemQuantity}</td>
-                      <td className="px-4 py-2 text-right">
+                      <td className="px-4 py-2 text-end tabular-nums">{item.systemQuantity}</td>
+                      <td className="px-4 py-2 text-end">
                         {isDraft && canEdit ? (
                           <Input
-                            type="number" className="h-8 w-24 ml-auto text-right"
+                            type="number" className="h-8 w-24 ml-auto text-end"
                             value={countInputs[item.productId] ?? ""}
                             onChange={e => setCountInputs(ci => ({ ...ci, [item.productId]: e.target.value }))}
                             onBlur={e => saveCount(item.productId, e.target.value)}
@@ -995,7 +995,7 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
                           <span className="tabular-nums">{item.countedQuantity ?? "—"}</span>
                         )}
                       </td>
-                      <td className={`px-4 py-2 text-right font-semibold tabular-nums ${variance == null ? "text-muted-foreground" : variance === 0 ? "text-success" : variance > 0 ? "text-blue-600" : "text-destructive"}`}>
+                      <td className={`px-4 py-2 text-end font-semibold tabular-nums ${variance == null ? "text-muted-foreground" : variance === 0 ? "text-success" : variance > 0 ? "text-blue-600" : "text-destructive"}`}>
                         {variance == null ? "—" : variance > 0 ? `+${variance}` : variance}
                       </td>
                     </tr>
@@ -1508,13 +1508,13 @@ function Stocks() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
                     <tr>
-                      <th className="px-4 py-2 text-left">Product</th>
-                      <th className="px-4 py-2 text-left">Branch</th>
-                      <th className="px-4 py-2 text-right">Qty</th>
-                      <th className="px-4 py-2 text-right">Reserved</th>
-                      <th className="px-4 py-2 text-right">Reorder Lvl</th>
-                      <th className="px-4 py-2 text-left">Status</th>
-                      <th className="px-4 py-2 text-left">Last Updated</th>
+                      <th className="px-4 py-2 text-start">Product</th>
+                      <th className="px-4 py-2 text-start">Branch</th>
+                      <th className="px-4 py-2 text-end">Qty</th>
+                      <th className="px-4 py-2 text-end">Reserved</th>
+                      <th className="px-4 py-2 text-end">Reorder Lvl</th>
+                      <th className="px-4 py-2 text-start">Status</th>
+                      <th className="px-4 py-2 text-start">Last Updated</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1529,9 +1529,9 @@ function Stocks() {
                         <tr key={s.id} className="border-t hover:bg-muted/20">
                           <td className="px-4 py-2.5 font-medium">{s.product?.name ?? "—"}</td>
                           <td className="px-4 py-2.5 text-muted-foreground">{branch?.name ?? s.branchId}</td>
-                          <td className="px-4 py-2.5 text-right font-semibold">{fmt(s.quantity)}</td>
-                          <td className="px-4 py-2.5 text-right text-muted-foreground">{fmt(s.reservedQuantity ?? 0)}</td>
-                          <td className="px-4 py-2.5 text-right text-muted-foreground">{s.reorderLevel}</td>
+                          <td className="px-4 py-2.5 text-end font-semibold">{fmt(s.quantity)}</td>
+                          <td className="px-4 py-2.5 text-end text-muted-foreground">{fmt(s.reservedQuantity ?? 0)}</td>
+                          <td className="px-4 py-2.5 text-end text-muted-foreground">{s.reorderLevel}</td>
                           <td className="px-4 py-2.5">
                             {isLow ? <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700"><AlertTriangle className="h-3 w-3" />Low</span>
                               : <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700"><CheckCircle2 className="h-3 w-3 mr-0.5" />OK</span>}
@@ -1595,16 +1595,16 @@ function Stocks() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
                     <tr>
-                      <th className="px-4 py-2 text-left">Batch #</th>
-                      <th className="px-4 py-2 text-left">Product</th>
-                      <th className="px-4 py-2 text-left">Branch</th>
-                      <th className="px-4 py-2 text-left">Supplier</th>
-                      <th className="px-4 py-2 text-right">Qty</th>
-                      <th className="px-4 py-2 text-right">Remaining</th>
-                      <th className="px-4 py-2 text-right">Cost</th>
-                      <th className="px-4 py-2 text-left">Expiry</th>
-                      <th className="px-4 py-2 text-left">Received</th>
-                      <th className="px-4 py-2 text-left">Status</th>
+                      <th className="px-4 py-2 text-start">Batch #</th>
+                      <th className="px-4 py-2 text-start">Product</th>
+                      <th className="px-4 py-2 text-start">Branch</th>
+                      <th className="px-4 py-2 text-start">Supplier</th>
+                      <th className="px-4 py-2 text-end">Qty</th>
+                      <th className="px-4 py-2 text-end">Remaining</th>
+                      <th className="px-4 py-2 text-end">Cost</th>
+                      <th className="px-4 py-2 text-start">Expiry</th>
+                      <th className="px-4 py-2 text-start">Received</th>
+                      <th className="px-4 py-2 text-start">Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1618,9 +1618,9 @@ function Stocks() {
                         <td className="px-4 py-2.5 font-medium">{b.product?.name ?? "—"}</td>
                         <td className="px-4 py-2.5 text-muted-foreground text-xs">{branches.find(br => br.id === b.branchId)?.name ?? "—"}</td>
                         <td className="px-4 py-2.5 text-muted-foreground">{b.supplier?.name ?? "—"}</td>
-                        <td className="px-4 py-2.5 text-right">{fmt(b.quantity)}</td>
-                        <td className="px-4 py-2.5 text-right">{fmt(b.remainingQuantity)}</td>
-                        <td className="px-4 py-2.5 text-right">{b.purchaseCost != null ? `${b.purchaseCost.toFixed(2)} SAR` : "—"}</td>
+                        <td className="px-4 py-2.5 text-end">{fmt(b.quantity)}</td>
+                        <td className="px-4 py-2.5 text-end">{fmt(b.remainingQuantity)}</td>
+                        <td className="px-4 py-2.5 text-end">{b.purchaseCost != null ? `${b.purchaseCost.toFixed(2)} SAR` : "—"}</td>
                         <td className="px-4 py-2.5">{b.expiryDate ? <ExpiryCell date={b.expiryDate} /> : "—"}</td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">{fmtDate(b.receivedDate)}</td>
                         <td className="px-4 py-2.5"><StBadge status={b.status} /></td>
@@ -1728,13 +1728,13 @@ function Stocks() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
                     <tr>
-                      <th className="px-4 py-2 text-left">PO #</th>
-                      <th className="px-4 py-2 text-left">Supplier</th>
-                      <th className="px-4 py-2 text-left">Warehouse / Branch</th>
-                      <th className="px-4 py-2 text-right">Total</th>
-                      <th className="px-4 py-2 text-left">ETA</th>
-                      <th className="px-4 py-2 text-left">Received</th>
-                      <th className="px-4 py-2 text-left">Status</th>
+                      <th className="px-4 py-2 text-start">PO #</th>
+                      <th className="px-4 py-2 text-start">Supplier</th>
+                      <th className="px-4 py-2 text-start">Warehouse / Branch</th>
+                      <th className="px-4 py-2 text-end">Total</th>
+                      <th className="px-4 py-2 text-start">ETA</th>
+                      <th className="px-4 py-2 text-start">Received</th>
+                      <th className="px-4 py-2 text-start">Status</th>
                       <th className="px-4 py-2" />
                     </tr>
                   </thead>
@@ -1748,7 +1748,7 @@ function Stocks() {
                         <td className="px-4 py-2.5 font-mono text-xs font-semibold">{po.poNumber}</td>
                         <td className="px-4 py-2.5">{po.supplier?.name ?? "—"}</td>
                         <td className="px-4 py-2.5 text-muted-foreground">{po.warehouse?.name ?? po.branch?.name ?? "—"}</td>
-                        <td className="px-4 py-2.5 text-right">{po.totalAmount.toFixed(2)} SAR</td>
+                        <td className="px-4 py-2.5 text-end">{po.totalAmount.toFixed(2)} SAR</td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">{fmtDate(po.expectedDeliveryDate)}</td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">{fmtDate(po.receivedDate)}</td>
                         <td className="px-4 py-2.5"><StBadge status={po.status} /></td>
@@ -1909,15 +1909,15 @@ function Stocks() {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground uppercase">
                     <tr>
-                      <th className="px-4 py-2 text-left">Date / Time</th>
-                      <th className="px-4 py-2 text-left">Type</th>
-                      <th className="px-4 py-2 text-left">Product</th>
-                      <th className="px-4 py-2 text-left">Location</th>
-                      <th className="px-4 py-2 text-left">Batch #</th>
-                      <th className="px-4 py-2 text-right">Qty</th>
-                      <th className="px-4 py-2 text-left">Reference</th>
-                      <th className="px-4 py-2 text-left">By</th>
-                      <th className="px-4 py-2 text-left">Notes</th>
+                      <th className="px-4 py-2 text-start">Date / Time</th>
+                      <th className="px-4 py-2 text-start">Type</th>
+                      <th className="px-4 py-2 text-start">Product</th>
+                      <th className="px-4 py-2 text-start">Location</th>
+                      <th className="px-4 py-2 text-start">Batch #</th>
+                      <th className="px-4 py-2 text-end">Qty</th>
+                      <th className="px-4 py-2 text-start">Reference</th>
+                      <th className="px-4 py-2 text-start">By</th>
+                      <th className="px-4 py-2 text-start">Notes</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1941,7 +1941,7 @@ function Stocks() {
                           <td className="px-4 py-2.5 font-medium">{mv.product?.name ?? "—"}</td>
                           <td className="px-4 py-2.5 text-muted-foreground">{location}</td>
                           <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{mv.batch?.batchNumber ?? "—"}</td>
-                          <td className={`px-4 py-2.5 text-right font-semibold whitespace-nowrap ${isIncrease ? "text-green-600" : "text-red-600"}`}>
+                          <td className={`px-4 py-2.5 text-end font-semibold whitespace-nowrap ${isIncrease ? "text-green-600" : "text-red-600"}`}>
                             {isIncrease ? "+" : ""}{fmt(mv.quantity)}
                           </td>
                           <td className="px-4 py-2.5 text-muted-foreground">{mv.referenceNumber ?? "—"}</td>
@@ -2042,16 +2042,16 @@ function AdjustmentTable({ rows, branches, loading, onReviewed }: { rows: Invent
       <table className="w-full text-sm">
         <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
           <tr>
-            <th className="px-4 py-2 text-left">Product</th>
-            <th className="px-4 py-2 text-left">Branch</th>
-            <th className="px-4 py-2 text-right">Qty</th>
-            <th className="px-4 py-2 text-left">Type</th>
-            <th className="px-4 py-2 text-left">Reason</th>
-            <th className="px-4 py-2 text-left">Created By</th>
-            <th className="px-4 py-2 text-left">Approved By</th>
-            <th className="px-4 py-2 text-left">Status</th>
-            <th className="px-4 py-2 text-left">Date</th>
-            <th className="px-4 py-2 text-right">Actions</th>
+            <th className="px-4 py-2 text-start">Product</th>
+            <th className="px-4 py-2 text-start">Branch</th>
+            <th className="px-4 py-2 text-end">Qty</th>
+            <th className="px-4 py-2 text-start">Type</th>
+            <th className="px-4 py-2 text-start">Reason</th>
+            <th className="px-4 py-2 text-start">Created By</th>
+            <th className="px-4 py-2 text-start">Approved By</th>
+            <th className="px-4 py-2 text-start">Status</th>
+            <th className="px-4 py-2 text-start">Date</th>
+            <th className="px-4 py-2 text-end">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -2066,14 +2066,14 @@ function AdjustmentTable({ rows, branches, loading, onReviewed }: { rows: Invent
               <tr key={a.id} className="border-t hover:bg-muted/20">
                 <td className="px-4 py-2.5 font-medium">{a.product?.name ?? "—"}</td>
                 <td className="px-4 py-2.5 text-muted-foreground">{a.branch?.name ?? branch?.name ?? "—"}</td>
-                <td className="px-4 py-2.5 text-right">{fmt(a.quantity)}</td>
+                <td className="px-4 py-2.5 text-end">{fmt(a.quantity)}</td>
                 <td className="px-4 py-2.5"><StBadge status={a.adjustmentType} /></td>
                 <td className="px-4 py-2.5 text-muted-foreground text-xs">{a.reason ?? "—"}</td>
                 <td className="px-4 py-2.5 text-xs text-muted-foreground">{a.adjustedByUser?.fullName ?? "—"}</td>
                 <td className="px-4 py-2.5 text-xs text-muted-foreground">{a.approvedByUser?.fullName ?? "—"}</td>
                 <td className="px-4 py-2.5">{a.approvalStatus ? <StBadge status={a.approvalStatus} /> : <span className="text-xs text-muted-foreground">—</span>}</td>
                 <td className="px-4 py-2.5 text-xs text-muted-foreground">{new Date(a.createdAt).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "numeric" })}</td>
-                <td className="px-4 py-2.5 text-right">
+                <td className="px-4 py-2.5 text-end">
                   {pending && canApprove ? (
                     <div className="flex items-center justify-end gap-1.5">
                       <Button size="sm" className="h-7 px-2 text-xs gradient-primary text-primary-foreground border-0" onClick={() => approve(a)} disabled={busyId === a.id}>Approve</Button>
@@ -2110,13 +2110,13 @@ function TransferTable({ rows, loading }: { rows: StockTransfer[]; loading: bool
       <table className="w-full text-sm">
         <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
           <tr>
-            <th className="px-4 py-2 text-left">Transfer #</th>
-            <th className="px-4 py-2 text-left">From</th>
-            <th className="px-4 py-2 text-left">To</th>
-            <th className="px-4 py-2 text-right">Items</th>
-            <th className="px-4 py-2 text-left">Expected</th>
-            <th className="px-4 py-2 text-left">Completed</th>
-            <th className="px-4 py-2 text-left">Status</th>
+            <th className="px-4 py-2 text-start">Transfer #</th>
+            <th className="px-4 py-2 text-start">From</th>
+            <th className="px-4 py-2 text-start">To</th>
+            <th className="px-4 py-2 text-end">Items</th>
+            <th className="px-4 py-2 text-start">Expected</th>
+            <th className="px-4 py-2 text-start">Completed</th>
+            <th className="px-4 py-2 text-start">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -2129,7 +2129,7 @@ function TransferTable({ rows, loading }: { rows: StockTransfer[]; loading: bool
               <td className="px-4 py-2.5 font-mono text-xs font-semibold">{t.transferNumber}</td>
               <td className="px-4 py-2.5">{t.sourceWarehouse?.name ?? t.sourceBranch?.name ?? t.sourceSupplier?.name ?? "—"}</td>
               <td className="px-4 py-2.5">{t.destBranch?.name ?? t.destWarehouse?.name ?? t.destSupplier?.name ?? "—"}</td>
-              <td className="px-4 py-2.5 text-right">{t.items?.length ?? 0}</td>
+              <td className="px-4 py-2.5 text-end">{t.items?.length ?? 0}</td>
               <td className="px-4 py-2.5 text-xs text-muted-foreground">{t.expectedDate ? new Date(t.expectedDate).toLocaleDateString("en-SA", { day: "2-digit", month: "short" }) : "—"}</td>
               <td className="px-4 py-2.5 text-xs text-muted-foreground">{t.completedDate ? new Date(t.completedDate).toLocaleDateString("en-SA", { day: "2-digit", month: "short" }) : "—"}</td>
               <td className="px-4 py-2.5"><StBadge status={t.status} /></td>

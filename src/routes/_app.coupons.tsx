@@ -60,7 +60,7 @@ function BranchMultiSelect({ branches, value, onChange }: {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" className="h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-left flex items-center justify-between hover:bg-accent/40 transition-colors">
+        <button type="button" className="h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-start flex items-center justify-between hover:bg-accent/40 transition-colors">
           <span className={value.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
           <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
         </button>
@@ -76,7 +76,7 @@ function BranchMultiSelect({ branches, value, onChange }: {
         ))}
         {value.length > 0 && (
           <div className="border-t border-border/50 mt-1 pt-1">
-            <button type="button" className="w-full text-xs text-muted-foreground px-2 py-1 hover:bg-muted rounded text-left" onClick={() => onChange([])}>
+            <button type="button" className="w-full text-xs text-muted-foreground px-2 py-1 hover:bg-muted rounded text-start" onClick={() => onChange([])}>
               Clear selection
             </button>
           </div>
@@ -98,7 +98,7 @@ function ProductMultiSelect({ products, value, onChange }: {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" className="h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-left flex items-center justify-between hover:bg-accent/40 transition-colors">
+        <button type="button" className="h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-start flex items-center justify-between hover:bg-accent/40 transition-colors">
           <span className={value.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
           <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
         </button>
@@ -114,7 +114,7 @@ function ProductMultiSelect({ products, value, onChange }: {
         ))}
         {value.length > 0 && (
           <div className="border-t border-border/50 mt-1 pt-1">
-            <button type="button" className="w-full text-xs text-muted-foreground px-2 py-1 hover:bg-muted rounded text-left" onClick={() => onChange([])}>
+            <button type="button" className="w-full text-xs text-muted-foreground px-2 py-1 hover:bg-muted rounded text-start" onClick={() => onChange([])}>
               Clear exclusions
             </button>
           </div>
@@ -303,7 +303,7 @@ function CouponsTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left">
+                <tr className="bg-muted/40 border-b border-border/60 text-start">
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Coupon</th>
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Code</th>
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
@@ -577,7 +577,7 @@ function DiscountsTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left">
+                <tr className="bg-muted/40 border-b border-border/60 text-start">
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Discount</th>
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Applies To</th>
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Value</th>
@@ -903,7 +903,7 @@ function OffersTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left">
+                <tr className="bg-muted/40 border-b border-border/60 text-start">
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Offer</th>
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items / Condition</th>

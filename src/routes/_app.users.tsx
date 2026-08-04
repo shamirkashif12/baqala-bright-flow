@@ -196,7 +196,7 @@ function RegisteredUsers() {
         </div>
         <div className="flex-1" />
         {canCreate && (
-          <p className="text-xs text-muted-foreground italic max-w-xs text-right">
+          <p className="text-xs text-muted-foreground italic max-w-xs text-end">
             New logins are created from the Employees page — open an employee record and enable "Create login account".
           </p>
         )}

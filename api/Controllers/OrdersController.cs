@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, IBatchConsumptionService batchConsumption, IStockMovementService stockMovements, IOrderVoidService orderVoidService, IOrderEditService orderEditService, IApprovalNotificationService approvalNotifications, ILogger<OrdersController> logger) : ControllerBase
+public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZatcaService zatcaService, IAuditService audit, INotificationService notifications, IStockAlertService stockAlerts, IBatchConsumptionService batchConsumption, IPackBreakService packBreaks, IStockMovementService stockMovements, IOrderVoidService orderVoidService, IOrderEditService orderEditService, IApprovalNotificationService approvalNotifications, ILogger<OrdersController> logger) : ControllerBase
 {
     // Branch-scoped roles (anything but tenant_admin) may only see their own branch's orders —
     // mirrors ReportsController.GetCallerContext. Previously branchId was just an optional query
@@ -251,10 +251,22 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return Ok(order);
     }
 
+    /// <param name="allowPackBreak">
+    /// The cashier has confirmed that unopened packs may be broken open to cover a shortfall of
+    /// loose units (see the pack-break suggestion in the stock pre-flight below). A query flag
+    /// rather than a body field so no existing caller's payload changes shape; it defaults off
+    /// because opening a carton is a physical act nobody should be doing on the customer's behalf
+    /// without being asked.
+    /// </param>
     [RequirePermission("POS", PermAction.Create)]
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Order order)
+    public async Task<IActionResult> Create([FromBody] Order order, [FromQuery] bool allowPackBreak = false)
     {
+        // Packs the stock pre-flight decided must be opened to fulfil this order, applied inside
+        // the locked stock-reduction transaction further down so concurrent sales can't both open
+        // the same last carton. Keyed by the loose product that came up short.
+        var packBreaksNeeded = new Dictionary<Guid, (Product PackProduct, decimal Packs)>();
+
         // Idempotency: if the client already successfully created an order for this exact
         // checkout attempt (its response was lost to a network drop/timeout and it's retrying
         // the same Confirm click), return the existing order instead of creating a duplicate —
@@ -404,11 +416,49 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                     .Where(s => s.ProductId == group.Key && s.BranchId == order.BranchId)
                     .Select(s => (decimal?)s.Quantity)
                     .FirstOrDefaultAsync() ?? 0;
-                if (onHand - needed < 0)
+                if (onHand - needed >= 0) continue;
+
+                var product = await db.Products.FindAsync(group.Key);
+
+                // Short on loose stock, but the shelf may still hold unopened packs of the same
+                // goods — 4 loose eggs and 3 unopened dozens can absolutely fill an order for 6.
+                // Rather than failing a sale the store can physically serve, tell the client
+                // exactly which pack to open and how many, so the cashier can confirm (opening a
+                // carton is a real physical act, so it is never done silently) and retry with
+                // AllowPackBreak set.
+                var availability = await packBreaks.GetAvailabilityAsync(group.Key, order.BranchId);
+                if (availability.PackProduct is { } packProduct && availability.TotalAvailable - needed >= 0)
                 {
-                    var product = await db.Products.FindAsync(group.Key);
-                    return BadRequest(new { message = $"Cannot sell '{product?.Name ?? "item"}' — only {onHand:0.##} on hand and this branch does not allow negative stock." });
+                    var shortfall = needed - onHand;
+                    var packsNeeded = Math.Ceiling(shortfall / availability.ItemsPerPack);
+
+                    if (!allowPackBreak)
+                    {
+                        return BadRequest(new
+                        {
+                            message = $"Only {onHand:0.##} of '{product?.Name ?? "item"}' loose — open {packsNeeded:0} × {packProduct.Name} to complete this sale?",
+                            packBreakSuggestion = new
+                            {
+                                productId = group.Key,
+                                productName = product?.Name,
+                                packProductId = packProduct.Id,
+                                packProductName = packProduct.Name,
+                                itemsPerPack = availability.ItemsPerPack,
+                                packsNeeded,
+                                looseOnHand = onHand,
+                                totalAvailable = availability.TotalAvailable,
+                            },
+                        });
+                    }
+
+                    // The break is deferred to the locked stock-reduction block below rather than
+                    // applied here: this pre-flight reads stock without a lock, so breaking now
+                    // would let two concurrent sales both open the last carton.
+                    packBreaksNeeded[group.Key] = (packProduct, packsNeeded);
+                    continue;
                 }
+
+                return BadRequest(new { message = $"Cannot sell '{product?.Name ?? "item"}' — only {onHand:0.##} on hand and this branch does not allow negative stock." });
             }
         }
 
@@ -776,6 +826,39 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 .FromSqlRaw("SELECT * FROM inventory_stock WHERE product_id = {0} AND branch_id = {1} FOR UPDATE", group.Key, order.BranchId)
                 .FirstOrDefaultAsync();
             var needed = group.Sum(i => i.Quantity);
+
+            // Break open the packs the cashier approved, now that the loose row is locked and its
+            // true on-hand is known. Recomputed from the locked quantity rather than trusting the
+            // unlocked pre-flight's figure, so a concurrent sale that consumed loose units in
+            // between still opens enough — and one that already opened a carton doesn't open a
+            // second unnecessarily. Inside the same transaction as the sale: if anything below
+            // fails, the carton un-breaks with it.
+            if (packBreaksNeeded.TryGetValue(group.Key, out var pending))
+            {
+                var shortfall = needed - (stock?.Quantity ?? 0);
+                if (shortfall > 0)
+                {
+                    var itemsPerPack = pending.PackProduct.ItemsPerPack is > 0 ? pending.PackProduct.ItemsPerPack.Value : 1;
+                    var packsToBreak = Math.Ceiling(shortfall / itemsPerPack);
+                    try
+                    {
+                        await packBreaks.BreakAsync(
+                            pending.PackProduct, order.BranchId, packsToBreak, CallerId(),
+                            noteSuffix: $"sale {order.OrderNumber}");
+                        await db.SaveChangesAsync();
+                        // Re-read under the same lock so the deduction below sees the units the
+                        // break just added.
+                        stock = await db.InventoryStocks
+                            .FromSqlRaw("SELECT * FROM inventory_stock WHERE product_id = {0} AND branch_id = {1} FOR UPDATE", group.Key, order.BranchId)
+                            .FirstOrDefaultAsync();
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        // Someone else took the last carton between pre-flight and here.
+                        return BadRequest(new { message = ex.Message });
+                    }
+                }
+            }
 
             if (blockNegativeStock && (stock?.Quantity ?? 0) - needed < 0)
             {

@@ -52,6 +52,7 @@ builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IStockAlertService, StockAlertService>();
 builder.Services.AddScoped<IBatchConsumptionService, BatchConsumptionService>();
+builder.Services.AddScoped<IPackBreakService, PackBreakService>();
 builder.Services.AddScoped<IPriceResolutionService, PriceResolutionService>();
 builder.Services.AddScoped<IOnlineOrderPricingService, OnlineOrderPricingService>();
 builder.Services.AddScoped<IOfferResolutionService, OfferResolutionService>();

@@ -21,7 +21,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { TierMultiSelect } from "@/components/tier-multi-select";
-import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList, type ProductImage, type ProductVariant, type Product } from "@/lib/api";
+import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList, type ProductImage, type ProductVariant, type Product, type UnitOfMeasureOption, type ProductSubstitute } from "@/lib/api";
+import { DEFAULT_UNIT, unitSpec, unitSymbol } from "@/lib/units";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -164,6 +165,182 @@ function IncomingTransfersBanner({ transfers, onReceive }: { transfers: StockTra
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1.5"><Label className="text-xs font-medium">{label}</Label>{children}</div>;
+}
+
+// Human labels for the unit picker. The codes themselves come from the server
+// (GET /api/products/units) so the list offered is always the list the API accepts.
+const UNIT_LABELS: Record<string, string> = {
+  piece: "Piece — countable items",
+  dozen: "Dozen — sold twelve at a time",
+  box: "Box / case — sold as a whole container",
+  kilogram: "Kilogram (kg) — meat, produce, bulk goods",
+  gram: "Gram (g) — priced per gram",
+  liter: "Litre (L) — oil, dispensed drinks",
+  milliliter: "Millilitre (ml) — priced per ml",
+  meter: "Metre (m) — rope, fabric, cable",
+};
+const UNIT_GROUP_LABELS: Record<string, string> = {
+  count: "Counted", weight: "By weight", volume: "By volume", length: "By length",
+};
+
+/** Quantity input step for a unit code — 0.001 for kg/L, 1 for counted goods. */
+function qtyStepFor(code: string): string {
+  const spec = unitSpec(code);
+  return spec.category === "count" ? "1" : String(10 ** -spec.decimalPlaces);
+}
+
+/**
+ * The unit a product is stocked, counted and priced in. Options are fetched from the server rather
+ * than hardcoded here, so this picker can never offer a code the API would normalise away.
+ */
+function UnitOfMeasureField({ value, onChange, countOnly = false }: {
+  value: string; onChange: (code: string) => void; countOnly?: boolean;
+}) {
+  const [units, setUnits] = useState<UnitOfMeasureOption[]>([]);
+  useEffect(() => { api.getUnitsOfMeasure().then(setUnits).catch(() => {}); }, []);
+
+  const options = countOnly ? units.filter(u => u.category === "count") : units;
+  // A pack switched on while a measured unit was selected would otherwise leave an invalid value
+  // sitting in the form until save bounced it.
+  useEffect(() => {
+    if (countOnly && unitSpec(value).category !== "count") onChange(DEFAULT_UNIT);
+  }, [countOnly, value, onChange]);
+
+  const grouped = ["count", "weight", "volume", "length"]
+    .map(cat => [cat, options.filter(u => u.category === cat)] as const)
+    .filter(([, list]) => list.length > 0);
+
+  return (
+    <FieldRow label="Sold by (unit) *">
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {grouped.map(([cat, list]) => (
+            <React.Fragment key={cat}>
+              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {UNIT_GROUP_LABELS[cat]}
+              </div>
+              {list.map(u => (
+                <SelectItem key={u.code} value={u.code}>{UNIT_LABELS[u.code] ?? u.code}</SelectItem>
+              ))}
+            </React.Fragment>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-[10px] text-muted-foreground mt-1">
+        The selling price above is the price of one {unitSymbol(value)}
+        {unitSpec(value).category !== "count" && ` — a ${unitSpec(value).subUnitLabel === "gram" ? "250 g" : "500 ml"} sale is charged pro rata`}.
+      </p>
+    </FieldRow>
+  );
+}
+
+/**
+ * Brand entry backed by a datalist of brands already in the catalogue. Free text is still allowed
+ * (a genuinely new brand must be typable), but suggesting what exists is what stops "Nestle",
+ * "nestle" and "Nestlé" becoming three brands that split the POS brand filter and hide each
+ * other's products from substitution suggestions. The server folds casing on save as a backstop.
+ */
+function BrandInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [brands, setBrands] = useState<string[]>([]);
+  useEffect(() => { api.getBrands().then(setBrands).catch(() => {}); }, []);
+  const listId = React.useId();
+  return (
+    <>
+      <Input className="h-9" list={listId} value={value} placeholder="e.g. Almarai"
+        onChange={e => onChange(e.target.value)} />
+      <datalist id={listId}>
+        {brands.map(b => <option key={b} value={b} />)}
+      </datalist>
+    </>
+  );
+}
+
+/**
+ * Interchangeable products to offer when this one is out of stock — the brand-substitution flow.
+ *
+ * Links are stated explicitly rather than inferred from brand or name: brand alone doesn't make two
+ * products interchangeable, and name matching fails in both directions ("Milk 1L" vs "Full Cream
+ * Milk 1 Litre" won't match; "Milk 1L" vs "Milk 2L" wrongly will). A wrong suggestion at the till
+ * is worse than none. The server stores each pair both ways, so unlinking from either side is enough.
+ */
+function SubstitutesEditor({ productId }: { productId?: string }) {
+  const [subs, setSubs] = useState<ProductSubstitute[]>([]);
+  const [candidates, setCandidates] = useState<Product[]>([]);
+  const [picked, setPicked] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = React.useCallback(() => {
+    if (!productId) return;
+    api.getProductSubstitutes(productId).then(setSubs).catch(() => {});
+  }, [productId]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!productId) return;
+    api.getProducts({ status: "active" })
+      .then(list => setCandidates(list.filter(p => p.id !== productId)))
+      .catch(() => {});
+  }, [productId]);
+
+  if (!productId) return null;
+
+  const linked = new Set(subs.map(s => s.id));
+  const available = candidates.filter(c => !linked.has(c.id));
+
+  const add = async () => {
+    if (!picked) return;
+    setBusy(true);
+    try {
+      await api.addProductSubstitute(productId, picked);
+      setPicked("");
+      load();
+    } catch (e) {
+      // The server refuses a cross-unit pair (swapping "1 piece" for "1 kg" would charge the
+      // customer for the wrong amount of a physically different thing) — surface that reason.
+      toast.error(e instanceof Error ? e.message : "Failed to link substitute.");
+    } finally { setBusy(false); }
+  };
+
+  const remove = async (substituteId: string) => {
+    setBusy(true);
+    try { await api.removeProductSubstitute(productId, substituteId); load(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Failed to unlink."); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <FieldRow label="Substitutes (offer these when out of stock)">
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {subs.length === 0 && (
+          <p className="text-[10px] text-muted-foreground">
+            None linked. Add the same product in another brand so the till can offer it when this one runs out.
+          </p>
+        )}
+        {subs.map(s => (
+          <Badge key={s.id} variant="secondary" className="gap-1 pr-1">
+            {s.brand ? `${s.brand} — ` : ""}{s.name}
+            <button type="button" disabled={busy} onClick={() => remove(s.id)}
+              className="ml-0.5 rounded hover:bg-destructive/20 p-0.5" aria-label={`Unlink ${s.name}`}>
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <Select value={picked} onValueChange={setPicked}>
+          <SelectTrigger className="h-9"><SelectValue placeholder="Pick a product…" /></SelectTrigger>
+          <SelectContent>
+            {available.map(c => (
+              <SelectItem key={c.id} value={c.id}>{c.brand ? `${c.brand} — ` : ""}{c.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button type="button" variant="outline" className="h-9 shrink-0" disabled={!picked || busy} onClick={add}>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+        </Button>
+      </div>
+    </FieldRow>
+  );
 }
 
 function ProductThumb({ src, className = "h-9 w-9" }: { src?: string; className?: string }) {
@@ -477,10 +654,14 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     looseUnitProductId: "",
     purchasePrice: "", sellingPrice: "",
     quantity: "100", expiryDate: "",
-    // For weight-sold items (meat, produce) quantity is entered in kg rather than whole units —
-    // EditProductDialog already supports this flag, but Add Product had no way to set it, so every
-    // newly-created product came in as unit-based even when it should have been weight-based.
-    weightBased: false,
+    // The unit this product is stocked, counted and priced in. Selling Price is always the price of
+    // ONE of these (per kg, per litre, per piece). Replaces the old "Sold by weight (kg)" checkbox,
+    // which could only ever mean kilograms — there was no way to stock a drink dispensed by the
+    // litre. The server derives weightBased from this, so the two can't disagree.
+    unitOfMeasure: DEFAULT_UNIT,
+    // Average weight of one item (0.12 kg for a tomato), only for measured units. Optional — set it
+    // to let the POS also ring this product up by the piece ("3 tomatoes") instead of weighing.
+    estimatedUnitWeight: "",
     // Was always auto-generated (`INIT-{id}`) with no way to record the supplier's own batch/lot
     // number for a fresh product's opening stock.
     batchNumber: "",
@@ -523,7 +704,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     setPriceSchedule({ from: "", to: "" });
     setTopCategoryId("");
     setSubCategoryId("");
-    setForm({ name: "", sku: "", barcode: "", categoryId: "", brand: "", saleUnitType: "single", itemsPerPack: "", looseUnitProductId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", weightBased: false, batchNumber: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "", description: "" });
+    setForm({ name: "", sku: "", barcode: "", categoryId: "", brand: "", saleUnitType: "single", itemsPerPack: "", looseUnitProductId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", unitOfMeasure: DEFAULT_UNIT, estimatedUnitWeight: "", batchNumber: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "", description: "" });
   };
 
   // Pack breaking: eligible "breaks down into" targets, fetched only once a pack is actually
@@ -606,7 +787,11 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
         taxPercentage: Number(form.vatPct) || 15,
         reorderLevel: 10,
         status: "active",
-        weightBased: form.weightBased,
+        // weightBased is derived from the unit server-side; sent here only so an older API build
+        // that predates the unit catalogue still gets the right fractional behaviour.
+        unitOfMeasure: form.unitOfMeasure,
+        weightBased: unitSpec(form.unitOfMeasure).category !== "count",
+        estimatedUnitWeight: form.estimatedUnitWeight ? Number(form.estimatedUnitWeight) : null,
         isTobacco: form.isTobacco,
         imageUrl: form.imageUrl || undefined,
         description: form.description.trim() || undefined,
@@ -788,7 +973,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             </FieldRow>
           )}
           <FieldRow label="Brand">
-            <Input className="h-9" value={form.brand} onChange={e => set("brand")(e.target.value)} placeholder="e.g. Almarai" />
+            <BrandInput value={form.brand} onChange={v => set("brand")(v)} />
           </FieldRow>
           <div className="col-span-2">
             <FieldRow label="Branches * (stock the product into these)">
@@ -860,8 +1045,32 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
               </p>
             </FieldRow>
           )}
-          <FieldRow label={form.weightBased ? "Quantity (kg) *" : "Quantity *"}>
-            <Input type="number" min={1} step={form.weightBased ? "0.001" : "1"} className={`h-9 ${submitted && (!form.quantity || Number(form.quantity) <= 0) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`} placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
+          <UnitOfMeasureField
+            value={form.unitOfMeasure}
+            onChange={(code) => setForm(p => ({
+              ...p,
+              unitOfMeasure: code,
+              // A counted product can't carry a per-item weight estimate — clear it rather than
+              // leave a stale value that the server would silently drop anyway.
+              estimatedUnitWeight: unitSpec(code).category === "count" ? "" : p.estimatedUnitWeight,
+            }))}
+            // A pack is a discrete container — you sell 2 cartons, never 0.4 of one — so the
+            // server rejects a measured unit here. Reflect that instead of letting them pick an
+            // option that will bounce on save.
+            countOnly={form.saleUnitType === "pack"}
+          />
+          {unitSpec(form.unitOfMeasure).category !== "count" && (
+            <FieldRow label={`Avg. weight per item (${unitSymbol(form.unitOfMeasure)}, optional)`}>
+              <Input type="number" min={0} step="0.001" className="h-9" placeholder="0.120"
+                value={form.estimatedUnitWeight} onChange={e => set("estimatedUnitWeight")(e.target.value)} />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Lets the till also ring this up by the piece — "3 tomatoes" instead of weighing them.
+                Leave blank if it must always be weighed.
+              </p>
+            </FieldRow>
+          )}
+          <FieldRow label={`Quantity * (${unitSymbol(form.unitOfMeasure)})`}>
+            <Input type="number" min={0} step={qtyStepFor(form.unitOfMeasure)} className={`h-9 ${submitted && (!form.quantity || Number(form.quantity) <= 0) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`} placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
           </FieldRow>
           <FieldRow label="Expiry Date">
             <Input type="date" className="h-9" min={todayStr} value={form.expiryDate} onChange={e => set("expiryDate")(e.target.value)} />
@@ -869,12 +1078,6 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
           <FieldRow label="Batch Number (optional)">
             <Input className="h-9" placeholder="Auto-generated if left blank" value={form.batchNumber} onChange={e => set("batchNumber")(e.target.value)} />
           </FieldRow>
-          <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" className="h-4 w-4" checked={form.weightBased} onChange={e => setForm(p => ({ ...p, weightBased: e.target.checked }))} />
-              Sold by weight (kg) — e.g. meat, produce
-            </label>
-          </div>
 
           {/* Discount */}
           <div className="col-span-2">
@@ -1036,7 +1239,9 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     vatPct: "15", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
     discount: "", imageUrl: "", description: "",
-    status: "active", weightBased: false,
+    status: "active",
+    // See the Add dialog: the unit is the source of truth and weightBased is derived from it.
+    unitOfMeasure: DEFAULT_UNIT, estimatedUnitWeight: "",
   });
 
   // Category/Subcategory cascade: a product's real CategoryId always holds the most specific
@@ -1154,11 +1359,16 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
       discount: p.discount != null ? String(p.discount) : "",
       imageUrl: p.imageUrl ?? "",
       description: p.description ?? "",
-      // Carried through unchanged — this dialog has no controls for either, so it must not
-      // clobber them. Previously hardcoded to "active"/false on every save, which silently
-      // un-discontinued products and reset weight-based (kg-priced) items to unit pricing.
+      // Carried through unchanged — this dialog has no control for it, so it must not clobber it.
+      // Previously hardcoded to "active" on every save, which silently un-discontinued products.
       status: p.status ?? "active",
-      weightBased: p.weightBased ?? false,
+      // A product saved before the unit catalogue shipped has weightBased set but its unit string
+      // still at the "piece" default; show it as kilogram (what the flag always meant) rather than
+      // as a counted product, which is what saving it back would otherwise turn it into.
+      unitOfMeasure: p.unitOfMeasure && unitSpec(p.unitOfMeasure).category !== "count"
+        ? p.unitOfMeasure
+        : (p.weightBased ? "kilogram" : (p.unitOfMeasure ?? DEFAULT_UNIT)),
+      estimatedUnitWeight: p.estimatedUnitWeight != null ? String(p.estimatedUnitWeight) : "",
     });
     const currentCategoryId = (p as unknown as { categoryId?: string }).categoryId ?? "";
     const currentCategory = categories.find(c => c.id === currentCategoryId);
@@ -1208,7 +1418,9 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         imageUrl: form.imageUrl || undefined,
         description: form.description.trim() || undefined,
         status: form.status,
-        weightBased: form.weightBased,
+        unitOfMeasure: form.unitOfMeasure,
+        weightBased: unitSpec(form.unitOfMeasure).category !== "count",
+        estimatedUnitWeight: form.estimatedUnitWeight ? Number(form.estimatedUnitWeight) : null,
         saleUnitType: form.saleUnitType,
         itemsPerPack: form.saleUnitType === "pack" ? Number(form.itemsPerPack) : null,
         looseUnitProductId: form.saleUnitType === "pack" ? (form.looseUnitProductId || null) : null,
@@ -1407,7 +1619,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
             </FieldRow>
           )}
           <FieldRow label="Brand">
-            <Input className="h-9" value={form.brand} onChange={set("brand")} placeholder="e.g. Almarai" />
+            <BrandInput value={form.brand} onChange={v => setForm(p => ({ ...p, brand: v }))} />
           </FieldRow>
           <FieldRow label="Purchase Price">
             <Input type="number" step="0.01" className="h-9" value={form.purchasePrice} onChange={set("purchasePrice")} placeholder="4.20" />
@@ -1441,10 +1653,35 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
                 </SelectContent>
               </Select>
               <p className="text-[10px] text-muted-foreground mt-1">
-                Lets Inventory "Break Pack" convert on-hand cartons into on-hand units of this product.
+                Lets the till break open a carton automatically when loose units run short, and Inventory
+                "Break Pack" do it manually.
               </p>
             </FieldRow>
           )}
+          <UnitOfMeasureField
+            value={form.unitOfMeasure}
+            onChange={(code) => setForm(p => ({
+              ...p,
+              unitOfMeasure: code,
+              estimatedUnitWeight: unitSpec(code).category === "count" ? "" : p.estimatedUnitWeight,
+            }))}
+            countOnly={form.saleUnitType === "pack"}
+          />
+          {unitSpec(form.unitOfMeasure).category !== "count" && (
+            <FieldRow label={`Avg. weight per item (${unitSymbol(form.unitOfMeasure)}, optional)`}>
+              <Input type="number" min={0} step="0.001" className="h-9" placeholder="0.120"
+                value={form.estimatedUnitWeight}
+                onChange={e => setForm(p => ({ ...p, estimatedUnitWeight: e.target.value }))} />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Lets the till also ring this up by the piece instead of weighing it.
+              </p>
+            </FieldRow>
+          )}
+
+          {/* Substitutes — what to offer when this product is out of stock */}
+          <div className="col-span-2">
+            <SubstitutesEditor productId={item?.product?.id} />
+          </div>
 
           {/* Discount */}
           <div className="col-span-2">
@@ -2355,7 +2592,7 @@ function Inventory() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="w-8 px-2 py-3" />
                   <th className="px-3 py-3 font-semibold">Product</th>
                   <th className="px-3 py-3 font-semibold">Unit</th>

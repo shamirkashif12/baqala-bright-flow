@@ -374,7 +374,7 @@ function EmployeeCard({ employee, onView, onEdit, onEditTab, onDelete, onActivat
             {employee.profileImageUrl ? <img src={employee.profileImageUrl} alt="" className="h-full w-full object-cover" /> : <UserIcon className="h-5 w-5 text-muted-foreground" />}
           </div>
           <div className="min-w-0">
-            <button onClick={onView} className="font-semibold text-sm truncate hover:text-primary text-left">{employee.fullName}</button>
+            <button onClick={onView} className="font-semibold text-sm truncate hover:text-primary text-start">{employee.fullName}</button>
             <p className="text-xs text-muted-foreground font-mono">{employee.employeeCode}</p>
           </div>
         </div>
@@ -1081,7 +1081,7 @@ function EmployeeProfileDrawer({ employee, onClose, onEdit, onChanged }: { emplo
           {rows.map(([l, v]) => (
             <div key={l} className="flex justify-between gap-3 border-b border-border/40 pb-2 text-sm">
               <span className="text-muted-foreground shrink-0">{l}</span>
-              <span className="font-medium text-right">{v}</span>
+              <span className="font-medium text-end">{v}</span>
             </div>
           ))}
         </div>
@@ -1450,7 +1450,7 @@ function EmployeesTab() {
         <PaginatedDataTable
           columns={[
             { key: "fullName", label: "Name", render: e => (
-              <button onClick={() => setViewEmployee(e)} className="flex items-center gap-2 text-left hover:text-primary">
+              <button onClick={() => setViewEmployee(e)} className="flex items-center gap-2 text-start hover:text-primary">
                 <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
                   {e.profileImageUrl ? <img src={e.profileImageUrl} alt="" className="h-full w-full object-cover" /> : <UserIcon className="h-4 w-4 text-muted-foreground" />}
                 </div>

@@ -169,7 +169,7 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
               ≈ <SARIcon />{(customer.loyaltyBalance * redemptionRate).toFixed(2)} discount value
             </p>
           </div>
-          <div className="text-right">
+          <div className="text-end">
             <p className="text-xs text-muted-foreground">Total Spend</p>
             <p className="text-lg font-bold tabular-nums">
               <SARIcon />{customer.totalSpend.toLocaleString("en-SA", { minimumFractionDigits: 2 })}
@@ -206,7 +206,7 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
                     {" · "}Balance after: {tx.balanceAfter.toLocaleString()} pts
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="text-end">
                   <span className={`font-bold tabular-nums text-sm block ${tx.points > 0 ? "text-green-600" : "text-red-500"}`}>
                     {tx.points > 0 ? "+" : ""}{tx.points} pts
                   </span>
@@ -249,7 +249,7 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
                     {o.branch?.name ? ` · ${o.branch.name}` : ""}
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="text-end">
                   <span className="font-bold tabular-nums text-sm block"><SARIcon />{fmtSAR(o.totalAmount)}</span>
                   <StatusBadge status={o.orderStatus} />
                 </div>
@@ -616,7 +616,7 @@ function Customers() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-4 py-3 font-semibold">Customer</th>
                   <th className="px-4 py-3 font-semibold">Contact</th>
                   <th className="px-4 py-3 font-semibold">Tier</th>

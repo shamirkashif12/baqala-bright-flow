@@ -154,7 +154,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between border-b border-border/40 pb-2 pt-2 text-sm">
       <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium text-right max-w-[60%] break-words">{value}</span>
+      <span className="font-medium text-end max-w-[60%] break-words">{value}</span>
     </div>
   );
 }

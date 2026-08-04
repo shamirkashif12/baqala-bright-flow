@@ -679,7 +679,7 @@ function Dashboard() {
                     <span>{p.method}</span>
                     <div className="flex items-center gap-3">
                       <span className="text-muted-foreground"><SARIcon />{p.amount.toLocaleString("en-SA", { minimumFractionDigits: 2 })}</span>
-                      <span className="font-semibold w-10 text-right">{p.pct.toFixed(1)}%</span>
+                      <span className="font-semibold w-10 text-end">{p.pct.toFixed(1)}%</span>
                     </div>
                   </div>
                   <div className="h-2 rounded-full bg-muted overflow-hidden">
@@ -751,12 +751,12 @@ function Dashboard() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-2 font-semibold">Product</th>
                       <th className="px-3 py-2 font-semibold">Category</th>
                       <th className="px-3 py-2 font-semibold">Branch</th>
-                      <th className="px-3 py-2 font-semibold text-right">Qty</th>
-                      <th className="px-3 py-2 font-semibold text-right">Reorder Level</th>
+                      <th className="px-3 py-2 font-semibold text-end">Qty</th>
+                      <th className="px-3 py-2 font-semibold text-end">Reorder Level</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -765,8 +765,8 @@ function Dashboard() {
                         <td className="px-3 py-2 font-medium">{item.product?.name ?? "—"}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{item.product?.category?.name ?? "—"}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{item.branch?.name ?? "—"}</td>
-                        <td className="px-3 py-2 text-right font-mono font-bold text-destructive">{item.quantity}</td>
-                        <td className="px-3 py-2 text-right text-xs text-muted-foreground">{item.reorderLevel}</td>
+                        <td className="px-3 py-2 text-end font-mono font-bold text-destructive">{item.quantity}</td>
+                        <td className="px-3 py-2 text-end text-xs text-muted-foreground">{item.reorderLevel}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -796,7 +796,7 @@ function Dashboard() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-2 font-semibold">Cashier</th>
                       <th className="px-3 py-2 font-semibold">Terminal</th>
                       <th className="px-3 py-2 font-semibold">Branch</th>
@@ -862,7 +862,7 @@ function Dashboard() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-2 font-semibold">Code</th>
                       <th className="px-3 py-2 font-semibold">Name</th>
                       <th className="px-3 py-2 font-semibold">Branch</th>
@@ -977,10 +977,10 @@ function InvMoverCard({ title, rows, loading, canViewCost, emptyHint }: {
           <table className="w-full text-xs">
             <thead className="bg-muted/40">
               <tr>
-                <th className="text-left px-3 py-2">Product</th>
-                <th className="text-left px-2 py-2">SKU</th>
-                <th className="text-right px-2 py-2">Units Moved</th>
-                {canViewCost && <th className="text-right px-2 py-2">COGS</th>}
+                <th className="text-start px-3 py-2">Product</th>
+                <th className="text-start px-2 py-2">SKU</th>
+                <th className="text-end px-2 py-2">Units Moved</th>
+                {canViewCost && <th className="text-end px-2 py-2">COGS</th>}
               </tr>
             </thead>
             <tbody>
@@ -988,8 +988,8 @@ function InvMoverCard({ title, rows, loading, canViewCost, emptyHint }: {
                 <tr key={r.productId} className="border-t border-border/40">
                   <td className="px-3 py-2">{r.productName}</td>
                   <td className="px-2 py-2 font-mono text-[11px] text-muted-foreground">{r.sku}</td>
-                  <td className="px-2 py-2 text-right tabular-nums font-medium">{r.unitsMoved}</td>
-                  {canViewCost && <td className="px-2 py-2 text-right tabular-nums"><SARIcon />{fmtSAR(r.cogsValue)}</td>}
+                  <td className="px-2 py-2 text-end tabular-nums font-medium">{r.unitsMoved}</td>
+                  {canViewCost && <td className="px-2 py-2 text-end tabular-nums"><SARIcon />{fmtSAR(r.cogsValue)}</td>}
                 </tr>
               ))}
             </tbody>

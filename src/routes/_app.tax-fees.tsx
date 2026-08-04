@@ -408,13 +408,13 @@ function TaxFees() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/60 bg-muted/40">
-                      <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">SKU</th>
-                      <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Product</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Base</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Excise</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">VAT</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Selling Price</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Stock</th>
+                      <th className="text-start px-4 py-2.5 font-medium text-muted-foreground text-xs">SKU</th>
+                      <th className="text-start px-4 py-2.5 font-medium text-muted-foreground text-xs">Product</th>
+                      <th className="text-end px-4 py-2.5 font-medium text-muted-foreground text-xs">Base</th>
+                      <th className="text-end px-4 py-2.5 font-medium text-muted-foreground text-xs">Excise</th>
+                      <th className="text-end px-4 py-2.5 font-medium text-muted-foreground text-xs">VAT</th>
+                      <th className="text-end px-4 py-2.5 font-medium text-muted-foreground text-xs">Selling Price</th>
+                      <th className="text-end px-4 py-2.5 font-medium text-muted-foreground text-xs">Stock</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
@@ -425,11 +425,11 @@ function TaxFees() {
                         <tr key={p.id} className="hover:bg-muted/30">
                           <td className="px-4 py-2.5 text-muted-foreground text-xs tabular-nums">{p.sku}</td>
                           <td className="px-4 py-2.5 font-medium">{p.name}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums"><SARIcon />{p.basePrice.toFixed(2)}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-warning-foreground"><SARIcon />{fee.toFixed(2)}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums"><SARIcon />{vat.toFixed(2)}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-primary"><SARIcon />{total.toFixed(2)}</td>
-                          <td className="px-4 py-2.5 text-right">
+                          <td className="px-4 py-2.5 text-end tabular-nums"><SARIcon />{p.basePrice.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 text-end tabular-nums text-warning-foreground"><SARIcon />{fee.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 text-end tabular-nums"><SARIcon />{vat.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 text-end tabular-nums font-semibold text-primary"><SARIcon />{total.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 text-end">
                             {stock === undefined ? (
                               <span className="text-muted-foreground">—</span>
                             ) : (

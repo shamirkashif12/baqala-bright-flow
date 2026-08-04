@@ -396,13 +396,13 @@ function Pricing() {
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 border-b">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Kind</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scope</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Window</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Price</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Kind</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scope</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Window</th>
+                    <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base</th>
+                    <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Price</th>
+                    <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -437,10 +437,10 @@ function Pricing() {
                                 : "text-muted-foreground"
                           }>{w.text}</span>
                         </td>
-                        <td className="px-4 py-3 text-right text-xs text-muted-foreground tabular-nums">
+                        <td className="px-4 py-3 text-end text-xs text-muted-foreground tabular-nums">
                           {p ? <><SARIcon />{p.basePrice.toFixed(2)}</> : "—"}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                        <td className="px-4 py-3 text-end tabular-nums font-semibold">
                           <SARIcon />{r.price.toFixed(2)}
                           {r.unitType === "pack" && (
                             <p className="text-[10px] font-normal text-muted-foreground">

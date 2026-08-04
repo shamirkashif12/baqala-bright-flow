@@ -317,7 +317,7 @@ function LeavesTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Employee</th>
                   <th className="px-3 py-3 font-semibold">Leave Type</th>
                   <th className="px-3 py-3 font-semibold">From</th>

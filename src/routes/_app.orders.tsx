@@ -397,7 +397,7 @@ function RefundDialog({ order, open, onClose, onDone }: {
                         onClick={() => setItemStates(prev => ({ ...prev, [i]: { ...prev[i], qty: prev[i].qty + 1 } }))}
                       >+</button>
                     </div>
-                    <p className="text-sm font-semibold w-20 text-right tabular-nums">
+                    <p className="text-sm font-semibold w-20 text-end tabular-nums">
                       SAR {(item.unitPrice * s.qty).toFixed(2)}
                     </p>
                   </div>
@@ -660,7 +660,7 @@ function EditOrderDialog({ order, open, onClose, onDone }: {
                   {productResults.map(p => (
                     <button
                       key={p.id} onClick={() => addProduct(p)}
-                      className="w-full flex items-center justify-between text-xs rounded px-2 py-1.5 hover:bg-muted text-left"
+                      className="w-full flex items-center justify-between text-xs rounded px-2 py-1.5 hover:bg-muted text-start"
                     >
                       <span className="truncate">{p.name}</span>
                       <span className="flex items-center gap-2 shrink-0 ml-2 text-muted-foreground">
@@ -1279,7 +1279,7 @@ function POSTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Order#</th>
                   <th className="px-3 py-3 font-semibold">Branch</th>
                   <th className="px-3 py-3 font-semibold">Cashier</th>
@@ -1763,7 +1763,7 @@ function OnlineTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Order#</th>
                   <th className="px-3 py-3 font-semibold">Branch</th>
                   <th className="px-3 py-3 font-semibold">Customer</th>

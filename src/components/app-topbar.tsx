@@ -227,7 +227,7 @@ function NotificationsPopover() {
                 key={n.id}
                 onClick={() => handleClick(n)}
                 title={routeForNotification(n) ? "Click to open" : "Click to mark as read"}
-                className={`w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors ${n.isRead ? "opacity-60" : ""}`}
+                className={`w-full flex items-start gap-3 px-4 py-3 text-start hover:bg-muted/40 transition-colors ${n.isRead ? "opacity-60" : ""}`}
               >
                 <div className={`h-2 w-2 rounded-full mt-2 shrink-0 ${TONE_DOT[n.tone]}`} />
                 <div className="flex-1 min-w-0">
@@ -285,7 +285,7 @@ function HelpPopover() {
         <div className="p-2 space-y-0.5">
           <button
             onClick={handleRestartTour}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/60 text-sm transition-colors text-left"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/60 text-sm transition-colors text-start"
           >
             <Compass className="h-4 w-4 text-primary shrink-0" />
             <div>

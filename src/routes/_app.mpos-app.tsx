@@ -395,7 +395,7 @@ function LoginScreen({ onLogin, lang, setLang }: { onLogin: (u: PUser) => void; 
           <button key={u.id} onClick={() => onLogin(u)} className="w-full animate-fade-in" style={{ animationDelay: `${i * 60}ms` }}>
             <Card className="p-2.5 flex items-center gap-2.5 border-border/60 hover:border-primary/60 transition-all active:scale-[0.98] hover:shadow-card">
               <div className="h-10 w-10 rounded-full gradient-primary flex items-center justify-center text-white font-black shadow-md">{u.name[0]}</div>
-              <div className="flex-1 text-left min-w-0">
+              <div className="flex-1 text-start min-w-0">
                 <p className="text-xs font-bold truncate">{u.name}</p>
                 <p className="text-[10px] text-muted-foreground truncate">{u.role} · {u.email}</p>
               </div>
@@ -417,7 +417,7 @@ function BranchSelectScreen({ user, onPick }: { user: PUser; onPick: (b: PBranch
           <button key={b.id} onClick={() => onPick(b)} className="w-full">
             <Card className="p-3 flex items-center gap-3 border-border/60 hover:border-primary/50">
               <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center"><Home className="h-5 w-5 text-primary" /></div>
-              <div className="flex-1 text-left">
+              <div className="flex-1 text-start">
                 <p className="text-sm font-bold">{b.name}</p>
                 <p className="text-[10px] text-muted-foreground">{b.city} · {b.code}</p>
               </div>
@@ -439,7 +439,7 @@ function TerminalSelectScreen({ terminal, setTerminal, onDone, onBack }: { termi
           const selected = terminal === t.id;
           const live = t.status === "Active" || t.status === "Syncing";
           return (
-            <button key={t.id} onClick={() => setTerminal(t.id)} className="w-full text-left">
+            <button key={t.id} onClick={() => setTerminal(t.id)} className="w-full text-start">
               <Card className={`p-3 border ${selected ? "border-primary ring-2 ring-primary/30" : "border-border/60"}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -636,7 +636,7 @@ function POSScreen({ onAdd, cartCount, cartTotal, onCart, onHeld, heldCount }: a
       <div className="flex-1 overflow-y-auto px-3 pb-24">
         <div className="grid grid-cols-2 gap-2">
           {list.map((p, i) => (
-            <button key={p.id} onClick={() => onAdd(p)} className="text-left animate-fade-in" style={{ animationDelay: `${i * 30}ms` }}>
+            <button key={p.id} onClick={() => onAdd(p)} className="text-start animate-fade-in" style={{ animationDelay: `${i * 30}ms` }}>
               <Card className="relative p-2 border-border/60 hover:border-primary/50 hover:shadow-card active:scale-95 transition-all overflow-hidden group">
                 {p.expiry === "Close" && <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-warning animate-pulse z-10" />}
                 {p.expiry === "Expired" && <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-destructive z-10" />}
@@ -819,7 +819,7 @@ function HeldOrdersScreen({ held, onResume, onBack }: any) {
         {held.map((h: PCart[], i: number) => {
           const total = h.reduce((s, x) => s + x.p.price * x.qty, 0) * 1.15;
           return (
-            <button key={i} className="w-full text-left" onClick={() => onResume(i)}>
+            <button key={i} className="w-full text-start" onClick={() => onResume(i)}>
               <Card className="p-3 border-border/60">
                 <div className="flex justify-between"><span className="text-xs font-black text-primary">HLD-{1000 + i}</span><Badge2 label="held" /></div>
                 <p className="text-xs font-bold mt-1">Walk-in</p>
@@ -852,7 +852,7 @@ function OrdersScreen({ orders, onOpen }: any) {
           ))}
         </div>
         {list.map((o: POrder) => (
-          <button key={o.id} className="w-full text-left" onClick={() => onOpen(o)}>
+          <button key={o.id} className="w-full text-start" onClick={() => onOpen(o)}>
             <Card className="p-3 border-border/60">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black text-primary">{o.id}</span>
@@ -914,7 +914,7 @@ function InventoryScreen({ onOpen }: any) {
           ))}
         </div>
         {list.map(p => (
-          <button key={p.id} className="w-full text-left" onClick={() => onOpen(p)}>
+          <button key={p.id} className="w-full text-start" onClick={() => onOpen(p)}>
             <Card className="p-3 border-border/60">
               <div className="flex items-start justify-between">
                 <div className="min-w-0">
@@ -980,7 +980,7 @@ function TerminalOverviewScreen({ onOpen, onBack }: any) {
           <StatTile label="Offline" value={terminals.filter(t => t.status === "Offline").length} icon={AlertCircle} accent="destructive" />
         </div>
         {terminals.map(t => (
-          <button key={t.id} className="w-full text-left" onClick={() => onOpen(t)}>
+          <button key={t.id} className="w-full text-start" onClick={() => onOpen(t)}>
             <Card className="p-3 border-border/60">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 min-w-0">
@@ -1106,7 +1106,7 @@ function ReturnsScreen({ orders, onBack, onSubmit }: any) {
           <>
             <p className="text-xs font-bold">1. Pick the order</p>
             {orders.slice(0, 6).map((o: POrder) => (
-              <button key={o.id} className="w-full text-left" onClick={() => { setSelected(o); setStep(2); }}>
+              <button key={o.id} className="w-full text-start" onClick={() => { setSelected(o); setStep(2); }}>
                 <Card className="p-3 border-border/60 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-black text-primary">{o.id}</p>
@@ -1122,7 +1122,7 @@ function ReturnsScreen({ orders, onBack, onSubmit }: any) {
           <>
             <p className="text-xs font-bold">2. Items in {selected.id}</p>
             {products.slice(0, 3).map(p => (
-              <button key={p.id} className="w-full text-left" onClick={() => setStep(3)}>
+              <button key={p.id} className="w-full text-start" onClick={() => setStep(3)}>
                 <Card className="p-3 border-border/60 flex items-center justify-between">
                   <div className="min-w-0"><p className="text-xs font-bold truncate">{p.name}</p><p className="text-[10px] text-muted-foreground">{p.sku}</p></div>
                   <span className="text-xs font-black text-primary">{sar(p.price)}</span>
@@ -1178,7 +1178,7 @@ function ProfileScreen({ user, branch, terminal, opening, onLogout, onNav }: any
           <Row k="Opening cash" v={opening != null ? sar(opening) : "—"} />
         </Card>
         {links.map(({ l, i: I, s }) => (
-          <button key={l} className="w-full text-left" onClick={() => onNav(s)}>
+          <button key={l} className="w-full text-start" onClick={() => onNav(s)}>
             <Card className="p-3 border-border/60 flex items-center gap-2.5">
               <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><I className="h-4 w-4 text-primary" /></div>
               <span className="flex-1 text-xs font-bold">{l}</span>

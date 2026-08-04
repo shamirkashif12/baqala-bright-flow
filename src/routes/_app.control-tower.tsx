@@ -411,14 +411,14 @@ function ControlTower() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                     <th className="px-4 py-3 font-semibold">Terminal</th>
                     <th className="px-4 py-3 font-semibold">Branch</th>
                     <th className="px-4 py-3 font-semibold">Assigned Cashier</th>
                     <th className="px-4 py-3 font-semibold">Active Shift</th>
                     <th className="px-4 py-3 font-semibold">Uptime</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
-                    <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                    <th className="px-4 py-3 font-semibold text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -509,13 +509,13 @@ function ControlTower() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                     <th className="px-4 py-3 font-semibold">User</th>
                     <th className="px-4 py-3 font-semibold">Branch</th>
                     <th className="px-4 py-3 font-semibold">Role</th>
                     <th className="px-4 py-3 font-semibold">Current Shift</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
-                    <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                    <th className="px-4 py-3 font-semibold text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -584,7 +584,7 @@ function ControlTower() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3 text-end">
                           <div className="flex items-center justify-end gap-1">
                             {isOnShift ? (
                               <>

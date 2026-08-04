@@ -69,6 +69,93 @@ public class ProductsController(
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for product {ProductId} ({Action})", p.Id, action); }
     }
 
+    /// <summary>
+    /// Trims a brand and folds it onto the spelling already in the catalogue when one matches
+    /// case-insensitively. Brand is free text (deliberately — a normalised Brands table buys
+    /// nothing until brands carry their own metadata), so without this "Nestle", "nestle" and
+    /// "NESTLE " become three brands: the POS brand filter splits into near-duplicate entries and
+    /// substitution suggestions miss products that are obviously the same brand.
+    /// </summary>
+    private async Task<string?> NormalizeBrandAsync(string? brand)
+    {
+        if (string.IsNullOrWhiteSpace(brand)) return null;
+        var trimmed = System.Text.RegularExpressions.Regex.Replace(brand.Trim(), @"\s+", " ");
+
+        // MySQL's default collation is case-insensitive, so this matches regardless of casing and
+        // returns the spelling already stored — the first spelling entered wins, consistently.
+        var existing = await db.Products
+            .Where(p => p.Brand != null && p.Brand == trimmed)
+            .Select(p => p.Brand)
+            .FirstOrDefaultAsync();
+        return existing ?? trimmed;
+    }
+
+    /// <summary>
+    /// Canonicalises the unit/pack/weight fields and rejects combinations that cannot be honoured
+    /// downstream. Both Create and Update run this, because every one of these rules is a silent
+    /// data corruption if only one path enforces it — a product edited into an illegal shape breaks
+    /// exactly as badly as one created that way.
+    ///
+    /// Returns an error message, or null when the product is valid (mutated in place to canonical form).
+    /// </summary>
+    private async Task<string?> NormalizeUnitFieldsAsync(Product product, Guid? existingId)
+    {
+        // ── Unit of measure is the source of truth; WeightBased is derived from it ──────
+        // The client may send either (older builds of the POS only knew WeightBased). If the unit
+        // is still the default but WeightBased was explicitly set, honour that intent and promote
+        // it to a real kilogram product rather than silently dropping fractional support.
+        if (product.WeightBased && !UnitOfMeasureCatalog.IsFractional(product.UnitOfMeasure))
+            product.UnitOfMeasure = "kilogram";
+        product.UnitOfMeasure = UnitOfMeasureCatalog.Normalize(product.UnitOfMeasure);
+        product.WeightBased = UnitOfMeasureCatalog.IsFractional(product.UnitOfMeasure);
+
+        // ── Estimated unit weight: only meaningful on a fractional product ──────────────
+        // On a piece-counted product it would mean "the weight of one piece in pieces", which is
+        // nonsense, so it's cleared rather than stored to confuse the POS later.
+        if (!product.WeightBased) product.EstimatedUnitWeight = null;
+        else if (product.EstimatedUnitWeight is <= 0)
+            return "Estimated weight per item must be greater than zero, or left blank.";
+
+        // ── Pack fields (FRD §12) ──────────────────────────────────────────────────────
+        product.SaleUnitType = product.SaleUnitType == "pack" ? "pack" : "single";
+        product.ItemsPerPack = product.SaleUnitType == "pack"
+            ? (product.ItemsPerPack is > 0 ? product.ItemsPerPack : 1)
+            : null;
+        product.LooseUnitProductId = product.SaleUnitType == "pack" ? product.LooseUnitProductId : null;
+
+        // A pack is a discrete physical container — you sell 2 cartons, never 0.4 of one. Allowing
+        // a fractional unit here would let Break Pack be asked to open half a box, and its whole
+        // -unit guard (which reads WeightBased) would no longer fire.
+        if (product.SaleUnitType == "pack" && product.WeightBased)
+            return $"A product sold as a pack must be counted, not measured — \"{UnitOfMeasureCatalog.Get(product.UnitOfMeasure).Code}\" is a weight/volume unit.";
+
+        if (product.LooseUnitProductId is { } looseId)
+        {
+            // Self-reference would make Break Pack consume and produce the same stock row, looping
+            // a carton into itself and inflating on-hand without bound.
+            if (existingId.HasValue && looseId == existingId.Value)
+                return "A pack cannot break down into itself — pick a different loose-unit product.";
+
+            var loose = await db.Products.FindAsync(looseId);
+            if (loose is null)
+                return "The selected loose-unit product no longer exists.";
+            // Chains ("carton breaks into 6-pack breaks into bottle") are refused rather than
+            // supported: Break Pack converts one level, so a chain would strand stock in the middle
+            // tier with no way to reach the sellable unit. Keeping the target a non-pack makes the
+            // relationship exactly one level deep by construction, so no cycle is even expressible.
+            if (loose.SaleUnitType == "pack")
+                return $"\"{loose.Name}\" is itself sold as a pack. A pack must break down into a single-unit product.";
+            if (loose.Status == "discontinued")
+                return $"\"{loose.Name}\" is discontinued and cannot be used as a loose unit.";
+            // Breaking a carton produces ItemsPerPack *whole* loose items; a fractional loose
+            // product would mean a carton yields "12 kg of egg", which no sale path can reconcile.
+            if (loose.WeightBased)
+                return $"\"{loose.Name}\" is sold by weight/volume. A pack must break down into a counted product.";
+        }
+
+        return null;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid? categoryId, [FromQuery] string? status, [FromQuery] string? search)
     {
@@ -116,13 +203,11 @@ public class ProductsController(
         }
         product.Id = Guid.NewGuid();
         product.CreatedAt = product.UpdatedAt = DateTime.UtcNow;
-        // Pack & unit pricing (FRD §12): a "single" never carries a pack size, a "pack" always has
-        // one (default 1 if the client omitted it).
-        product.SaleUnitType = product.SaleUnitType == "pack" ? "pack" : "single";
-        product.ItemsPerPack = product.SaleUnitType == "pack"
-            ? (product.ItemsPerPack is > 0 ? product.ItemsPerPack : 1)
-            : null;
-        product.LooseUnitProductId = product.SaleUnitType == "pack" ? product.LooseUnitProductId : null;
+        // Unit of measure, derived WeightBased, estimated unit weight, and pack/loose-unit fields
+        // (FRD §12) — canonicalised and cross-validated in one place shared with Update.
+        product.Brand = await NormalizeBrandAsync(product.Brand);
+        if (await NormalizeUnitFieldsAsync(product, existingId: null) is { } unitError)
+            return BadRequest(new { message = unitError });
         db.Products.Add(product);
         await db.SaveChangesAsync();
         // "Added Items" in the Employee Audit Center — a new catalog item was previously written
@@ -163,26 +248,41 @@ public class ProductsController(
         product.Sku = updated.Sku;
         product.Barcode = updated.Barcode;
         product.CategoryId = updated.CategoryId;
-        product.Brand = updated.Brand;
+        product.Brand = await NormalizeBrandAsync(updated.Brand);
         product.BasePrice = updated.BasePrice;
         product.CostPrice = updated.CostPrice;
         product.TaxPercentage = updated.TaxPercentage;
         product.ReorderLevel = updated.ReorderLevel;
         product.Status = updated.Status;
-        product.WeightBased = updated.WeightBased;
         product.IsTobacco = updated.IsTobacco;
         product.Discount = updated.Discount;
         product.DiscountType = updated.DiscountType;
         product.ImageUrl = updated.ImageUrl;
         product.Description = updated.Description;
-        // Pack & unit pricing (FRD §12). Normalised so a "single" product never carries a stray
-        // pack size and a "pack" always has one — the same guard the create path applies.
-        product.SaleUnitType = updated.SaleUnitType == "pack" ? "pack" : "single";
-        product.ItemsPerPack = product.SaleUnitType == "pack"
-            ? (updated.ItemsPerPack is > 0 ? updated.ItemsPerPack : 1)
-            : null;
-        // Pack breaking (Break Pack action): only meaningful for a pack, same as ItemsPerPack.
-        product.LooseUnitProductId = product.SaleUnitType == "pack" ? updated.LooseUnitProductId : null;
+        product.UnitOfMeasure = updated.UnitOfMeasure;
+        product.WeightBased = updated.WeightBased;
+        product.EstimatedUnitWeight = updated.EstimatedUnitWeight;
+        product.SaleUnitType = updated.SaleUnitType;
+        product.ItemsPerPack = updated.ItemsPerPack;
+        product.LooseUnitProductId = updated.LooseUnitProductId;
+        // Same canonicalisation and cross-validation as Create — an edit can put a product into
+        // every illegal shape a create can.
+        if (await NormalizeUnitFieldsAsync(product, existingId: id) is { } unitError)
+            return BadRequest(new { message = unitError });
+
+        // Switching a product OFF a fractional unit while fractional stock is on hand would leave
+        // an unsellable remainder that no whole-unit sale can ever clear and no stock count can
+        // reconcile. Caught here rather than left to fail confusingly at the next sale.
+        if (!product.WeightBased)
+        {
+            var fractionalStock = await db.InventoryStocks
+                .Where(s => s.ProductId == id && s.Quantity != Math.Floor(s.Quantity))
+                .Select(s => (decimal?)s.Quantity)
+                .FirstOrDefaultAsync();
+            if (fractionalStock.HasValue)
+                return BadRequest(new { message = $"\"{product.Name}\" cannot switch to a counted unit while {fractionalStock:0.###} is on hand — adjust the stock to a whole number first." });
+        }
+
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
@@ -459,6 +559,169 @@ public class ProductsController(
 
         return NoContent();
     }
+
+    // ─── Units of measure ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The unit picker's options. Served from the server rather than duplicated as a frontend
+    /// constant so the list the operator picks from is definitionally the list the API accepts —
+    /// a client-side copy would drift and start producing values that normalise to "piece".
+    /// </summary>
+    [HttpGet("units")]
+    public IActionResult GetUnits() => Ok(UnitOfMeasureCatalog.All.Select(u => new
+    {
+        code = u.Code,
+        category = u.Category,
+        decimalPlaces = u.DecimalPlaces,
+        fractional = UnitOfMeasureCatalog.IsFractional(u.Code),
+        subUnitLabel = u.SubUnitLabel,
+        subUnitsPerUnit = u.SubUnitsPerUnit,
+    }));
+
+    // ─── Brands ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Distinct brands in the catalogue, for the Add/Edit form's typeahead. Feeding the input from
+    /// what already exists is the whole anti-fragmentation mechanism — an operator picks "Nestle"
+    /// instead of retyping it slightly differently.
+    /// </summary>
+    [HttpGet("brands")]
+    public async Task<IActionResult> GetBrands()
+    {
+        var brands = await db.Products
+            .Where(p => p.Brand != null && p.Brand != "" && p.Status != "discontinued")
+            .Select(p => p.Brand!)
+            .Distinct()
+            .OrderBy(b => b)
+            .ToListAsync();
+        return Ok(brands);
+    }
+
+    // ─── Substitutes (brand substitution) ────────────────────────────────────
+
+    /// <summary>
+    /// Interchangeable products for <paramref name="id"/> — what a cashier can offer when this item
+    /// is out of stock. When a branch is supplied, each substitute carries its on-hand quantity
+    /// there, since a substitute with no stock is not a usable suggestion.
+    /// </summary>
+    [HttpGet("{id:guid}/substitutes")]
+    public async Task<IActionResult> GetSubstitutes(Guid id, [FromQuery] Guid? branchId)
+    {
+        var links = await db.ProductSubstitutes
+            .Where(s => s.ProductId == id)
+            .Include(s => s.SubstituteProduct)
+            .ToListAsync();
+
+        var products = links
+            .Select(l => l.SubstituteProduct)
+            .Where(p => p is not null && p.Status != "discontinued")
+            .Select(p => p!)
+            .ToList();
+
+        // Filtered in memory after materialising: the MySQL provider mistranslates
+        // `list.Contains(x.Id)` against a DbSet, so the IN-list is built client-side.
+        var ids = products.Select(p => p.Id).ToList();
+        var stockByProduct = branchId.HasValue
+            ? (await db.InventoryStocks
+                .Where(s => s.BranchId == branchId)
+                .Select(s => new { s.ProductId, s.Quantity })
+                .ToListAsync())
+                .Where(s => ids.Contains(s.ProductId))
+                .GroupBy(s => s.ProductId)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity))
+            : [];
+
+        return Ok(products
+            .OrderByDescending(p => stockByProduct.GetValueOrDefault(p.Id))
+            .ThenBy(p => p.Name)
+            .Select(p => new
+            {
+                p.Id, p.Name, p.NameAr, p.Sku, p.Barcode, p.Brand, p.BasePrice,
+                p.UnitOfMeasure, p.WeightBased, p.ImageUrl, p.Status,
+                quantity = stockByProduct.GetValueOrDefault(p.Id),
+            }));
+    }
+
+    /// <summary>
+    /// Links two products as substitutes. Written in BOTH directions so the suggestion appears
+    /// whichever of the pair runs out — a one-way row would help a cashier only half the time, and
+    /// which half would depend on the arbitrary order they were linked in.
+    /// </summary>
+    [RequirePermission("Inventory", PermAction.Edit)]
+    [HttpPost("{id:guid}/substitutes")]
+    public async Task<IActionResult> AddSubstitute(Guid id, [FromBody] AddSubstituteRequest req)
+    {
+        if (id == req.SubstituteProductId)
+            return BadRequest(new { message = "A product cannot be its own substitute." });
+
+        var product = await db.Products.FindAsync(id);
+        if (product is null) return NotFound(new { message = "Product not found." });
+        var substitute = await db.Products.FindAsync(req.SubstituteProductId);
+        if (substitute is null) return NotFound(new { message = "Substitute product not found." });
+        if (substitute.Status == "discontinued")
+            return BadRequest(new { message = $"\"{substitute.Name}\" is discontinued and cannot be offered as a substitute." });
+
+        // Substituting across units would mean swapping "1 piece" for "1 kilogram" at the till —
+        // the quantity on the cart line carries over, so the customer is charged for the wrong
+        // amount of a physically different thing.
+        if (!string.Equals(product.UnitOfMeasure, substitute.UnitOfMeasure, StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = $"\"{substitute.Name}\" is sold by {substitute.UnitOfMeasure} but \"{product.Name}\" is sold by {product.UnitOfMeasure} — only products sharing a unit can substitute for each other." });
+
+        var callerId = CallerId();
+        var now = DateTime.UtcNow;
+
+        // Idempotent: re-linking an existing pair is a no-op rather than a unique-index violation,
+        // and a pair half-written by an earlier partial failure is completed rather than rejected.
+        foreach (var (from, to) in new[] { (id, req.SubstituteProductId), (req.SubstituteProductId, id) })
+        {
+            if (await db.ProductSubstitutes.AnyAsync(s => s.ProductId == from && s.SubstituteProductId == to)) continue;
+            db.ProductSubstitutes.Add(new ProductSubstitute
+            {
+                Id = Guid.NewGuid(), ProductId = from, SubstituteProductId = to,
+                CreatedBy = callerId, CreatedAt = now,
+            });
+        }
+        await db.SaveChangesAsync();
+
+        try
+        {
+            await audit.LogAsync(action: "link_product_substitute", entityType: "Product", entityId: id,
+                userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId), branchId: CallerBranchId(),
+                notes: $"{product.Name} ↔ {substitute.Name}", module: "Inventory");
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for substitute link on product {ProductId}", id); }
+
+        return Ok(new { message = $"\"{substitute.Name}\" linked as a substitute." });
+    }
+
+    [RequirePermission("Inventory", PermAction.Edit)]
+    [HttpDelete("{id:guid}/substitutes/{substituteId:guid}")]
+    public async Task<IActionResult> RemoveSubstitute(Guid id, Guid substituteId)
+    {
+        // Both directions go together — leaving the mirror row behind would keep suggesting the
+        // pair from one side after the operator believed they had unlinked it.
+        var links = await db.ProductSubstitutes
+            .Where(s => (s.ProductId == id && s.SubstituteProductId == substituteId)
+                     || (s.ProductId == substituteId && s.SubstituteProductId == id))
+            .ToListAsync();
+        if (links.Count == 0) return NotFound();
+
+        db.ProductSubstitutes.RemoveRange(links);
+        await db.SaveChangesAsync();
+
+        var callerId = CallerId();
+        try
+        {
+            await audit.LogAsync(action: "unlink_product_substitute", entityType: "Product", entityId: id,
+                userId: callerId, employeeId: await ResolveEmployeeIdAsync(callerId), branchId: CallerBranchId(),
+                beforeValue: $"substituteProductId={substituteId}", module: "Inventory");
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log failed for substitute unlink on product {ProductId}", id); }
+
+        return NoContent();
+    }
 }
 
 public record ItemDeletionRequest(string? Reason);
+
+public record AddSubstituteRequest(Guid SubstituteProductId);

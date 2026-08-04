@@ -73,6 +73,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<StockTransfer> StockTransfers { get; set; }
     public DbSet<StockTransferItem> StockTransferItems { get; set; }
     public DbSet<ProductVariant> ProductVariants { get; set; }
+    public DbSet<ProductSubstitute> ProductSubstitutes { get; set; }
     public DbSet<StockDiscrepancy> StockDiscrepancies { get; set; }
     public DbSet<SupplierCreditNote> SupplierCreditNotes { get; set; }
 
@@ -247,6 +248,28 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .WithMany()
             .HasForeignKey(p => p.LooseUnitProductId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── ProductSubstitute: symmetric brand-substitution pairs ────────────
+        // Cascade from the owning product (deleting a product should not leave dangling
+        // "substitute with X" rows), restrict from the substitute side so a product still being
+        // offered as someone's alternative can't vanish out from under that suggestion.
+        modelBuilder.Entity<ProductSubstitute>()
+            .HasOne(s => s.Product)
+            .WithMany()
+            .HasForeignKey(s => s.ProductId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProductSubstitute>()
+            .HasOne(s => s.SubstituteProduct)
+            .WithMany()
+            .HasForeignKey(s => s.SubstituteProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // One row per ordered pair — the controller writes both directions, and this is what makes
+        // re-linking an existing pair a no-op rather than a duplicate suggestion at the till.
+        modelBuilder.Entity<ProductSubstitute>()
+            .HasIndex(s => new { s.ProductId, s.SubstituteProductId })
+            .IsUnique();
 
         // ─── User → Role/Branch (restrict on delete) ─────────────────────────
         modelBuilder.Entity<User>()

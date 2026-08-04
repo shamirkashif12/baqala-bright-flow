@@ -79,7 +79,7 @@ function MultiSelect({
             key={opt.id}
             type="button"
             onClick={() => toggle(opt.id)}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-left"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-start"
           >
             <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${value.includes(opt.id) ? "bg-primary border-primary" : "border-input"}`}>
               {value.includes(opt.id) && <Check className="h-3 w-3 text-primary-foreground" />}
@@ -537,7 +537,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
               <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
                 {/* Header */}
                 <div className="grid grid-cols-[1fr_56px_80px] gap-2 px-1 text-[10px] text-muted-foreground uppercase tracking-wider">
-                  <span>Product</span><span className="text-center">Qty</span><span className="text-right">Unit Cost</span>
+                  <span>Product</span><span className="text-center">Qty</span><span className="text-end">Unit Cost</span>
                 </div>
                 {items.map((item, idx) => {
                   const maxAvailable = maxAvailableFor(item.productId);
@@ -562,15 +562,15 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
                           step="0.01"
                           value={item.unitCost}
                           onChange={e => setItems(prev => prev.map((it, i) => i === idx ? { ...it, unitCost: e.target.value } : it))}
-                          className="h-8 text-xs text-right px-2"
+                          className="h-8 text-xs text-end px-2"
                           placeholder="0.00"
                         />
                       </div>
-                      <p className="text-[10px] text-right pr-1 text-muted-foreground">
+                      <p className="text-[10px] text-end pr-1 text-muted-foreground">
                         of {item.maxQuantity} ordered — can't return more than that
                       </p>
                       {maxAvailable !== null && (
-                        <p className={`text-[10px] text-right pr-1 ${isOverStock ? "text-destructive" : "text-muted-foreground"}`}>
+                        <p className={`text-[10px] text-end pr-1 ${isOverStock ? "text-destructive" : "text-muted-foreground"}`}>
                           {maxAvailable} available at selected warehouse(s)
                         </p>
                       )}
@@ -581,7 +581,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
                   <p className="text-xs text-muted-foreground text-center py-3">No items loaded from order.</p>
                 )}
               </div>
-              <p className="text-xs text-muted-foreground text-right">
+              <p className="text-xs text-muted-foreground text-end">
                 {validItems.length} item{validItems.length !== 1 ? "s" : ""} · {validItems.reduce((s, i) => s + i.requestedQuantity, 0)} units per warehouse
               </p>
             </div>
@@ -776,13 +776,13 @@ function SupplierReturns() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-4 py-3 font-semibold">Transfer #</th>
                   <th className="px-4 py-3 font-semibold">Supplier</th>
                   <th className="px-4 py-3 font-semibold">Warehouse</th>
                   <th className="px-4 py-3 font-semibold">Reason</th>
                   <th className="px-4 py-3 font-semibold text-center">Items</th>
-                  <th className="px-4 py-3 font-semibold text-right">Credit Value</th>
+                  <th className="px-4 py-3 font-semibold text-end">Credit Value</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
                   <th className="px-4 py-3 font-semibold">Date</th>
                   <th className="px-4 py-3 font-semibold"></th>
@@ -816,7 +816,7 @@ function SupplierReturns() {
                         {t.items?.length ?? 0}
                         {isBatch && <span className="ml-1 text-[10px] text-muted-foreground">×{group.length}</span>}
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold">
+                      <td className="px-4 py-3 text-end font-semibold">
                         {creditValue > 0
                           ? <span className="flex items-center gap-0.5 justify-end text-primary"><SARIcon />{creditValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
                           : "—"}

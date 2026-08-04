@@ -94,7 +94,7 @@ function DetailSheet({ ret, onClose, onAction, canApprove }: {
           ] as [string, React.ReactNode][]).map(([l, v]) => (
             <div key={l as string} className="flex justify-between border-b border-border/40 pb-1.5">
               <span className="text-muted-foreground text-xs">{l}</span>
-              <span className="font-medium text-xs text-right max-w-[220px]">{v}</span>
+              <span className="font-medium text-xs text-end max-w-[220px]">{v}</span>
             </div>
           ))}
         </div>
@@ -540,7 +540,7 @@ function Returns() {
                           key={o.id}
                           type="button"
                           onMouseDown={e => { e.preventDefault(); selectInvoiceMatch(o); }}
-                          className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left border-b last:border-0 border-border/40 hover:bg-muted/60"
+                          className="w-full flex items-center justify-between gap-3 px-3 py-2 text-start border-b last:border-0 border-border/40 hover:bg-muted/60"
                         >
                           <span className="font-mono text-xs font-semibold">{o.orderNumber}</span>
                           <span className="text-xs text-muted-foreground">SAR {o.totalAmount.toFixed(2)}</span>
@@ -711,7 +711,7 @@ function Returns() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Return#</th>
                   <th className="px-3 py-3 font-semibold">Invoice</th>
                   <th className="px-3 py-3 font-semibold">Customer</th>

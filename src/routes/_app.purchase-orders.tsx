@@ -108,7 +108,7 @@ function MultiSelect({
       <PopoverContent className="w-72 p-2 max-h-60 overflow-y-auto">
         {options.map(opt => (
           <button key={opt.id} type="button" onClick={() => toggle(opt.id)}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-left">
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted text-start">
             <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${value.includes(opt.id) ? "bg-primary border-primary" : "border-input"}`}>
               {value.includes(opt.id) && <Check className="h-3 w-3 text-primary-foreground" />}
             </div>
@@ -486,7 +486,7 @@ function CreatePOWizard({
           {step === 3 && (
             <div className="space-y-3">
               <div className={`grid gap-1.5 text-xs font-semibold text-muted-foreground uppercase px-1 ${warehouseIds.length > 1 ? "grid-cols-[1fr_72px_80px_28px]" : "grid-cols-[1fr_64px_80px_28px]"}`}>
-                <span>Item</span><span className="text-right">Qty</span><span className="text-right">Unit Cost (SAR)</span><span />
+                <span>Item</span><span className="text-end">Qty</span><span className="text-end">Unit Cost (SAR)</span><span />
               </div>
               {items.map((it, i) => (
                 <div key={i} className={`grid gap-1.5 items-center ${warehouseIds.length > 1 ? "grid-cols-[1fr_72px_80px_28px]" : "grid-cols-[1fr_64px_80px_28px]"}`}>
@@ -530,7 +530,7 @@ function CreatePOWizard({
                             <span className="text-xs truncate">{destinationName(whId)}</span>
                             <Input
                               type="number" min={0}
-                              className="h-7 w-16 text-xs text-right"
+                              className="h-7 w-16 text-xs text-end"
                               value={it.qtyByWarehouse[whId] ?? 0}
                               onChange={e => setItemQty(i, whId, Number(e.target.value))}
                             />
@@ -544,14 +544,14 @@ function CreatePOWizard({
                   ) : (
                     <Input
                       type="number" min={0}
-                      className="h-9 text-xs text-right"
+                      className="h-9 text-xs text-end"
                       value={it.qtyByWarehouse[warehouseIds[0] ?? ""] ?? 0}
                       onChange={e => setItemQty(i, warehouseIds[0] ?? "", Number(e.target.value))}
                     />
                   )}
                   <Input
                     type="number" min={0} step="0.01"
-                    className="h-9 text-xs text-right"
+                    className="h-9 text-xs text-end"
                     value={it.unitCost}
                     onChange={e => setItemField(i, "unitCost", Number(e.target.value))}
                   />
@@ -599,7 +599,7 @@ function CreatePOWizard({
               ))}
               <div className="flex justify-between border-b border-border/40 pb-2">
                 <span className="text-muted-foreground">Delivery to</span>
-                <span className="font-medium text-right max-w-[180px]">
+                <span className="font-medium text-end max-w-[180px]">
                   {selectedWarehouses.length === 0 ? "—"
                     : selectedWarehouses.length === 1 ? selectedWarehouses[0].name
                     : selectedWarehouses.map(w => w.name).join(", ")}
@@ -662,7 +662,7 @@ function CreatePOWizard({
               </div>
               <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Supplier</span><span className="font-medium">{selectedSupplier?.name ?? "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Delivery to</span><span className="font-medium text-right">{selectedWarehouses.map(w => w.name).join(", ") || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Delivery to</span><span className="font-medium text-end">{selectedWarehouses.map(w => w.name).join(", ") || "—"}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Items</span><span className="font-medium">{items.filter(it => it.productId).length} product(s)</span></div>
                 {plannedWarehouseIds.length > 1 && selectedWarehouses.map(w => (
                   <div key={w.id} className="flex justify-between text-xs"><span className="text-muted-foreground">{w.name}</span><span className="font-medium flex items-center gap-0.5"><SARIcon />{fmt(subtotalForWarehouse(w.id))}</span></div>
@@ -976,13 +976,13 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                 <table className="w-full text-xs">
                   <thead className="bg-muted/40">
                     <tr>
-                      <th className="text-left px-3 py-2">Product</th>
-                      <th className="text-left px-2 py-2">SKU</th>
-                      <th className="text-right px-2 py-2">Ordered</th>
-                      <th className="text-right px-2 py-2">Received</th>
-                      <th className="text-right px-2 py-2">Delta</th>
-                      <th className="text-right px-2 py-2">Cost</th>
-                      <th className="text-right px-2 py-2">Subtotal</th>
+                      <th className="text-start px-3 py-2">Product</th>
+                      <th className="text-start px-2 py-2">SKU</th>
+                      <th className="text-end px-2 py-2">Ordered</th>
+                      <th className="text-end px-2 py-2">Received</th>
+                      <th className="text-end px-2 py-2">Delta</th>
+                      <th className="text-end px-2 py-2">Cost</th>
+                      <th className="text-end px-2 py-2">Subtotal</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -993,17 +993,17 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
                         <tr key={it.id} className={`border-t border-border/40 ${hasDiscrepancy ? "bg-warning/5" : ""}`}>
                           <td className="px-3 py-2">{it.product?.name ?? it.productId}</td>
                           <td className="px-2 py-2 font-mono text-[11px] text-muted-foreground">{it.product?.sku ?? "—"}</td>
-                          <td className="px-2 py-2 text-right">{it.orderedQuantity}</td>
-                          <td className="px-2 py-2 text-right">{it.receivedQuantity > 0 ? it.receivedQuantity : <span className="text-muted-foreground">—</span>}</td>
-                          <td className="px-2 py-2 text-right">
+                          <td className="px-2 py-2 text-end">{it.orderedQuantity}</td>
+                          <td className="px-2 py-2 text-end">{it.receivedQuantity > 0 ? it.receivedQuantity : <span className="text-muted-foreground">—</span>}</td>
+                          <td className="px-2 py-2 text-end">
                             {it.receivedQuantity > 0 ? (
                               <span className={delta < 0 ? "text-destructive font-semibold" : delta > 0 ? "text-success font-semibold" : "text-muted-foreground"}>
                                 {delta > 0 ? "+" : ""}{delta}
                               </span>
                             ) : <span className="text-muted-foreground">—</span>}
                           </td>
-                          <td className="px-2 py-2 text-right tabular-nums">{fmt(it.unitCost)}</td>
-                          <td className="px-2 py-2 text-right tabular-nums font-medium">{fmt(it.subtotal)}</td>
+                          <td className="px-2 py-2 text-end tabular-nums">{fmt(it.unitCost)}</td>
+                          <td className="px-2 py-2 text-end tabular-nums font-medium">{fmt(it.subtotal)}</td>
                         </tr>
                       );
                     })}
@@ -1368,7 +1368,7 @@ function PurchaseOrders() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                     <th className="px-3 py-3 font-semibold">PO ID</th>
                     <th className="px-3 py-3 font-semibold">Supplier</th>
                     <th className="px-3 py-3 font-semibold">Type</th>
@@ -1521,7 +1521,7 @@ function PurchaseOrders() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                     <th className="px-3 py-3 font-semibold">Supplier</th>
                     <th className="px-3 py-3 font-semibold">PO</th>
                     <th className="px-3 py-3 font-semibold">PO Amount</th>
@@ -1582,12 +1582,12 @@ function PurchaseOrders() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/20 border-b border-border/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr className="bg-muted/20 border-b border-border/40 text-start text-xs uppercase tracking-wider text-muted-foreground">
                     <th className="px-3 py-2.5 font-semibold">Transfer #</th>
                     <th className="px-3 py-2.5 font-semibold">Supplier</th>
                     <th className="px-3 py-2.5 font-semibold">Source Warehouse(s)</th>
                     <th className="px-3 py-2.5 font-semibold">Reason</th>
-                    <th className="px-3 py-2.5 font-semibold text-right">Credit Value</th>
+                    <th className="px-3 py-2.5 font-semibold text-end">Credit Value</th>
                     <th className="px-3 py-2.5 font-semibold">Status</th>
                     <th className="px-3 py-2.5 font-semibold">Date</th>
                   </tr>
@@ -1617,7 +1617,7 @@ function PurchaseOrders() {
                           <td className="px-3 py-2.5">
                             {t.returnReason ? <Badge variant="outline" className="text-xs capitalize">{t.returnReason.replace(/_/g, " ")}</Badge> : "—"}
                           </td>
-                          <td className="px-3 py-2.5 text-right font-semibold text-primary">
+                          <td className="px-3 py-2.5 text-end font-semibold text-primary">
                             {creditVal > 0 ? <span className="flex items-center gap-0.5 justify-end"><SARIcon />{fmt(creditVal)}</span> : "—"}
                           </td>
                           <td className="px-3 py-2.5">

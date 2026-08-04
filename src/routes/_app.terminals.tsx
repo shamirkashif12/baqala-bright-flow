@@ -504,7 +504,7 @@ function Terminals() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-3 font-semibold">Code</th>
                       <th className="px-3 py-3 font-semibold">Name</th>
                       <th className="px-3 py-3 font-semibold">Branch</th>
@@ -653,7 +653,7 @@ function Terminals() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-3 font-semibold">Terminal</th>
                       <th className="px-3 py-3 font-semibold">Branch</th>
                       <th className="px-3 py-3 font-semibold">Cashier</th>
@@ -795,7 +795,7 @@ function Terminals() {
                           <p className={`text-xs font-semibold ${LOG_COLOR[entry.type]}`}>{entry.event}</p>
                           <p className="text-[11px] text-muted-foreground">{entry.detail}</p>
                         </div>
-                        <div className="flex-shrink-0 text-right">
+                        <div className="flex-shrink-0 text-end">
                           <p className="text-[10px] text-muted-foreground tabular-nums">{relTime(entry.time)}</p>
                           <p className="text-[10px] text-muted-foreground/60">{toUtc(entry.time).toLocaleTimeString("en-SA", { ...KSA, hour: "2-digit", minute: "2-digit" })}</p>
                         </div>

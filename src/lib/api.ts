@@ -198,6 +198,26 @@ export const api = {
   deleteProduct: (id: string, reason?: string) =>
     request<{ message: string; approvalRequestId: string }>(`/api/products/${id}`, { method: "DELETE", body: JSON.stringify({ reason }) }),
 
+  // The unit picker's options. Served rather than duplicated as a frontend constant so the list
+  // the operator picks from is definitionally the list the API accepts.
+  getUnitsOfMeasure: () => request<UnitOfMeasureOption[]>("/api/products/units"),
+
+  // Distinct brands already in the catalogue — feeds the Add/Edit typeahead so "Nestle"/"nestle"
+  // don't fragment into separate brands and split the POS brand filter.
+  getBrands: () => request<string[]>("/api/products/brands"),
+
+  // Interchangeable products, for offering an alternative when this one is out of stock. Pass a
+  // branch to get each substitute's on-hand there (a substitute with no stock is no use).
+  getProductSubstitutes: (productId: string, branchId?: string) =>
+    request<ProductSubstitute[]>(`/api/products/${productId}/substitutes${branchId ? `?branchId=${branchId}` : ""}`),
+  // Linked in both directions server-side, so the suggestion appears whichever of the pair runs out.
+  addProductSubstitute: (productId: string, substituteProductId: string) =>
+    request<{ message: string }>(`/api/products/${productId}/substitutes`, {
+      method: "POST", body: JSON.stringify({ substituteProductId }),
+    }),
+  removeProductSubstitute: (productId: string, substituteId: string) =>
+    request<void>(`/api/products/${productId}/substitutes/${substituteId}`, { method: "DELETE" }),
+
   // Gallery images — additive, optional extras alongside Product.imageUrl (the "primary" image).
   // Needs a real product id, so only available once a product has been saved at least once.
   getProductImages: (productId: string) =>
@@ -309,6 +329,10 @@ export const api = {
   breakPack: (data: { packProductId: string; branchId: string; packs: number }) =>
     request<{ packStock: { productId: string; branchId: string; quantity: number }; looseStock: { productId: string; branchId: string; quantity: number } }>(
       "/api/inventory/break-pack", { method: "POST", body: JSON.stringify(data) }),
+  // What's actually sellable at a branch, counting units still inside unopened packs — 4 loose
+  // eggs beside 3 unopened dozens is 40 available, not 4.
+  getPackAwareAvailability: (productId: string, branchId: string) =>
+    request<PackAwareAvailability>(`/api/inventory/availability/${productId}?branchId=${branchId}`),
 
   // Stock Counts (Stocking Review)
   getStockCounts: (params?: { branchId?: string[]; warehouseId?: string; status?: string; from?: string; to?: string }) =>
@@ -344,8 +368,12 @@ export const api = {
     request<{ total: number; page: number; pageSize: number; items: Order[] }>(`/api/orders${toQuery(params)}`),
   getOrder: (id: string) => request<Order>(`/api/orders/${id}`),
   getOrderByNumber: (num: string) => request<Order>(`/api/orders/by-number/${encodeURIComponent(num)}`),
-  createOrder: (data: Partial<Order>) =>
-    request<Order>("/api/orders", { method: "POST", body: JSON.stringify(data) }),
+  // allowPackBreak: the cashier has confirmed that unopened packs may be broken open to cover a
+  // shortfall of loose units. Without it the server rejects such a sale with a 400 carrying a
+  // `packBreakSuggestion` (see PackBreakSuggestion) describing exactly what to open — opening a
+  // carton is a physical act, so it is never done without asking.
+  createOrder: (data: Partial<Order>, allowPackBreak = false) =>
+    request<Order>(`/api/orders${allowPackBreak ? "?allowPackBreak=true" : ""}`, { method: "POST", body: JSON.stringify(data) }),
   updateOrderStatus: (id: string, status: string) =>
     request<Order>(`/api/orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   // Both return the updated Order on a 200, or a 202 `{ message, approvalRequestId }` when the
@@ -1323,6 +1351,15 @@ export interface Product {
   discount?: number; discountType?: "percentage" | "fixed";
   imageUrl?: string;
   description?: string;
+  // The unit this product is stocked, counted and priced in — basePrice is always the price of ONE
+  // of these (per kg, per litre, per piece). Server-normalised to a UNIT_OF_MEASURE code; it decides
+  // whether fractional quantities are legal, so `weightBased` is now derived from it server-side
+  // rather than set independently (they can no longer disagree).
+  unitOfMeasure?: string;
+  // Average weight/volume of one physical item, in this product's own unit (0.12 for a tomato on a
+  // per-kg product). Only set on a weight/volume product. Its presence is what lets the POS ring up
+  // a weighed item by the piece — see qtyFromUnitCount.
+  estimatedUnitWeight?: number | null;
   // Pack & unit pricing (FRD §12): "single" (default) or "pack". A pack is sold as one unit at its
   // own basePrice; itemsPerPack is informational (items inside one pack).
   saleUnitType?: "single" | "pack";
@@ -1331,6 +1368,41 @@ export interface Product {
   // pack links to the individual-egg single product). Only meaningful when saleUnitType is "pack".
   looseUnitProductId?: string | null;
   category?: { id: string; name: string; nameAr?: string };
+}
+
+// Mirrors the server's UnitOfMeasureCatalog entry (GET /api/products/units).
+export interface UnitOfMeasureOption {
+  code: string;
+  category: "count" | "weight" | "volume" | "length";
+  decimalPlaces: number;
+  fractional: boolean;
+  subUnitLabel?: string | null;
+  subUnitsPerUnit?: number | null;
+}
+
+// A product offered in place of one that's out of stock, with its on-hand at the queried branch.
+export interface ProductSubstitute {
+  id: string; name: string; nameAr?: string; sku: string; barcode?: string;
+  brand?: string; basePrice: number; unitOfMeasure?: string; weightBased: boolean;
+  imageUrl?: string; status: string; quantity: number;
+}
+
+// What's actually sellable, counting units still inside unopened packs. The raw stock row
+// understates a loose product whose cartons haven't been broken yet.
+export interface PackAwareAvailability {
+  productId: string; branchId: string;
+  looseOnHand: number; totalAvailable: number;
+  packProductId?: string | null; packProductName?: string | null;
+  packOnHand: number; itemsPerPack: number;
+}
+
+// Returned by createOrder as a 400 when the sale needs packs opened and the cashier hasn't yet
+// confirmed. Retry with allowPackBreak once they do.
+export interface PackBreakSuggestion {
+  productId: string; productName?: string;
+  packProductId: string; packProductName: string;
+  itemsPerPack: number; packsNeeded: number;
+  looseOnHand: number; totalAvailable: number;
 }
 
 export interface ProductImage {

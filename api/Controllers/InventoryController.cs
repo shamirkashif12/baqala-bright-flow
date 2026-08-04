@@ -18,6 +18,7 @@ public class InventoryController(
     IStockAlertService stockAlerts,
     IStockMovementService stockMovements,
     IBatchConsumptionService batchConsumption,
+    IPackBreakService packBreaks,
     IAuditService audit,
     ILogger<InventoryController> logger) : ControllerBase
 {
@@ -711,90 +712,21 @@ public class InventoryController(
 
         var packProduct = await db.Products.FindAsync(req.PackProductId);
         if (packProduct is null) return NotFound(new { message = "Pack product not found." });
-        if (packProduct.SaleUnitType != "pack")
-            return BadRequest(new { message = $"\"{packProduct.Name}\" is not sold as a pack." });
-        if (packProduct.LooseUnitProductId is null)
-            return BadRequest(new { message = $"\"{packProduct.Name}\" has no loose-unit product configured to break into." });
 
-        var looseProduct = await db.Products.FindAsync(packProduct.LooseUnitProductId);
-        if (looseProduct is null) return NotFound(new { message = "Linked loose-unit product not found." });
-
-        // A carton is always broken as a whole unit — reuses the same check every other
-        // stock-quantity write endpoint applies, since a pack product is never weight-based.
-        var packsQtyError = QuantityValidation.ValidateWholeUnit(packProduct, req.Packs, "Packs to break");
-        if (packsQtyError is not null) return BadRequest(new { message = packsQtyError });
-        if (req.Packs <= 0) return BadRequest(new { message = "Packs to break must be greater than zero." });
-
-        var packStock = await db.InventoryStocks
-            .FirstOrDefaultAsync(s => s.ProductId == req.PackProductId && s.BranchId == req.BranchId);
-        if (packStock is null || req.Packs > packStock.Quantity)
-            return BadRequest(new { message = $"Cannot break {req.Packs} pack(s) — only {packStock?.Quantity ?? 0} on hand at this branch." });
-
-        var itemsPerPack = packProduct.ItemsPerPack ?? 1;
-        var unitsProduced = req.Packs * itemsPerPack;
         var actingUserId = CallerId();
 
-        // FEFO draw-down of the pack's own batches — empty when the pack isn't batch-tracked at
-        // this branch, which is fine (falls back to the aggregate-only move below).
-        var consumed = await batchConsumption.ConsumeFefoAsync(req.PackProductId, req.BranchId, warehouseId: null, req.Packs);
-
-        var packQuantityBefore = packStock.Quantity;
-        packStock.Quantity -= req.Packs;
-        packStock.LastUpdated = DateTime.UtcNow;
-        packStock.UpdatedAt = DateTime.UtcNow;
-
-        var looseStock = await db.InventoryStocks
-            .FirstOrDefaultAsync(s => s.ProductId == looseProduct.Id && s.BranchId == req.BranchId);
-        if (looseStock is null)
+        // The conversion itself lives in IPackBreakService, shared with checkout's automatic break
+        // (OrdersController), so a pack opened at the till and one opened from this page produce
+        // identical FEFO draw-down, expiry inheritance and ledger entries.
+        PackBreakResult result;
+        try
         {
-            looseStock = new InventoryStock
-            {
-                Id = Guid.NewGuid(),
-                ProductId = looseProduct.Id,
-                BranchId = req.BranchId,
-                Quantity = 0,
-                LastUpdated = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            };
-            db.InventoryStocks.Add(looseStock);
+            result = await packBreaks.BreakAsync(packProduct, req.BranchId, req.Packs, actingUserId);
         }
-        var looseQuantityBefore = looseStock.Quantity;
-        looseStock.Quantity += unitsProduced;
-        looseStock.LastUpdated = DateTime.UtcNow;
-        looseStock.UpdatedAt = DateTime.UtcNow;
-
-        // Each consumed pack batch hands its expiry down to a proportional new batch on the loose
-        // product — a carton expiring Friday means the eggs pulled out of it still expire Friday.
-        foreach (var c in consumed)
+        catch (InvalidOperationException ex)
         {
-            var sourceBatch = await db.InventoryBatches.FindAsync(c.BatchId);
-            db.InventoryBatches.Add(new InventoryBatch
-            {
-                Id = Guid.NewGuid(),
-                ProductId = looseProduct.Id,
-                BranchId = req.BranchId,
-                BatchNumber = c.BatchNumber is null ? null : $"{c.BatchNumber}-BRK",
-                Quantity = c.Quantity * itemsPerPack,
-                RemainingQuantity = c.Quantity * itemsPerPack,
-                PurchaseCost = c.UnitCost,
-                ExpiryDate = sourceBatch?.ExpiryDate,
-                ReceivedDate = DateTime.UtcNow,
-                Status = "active",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            });
+            return BadRequest(new { message = ex.Message });
         }
-
-        var referenceNumber = $"BRK-{Guid.NewGuid().ToString("N")[..8]}";
-        stockMovements.Record(
-            packProduct.Id, req.BranchId, warehouseId: null, movementType: "pack_break_out", quantity: -req.Packs,
-            referenceType: "PackBreak", referenceNumber: referenceNumber, notes: $"Broken into {looseProduct.Name}",
-            createdBy: actingUserId, quantityBefore: packQuantityBefore, quantityAfter: packStock.Quantity);
-        stockMovements.Record(
-            looseProduct.Id, req.BranchId, warehouseId: null, movementType: "pack_break_in", quantity: unitsProduced,
-            referenceType: "PackBreak", referenceNumber: referenceNumber, notes: $"From breaking {packProduct.Name}",
-            createdBy: actingUserId, quantityBefore: looseQuantityBefore, quantityAfter: looseStock.Quantity);
 
         await db.SaveChangesAsync();
 
@@ -806,12 +738,12 @@ public class InventoryController(
                 entityId: packProduct.Id,
                 userId: actingUserId,
                 branchId: req.BranchId,
-                notes: $"{packProduct.Name} → {looseProduct.Name}",
+                notes: $"{packProduct.Name} → {result.LooseProduct.Name}",
                 details: System.Text.Json.JsonSerializer.Serialize(new
                 {
                     PackProductId = packProduct.Id, PackProductName = packProduct.Name,
-                    LooseProductId = looseProduct.Id, LooseProductName = looseProduct.Name,
-                    req.Packs, ItemsPerPack = itemsPerPack, UnitsProduced = unitsProduced,
+                    LooseProductId = result.LooseProduct.Id, LooseProductName = result.LooseProduct.Name,
+                    req.Packs, ItemsPerPack = packProduct.ItemsPerPack ?? 1, UnitsProduced = result.UnitsProduced,
                 }),
                 severity: "info");
         }
@@ -819,8 +751,31 @@ public class InventoryController(
 
         return Ok(new
         {
-            packStock = new { productId = packProduct.Id, branchId = req.BranchId, quantity = packStock.Quantity },
-            looseStock = new { productId = looseProduct.Id, branchId = req.BranchId, quantity = looseStock.Quantity },
+            packStock = new { productId = packProduct.Id, branchId = req.BranchId, quantity = result.PackQuantityAfter },
+            looseStock = new { productId = result.LooseProduct.Id, branchId = req.BranchId, quantity = result.LooseQuantityAfter },
+        });
+    }
+
+    /// <summary>
+    /// What's actually sellable for a product at a branch, counting stock still inside unopened
+    /// packs. The raw inventory_stock row understates a loose product whenever its cartons haven't
+    /// been broken yet — 4 loose eggs next to 3 unopened dozens reads as "4 on hand", which drives
+    /// a false Low Stock alert and blocks a sale of 6 that the shelf can clearly fulfil.
+    /// </summary>
+    [HttpGet("availability/{productId:guid}")]
+    public async Task<IActionResult> GetAvailability(Guid productId, [FromQuery] Guid branchId)
+    {
+        var availability = await packBreaks.GetAvailabilityAsync(productId, branchId);
+        return Ok(new
+        {
+            productId = availability.LooseProductId,
+            branchId,
+            looseOnHand = availability.LooseOnHand,
+            totalAvailable = availability.TotalAvailable,
+            packProductId = availability.PackProduct?.Id,
+            packProductName = availability.PackProduct?.Name,
+            packOnHand = availability.PackOnHand,
+            itemsPerPack = availability.ItemsPerPack,
         });
     }
 

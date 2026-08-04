@@ -34,7 +34,7 @@ export function DataTable({ columns, rows, emptyMessage = "No records match the 
                 // so with the table's default middle vertical-align the labels visibly stagger
                 // above/below each other — the container already scrolls horizontally, so a
                 // single-line header that overflows just extends the scroll range instead.
-                <th key={c.key} className={cn("text-left font-semibold text-xs uppercase tracking-wider text-muted-foreground px-4 py-3 whitespace-nowrap", c.className)}>
+                <th key={c.key} className={cn("text-start font-semibold text-xs uppercase tracking-wider text-muted-foreground px-4 py-3 whitespace-nowrap", c.className)}>
                   {c.label}
                 </th>
               ))}

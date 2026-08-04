@@ -567,14 +567,14 @@ function Batches() {
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 border-b">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Batch #</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Location</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Supplier</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Received</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Expiry</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Qty (rem / recv)</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Batch #</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Location</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Supplier</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Received</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Expiry</th>
+                    <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Qty (rem / recv)</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -608,7 +608,7 @@ function Batches() {
                             </span>
                           ) : "—"}
                         </td>
-                        <td className="px-4 py-3 text-right font-medium">
+                        <td className="px-4 py-3 text-end font-medium">
                           {b.remainingQuantity} / {b.quantity}
                         </td>
                         <td className="px-4 py-3">
@@ -656,14 +656,14 @@ function Batches() {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/40 border-b">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recall #</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scope</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Severity</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Quarantined</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
+                        <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recall #</th>
+                        <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
+                        <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scope</th>
+                        <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason</th>
+                        <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Severity</th>
+                        <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Quarantined</th>
+                        <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                        <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -685,7 +685,7 @@ function Batches() {
                               <p className="text-muted-foreground capitalize">{r.recallType.replace(/_/g, " ")}</p>
                             </td>
                             <td className="px-4 py-3"><SeverityBadge severity={r.severity} /></td>
-                            <td className="px-4 py-3 text-right tabular-nums">{r.quantityQuarantined || "—"}</td>
+                            <td className="px-4 py-3 text-end tabular-nums">{r.quantityQuarantined || "—"}</td>
                             <td className="px-4 py-3">
                               <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase ${
                                 r.status === "open" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"

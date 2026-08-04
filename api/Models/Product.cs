@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
+using BaqalaPOS.Api.Services;
 
 namespace BaqalaPOS.Api.Models;
 
@@ -70,11 +71,31 @@ public class Product
     [Column("description")]
     public string? Description { get; set; }
 
+    // The unit this product is stocked, counted and priced in — BasePrice is always the price of
+    // ONE of these (per kilogram, per litre, per piece), exactly how a shelf-edge tag reads.
+    // Constrained to UnitOfMeasureCatalog codes and normalised on every write; it decides whether
+    // fractional quantities are legal and which UN/ECE code the ZATCA invoice line carries.
     [Required, MaxLength(50), Column("unit_of_measure")]
-    public string UnitOfMeasure { get; set; } = "piece";
+    public string UnitOfMeasure { get; set; } = UnitOfMeasureCatalog.DefaultCode;
 
+    // Derived from UnitOfMeasure on every write (ProductsController.NormalizeUnitFields) — kept as
+    // a stored column because sale, transfer, PO, report and POS paths all read it, and because
+    // pre-catalog rows set it independently. Never set it directly: it is an output of the unit,
+    // not a second input. See QuantityValidation.AllowsFractional.
     [Column("weight_based")]
     public bool WeightBased { get; set; } = false;
+
+    // Average weight/volume of one physical item, expressed in this product's own UnitOfMeasure
+    // (e.g. 0.12 for a tomato on a per-kg product). Optional, and only meaningful for a
+    // weight/volume/length product.
+    //
+    // This is what lets a weighed product ALSO be rung up by the piece — a customer asking for
+    // "3 tomatoes" instead of a weighed bag. The POS converts 3 → 0.36 kg and the sale deducts
+    // stock and prices in kg as normal, so there is still exactly one SKU and one stock pool. It
+    // is deliberately an estimate: pre-packed goods that must be counted exactly are a separate
+    // product linked via LooseUnitProductId, not this.
+    [Column("estimated_unit_weight")]
+    public decimal? EstimatedUnitWeight { get; set; }
 
     // How this product is sold (FRD §12 Pack & Unit pricing).
     //   single — one item is one sellable unit (the default, and every pre-existing product).
@@ -234,6 +255,42 @@ public class ProductPriceList
     // Navigation
     public Product? Product { get; set; }
     public Branch? Branch { get; set; }
+}
+
+/// <summary>
+/// An explicit "these two products are interchangeable" link, so a cashier facing an out-of-stock
+/// item can offer the same goods in another brand (the FRD's brand-substitution ask).
+///
+/// Explicit rather than inferred: brand alone does not identify substitutes (every product of a
+/// brand is not interchangeable with every other), and name/category matching is unreliable in
+/// both directions — "Milk 1L" vs "Full Cream Milk 1 Liter" will not fuzzy-match, while
+/// "Milk 1L" vs "Milk 2L" wrongly will. A wrong suggestion at the till is worse than no
+/// suggestion, so the catalogue owner states the link, matching how LooseUnitProductId is also an
+/// explicit pointer rather than a guess.
+///
+/// Stored symmetrically — the controller writes both directions of a pair — so a substitute is
+/// found from whichever side happens to run out.
+/// </summary>
+[Table("product_substitutes")]
+public class ProductSubstitute
+{
+    [Key, Column("id")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required, Column("product_id")]
+    public Guid ProductId { get; set; }
+
+    [Required, Column("substitute_product_id")]
+    public Guid SubstituteProductId { get; set; }
+
+    [Column("created_by")]
+    public Guid? CreatedBy { get; set; }
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    [JsonIgnore] public Product? Product { get; set; }
+    public Product? SubstituteProduct { get; set; }
 }
 
 [Table("product_variants")]

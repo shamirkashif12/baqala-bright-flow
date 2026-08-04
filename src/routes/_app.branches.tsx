@@ -156,7 +156,7 @@ function ViewSheet({ branch, stats, onClose, onEdit }: {
           ] as [string, string][]).map(([l, v]) => (
             <div key={l} className="flex justify-between border-b border-border/40 pb-2">
               <span className="text-muted-foreground text-xs">{l}</span>
-              <span className="font-medium text-xs text-right max-w-[200px]">{v}</span>
+              <span className="font-medium text-xs text-end max-w-[200px]">{v}</span>
             </div>
           ))}
         </div>

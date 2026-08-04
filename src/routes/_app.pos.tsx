@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useMemo, useRef, useEffect, useCallback, type ReactNode } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,12 @@ import {
   Plus, Minus, Trash2, CreditCard, Banknote, Split,
   Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode,
   Building2, PrinterCheck, RefreshCw, AlertCircle, ImageOff, ClipboardCheck,
+  Hash, PackageOpen,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getUsbPrinter, type Product, type Category, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram } from "@/lib/api";
+import { api, getUsbPrinter, type Product, type Category, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram, type PackBreakSuggestion } from "@/lib/api";
+import { DEFAULT_UNIT, isFractional, minQty, normalizeQty, qtyFromUnitCount, qtyStep, supportsCountEntry, unitSpec, unitSymbol } from "@/lib/units";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
@@ -134,6 +136,71 @@ type InvoiceSnapshot = {
   // branch. Falls back to a locally-built Phase-1-style QR when absent.
   zatcaQrCode?: string;
 };
+
+// ─── By-the-piece entry for a weighed product ─────────────────────────────────
+//
+// A customer asks for "3 tomatoes" rather than a weighed bag. Rather than duplicating the product
+// into a second "sold by piece" SKU — which would split its stock into two pools that have to be
+// reconciled against one physical pile — the count is multiplied by the product's average unit
+// weight and the line stays denominated in kg, priced per kg. The estimate is deliberately
+// approximate, exactly as a scale reading would be; products that must be counted exactly are
+// pre-packed goods, which are a genuinely separate product linked via looseUnitProductId.
+function CountEntryDialog({ entry, onClose, onConfirm }: {
+  entry: { product: Product; sku: string } | null;
+  onClose: () => void;
+  onConfirm: (sku: string, qty: number) => void;
+}) {
+  const [count, setCount] = useState("1");
+  useEffect(() => { if (entry) setCount("1"); }, [entry]);
+
+  if (!entry) return null;
+  const { product } = entry;
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const qty = qtyFromUnitCount(product, n);
+  const sym = unitSymbol(product.unitOfMeasure);
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Hash className="h-4 w-4 text-primary" />
+            Enter by the piece
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            {product.name} — about{" "}
+            <span className="font-semibold text-foreground tabular-nums">{product.estimatedUnitWeight} {sym}</span> each.
+          </p>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">How many pieces?</Label>
+            <Input
+              type="number" min={1} step={1} autoFocus value={count}
+              onChange={(e) => setCount(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => { if (e.key === "Enter" && qty) onConfirm(entry.sku, qty); }}
+              className="h-10 text-center text-lg font-semibold tabular-nums"
+            />
+          </div>
+          <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+            Rings up as <span className="font-semibold tabular-nums">{qty ?? 0} {sym}</span>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            className="gradient-primary text-primary-foreground border-0"
+            disabled={!qty || n < 1}
+            onClick={() => qty && onConfirm(entry.sku, qty)}
+          >
+            Set quantity
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ─── Quick Stock In Dialog ────────────────────────────────────────────────────
 function QuickStockInDialog({ open, onClose, products, stockMap, cartQtyBySku, branchId, allowNegativeStock, initialProduct, onStockAdded }: {
@@ -299,7 +366,7 @@ function QuickStockInDialog({ open, onClose, products, stockMap, cartQtyBySku, b
                   className="w-[--radix-popover-trigger-width] p-0 max-h-72 overflow-y-auto overscroll-contain rounded-lg shadow-lg"
                 >
                   {results.map(p => (
-                    <button key={p.id} className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted text-sm text-left gap-3"
+                    <button key={p.id} className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted text-sm text-start gap-3"
                       onMouseDown={e => { e.preventDefault(); setSelected(p); setQuery(p.name); }}>
                       <div className="min-w-0">
                         <p className="font-medium truncate">{p.name}</p>
@@ -680,6 +747,49 @@ function POS() {
   const [flashSku, setFlashSku] = useState<string | null>(null);
   const [scanFlash, setScanFlash] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // ─── Pack-aware availability ──────────────────────────────────────────────────
+  // 4 loose eggs sitting beside 3 unopened dozens is 40 sellable, not 4. The raw stock row only
+  // ever counts what's already loose, so without this the till refuses a sale of 6 that the shelf
+  // can obviously fulfil, and shows "Out of stock" on an item that's physically stacked up behind
+  // the counter. Mirrors the server's PackBreakService.GetAvailabilityAsync — checkout applies the
+  // same arithmetic authoritatively, this just stops the UI blocking the sale before it gets there.
+  const packParentByLooseId = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products) {
+      if (p.saleUnitType === "pack" && p.looseUnitProductId && p.status !== "discontinued") {
+        m.set(p.looseUnitProductId, p);
+      }
+    }
+    return m;
+  }, [products]);
+
+  // Pack-break confirmation, raised from checkout when the server reports a shortfall that opening
+  // cartons would cover. Promise-based so handleCharge can simply await the cashier's answer
+  // mid-flight and retry, instead of unwinding and losing the whole payment context.
+  const [packBreakPrompt, setPackBreakPrompt] = useState<
+    { suggestion: PackBreakSuggestion; resolve: (ok: boolean) => void } | null
+  >(null);
+  const confirmPackBreak = (suggestion: PackBreakSuggestion) =>
+    new Promise<boolean>((resolve) => setPackBreakPrompt({ suggestion, resolve }));
+  const answerPackBreak = (ok: boolean) => {
+    packBreakPrompt?.resolve(ok);
+    setPackBreakPrompt(null);
+  };
+
+  // "3 tomatoes" instead of a weighed bag — see the Hash button on measured cart lines.
+  const [countEntryFor, setCountEntryFor] = useState<{ product: Product; sku: string } | null>(null);
+
+  /** Units reachable at this branch: already loose, plus what unopened packs would yield. */
+  const sellableStock = React.useCallback((productId: string) => {
+    const loose = stockMap.get(productId) ?? 0;
+    const pack = packParentByLooseId.get(productId);
+    if (!pack) return loose;
+    // Negative pack stock (a branch that allows overselling) must not subtract from what's
+    // reachable — a debt on the pack row doesn't make loose units disappear.
+    const packOnHand = Math.max(0, stockMap.get(pack.id) ?? 0);
+    return loose + packOnHand * (pack.itemsPerPack && pack.itemsPerPack > 0 ? pack.itemsPerPack : 1);
+  }, [stockMap, packParentByLooseId]);
 
   const pausedOrdersRef = useRef<HTMLDivElement>(null);
 
@@ -1654,20 +1764,21 @@ function POS() {
   const total = Math.max(0, taxable) + vatAmount + customFeeTotal;
 
   // ─── Cart ops ─────────────────────────────────────────────────────────────────
-  // Weight-based lines (kg, liter, etc.) sell in fractional amounts — a cashier types the exact
-  // weight rather than stepping by whole units. Mirrors the 0.001 granularity Stocks/Inventory/
-  // Purchase Orders already use for these products.
-  const WEIGHT_STEP = 0.001;
-  const minQtyFor = (weightBased: boolean) => (weightBased ? WEIGHT_STEP : 1);
-  const floorQtyFor = (weightBased: boolean, qty: number) => (weightBased ? qty : Math.floor(qty));
+  // Measured lines (kg, litre, metre) sell in fractional amounts — a cashier types the exact
+  // weight rather than stepping by whole units. The granularity now comes from the product's own
+  // unit (see lib/units) instead of a single hardcoded 0.001-kg assumption, so a litre-dispensed
+  // drink steps by 1 ml and a metre of cable by 1 cm.
+  const unitOf = (productId: string) =>
+    products.find((p) => p.id === productId) ?? { unitOfMeasure: DEFAULT_UNIT, weightBased: false };
+  const minQtyForProduct = (productId: string) => minQty(unitOf(productId));
+  const clampQtyForProduct = (productId: string, qty: number) => normalizeQty(unitOf(productId), qty);
 
   const updateQty = (sku: string, d: number) => {
     let blockedByStock = false;
     setCart((c) => c.map((i) => {
       if (i.sku !== sku) return i;
       const prod = products.find((p) => p.id === i.productId);
-      const weightBased = prod?.weightBased ?? false;
-      const next = Math.max(minQtyFor(weightBased), i.qty + d);
+      const next = Math.max(minQtyForProduct(i.productId), clampQtyForProduct(i.productId, i.qty + d));
       // A branch with AllowNegativeStock on can still ring up more than what's on record — the
       // shortfall becomes negative on-hand stock at checkout (OrdersController), same as scanning
       // a never-stocked item does. Only the branches that opted out of that still hard-block here.
@@ -1693,13 +1804,13 @@ function POS() {
     setCart((c) => c.map((i) => {
       if (i.sku !== sku) return i;
       const prod = products.find((p) => p.id === i.productId);
-      const weightBased = prod?.weightBased ?? false;
-      let next = Math.max(minQtyFor(weightBased), floorQtyFor(weightBased, newQty) || minQtyFor(weightBased));
+      const floor = minQtyForProduct(i.productId);
+      let next = Math.max(floor, clampQtyForProduct(i.productId, newQty) || floor);
       // Clamp down to available stock, but never below the minimum — a shortfall/negative-stock
       // item (see QuickStockInDialog's "Sell Anyway", stock recorded as 0) still has to stay
       // sellable at its pinned minimum qty, same as the +/- stepper already enforces. Branches
       // with AllowNegativeStock on skip the clamp entirely, same as updateQty above.
-      if (next > i.stock && !posPerms.allowNegativeStock) { blockedByStock = true; next = Math.max(minQtyFor(weightBased), i.stock); }
+      if (next > i.stock && !posPerms.allowNegativeStock) { blockedByStock = true; next = Math.max(floor, i.stock); }
       return { ...i, qty: next, price: prod ? priceForQty(prod, next) : i.price };
     }));
     if (blockedByStock) {
@@ -1733,7 +1844,9 @@ function POS() {
         { severity: "error", entityType: "Product", entityId: p.id });
       return;
     }
-    const stock = stockMap.get(p.id) ?? 0;
+    // Counts units still inside unopened packs — checkout breaks one open (with the cashier's
+    // confirmation) rather than failing a sale the shelf can fulfil.
+    const stock = sellableStock(p.id);
     const existing = cart.find((i) => i.sku === p.sku);
     const nextQty = (existing?.qty ?? 0) + 1;
     if (nextQty > stock) {
@@ -1745,6 +1858,9 @@ function POS() {
         if (stock === 0) {
           api.notify("Inventory", "Out of Stock", "Out of Stock", `Out of stock: ${p.name}`,
             { severity: "error", entityType: "Product", entityId: p.id });
+          // Out of stock is exactly when a substitute is worth offering — the cashier can swap
+          // brands instead of turning the customer away.
+          void offerSubstitutes(p);
         }
         return;
       }
@@ -1761,7 +1877,7 @@ function POS() {
     setCart((c) => {
       const ex = c.find((i) => i.sku === p.sku);
       // Re-price on quantity change — see priceForQty: a pack price unlocks at its pack size.
-      if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1, price: priceForQty(p, i.qty + 1) } : i));
+      if (ex) return c.map((i) => (i.sku === p.sku ? { ...i, qty: i.qty + 1, price: priceForQty(p, i.qty + 1), stock } : i));
       return [...c, { name: p.name, sku: p.sku, productId: p.id, qty: 1, price: priceForQty(p, 1), stock }];
     });
     setFlashSku(p.sku);
@@ -1805,20 +1921,66 @@ function POS() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, products, stockMap, categoryId, subcategoryId, categories, brandFilter, brandFilterActive]);
 
-  // "We don't have Brand X, here's Brand Y" — up to 3 in-stock products in the same category,
-  // a different brand preferred first (that's the actual substitution ask), then ranked by
-  // closest price to the item the cashier couldn't sell.
+  // Explicit substitute links, loaded lazily per product the cashier actually runs out of — the
+  // catalogue can be large and most products are never asked for while empty.
+  const [substitutesByProduct, setSubstitutesByProduct] = useState<Map<string, string[]>>(new Map());
+  // Tracked in a ref, not derived from the state map, so this callback's identity stays stable —
+  // otherwise the effect below re-fires on every load it performs and churns until it settles.
+  const substitutesRequestedRef = useRef<Set<string>>(new Set());
+  const offerSubstitutes = React.useCallback(async (p: Product) => {
+    if (substitutesRequestedRef.current.has(p.id)) return;
+    substitutesRequestedRef.current.add(p.id);
+    try {
+      const subs = await api.getProductSubstitutes(p.id, branchId || undefined);
+      setSubstitutesByProduct((m) => new Map(m).set(p.id, subs.map((s) => s.id)));
+    } catch {
+      // A failed lookup must never block the sale flow — the same-category fallback still applies.
+      setSubstitutesByProduct((m) => new Map(m).set(p.id, []));
+    }
+  }, [branchId]);
+
+  // Load substitute links for anything the cashier can currently see is unsellable. This has to
+  // run off the search results rather than off addToCart: a blocked row routes a tap to Quick
+  // Stock In and never reaches addToCart, so waiting for that call would mean the explicit links
+  // never load and the suggestion silently degraded to the same-category guess.
+  useEffect(() => {
+    for (const p of matches) {
+      if (sellableStock(p.id) <= 0 || expiredProductIds.has(p.id)) void offerSubstitutes(p);
+    }
+  }, [matches, sellableStock, expiredProductIds, offerSubstitutes]);
+
+  // "We don't have Brand X, here's Brand Y" — up to 3 in-stock alternatives.
+  //
+  // Explicitly-linked substitutes (Inventory → edit product → Substitutes) come first and are
+  // shown regardless of category, because someone deliberately said these two are interchangeable.
+  // Same-category items are the fallback heuristic for products nobody has linked yet: better than
+  // nothing, but a guess, so it never outranks a stated link.
   const alternativesFor = (p: Product) => {
-    if (!p.categoryId) return [];
-    return products
-      .filter((alt) => alt.id !== p.id && alt.status === "active" && alt.categoryId === p.categoryId && (stockMap.get(alt.id) ?? 0) > 0)
-      .sort((a, b) => {
-        const aDifferentBrand = a.brand && a.brand !== p.brand ? 0 : 1;
-        const bDifferentBrand = b.brand && b.brand !== p.brand ? 0 : 1;
-        if (aDifferentBrand !== bDifferentBrand) return aDifferentBrand - bDifferentBrand;
-        return Math.abs(effectivePrice(a) - effectivePrice(p)) - Math.abs(effectivePrice(b) - effectivePrice(p));
-      })
-      .slice(0, 3);
+    const linkedIds = new Set(substitutesByProduct.get(p.id) ?? []);
+    const inStock = (alt: Product) => sellableStock(alt.id) > 0;
+    const byClosestPrice = (a: Product, b: Product) =>
+      Math.abs(effectivePrice(a) - effectivePrice(p)) - Math.abs(effectivePrice(b) - effectivePrice(p));
+
+    const linked = products
+      .filter((alt) => linkedIds.has(alt.id) && alt.status === "active" && inStock(alt))
+      .sort(byClosestPrice);
+
+    const sameCategory = p.categoryId
+      ? products
+          .filter((alt) =>
+            alt.id !== p.id && !linkedIds.has(alt.id) &&
+            alt.status === "active" && alt.categoryId === p.categoryId && inStock(alt))
+          .sort((a, b) => {
+            // A different brand IS the substitution ask — same-brand items are near-duplicates
+            // of what the customer already couldn't have.
+            const aDifferentBrand = a.brand && a.brand !== p.brand ? 0 : 1;
+            const bDifferentBrand = b.brand && b.brand !== p.brand ? 0 : 1;
+            if (aDifferentBrand !== bDifferentBrand) return aDifferentBrand - bDifferentBrand;
+            return byClosestPrice(a, b);
+          })
+      : [];
+
+    return [...linked, ...sameCategory].slice(0, 3);
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -2124,7 +2286,7 @@ function POS() {
 
     if (!checkoutRequestIdRef.current) checkoutRequestIdRef.current = uuid();
 
-    const order: Order = await api.createOrder({
+    const orderPayload = {
       source: "pos",
       branchId: branch.id,
       customerId: customer?.id,
@@ -2164,7 +2326,23 @@ function POS() {
       }),
       payments,
       clientRequestId: checkoutRequestIdRef.current,
-    });
+    };
+
+    // Selling loose units off a shelf that only has unopened packs left: the server refuses to
+    // break a carton silently (it's a physical act someone has to actually perform) and instead
+    // hands back exactly what needs opening. Ask, then retry with permission. The same
+    // clientRequestId is reused, so if the first attempt did somehow land, the retry is
+    // deduplicated into the existing order rather than charging twice.
+    let order: Order;
+    try {
+      order = await api.createOrder(orderPayload);
+    } catch (e) {
+      const suggestion = (e as { body?: { packBreakSuggestion?: PackBreakSuggestion } }).body?.packBreakSuggestion;
+      if (!suggestion) throw e;
+      const confirmed = await confirmPackBreak(suggestion);
+      if (!confirmed) throw new Error("Sale cancelled — no pack was opened.");
+      order = await api.createOrder(orderPayload, true);
+    }
 
     // Sale confirmed — free the id so the next, genuinely new sale gets its own.
     checkoutRequestIdRef.current = null;
@@ -2348,7 +2526,11 @@ function POS() {
             {!loading && (showResults || categoryFilterActive || brandFilterActive) && matches.length > 0 && (
               <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden max-h-[420px] overflow-y-auto">
                 {matches.map((p) => {
-                  const stock = stockMap.get(p.id);
+                  // Pack-aware, same as addToCart and as checkout: a loose product with unopened
+                  // cartons behind it is NOT out of stock. Reading the raw row here would grey the
+                  // row out and route a tap to Quick Stock In, contradicting the sale path — which
+                  // would happily sell it by breaking a carton open.
+                  const stock = stockMap.has(p.id) ? sellableStock(p.id) : undefined;
                   const outOfStock = stock !== undefined && stock <= 0;
                   const expired = expiredProductIds.has(p.id);
                   const blocked = outOfStock || expired;
@@ -2367,7 +2549,7 @@ function POS() {
                           }
                           addToCart(p);
                         }}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 text-left ${
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 text-start ${
                           blocked ? "opacity-70 hover:bg-destructive/5 cursor-pointer" : "hover:bg-muted/60"
                         }`}
                       >
@@ -2394,7 +2576,7 @@ function POS() {
                             <Package className="h-2.5 w-2.5 inline mr-0.5" />{outOfStock ? "Out of stock · Tap to Stock In" : stock}
                           </span>
                         )}
-                        <span className="font-bold text-primary tabular-nums w-20 text-right">
+                        <span className="font-bold text-primary tabular-nums w-20 text-end">
                           <SARIcon />{effectivePrice(p).toFixed(2)}
                         </span>
                       </button>
@@ -2464,7 +2646,7 @@ function POS() {
                     key={item.sku}
                     className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${flashSku === item.sku ? "bg-primary/10" : "hover:bg-muted/30"}`}
                   >
-                    <span className="text-xs text-muted-foreground tabular-nums w-6 text-right">{idx + 1}.</span>
+                    <span className="text-xs text-muted-foreground tabular-nums w-6 text-end">{idx + 1}.</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate flex items-center gap-1.5">
                         {item.name}
@@ -2474,26 +2656,53 @@ function POS() {
                           </span>
                         )}
                       </p>
-                      <p className="text-[11px] text-muted-foreground">SKU {item.sku} · <SARIcon />{item.price.toFixed(2)}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        SKU {item.sku} · <SARIcon />{item.price.toFixed(2)}
+                        {(() => {
+                          const prod = products.find((p) => p.id === item.productId);
+                          // "per kg" / "per L" makes it unambiguous that the price above is a rate,
+                          // not the price of the bag in front of the customer.
+                          return prod && isFractional(prod) ? ` / ${unitSymbol(prod.unitOfMeasure)}` : "";
+                        })()}
+                      </p>
                     </div>
                     {item.isBonusOnly ? (
                       <span className="text-xs font-semibold text-success px-2">Auto-added</span>
                     ) : (() => {
-                      const weightBased = products.find((p) => p.id === item.productId)?.weightBased ?? false;
-                      // Weight-based lines (kg/liter) are typed exactly (from a scale, or a known
-                      // amount) rather than stepped one gram at a time, so the +/- buttons are
-                      // dropped in favor of a wider, decimal-precision input.
-                      return weightBased ? (
-                        <Input
-                          type="number"
-                          min={WEIGHT_STEP}
-                          max={item.stock}
-                          step={WEIGHT_STEP}
-                          value={Number(item.qty.toFixed(3))}
-                          onChange={(e) => setQtyAbsolute(item.sku, parseFloat(e.target.value) || WEIGHT_STEP)}
-                          onFocus={(e) => e.target.select()}
-                          className="w-20 h-7 px-1 text-center text-sm font-semibold tabular-nums bg-muted rounded-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
+                      const prod = products.find((p) => p.id === item.productId);
+                      const measured = prod ? isFractional(prod) : false;
+                      const step = prod ? qtyStep(prod) : 1;
+                      // Measured lines (kg/L/m) are typed exactly — from a scale, or a known
+                      // amount — rather than stepped one gram at a time, so the +/- buttons are
+                      // dropped in favour of a wider, decimal-precision input.
+                      return measured && prod ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min={step}
+                            max={item.stock}
+                            step={step}
+                            value={Number(item.qty.toFixed(unitSpec(prod.unitOfMeasure).decimalPlaces))}
+                            onChange={(e) => setQtyAbsolute(item.sku, parseFloat(e.target.value) || step)}
+                            onFocus={(e) => e.target.select()}
+                            className="w-20 h-7 px-1 text-center text-sm font-semibold tabular-nums bg-muted rounded-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <span className="text-[10px] text-muted-foreground w-5">{unitSymbol(prod.unitOfMeasure)}</span>
+                          {/* By-the-piece entry for a weighed product with an average unit weight
+                              configured — a customer asking for "3 tomatoes" rather than a weighed
+                              bag. Converts to the product's own unit, so there is still one SKU and
+                              one stock pool; the estimate is accepted as approximate, same as a
+                              scale reading would be. */}
+                          {supportsCountEntry(prod) && (
+                            <Button
+                              variant="ghost" size="icon" className="h-7 w-7 shrink-0"
+                              title={`Enter by the piece (≈${prod.estimatedUnitWeight} ${unitSymbol(prod.unitOfMeasure)} each)`}
+                              onClick={() => setCountEntryFor({ product: prod, sku: item.sku })}
+                            >
+                              <Hash className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
                       ) : (
                         <div className="flex items-center gap-1 bg-muted rounded-lg">
                           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateQty(item.sku, -1)}>
@@ -2521,7 +2730,7 @@ function POS() {
                         </div>
                       );
                     })()}
-                    <span className="text-sm font-semibold tabular-nums w-20 text-right">
+                    <span className="text-sm font-semibold tabular-nums w-20 text-end">
                       <SARIcon />{(item.qty * item.price).toFixed(2)}
                     </span>
                     {!item.isBonusOnly && (
@@ -2573,7 +2782,7 @@ function POS() {
                       </p>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right">
+                      <div className="text-end">
                         <p className="text-sm font-bold tabular-nums"><SARIcon />{h.total.toFixed(2)}</p>
                         <p className="text-[11px] text-muted-foreground">{h.items.length} item{h.items.length !== 1 ? "s" : ""}</p>
                       </div>
@@ -2652,7 +2861,7 @@ function POS() {
                 </p>
                 {customerMatches.map((c) => (
                   <button key={c.id} onClick={() => selectCustomer(c)}
-                    className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-muted/50">
+                    className="w-full flex items-center justify-between px-3 py-2 text-start hover:bg-muted/50">
                     <span className="text-xs font-medium truncate">{c.fullName}</span>
                     <span className="text-[10px] text-muted-foreground shrink-0 ml-2">{c.phone}</span>
                   </button>
@@ -3307,6 +3516,54 @@ function POS() {
           setStockInOpen(false);
           setStockInInitialProduct(null);
         }}
+      />
+
+      {/* Break open a carton to finish the sale. Raised from checkout, mid-payment — declining
+          leaves every carton sealed and the sale uncharged. */}
+      <Dialog open={!!packBreakPrompt} onOpenChange={(v) => { if (!v) answerPackBreak(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PackageOpen className="h-4 w-4 text-primary" />
+              Open a pack to complete this sale?
+            </DialogTitle>
+          </DialogHeader>
+          {packBreakPrompt && (
+            <div className="space-y-3 text-sm">
+              <p>
+                Only <span className="font-semibold tabular-nums">{packBreakPrompt.suggestion.looseOnHand}</span> loose{" "}
+                <span className="font-semibold">{packBreakPrompt.suggestion.productName}</span> left, which isn't enough
+                for this sale.
+              </p>
+              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5">
+                <p className="font-semibold">
+                  Open {packBreakPrompt.suggestion.packsNeeded} × {packBreakPrompt.suggestion.packProductName}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Adds {packBreakPrompt.suggestion.packsNeeded * packBreakPrompt.suggestion.itemsPerPack} loose units
+                  ({packBreakPrompt.suggestion.itemsPerPack} per pack). Any expiry date on the pack carries over.
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Physically open the pack before confirming — stock is recorded as opened either way.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => answerPackBreak(false)}>Cancel sale</Button>
+            <Button className="gradient-primary text-primary-foreground border-0" onClick={() => answerPackBreak(true)}>
+              Open &amp; complete sale
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* By-the-piece entry for a weighed product — "3 tomatoes" converted to kg via the product's
+          average unit weight, so there is still one SKU and one stock pool. */}
+      <CountEntryDialog
+        entry={countEntryFor}
+        onClose={() => setCountEntryFor(null)}
+        onConfirm={(sku, qty) => { setQtyAbsolute(sku, qty); setCountEntryFor(null); }}
       />
 
       {needsCheckIn && (
