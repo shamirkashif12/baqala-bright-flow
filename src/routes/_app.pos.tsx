@@ -1949,38 +1949,26 @@ function POS() {
     }
   }, [matches, sellableStock, expiredProductIds, offerSubstitutes]);
 
-  // "We don't have Brand X, here's Brand Y" — up to 3 in-stock alternatives.
+  // "We don't have Brand X, here's Brand Y" — the in-stock alternatives for an item the cashier
+  // can't sell.
   //
-  // Explicitly-linked substitutes (Inventory → edit product → Substitutes) come first and are
-  // shown regardless of category, because someone deliberately said these two are interchangeable.
-  // Same-category items are the fallback heuristic for products nobody has linked yet: better than
-  // nothing, but a guess, so it never outranks a stated link.
+  // ONLY products explicitly linked on the product itself (Inventory → edit product →
+  // Substitutes). This deliberately replaced an older "any in-stock product in the same category"
+  // heuristic, which was a guess that routinely suggested things that are not interchangeable at
+  // all — a 2L bottle for a 1L one, yoghurt for milk — because sharing a category does not make
+  // two products substitutes. A wrong suggestion at the till is worse than none: the cashier acts
+  // on it in front of the customer. So the catalogue owner states the link, and nothing else is
+  // inferred. No links configured means no suggestions, which is the honest answer.
   const alternativesFor = (p: Product) => {
     const linkedIds = new Set(substitutesByProduct.get(p.id) ?? []);
-    const inStock = (alt: Product) => sellableStock(alt.id) > 0;
-    const byClosestPrice = (a: Product, b: Product) =>
-      Math.abs(effectivePrice(a) - effectivePrice(p)) - Math.abs(effectivePrice(b) - effectivePrice(p));
-
-    const linked = products
-      .filter((alt) => linkedIds.has(alt.id) && alt.status === "active" && inStock(alt))
-      .sort(byClosestPrice);
-
-    const sameCategory = p.categoryId
-      ? products
-          .filter((alt) =>
-            alt.id !== p.id && !linkedIds.has(alt.id) &&
-            alt.status === "active" && alt.categoryId === p.categoryId && inStock(alt))
-          .sort((a, b) => {
-            // A different brand IS the substitution ask — same-brand items are near-duplicates
-            // of what the customer already couldn't have.
-            const aDifferentBrand = a.brand && a.brand !== p.brand ? 0 : 1;
-            const bDifferentBrand = b.brand && b.brand !== p.brand ? 0 : 1;
-            if (aDifferentBrand !== bDifferentBrand) return aDifferentBrand - bDifferentBrand;
-            return byClosestPrice(a, b);
-          })
-      : [];
-
-    return [...linked, ...sameCategory].slice(0, 3);
+    if (linkedIds.size === 0) return [];
+    return products
+      .filter((alt) =>
+        linkedIds.has(alt.id) && alt.status === "active" && sellableStock(alt.id) > 0)
+      // Closest price first — the nearest like-for-like swap is the easiest sell.
+      .sort((a, b) =>
+        Math.abs(effectivePrice(a) - effectivePrice(p)) - Math.abs(effectivePrice(b) - effectivePrice(p)))
+      .slice(0, 3);
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
