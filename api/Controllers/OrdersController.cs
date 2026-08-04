@@ -985,6 +985,10 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 Id = Guid.NewGuid(),
                 OrderId = order.Id,
                 BranchId = order.BranchId,
+                // Matches DataSeeder's convention (InvoiceNumber = $"INV-{order.OrderNumber}") — left
+                // unset here, every real-checkout invoice fell back to displaying the row's raw GUID
+                // prefix (e.g. "ca8bf511") on the ZATCA Invoices page instead of a readable number.
+                InvoiceNumber = $"INV-{order.OrderNumber}",
                 InvoiceType = "simplified", // POS sales are always B2C — no buyer VAT captured on Customer
                 IssueDate = order.CreatedAt,
                 TotalAmount = order.TotalAmount,
