@@ -12,13 +12,13 @@ export function BaqalaLogo({ className, showText = true }: { className?: string;
             className="h-8 w-auto object-contain"
             loading="eager"
           />
-          <span className="text-[10px] uppercase tracking-[0.18em] opacity-60 mt-1.5 pl-0.5">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sidebar-primary/80 mt-1 pl-0.5">
             Mart ECR · KSA
           </span>
         </div>
       ) : (
-        <div className="h-9 w-9 rounded-lg bg-white flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
-          <img src={mimonyLogo} alt="MI Money" className="h-7 w-auto object-contain" />
+        <div className="h-7 w-10 rounded-md bg-white flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+          <img src={mimonyLogo} alt="MI Money" className="h-full w-full object-cover object-left" />
         </div>
       )}
     </div>

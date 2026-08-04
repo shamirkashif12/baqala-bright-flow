@@ -94,6 +94,12 @@ public class TenantPlanService(BaqalaDbContext db) : ITenantPlanService
         plan.SubscriptionId = req.SubscriptionId;
         ApplyCommon(plan, req.PlanName, req.Category, req.EnabledModules, req.Limits, req.Status);
         plan.LastEventId = req.EventId;
+        // A real entitlements-update event proves this business is an active, existing client —
+        // e.g. this instance's tenant never went through /pos/users/provision (seeded with plan
+        // data directly instead) and would otherwise stay "provisioned: false" forever, which
+        // makes the frontend ignore every field this method just set (see resolvePlans in
+        // src/routes/_app.plans.tsx) and silently fall back to a hardcoded default plan.
+        plan.ProvisionedAt ??= DateTime.UtcNow;
         plan.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return plan;

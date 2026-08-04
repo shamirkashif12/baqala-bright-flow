@@ -17,6 +17,7 @@ import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge } from "@/components/batch-status-badge";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { useCompanyHeader } from "@/lib/use-company-header";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
 // Per-branch picking strategy — mirrors BatchConsumptionService.StrategySettingKey on the backend.
 // Absent/unrecognised means FEFO (the grocery-safe default), matching the service's Normalize().
@@ -153,7 +154,7 @@ function BatchDetailSheet({ batch, branches, warehouses, onClose }: {
             <div><p className="text-xs text-muted-foreground">Supplier</p><p className="font-medium">{batch.supplier?.name ?? "—"}</p></div>
             <div><p className="text-xs text-muted-foreground">Received</p><p className="font-medium">{fmtDate(batch.receivedDate)}</p></div>
             <div><p className="text-xs text-muted-foreground">Expiry</p><p className="font-medium">{fmtDate(batch.expiryDate)}</p></div>
-            <div><p className="text-xs text-muted-foreground">Purchase Cost</p><p className="font-medium">{batch.purchaseCost != null ? `﷼${batch.purchaseCost.toFixed(2)}` : "—"}</p></div>
+            <div><p className="text-xs text-muted-foreground">Purchase Cost</p><p className="font-medium">{batch.purchaseCost != null ? <><SARIcon />{fmtSAR(batch.purchaseCost)}</> : "—"}</p></div>
             <div><p className="text-xs text-muted-foreground">Qty (remaining / received)</p><p className="font-medium">{batch.remainingQuantity} / {batch.quantity}</p></div>
             <div><p className="text-xs text-muted-foreground">Status</p><BatchStatusBadge status={batch.status} /></div>
           </div>

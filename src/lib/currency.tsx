@@ -4,22 +4,13 @@ import React from "react";
 export function SARIcon({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 28 26"
+      viewBox="0 0 100 111.11"
       fill="currentColor"
       className={className ?? "inline-block h-[0.85em] w-auto align-[-0.05em] mx-[0.1em]"}
       aria-label="SAR"
       xmlns="http://www.w3.org/2000/svg"
     >
-      {/* Left vertical stroke with Arabic-style curved base */}
-      <path d="M4.5 1 L3.5 15 Q3 19.5 7 20 L11 20 L11 18.5 L7.5 18.5 Q5.5 18.2 5.5 15.5 L6.5 1 Z" />
-      {/* Right vertical stroke */}
-      <path d="M10.5 1 L9.5 18.5 L11 18.5 L12 1 Z" />
-      {/* Top diagonal bar */}
-      <path d="M3 9 L26 3 L26 4.8 L3 10.8 Z" />
-      {/* Middle diagonal bar */}
-      <path d="M3 12.5 L26 6.5 L26 8.3 L3 14.3 Z" />
-      {/* Bottom diagonal bar */}
-      <path d="M6 16 L26 10 L26 11.8 L6 17.8 Z" />
+      <path d="M 100 66.16 L 97.22 80.3 L 60.61 87.88 L 58.59 63.89 L 50 64.9 L 47.22 84.6 L 38.38 94.44 L 0 102.78 L 4.29 89.14 L 33.84 81.82 L 35.35 68.94 L 7.32 74.75 L 5.56 66.67 L 9.6 61.11 L 34.85 56.06 L 35.35 42.93 L 36.11 8.08 L 47.22 0 L 47.22 50 L 54.29 52.02 L 58.59 49.75 L 57.32 16.41 L 70.71 6.06 L 70.45 47.22 L 99.24 41.41 L 100 47.98 L 96.21 55.56 L 70.45 60.61 L 70.45 69.95 Z M 99.24 94.44 L 97.47 102.53 L 78.79 108.59 L 58.59 111.11 L 58.59 107.32 L 62.63 96.97 L 95.96 88.89 Z" />
     </svg>
   );
 }
