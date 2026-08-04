@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Building2, Users, ScanBarcode, Activity,
   WifiOff, RefreshCw, AlertTriangle, Search, ArrowRight, Zap,
-  LogIn, LogOut, Eye, Radio, Sparkles, ShieldCheck, Loader2,
+  LogIn, LogOut, Eye, ShieldCheck, Loader2,
   Clock, CheckCircle2, XCircle, ToggleLeft, ToggleRight, UserCheck,
 } from "lucide-react";
 import { api, type Branch, type Terminal, type User, type CashierShift } from "@/lib/api";
@@ -139,14 +139,13 @@ function ControlTower() {
     unassignedTerminals: terminals.filter(t => !t.assignedCashierId).length,
   }), [branches, terminals, activeShifts]);
 
-  const ALL_CARDS = ["Active Branches", "Active Terminals", "Staff on Shift", "Alerts", "Unassigned Terminals"];
+  const ALL_CARDS = ["Active Branches", "Active Terminals", "Staff on Shift", "Unassigned Terminals"];
   const cards = useCustomizableCards("baqala_control_tower_cards", ALL_CARDS);
 
   const cardMap: Record<string, ReactElement> = {
     "Active Branches":  <MetricCard label="Active Branches"  value={String(totals.activeBranches)}  icon={Building2}  accent="primary"     editing={cards.editing} onRemove={() => cards.remove("Active Branches")} />,
     "Active Terminals": <MetricCard label="Active Terminals" value={String(totals.activeTerminals)} icon={Activity}   accent="success"     editing={cards.editing} onRemove={() => cards.remove("Active Terminals")} />,
     "Staff on Shift":   <MetricCard label="Staff on Shift"   value={String(totals.staffOnShift)}    icon={UserCheck}  accent="primary"     editing={cards.editing} onRemove={() => cards.remove("Staff on Shift")} />,
-    "Alerts":           <MetricCard label="Alerts"           value={String(totals.alerts)}          icon={WifiOff}    accent="destructive" editing={cards.editing} onRemove={() => cards.remove("Alerts")} />,
     "Unassigned Terminals": <MetricCard label="Unassigned Terminals" value={String(totals.unassignedTerminals)} icon={AlertTriangle} accent="warning" editing={cards.editing} onRemove={() => cards.remove("Unassigned Terminals")} />,
   };
 
@@ -203,29 +202,6 @@ function ControlTower() {
       }
     >
       {loadError && <LoadErrorBanner onRetry={() => loadAll()} />}
-      {/* Hero banner */}
-      <div className="relative overflow-hidden rounded-3xl border border-border/60 gradient-primary text-primary-foreground p-6 md:p-7 shadow-elegant">
-        <div className="absolute inset-0 opacity-[0.15] pointer-events-none"
-          style={{ backgroundImage: "radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0)", backgroundSize: "22px 22px" }} />
-        <div className="absolute -top-10 -right-10 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
-        {/* The hero pills that used to sit here duplicated the KPI card row immediately below —
-            same numbers, two different visual styles, back to back. Dropped in favor of the one
-            line of context text below; the KPI cards are the single place to read the numbers. */}
-        <div className="relative flex items-center gap-4">
-          <div className="h-14 w-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center ring-1 ring-white/30">
-            <Radio className="h-7 w-7 animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/80">
-              <Sparkles className="h-3.5 w-3.5" /> Live Control Tower
-            </div>
-            <h2 className="mt-1 text-2xl md:text-3xl font-bold tracking-tight">All systems in view</h2>
-            <p className="text-sm text-white/80 mt-0.5">
-              {branches.length} branches · {totals.activeTerminals} live terminals · {totals.staffOnShift} staff on shift
-            </p>
-          </div>
-        </div>
-      </div>
 
       {/* KPI cards */}
       {cards.visible.length === 0 ? (

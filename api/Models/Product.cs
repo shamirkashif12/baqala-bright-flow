@@ -90,6 +90,14 @@ public class Product
     [Column("items_per_pack")]
     public int? ItemsPerPack { get; set; }
 
+    // The "single" product this pack breaks down into (e.g. a carton-of-12-eggs pack product
+    // links to the individual-egg single product). Only meaningful when SaleUnitType == "pack" —
+    // it is what lets InventoryController's Break Pack action convert on-hand cartons into
+    // on-hand loose units (ItemsPerPack of them per pack), which nothing else in the pack model
+    // does: selling a pack normally still just decrements the pack's own on-hand by 1.
+    [Column("loose_unit_product_id")]
+    public Guid? LooseUnitProductId { get; set; }
+
     [Column("base_price")]
     public decimal BasePrice { get; set; }
 
@@ -135,6 +143,7 @@ public class Product
     [JsonIgnore] public ICollection<OrderItem> OrderItems { get; set; } = [];
     [JsonIgnore] public ICollection<ProductPriceList> PriceLists { get; set; } = [];
     public ICollection<ProductVariant> Variants { get; set; } = [];
+    public Product? LooseUnitProduct { get; set; }
 }
 
 // One price rule for a product. Historically this table existed but nothing read or wrote it —

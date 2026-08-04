@@ -21,7 +21,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { TierMultiSelect } from "@/components/tier-multi-select";
-import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList, type ProductImage, type ProductVariant } from "@/lib/api";
+import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList, type ProductImage, type ProductVariant, type Product } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
@@ -466,12 +466,15 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     }
   };
   const [form, setForm] = useState({
-    name: "", sku: "", barcode: "", categoryId: "",
+    name: "", sku: "", barcode: "", categoryId: "", brand: "",
     // FRD §12 Pack & Unit: how the product is sold. "pack" means the sellable unit is a pack of
     // itemsPerPack items, priced whole; it stocks and sells exactly like a single (on-hand −1 per
     // sale). "single" is the default.
     saleUnitType: "single" as "single" | "pack",
     itemsPerPack: "",
+    // Pack breaking: which "single" product this pack breaks down into (e.g. a carton of 12
+    // eggs → the individual-egg product). Optional — most packs are never broken.
+    looseUnitProductId: "",
     purchasePrice: "", sellingPrice: "",
     quantity: "100", expiryDate: "",
     // For weight-sold items (meat, produce) quantity is entered in kg rather than whole units —
@@ -520,8 +523,19 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     setPriceSchedule({ from: "", to: "" });
     setTopCategoryId("");
     setSubCategoryId("");
-    setForm({ name: "", sku: "", barcode: "", categoryId: "", saleUnitType: "single", itemsPerPack: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", weightBased: false, batchNumber: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "", description: "" });
+    setForm({ name: "", sku: "", barcode: "", categoryId: "", brand: "", saleUnitType: "single", itemsPerPack: "", looseUnitProductId: "", purchasePrice: "", sellingPrice: "", quantity: "100", expiryDate: "", weightBased: false, batchNumber: "", vatPct: "15", isTobacco: false, discountType: "percentage", discount: "", imageUrl: "", description: "" });
   };
+
+  // Pack breaking: eligible "breaks down into" targets, fetched only once a pack is actually
+  // being configured — a plain single-item add never needs this list.
+  const [looseProducts, setLooseProducts] = useState<Product[]>([]);
+  useEffect(() => {
+    if (form.saleUnitType !== "pack") return;
+    api.getProducts({ status: "active" })
+      .then((list) => setLooseProducts(list.filter((p) => p.saleUnitType !== "pack")))
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.saleUnitType]);
 
   const missingFields = [
     !form.name && "Product Name",
@@ -586,6 +600,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
         name: form.name, sku: form.sku,
         barcode: form.barcode || undefined,
         categoryId: form.categoryId,
+        brand: form.brand.trim() || undefined,
         basePrice: Number(form.sellingPrice),
         costPrice: Number(form.purchasePrice) || undefined,
         taxPercentage: Number(form.vatPct) || 15,
@@ -598,6 +613,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
         // Pack & unit (FRD §12): a pack sells as one unit at the Selling Price above.
         saleUnitType: form.saleUnitType,
         itemsPerPack: form.saleUnitType === "pack" ? Number(form.itemsPerPack) : null,
+        looseUnitProductId: form.saleUnitType === "pack" ? (form.looseUnitProductId || null) : null,
         ...(form.discount ? { discount: Number(form.discount), discountType: form.discountType } : {}),
       } as Parameters<typeof api.createProduct>[0]);
       createdProductId = product.id;
@@ -771,6 +787,9 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
               </Select>
             </FieldRow>
           )}
+          <FieldRow label="Brand">
+            <Input className="h-9" value={form.brand} onChange={e => set("brand")(e.target.value)} placeholder="e.g. Almarai" />
+          </FieldRow>
           <div className="col-span-2">
             <FieldRow label="Branches * (stock the product into these)">
               <SearchableMultiSelect
@@ -825,6 +844,21 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
               A pack sells as one unit at the price above and reduces stock by one per sale, exactly like a
               single item — the item count is just for your reference.
             </p>
+          )}
+          {form.saleUnitType === "pack" && (
+            <FieldRow label="Breaks down into (optional)">
+              <Select value={form.looseUnitProductId || "__none__"} onValueChange={v => setForm(p => ({ ...p, looseUnitProductId: v === "__none__" ? "" : v }))}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="No loose-unit product" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {looseProducts.map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Lets Inventory "Break Pack" convert on-hand cartons into on-hand units of this product, e.g. a
+                carton of 12 eggs → individual eggs.
+              </p>
+            </FieldRow>
           )}
           <FieldRow label={form.weightBased ? "Quantity (kg) *" : "Quantity *"}>
             <Input type="number" min={1} step={form.weightBased ? "0.001" : "1"} className={`h-9 ${submitted && (!form.quantity || Number(form.quantity) <= 0) ? "border-destructive/60 ring-1 ring-destructive/30" : ""}`} placeholder="100" value={form.quantity} onChange={e => set("quantity")(e.target.value)} />
@@ -996,8 +1030,8 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   const [deletingProduct, setDeletingProduct] = useState(false);
   const [deleteReason, setDeleteReason] = useState("");
   const [form, setForm] = useState({
-    name: "", sku: "", barcode: "", categoryId: "",
-    saleUnitType: "single" as "single" | "pack", itemsPerPack: "",
+    name: "", sku: "", barcode: "", categoryId: "", brand: "",
+    saleUnitType: "single" as "single" | "pack", itemsPerPack: "", looseUnitProductId: "",
     sellingPrice: "", purchasePrice: "",
     vatPct: "15", isTobacco: false,
     discountType: "percentage" as "percentage" | "fixed",
@@ -1014,6 +1048,16 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   useEffect(() => {
     setForm(p => ({ ...p, categoryId: subCategoryId || topCategoryId }));
   }, [topCategoryId, subCategoryId]);
+
+  // Pack breaking: eligible "breaks down into" targets — active singles, excluding this product.
+  const [looseProducts, setLooseProducts] = useState<Product[]>([]);
+  useEffect(() => {
+    if (form.saleUnitType !== "pack") return;
+    api.getProducts({ status: "active" })
+      .then((list) => setLooseProducts(list.filter((p) => p.saleUnitType !== "pack" && p.id !== item?.product?.id)))
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.saleUnitType, item?.product?.id]);
 
   // Existing extra prices for this product (FRD §12), managed inline here so the edit form shows
   // the same pricing options as add. Branch rows stay one-independent-row-per-branch (edit/delete
@@ -1098,8 +1142,10 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
       sku: p.sku ?? "",
       barcode: p.barcode ?? "",
       categoryId: (p as unknown as { categoryId?: string }).categoryId ?? "",
+      brand: p.brand ?? "",
       saleUnitType: (p.saleUnitType as "single" | "pack") ?? "single",
       itemsPerPack: p.itemsPerPack != null ? String(p.itemsPerPack) : "",
+      looseUnitProductId: p.looseUnitProductId ?? "",
       sellingPrice: String(p.basePrice ?? ""),
       purchasePrice: p.costPrice != null ? String(p.costPrice) : "",
       vatPct: String(p.taxPercentage ?? 15),
@@ -1152,6 +1198,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         sku: form.sku,
         barcode: form.barcode || undefined,
         categoryId: form.categoryId || undefined,
+        brand: form.brand.trim() || undefined,
         basePrice: Number(form.sellingPrice),
         costPrice: Number(form.purchasePrice) || undefined,
         taxPercentage: Number(form.vatPct) || 15,
@@ -1164,6 +1211,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
         weightBased: form.weightBased,
         saleUnitType: form.saleUnitType,
         itemsPerPack: form.saleUnitType === "pack" ? Number(form.itemsPerPack) : null,
+        looseUnitProductId: form.saleUnitType === "pack" ? (form.looseUnitProductId || null) : null,
         reorderLevel: item.reorderLevel ?? 10,
       });
       onDone(); onClose();
@@ -1358,6 +1406,9 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
               </Select>
             </FieldRow>
           )}
+          <FieldRow label="Brand">
+            <Input className="h-9" value={form.brand} onChange={set("brand")} placeholder="e.g. Almarai" />
+          </FieldRow>
           <FieldRow label="Purchase Price">
             <Input type="number" step="0.01" className="h-9" value={form.purchasePrice} onChange={set("purchasePrice")} placeholder="4.20" />
           </FieldRow>
@@ -1378,6 +1429,20 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
             <FieldRow label="Items per pack *">
               <Input type="number" min={2} step={1} className="h-9" value={form.itemsPerPack}
                 onChange={e => setForm(p => ({ ...p, itemsPerPack: e.target.value }))} placeholder="12" />
+            </FieldRow>
+          )}
+          {form.saleUnitType === "pack" && (
+            <FieldRow label="Breaks down into (optional)">
+              <Select value={form.looseUnitProductId || "__none__"} onValueChange={v => setForm(p => ({ ...p, looseUnitProductId: v === "__none__" ? "" : v }))}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="No loose-unit product" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {looseProducts.map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Lets Inventory "Break Pack" convert on-hand cartons into on-hand units of this product.
+              </p>
             </FieldRow>
           )}
 
@@ -1786,6 +1851,73 @@ function AdjustDialog({ item, batches, onClose, onDone }: { item: StockItem | nu
   );
 }
 
+// Pack breaking — converts on-hand cartons of a "pack" product (with a configured
+// looseUnitProductId) into on-hand units of its linked loose product, e.g. 1 carton of a dozen
+// eggs → 12 individual eggs. Only rendered for stock rows where that link is set (see the
+// Actions cell above).
+function BreakPackDialog({ item, onClose, onDone }: { item: StockItem | null; onClose: () => void; onDone: () => void }) {
+  const [packs, setPacks] = useState("1");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [looseProductName, setLooseProductName] = useState("");
+
+  useEffect(() => {
+    if (!item) return;
+    setPacks("1");
+    setError("");
+    setLooseProductName("");
+    const looseId = item.product?.looseUnitProductId;
+    if (!looseId) return;
+    api.getProducts({ status: "active" }).then(list => {
+      setLooseProductName(list.find(p => p.id === looseId)?.name ?? "");
+    }).catch(() => {});
+  }, [item]);
+
+  const itemsPerPack = item?.product?.itemsPerPack ?? 1;
+  const packsNum = Number(packs) || 0;
+  const unitsProduced = packsNum * itemsPerPack;
+
+  const handleBreak = async () => {
+    if (!item || packsNum <= 0) return;
+    setSaving(true); setError("");
+    try {
+      await api.breakPack({ packProductId: item.productId, branchId: item.branchId, packs: packsNum });
+      onDone(); onClose();
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to break pack."); }
+    finally { setSaving(false); }
+  };
+
+  if (!item) return null;
+  return (
+    <Dialog open={!!item} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-base">Break Pack · {item.product?.name}</DialogTitle>
+        </DialogHeader>
+        <div className="rounded-xl border border-border/60 bg-muted/30 p-4 text-center mb-1">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Cartons on hand</p>
+          <p className="text-4xl font-bold mt-1">{item.quantity}</p>
+        </div>
+        <div className="space-y-3">
+          <FieldRow label="Packs to break">
+            <Input type="number" min={1} max={item.quantity} step={1} className="h-9" value={packs} onChange={e => setPacks(e.target.value)} />
+            {packsNum > 0 && (
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Produces <span className="font-semibold text-foreground">{unitsProduced}</span> unit(s)
+                {looseProductName ? <> of <span className="font-semibold text-foreground">{looseProductName}</span></> : null}
+              </p>
+            )}
+          </FieldRow>
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        <Button className="w-full gradient-primary text-primary-foreground border-0 shadow-glow" onClick={handleBreak} disabled={saving || packsNum <= 0 || packsNum > item.quantity}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Break pack
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type StockItem = InventoryStock & {
@@ -1850,6 +1982,7 @@ function Inventory() {
 
   const [viewItem, setViewItem] = useState<StockItem | null>(null);
   const [adjustItem, setAdjustItem] = useState<StockItem | null>(null);
+  const [breakPackItem, setBreakPackItem] = useState<StockItem | null>(null);
   const [editItem, setEditItem] = useState<StockItem | null>(null);
   const [deleteItem, setDeleteItem] = useState<StockItem | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -2302,6 +2435,9 @@ function Inventory() {
                             <Button size="icon" variant="ghost" className="h-7 w-7" title="View" onClick={() => setViewItem(s)}><Eye className="h-3.5 w-3.5" /></Button>
                             {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={() => setEditItem(s)}><Pencil className="h-3.5 w-3.5" /></Button>}
                             {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" title="Adjust stock" onClick={() => setAdjustItem(s)}><LayoutGrid className="h-3.5 w-3.5" /></Button>}
+                            {canEdit && s.product?.saleUnitType === "pack" && s.product?.looseUnitProductId && (
+                              <Button size="icon" variant="ghost" className="h-7 w-7" title="Break pack into loose units" onClick={() => setBreakPackItem(s)}><Boxes className="h-3.5 w-3.5" /></Button>
+                            )}
                             {canDelete && (
                               <Button
                                 size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
@@ -2350,6 +2486,7 @@ function Inventory() {
       <EditProductDialog item={editItem} onClose={() => setEditItem(null)} categories={categories} branches={branches} onDone={load} />
       <ViewSheet item={viewItem} suppliers={suppliers} onClose={() => setViewItem(null)} />
       <AdjustDialog item={adjustItem} batches={allBatches} onClose={() => setAdjustItem(null)} onDone={load} />
+      <BreakPackDialog item={breakPackItem} onClose={() => setBreakPackItem(null)} onDone={load} />
       <QuickReceiveTransferSheet
         transfer={receiveTransferTarget}
         onClose={() => setReceiveTransferTarget(null)}

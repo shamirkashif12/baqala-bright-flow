@@ -241,6 +241,13 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .HasForeignKey(c => c.ParentId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ─── Self-referential: Product → LooseUnitProduct (pack breaking) ─────
+        modelBuilder.Entity<Product>()
+            .HasOne(p => p.LooseUnitProduct)
+            .WithMany()
+            .HasForeignKey(p => p.LooseUnitProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // ─── User → Role/Branch (restrict on delete) ─────────────────────────
         modelBuilder.Entity<User>()
             .HasOne(u => u.Role)

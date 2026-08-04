@@ -122,6 +122,7 @@ public class ProductsController(
         product.ItemsPerPack = product.SaleUnitType == "pack"
             ? (product.ItemsPerPack is > 0 ? product.ItemsPerPack : 1)
             : null;
+        product.LooseUnitProductId = product.SaleUnitType == "pack" ? product.LooseUnitProductId : null;
         db.Products.Add(product);
         await db.SaveChangesAsync();
         // "Added Items" in the Employee Audit Center — a new catalog item was previously written
@@ -180,6 +181,8 @@ public class ProductsController(
         product.ItemsPerPack = product.SaleUnitType == "pack"
             ? (updated.ItemsPerPack is > 0 ? updated.ItemsPerPack : 1)
             : null;
+        // Pack breaking (Break Pack action): only meaningful for a pack, same as ItemsPerPack.
+        product.LooseUnitProductId = product.SaleUnitType == "pack" ? updated.LooseUnitProductId : null;
         product.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 

@@ -669,6 +669,14 @@ function POS() {
   const categoryFilterActive = categoryId !== "all";
   const topCategories = useMemo(() => categories.filter((c) => !c.parentId), [categories]);
   const subcategoriesOf = (parentId: string) => categories.filter((c) => c.parentId === parentId);
+  // Brand filter — lets a cashier narrow to "what Almarai do we have" the same way category
+  // narrowing works, and feeds the out-of-stock substitution suggestions below.
+  const [brandFilter, setBrandFilter] = useState("all");
+  const brandFilterActive = brandFilter !== "all";
+  const brands = useMemo(
+    () => Array.from(new Set(products.map((p) => p.brand).filter((b): b is string => !!b))).sort(),
+    [products],
+  );
   const [flashSku, setFlashSku] = useState<string | null>(null);
   const [scanFlash, setScanFlash] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -1646,11 +1654,20 @@ function POS() {
   const total = Math.max(0, taxable) + vatAmount + customFeeTotal;
 
   // ─── Cart ops ─────────────────────────────────────────────────────────────────
+  // Weight-based lines (kg, liter, etc.) sell in fractional amounts — a cashier types the exact
+  // weight rather than stepping by whole units. Mirrors the 0.001 granularity Stocks/Inventory/
+  // Purchase Orders already use for these products.
+  const WEIGHT_STEP = 0.001;
+  const minQtyFor = (weightBased: boolean) => (weightBased ? WEIGHT_STEP : 1);
+  const floorQtyFor = (weightBased: boolean, qty: number) => (weightBased ? qty : Math.floor(qty));
+
   const updateQty = (sku: string, d: number) => {
     let blockedByStock = false;
     setCart((c) => c.map((i) => {
       if (i.sku !== sku) return i;
-      const next = Math.max(1, i.qty + d);
+      const prod = products.find((p) => p.id === i.productId);
+      const weightBased = prod?.weightBased ?? false;
+      const next = Math.max(minQtyFor(weightBased), i.qty + d);
       // A branch with AllowNegativeStock on can still ring up more than what's on record — the
       // shortfall becomes negative on-hand stock at checkout (OrdersController), same as scanning
       // a never-stocked item does. Only the branches that opted out of that still hard-block here.
@@ -1658,7 +1675,6 @@ function POS() {
       // Re-price both ways: crossing up into a pack size unlocks the pack price, and dropping back
       // below it has to give that price up again — otherwise adding 12 then removing one would
       // leave 11 units permanently at the case rate.
-      const prod = products.find((p) => p.id === i.productId);
       return { ...i, qty: next, price: prod ? priceForQty(prod, next) : i.price };
     }));
     if (blockedByStock) {
@@ -1676,13 +1692,14 @@ function POS() {
     let blockedByStock = false;
     setCart((c) => c.map((i) => {
       if (i.sku !== sku) return i;
-      let next = Math.max(1, Math.floor(newQty) || 1);
-      // Clamp down to available stock, but never below 1 — a shortfall/negative-stock item
-      // (see QuickStockInDialog's "Sell Anyway", stock recorded as 0) still has to stay
-      // sellable at its pinned qty of 1, same as the +/- stepper already enforces. Branches with
-      // AllowNegativeStock on skip the clamp entirely, same as updateQty above.
-      if (next > i.stock && !posPerms.allowNegativeStock) { blockedByStock = true; next = Math.max(1, i.stock); }
       const prod = products.find((p) => p.id === i.productId);
+      const weightBased = prod?.weightBased ?? false;
+      let next = Math.max(minQtyFor(weightBased), floorQtyFor(weightBased, newQty) || minQtyFor(weightBased));
+      // Clamp down to available stock, but never below the minimum — a shortfall/negative-stock
+      // item (see QuickStockInDialog's "Sell Anyway", stock recorded as 0) still has to stay
+      // sellable at its pinned minimum qty, same as the +/- stepper already enforces. Branches
+      // with AllowNegativeStock on skip the clamp entirely, same as updateQty above.
+      if (next > i.stock && !posPerms.allowNegativeStock) { blockedByStock = true; next = Math.max(minQtyFor(weightBased), i.stock); }
       return { ...i, qty: next, price: prod ? priceForQty(prod, next) : i.price };
     }));
     if (blockedByStock) {
@@ -1759,7 +1776,7 @@ function POS() {
   // ─── Search / barcode scan ─────────────────────────────────────────────────────
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q && !categoryFilterActive) return [];
+    if (!q && !categoryFilterActive && !brandFilterActive) return [];
     // "under this category" = the category itself plus every one of its subcategories, unless a
     // specific subcategory was picked (then just that one).
     const categoryIdSet = categoryFilterActive
@@ -1773,18 +1790,36 @@ function POS() {
       if (p.status !== "active") return false;
       if (!stockMap.has(p.id)) return false; // hide products not stocked in current branch
       if (categoryIdSet && !(p.categoryId && categoryIdSet.has(p.categoryId))) return false;
+      if (brandFilterActive && p.brand !== brandFilter) return false;
       if (!q) return true;
       return (
         p.name.toLowerCase().includes(q) ||
         p.sku.toLowerCase().includes(q) ||
-        (p.barcode && p.barcode.toLowerCase().includes(q))
+        (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+        (p.brand && p.brand.toLowerCase().includes(q))
       );
     });
-    // A bare text search keeps the short typeahead cap; browsing by category/subcategory is a
-    // deliberate "show me everything in here" action, not a safety-capped autocomplete.
-    return categoryFilterActive ? filtered : filtered.slice(0, 8);
+    // A bare text search keeps the short typeahead cap; browsing by category/subcategory/brand is
+    // a deliberate "show me everything in here" action, not a safety-capped autocomplete.
+    return (categoryFilterActive || brandFilterActive) ? filtered : filtered.slice(0, 8);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, products, stockMap, categoryId, subcategoryId, categories]);
+  }, [query, products, stockMap, categoryId, subcategoryId, categories, brandFilter, brandFilterActive]);
+
+  // "We don't have Brand X, here's Brand Y" — up to 3 in-stock products in the same category,
+  // a different brand preferred first (that's the actual substitution ask), then ranked by
+  // closest price to the item the cashier couldn't sell.
+  const alternativesFor = (p: Product) => {
+    if (!p.categoryId) return [];
+    return products
+      .filter((alt) => alt.id !== p.id && alt.status === "active" && alt.categoryId === p.categoryId && (stockMap.get(alt.id) ?? 0) > 0)
+      .sort((a, b) => {
+        const aDifferentBrand = a.brand && a.brand !== p.brand ? 0 : 1;
+        const bDifferentBrand = b.brand && b.brand !== p.brand ? 0 : 1;
+        if (aDifferentBrand !== bDifferentBrand) return aDifferentBrand - bDifferentBrand;
+        return Math.abs(effectivePrice(a) - effectivePrice(p)) - Math.abs(effectivePrice(b) - effectivePrice(p));
+      })
+      .slice(0, 3);
+  };
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -2249,18 +2284,20 @@ function POS() {
               </div>
             </div>
 
-            {topCategories.length > 0 && (
+            {(topCategories.length > 0 || brands.length > 0) && (
               <div className="flex items-center gap-2 mt-2">
-                <Select
-                  value={categoryId}
-                  onValueChange={(v) => { setCategoryId(v); setSubcategoryId("all"); setShowResults(true); }}
-                >
-                  <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="Category" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {topCategories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {topCategories.length > 0 && (
+                  <Select
+                    value={categoryId}
+                    onValueChange={(v) => { setCategoryId(v); setSubcategoryId("all"); setShowResults(true); }}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="Category" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      {topCategories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
                 {categoryFilterActive && subcategoriesOf(categoryId).length > 0 && (
                   <Select value={subcategoryId} onValueChange={(v) => { setSubcategoryId(v); setShowResults(true); }}>
                     <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="Subcategory" /></SelectTrigger>
@@ -2270,10 +2307,19 @@ function POS() {
                     </SelectContent>
                   </Select>
                 )}
-                {categoryFilterActive && (
+                {brands.length > 0 && (
+                  <Select value={brandFilter} onValueChange={(v) => { setBrandFilter(v); setShowResults(true); }}>
+                    <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="Brand" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Brands</SelectItem>
+                      {brands.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                {(categoryFilterActive || brandFilterActive) && (
                   <Button
                     size="sm" variant="ghost" className="h-8 text-xs px-2 text-muted-foreground"
-                    onClick={() => { setCategoryId("all"); setSubcategoryId("all"); }}
+                    onClick={() => { setCategoryId("all"); setSubcategoryId("all"); setBrandFilter("all"); }}
                   >
                     Clear
                   </Button>
@@ -2299,63 +2345,80 @@ function POS() {
               </div>
             )}
 
-            {!loading && (showResults || categoryFilterActive) && matches.length > 0 && (
+            {!loading && (showResults || categoryFilterActive || brandFilterActive) && matches.length > 0 && (
               <div className="mt-2 rounded-lg border border-border/70 bg-card overflow-hidden max-h-[420px] overflow-y-auto">
                 {matches.map((p) => {
                   const stock = stockMap.get(p.id);
                   const outOfStock = stock !== undefined && stock <= 0;
                   const expired = expiredProductIds.has(p.id);
                   const blocked = outOfStock || expired;
+                  const alternatives = blocked ? alternativesFor(p) : [];
                   return (
-                    <button
-                      key={p.sku}
-                      type="button"
-                      title={blocked ? (outOfStock ? "Out of stock — click to Stock In" : "Expired — click to Stock In") : undefined}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        if (blocked) {
-                          setStockInInitialProduct(p);
-                          setStockInOpen(true);
-                          return;
-                        }
-                        addToCart(p);
-                      }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-0 border-border/40 ${
-                        blocked ? "opacity-70 hover:bg-destructive/5 cursor-pointer" : "hover:bg-muted/60"
-                      }`}
-                    >
-                      {p.imageUrl ? (
-                        <img src={p.imageUrl} alt="" className="h-9 w-9 rounded-md border border-border/60 object-cover shrink-0" />
-                      ) : (
-                        <div className="h-9 w-9 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center shrink-0">
-                          <ImageOff className="h-4 w-4 text-muted-foreground" />
+                    <div key={p.sku} className="border-b last:border-0 border-border/40">
+                      <button
+                        type="button"
+                        title={blocked ? (outOfStock ? "Out of stock — click to Stock In" : "Expired — click to Stock In") : undefined}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          if (blocked) {
+                            setStockInInitialProduct(p);
+                            setStockInOpen(true);
+                            return;
+                          }
+                          addToCart(p);
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 text-left ${
+                          blocked ? "opacity-70 hover:bg-destructive/5 cursor-pointer" : "hover:bg-muted/60"
+                        }`}
+                      >
+                        {p.imageUrl ? (
+                          <img src={p.imageUrl} alt="" className="h-9 w-9 rounded-md border border-border/60 object-cover shrink-0" />
+                        ) : (
+                          <div className="h-9 w-9 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center shrink-0">
+                            <ImageOff className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{p.name}{p.brand ? ` · ${p.brand}` : ""}</p>
+                          <p className="text-xs text-muted-foreground">
+                            SKU {p.sku}{p.barcode ? ` · ${p.barcode}` : ""}
+                          </p>
+                        </div>
+                        {expired && (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
+                            Expired · Tap to Stock In
+                          </span>
+                        )}
+                        {!expired && stock !== undefined && (
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${outOfStock ? "bg-destructive/15 text-destructive" : stock <= 5 ? "bg-warning/20 text-warning-foreground" : "bg-success/15 text-success"}`}>
+                            <Package className="h-2.5 w-2.5 inline mr-0.5" />{outOfStock ? "Out of stock · Tap to Stock In" : stock}
+                          </span>
+                        )}
+                        <span className="font-bold text-primary tabular-nums w-20 text-right">
+                          <SARIcon />{effectivePrice(p).toFixed(2)}
+                        </span>
+                      </button>
+                      {blocked && alternatives.length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap px-3 pb-2 -mt-0.5">
+                          <span className="text-[10px] text-muted-foreground">Try instead:</span>
+                          {alternatives.map((alt) => (
+                            <button
+                              key={alt.sku}
+                              type="button"
+                              onMouseDown={(e) => { e.preventDefault(); addToCart(alt); }}
+                              className="text-[10px] font-medium px-1.5 py-0.5 rounded-full border border-border/60 hover:bg-primary/10 hover:border-primary/40 transition-colors"
+                            >
+                              {alt.name}{alt.brand ? ` (${alt.brand})` : ""}
+                            </button>
+                          ))}
                         </div>
                       )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          SKU {p.sku}{p.barcode ? ` · ${p.barcode}` : ""}
-                        </p>
-                      </div>
-                      {expired && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
-                          Expired · Tap to Stock In
-                        </span>
-                      )}
-                      {!expired && stock !== undefined && (
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${outOfStock ? "bg-destructive/15 text-destructive" : stock <= 5 ? "bg-warning/20 text-warning-foreground" : "bg-success/15 text-success"}`}>
-                          <Package className="h-2.5 w-2.5 inline mr-0.5" />{outOfStock ? "Out of stock · Tap to Stock In" : stock}
-                        </span>
-                      )}
-                      <span className="font-bold text-primary tabular-nums w-20 text-right">
-                        <SARIcon />{effectivePrice(p).toFixed(2)}
-                      </span>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
             )}
-            {!loading && (showResults || categoryFilterActive) && (query || categoryFilterActive) && matches.length === 0 && (
+            {!loading && (showResults || categoryFilterActive || brandFilterActive) && (query || categoryFilterActive || brandFilterActive) && matches.length === 0 && (
               <p className="mt-2 text-sm text-muted-foreground px-1">
                 {query ? `No product matches "${query}"` : "No products in this category."}
               </p>
@@ -2415,32 +2478,49 @@ function POS() {
                     </div>
                     {item.isBonusOnly ? (
                       <span className="text-xs font-semibold text-success px-2">Auto-added</span>
-                    ) : (
-                      <div className="flex items-center gap-1 bg-muted rounded-lg">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateQty(item.sku, -1)}>
-                          <Minus className="h-3 w-3" />
-                        </Button>
+                    ) : (() => {
+                      const weightBased = products.find((p) => p.id === item.productId)?.weightBased ?? false;
+                      // Weight-based lines (kg/liter) are typed exactly (from a scale, or a known
+                      // amount) rather than stepped one gram at a time, so the +/- buttons are
+                      // dropped in favor of a wider, decimal-precision input.
+                      return weightBased ? (
                         <Input
                           type="number"
-                          min={1}
+                          min={WEIGHT_STEP}
                           max={item.stock}
-                          value={item.qty}
-                          onChange={(e) => setQtyAbsolute(item.sku, parseInt(e.target.value) || 1)}
+                          step={WEIGHT_STEP}
+                          value={Number(item.qty.toFixed(3))}
+                          onChange={(e) => setQtyAbsolute(item.sku, parseFloat(e.target.value) || WEIGHT_STEP)}
                           onFocus={(e) => e.target.select()}
-                          className="w-12 h-7 px-0 text-center text-sm font-semibold tabular-nums border-0 bg-transparent shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          className="w-20 h-7 px-1 text-center text-sm font-semibold tabular-nums bg-muted rounded-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => updateQty(item.sku, 1)}
-                          disabled={item.qty >= item.stock}
-                          title={item.qty >= item.stock ? `Only ${item.stock} in stock` : undefined}
-                        >
-                          <Plus className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="flex items-center gap-1 bg-muted rounded-lg">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateQty(item.sku, -1)}>
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={item.stock}
+                            value={item.qty}
+                            onChange={(e) => setQtyAbsolute(item.sku, parseInt(e.target.value) || 1)}
+                            onFocus={(e) => e.target.select()}
+                            className="w-12 h-7 px-0 text-center text-sm font-semibold tabular-nums border-0 bg-transparent shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => updateQty(item.sku, 1)}
+                            disabled={item.qty >= item.stock}
+                            title={item.qty >= item.stock ? `Only ${item.stock} in stock` : undefined}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      );
+                    })()}
                     <span className="text-sm font-semibold tabular-nums w-20 text-right">
                       <SARIcon />{(item.qty * item.price).toFixed(2)}
                     </span>

@@ -27,6 +27,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   reconciliation_addition: "Stocktake Addition",
   reconciliation_subtraction: "Stocktake Subtraction",
   damage: "Damage (Recall)",
+  pack_break_out: "Pack Broken",
+  pack_break_in: "From Broken Pack",
 };
 
 // Shared drill-down behind a single product row — used by both the Inventory Aging and the

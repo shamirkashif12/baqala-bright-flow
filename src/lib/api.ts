@@ -304,6 +304,11 @@ export const api = {
     }),
   getStockMovements: (params?: { productId?: string; branchId?: string[]; warehouseId?: string[]; batchId?: string; movementType?: string; from?: string; to?: string; limit?: number }) =>
     request<StockMovement[]>(`/api/inventory/movements${toQuery(params)}`),
+  // Pack breaking: converts `packs` cartons of a "pack" product into loose units of its linked
+  // looseUnitProductId, at the given branch — e.g. 1 carton of a dozen eggs into 12 loose eggs.
+  breakPack: (data: { packProductId: string; branchId: string; packs: number }) =>
+    request<{ packStock: { productId: string; branchId: string; quantity: number }; looseStock: { productId: string; branchId: string; quantity: number } }>(
+      "/api/inventory/break-pack", { method: "POST", body: JSON.stringify(data) }),
 
   // Stock Counts (Stocking Review)
   getStockCounts: (params?: { branchId?: string[]; warehouseId?: string; status?: string; from?: string; to?: string }) =>
@@ -1322,6 +1327,9 @@ export interface Product {
   // own basePrice; itemsPerPack is informational (items inside one pack).
   saleUnitType?: "single" | "pack";
   itemsPerPack?: number | null;
+  // Pack breaking: the "single" product this pack breaks down into (e.g. a carton-of-12-eggs
+  // pack links to the individual-egg single product). Only meaningful when saleUnitType is "pack".
+  looseUnitProductId?: string | null;
   category?: { id: string; name: string; nameAr?: string };
 }
 
