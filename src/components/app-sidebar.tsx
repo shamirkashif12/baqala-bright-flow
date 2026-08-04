@@ -310,7 +310,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" side={dir === "rtl" ? "right" : "left"} className="border-r-0">
-      <SidebarHeader className="p-4 border-b border-sidebar-border/50">
+      <SidebarHeader className="p-4 group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:py-3 border-b border-sidebar-border/50 bg-white">
         {collapsed ? <BaqalaLogo showText={false} /> : <BaqalaLogo />}
       </SidebarHeader>
       <SidebarContent className="px-2 py-3" data-tour="sidebar-nav">
