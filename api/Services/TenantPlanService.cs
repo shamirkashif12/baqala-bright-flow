@@ -21,10 +21,11 @@ public interface ITenantPlanService
     // real Dashboard contract. Kept for convenience; not part of the real integration.
     Task<TenantPlan> ProvisionAsync(TenantPlanProvisionRequest req, CancellationToken ct = default);
 
-    // Real Dashboard contract — POST /pos/users/provision and /pos/entitlements/update.
+    // Real Dashboard contract — POST /pos/users/provision, /pos/entitlements/update, /pos/secrets/rotate.
     Task<bool> IsDuplicateEventAsync(string eventId, CancellationToken ct = default);
     Task<TenantPlan> ApplyProvisionAsync(GatewayProvisionRequest req, CancellationToken ct = default);
     Task<TenantPlan> ApplyEntitlementsAsync(GatewayEntitlementsRequest req, CancellationToken ct = default);
+    Task<TenantPlan> RotateSecretsAsync(GatewaySecretsRotateRequest req, CancellationToken ct = default);
 
     Task<bool> CanCreateBranchAsync(CancellationToken ct = default);
     Task<bool> CanCreateTerminalAsync(Guid branchId, CancellationToken ct = default);
@@ -100,6 +101,24 @@ public class TenantPlanService(BaqalaDbContext db) : ITenantPlanService
         // makes the frontend ignore every field this method just set (see resolvePlans in
         // src/routes/_app.plans.tsx) and silently fall back to a hardcoded default plan.
         plan.ProvisionedAt ??= DateTime.UtcNow;
+        plan.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return plan;
+    }
+
+    // POST /pos/secrets/rotate — corrects a WebhookSharedSecret/GatewayJwtKey/Issuer/Audience that
+    // got locked in wrong by ApplyProvisionAsync's set-once guard (e.g. an early test bootstrap
+    // call). Unlike that guard, this overwrites unconditionally — RequireGatewaySignature already
+    // required the caller to sign this request with the CURRENT secret, so knowing it is the proof
+    // of authority to replace it. Only fields present in the request are touched.
+    public async Task<TenantPlan> RotateSecretsAsync(GatewaySecretsRotateRequest req, CancellationToken ct = default)
+    {
+        var plan = await GetCurrentPlanAsync(ct);
+        if (!string.IsNullOrWhiteSpace(req.WebhookSharedSecret)) plan.WebhookSharedSecret = req.WebhookSharedSecret;
+        if (!string.IsNullOrWhiteSpace(req.GatewayJwtKey)) plan.GatewayJwtKey = req.GatewayJwtKey;
+        if (!string.IsNullOrWhiteSpace(req.GatewayJwtIssuer)) plan.GatewayJwtIssuer = req.GatewayJwtIssuer;
+        if (!string.IsNullOrWhiteSpace(req.GatewayJwtAudience)) plan.GatewayJwtAudience = req.GatewayJwtAudience;
+        plan.LastEventId = req.EventId;
         plan.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return plan;
@@ -273,4 +292,15 @@ public class GatewayEntitlementsRequest
     public List<GatewayModule>? EnabledModules { get; set; }
     public GatewayLimits? Limits { get; set; }
     public DateTime? Timestamp { get; set; }
+}
+
+// POST /pos/secrets/rotate — corrects a per-client secret after the first bootstrap call locked in
+// a wrong value. Only non-null fields are applied; omit whichever secrets don't need rotating.
+public class GatewaySecretsRotateRequest
+{
+    public string EventId { get; set; } = "";
+    public string? WebhookSharedSecret { get; set; }
+    public string? GatewayJwtKey { get; set; }
+    public string? GatewayJwtIssuer { get; set; }
+    public string? GatewayJwtAudience { get; set; }
 }

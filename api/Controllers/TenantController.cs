@@ -83,6 +83,33 @@ public class TenantController(
         return Ok(ToResponse(plan));
     }
 
+    // POST /pos/secrets/rotate — corrects a WebhookSharedSecret/GatewayJwtKey/Issuer/Audience that
+    // got locked in wrong by ApplyProvisionAsync's set-once guard (e.g. an early test bootstrap
+    // call whose gatewayJwtKey never matched what the Dashboard actually signs launch tokens with).
+    // Deliberately NOT AllowBootstrap: RequireGatewaySignature re-checks X-Signature against
+    // whatever secret is stored right now, so knowing the CURRENT one is exactly the proof of
+    // authority needed to replace it.
+    [AllowAnonymous]
+    [RequireGatewaySignature]
+    [HttpPost("/pos/secrets/rotate")]
+    public async Task<IActionResult> RotateSecrets([FromBody] GatewaySecretsRotateRequest req)
+    {
+        if (await tenantPlans.IsDuplicateEventAsync(req.EventId))
+            return Ok(new { message = "Already processed." });
+
+        var plan = await tenantPlans.RotateSecretsAsync(req);
+        var rotatedFields = new[]
+        {
+            req.WebhookSharedSecret is not null ? "WebhookSharedSecret" : null,
+            req.GatewayJwtKey is not null ? "GatewayJwtKey" : null,
+            req.GatewayJwtIssuer is not null ? "GatewayJwtIssuer" : null,
+            req.GatewayJwtAudience is not null ? "GatewayJwtAudience" : null,
+        }.Where(f => f is not null);
+        logger.LogWarning("Gateway secrets rotated for business {BusinessId} (event {EventId}): {Fields}",
+            plan.BusinessId, req.EventId, string.Join(", ", rotatedFields));
+        return Ok(ToResponse(plan));
+    }
+
     // Creates the first Branch + Employee + User for a brand-new business. Idempotent on its own
     // (skips entirely if a User with this email already exists) rather than relying solely on
     // eventId bookkeeping — a business that already has its bootstrap user must never get a
