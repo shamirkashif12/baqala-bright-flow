@@ -309,3 +309,12 @@
       #fff;
   }
 }
+
+/* Leaflet's panes/controls carry z-index 400-1000, which paints them over
+   dialogs, dropdowns and popovers (z-50). Making the map container its own
+   stacking context keeps those layers trapped inside the map. */
+.leaflet-container {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
