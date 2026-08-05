@@ -71,6 +71,11 @@ type ShowOptions = {
   // Resolved URL of the app logo. Passed in rather than hard-coded because it is a bundled asset
   // whose hashed filename only the importing module knows; there is no /favicon.ico to point at.
   icon?: string;
+  // Keeps the toast on screen until it is explicitly dismissed, instead of sliding away after the
+  // few seconds Windows allows. On by default: an order alert that vanishes while nobody is at the
+  // counter has done nothing, which is the entire failure this feature exists to prevent. The
+  // "desktop alerts are on" confirmation opts out — a test that has to be dismissed is a nuisance.
+  requireInteraction?: boolean;
   onClick?: () => void;
 };
 
@@ -78,7 +83,7 @@ type ShowOptions = {
  * Shows an OS toast. Returns whether one was actually raised, so the caller can fall back to the
  * in-app beep when it wasn't.
  */
-export function showDesktopNotification({ title, body, tag, silent, icon, onClick }: ShowOptions): boolean {
+export function showDesktopNotification({ title, body, tag, silent, icon, requireInteraction = true, onClick }: ShowOptions): boolean {
   if (!isSupported()) return false;
   if (Notification.permission !== "granted") return false;
   if (!isDesktopNotificationEnabled()) return false;
@@ -94,9 +99,15 @@ export function showDesktopNotification({ title, body, tag, silent, icon, onClic
       body,
       tag,
       silent,
+      requireInteraction,
       // The app logo rather than the browser's generic globe, so the toast is identifiable at a
       // glance from across the counter.
       icon,
+      // `tag` alone would swap a replacement toast in silently. With `renotify`, a second order
+      // arriving under the batch tag re-alerts instead of quietly overwriting the first. Cast
+      // because TypeScript's DOM lib omits it — it is a Chrome/Edge extension to the spec, and
+      // browsers that don't know it ignore it rather than throwing.
+      ...({ renotify: true } as NotificationOptions),
     });
 
     notification.onclick = () => {

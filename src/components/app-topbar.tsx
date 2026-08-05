@@ -282,6 +282,8 @@ function NotificationsPopover() {
           tag: "mimony-desktop-test",
           silent: !isNotificationSoundEnabled(),
           icon: mimonyLogo,
+          // Unlike a real order alert, this one should slide away on its own.
+          requireInteraction: false,
         });
       }
     });

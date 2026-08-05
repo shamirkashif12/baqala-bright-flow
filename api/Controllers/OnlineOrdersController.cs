@@ -334,9 +334,18 @@ public class OnlineOrdersController(
             var itemCount = totals.Items.Sum(i => i.Quantity);
             await notifications.NotifyRoleAsync(
                 ["Manager", "Admin"], branchId,
-                "Online Orders", "New Online Order", "New Online Order",
-                $"{order.OrderNumber} — SAR {order.TotalAmount:F2} from {req.FullName.Trim()} " +
-                $"({itemCount:0.##} item{(itemCount == 1 ? "" : "s")}) is waiting for approval",
+                // The `type` stays "New Online Order" — it is the key the client routes and alerts
+                // on — but the title is written to be read, not parsed. It lands as the bold line of
+                // a desktop toast and of the notification bell, where the money is the one thing
+                // worth seeing without reading: "New order · SAR 34.25" answers "do I care?" from
+                // across the room, which "New Online Order" never did.
+                "Online Orders", "New Online Order",
+                $"New order · SAR {order.TotalAmount:F2}",
+                // Everything else, ordered by how quickly it is needed. The order number is last:
+                // it is the least scannable token and the only one nobody acts on from the alert
+                // itself — you click through to the Orders page regardless.
+                $"{req.FullName.Trim()} · {itemCount:0.##} item{(itemCount == 1 ? "" : "s")} · " +
+                $"waiting for approval · {order.OrderNumber}",
                 // "info", not "warning": a shop taking orders all day would otherwise have a
                 // permanently amber notification list, and amber would stop meaning anything. The
                 // urgency is carried by the alert sound and the unread badge instead.
