@@ -22,7 +22,16 @@ public record OnlineOrderTotals(
     IReadOnlyList<OnlineOrderFee> CustomFees,
     decimal CustomFeeAmount,
     decimal TaxAmount,
-    decimal TotalAmount);
+    decimal TotalAmount,
+    // Resolved from the delivery pin against DeliveryFeeRule — see IDeliveryFeeService. Always
+    // present (Source "none", Amount 0, when delivery is free), so callers never null-check it.
+    DeliveryFeeQuote Delivery)
+{
+    /// The goods total — everything except delivery. What the branch's min/max order-value gates
+    /// compare against: a delivery fee must never be the thing that pushes an order over the
+    /// maximum, nor be counted towards clearing the minimum.
+    public decimal GoodsTotal => TotalAmount - Delivery.Amount;
+}
 
 // The public online-order endpoints are the one checkout path in this codebase that is fully
 // anonymous — nothing from the client can be trusted, unlike the POS/kiosk paths (semi-trusted
@@ -33,24 +42,34 @@ public record OnlineOrderTotals(
 // scratch every time, since an anonymous caller can send anything.
 public interface IOnlineOrderPricingService
 {
+    /// <param name="deliveryLatitude">Delivery pin, when the shopper picked one on the map.
+    /// Optional — an order with no pin simply can't match a geographic delivery-fee rule and
+    /// falls through to the flat rules and the branch default.</param>
     Task<OnlineOrderTotals> ComputeAsync(
-        Guid branchId, IEnumerable<(Guid ProductId, decimal Quantity)> items, CancellationToken ct = default);
+        Guid branchId, IEnumerable<(Guid ProductId, decimal Quantity)> items,
+        decimal? deliveryLatitude = null, decimal? deliveryLongitude = null,
+        CancellationToken ct = default);
 }
 
 public class OnlineOrderPricingService(
-    BaqalaDbContext db, IPriceResolutionService priceResolution, IOfferResolutionService offerResolution)
+    BaqalaDbContext db, IPriceResolutionService priceResolution, IOfferResolutionService offerResolution,
+    IDeliveryFeeService deliveryFees)
     : IOnlineOrderPricingService
 {
     public async Task<OnlineOrderTotals> ComputeAsync(
-        Guid branchId, IEnumerable<(Guid ProductId, decimal Quantity)> items, CancellationToken ct = default)
+        Guid branchId, IEnumerable<(Guid ProductId, decimal Quantity)> items,
+        decimal? deliveryLatitude = null, decimal? deliveryLongitude = null,
+        CancellationToken ct = default)
     {
         var lines = items.ToList();
         var productIds = lines.Select(l => l.ProductId).ToList();
 
-        // "online" is a recognized ProductPriceList.PriceType alongside standard/aggregator/
-        // wholesale — a product with no online-specific rule still resolves to its base price via
-        // IPriceResolutionService's own fallback, so this is safe to use unconditionally.
-        var resolved = await priceResolution.ResolveManyAsync(productIds, branchId, customerTier: null, priceType: "online", ct: ct);
+        // Price this basket for the ONLINE channel. A product with no online-specific rule falls
+        // back to its in-store rule, and only then to BasePrice (see IPriceResolutionService), so
+        // this is safe to use unconditionally — switching a product to a different online price is
+        // purely additive, and never blanks out a price that was already set.
+        var resolved = await priceResolution.ResolveManyAsync(
+            productIds, branchId, customerTier: null, priceType: SalesChannelCatalog.Online, ct: ct);
 
         // Materialize then filter in memory — a `productIds.Contains()` filter inside the live
         // query fails to type-map on this MySQL EF provider (the ef-mysql-inlist-gotcha worked
@@ -112,11 +131,20 @@ public class OnlineOrderPricingService(
         var customFees = await ResolveCustomFeesAsync(branchId, subtotal, ct);
         var customFeeTotal = customFees.Sum(f => f.Amount);
 
+        // Delivery is resolved against the goods subtotal, so a free-delivery threshold means
+        // "spend this much on groceries", not "spend this much once we've added fees and VAT".
+        var delivery = await deliveryFees.ResolveAsync(branchId, deliveryLatitude, deliveryLongitude, subtotal, ct);
+
         var taxableBase = subtotal + tobaccoFeeTotal;
         var taxAmount = Math.Round(taxableBase * await ResolveVatRateAsync(branchId, ct), 2);
-        var totalAmount = subtotal + tobaccoFeeTotal + taxAmount + customFeeTotal;
+        // Delivery sits outside the VAT base, exactly like the configured custom fees above
+        // (which is where a "Delivery Service Fee" was modelled before this existed). Consistency
+        // with the existing treatment matters more here than the alternative reading, because the
+        // two would otherwise disagree on the same order.
+        var totalAmount = subtotal + tobaccoFeeTotal + taxAmount + customFeeTotal + delivery.Amount;
 
-        return new OnlineOrderTotals(resultItems, subtotal, tobaccoFeeTotal, customFees, customFeeTotal, taxAmount, totalAmount);
+        return new OnlineOrderTotals(
+            resultItems, subtotal, tobaccoFeeTotal, customFees, customFeeTotal, taxAmount, totalAmount, delivery);
     }
 
     // Branch-specific active "vat" rule wins over the tenant-wide one, mirroring

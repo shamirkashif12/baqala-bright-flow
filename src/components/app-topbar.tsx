@@ -1,13 +1,17 @@
-import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass } from "lucide-react";
+import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass, Globe, Volume2, VolumeX } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { api, NOTIFICATION_CREATED_EVENT } from "@/lib/api";
+import {
+  playNotificationSound, primeNotificationSound,
+  isNotificationSoundEnabled, setNotificationSoundEnabled,
+} from "@/lib/notification-sound";
 import { restartDashboardTour } from "@/lib/tour-bus";
 import {
   Popover,
@@ -41,6 +45,7 @@ const TONE_DOT: Record<NotifItem["tone"], string> = {
 
 const CATEGORY_ICON: Record<string, React.FC<{ className?: string }>> = {
   "Sales / Checkout": ShoppingCart,
+  "Online Orders": Globe,
   "Payment": CreditCard,
   "Cashier Shift": AlertTriangle,
   "Inventory": Package,
@@ -62,6 +67,9 @@ const CATEGORY_ICON: Record<string, React.FC<{ className?: string }>> = {
 // (Payment Successful, Item Added to Cart, Coupon Applied, Loyalty Points Earned, …) stay
 // non-navigating — there is no useful tab for them and jumping away would be jarring.
 const TYPE_ROUTE: Record<string, string> = {
+  // Online ordering — ?tab=online, because /orders opens on POS Orders by default and the
+  // pending order this notification is about lives on the other tab.
+  "New Online Order": "/orders?tab=online",
   // Returns / refunds
   "Return Started": "/returns",
   "Return Approval Required": "/returns",
@@ -110,6 +118,15 @@ function routeForNotification(n: { type: string; entityType?: string }): string 
   return TYPE_ROUTE[n.type];
 }
 
+// Splits a TYPE_ROUTE entry into the shape navigate() wants. Entries are plain path strings, but a
+// couple need a query param to land on the right tab of a multi-tab page — navigate() ignores a
+// "?..." embedded in `to`, so it has to be handed over separately.
+function toNavigateTarget(route: string): { to: string; search?: Record<string, string> } {
+  const [to, query] = route.split("?");
+  if (!query) return { to };
+  return { to, search: Object.fromEntries(new URLSearchParams(query)) };
+}
+
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
@@ -120,14 +137,40 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// Notification types that play a sound as well as appearing in the bell. Deliberately a short
+// allow-list rather than "anything unread": a sound that fires for every routine event is one
+// staff learn to ignore, which is the same as having no sound at all. A new online order earns it
+// because it is the one event with nobody present when it happens — it sits unapproved until
+// somebody notices.
+const AUDIBLE_TYPES = new Set(["New Online Order"]);
+
 function NotificationsPopover() {
   const [open, setOpen] = useState(false);
   const [persisted, setPersisted] = useState<NotifItem[]>([]);
   const [showAll, setShowAll] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
   const navigate = useNavigate();
+
+  // Ids already seen by this tab. The bell replaces its whole list on every poll, so "which of
+  // these is new?" can only be answered against what the previous poll returned. A ref, not state:
+  // updating it must not itself trigger a re-render/refetch.
+  const seenIds = useRef<Set<string> | null>(null);
 
   const loadPersisted = () => {
     api.getNotifications({ pageSize: 20 }).then(res => {
+      // First load of the tab primes the set without making a sound. Otherwise every page refresh
+      // would replay the beep for orders that arrived — and were dealt with — hours ago.
+      const isFirstLoad = seenIds.current === null;
+      const seen = seenIds.current ?? new Set<string>();
+
+      const arrived = res.items.filter(n => !seen.has(n.id));
+      for (const n of res.items) seen.add(n.id);
+      seenIds.current = seen;
+
+      if (!isFirstLoad && arrived.some(n => !n.isRead && AUDIBLE_TYPES.has(n.type))) {
+        playNotificationSound();
+      }
+
       setPersisted(res.items.map(n => ({
         id: n.id,
         tone: n.severity,
@@ -144,6 +187,7 @@ function NotificationsPopover() {
   };
 
   useEffect(() => {
+    setSoundOn(isNotificationSoundEnabled());
     loadPersisted();
     const interval = setInterval(loadPersisted, 30000);
     // Backend/other-user-triggered notifications rely on the poll above, but a notification
@@ -151,12 +195,24 @@ function NotificationsPopover() {
     // rather than waiting up to 30s — api.notify() fires this event once its POST resolves.
     const onCreated = () => loadPersisted();
     window.addEventListener(NOTIFICATION_CREATED_EVENT, onCreated);
+    // Browsers keep audio suspended until the user interacts with the page; this arms it on their
+    // first click or keypress so the beep isn't silently dropped later.
+    const unprime = primeNotificationSound();
     return () => {
       clearInterval(interval);
       window.removeEventListener(NOTIFICATION_CREATED_EVENT, onCreated);
+      unprime();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    setNotificationSoundEnabled(next);
+    // Play it on the way ON so the user hears exactly what they've just enabled — and confirms
+    // this machine's speakers actually work, which is the thing they're really checking.
+    if (next) playNotificationSound();
+  };
 
   // "Unread" is the default view — once you've acted on/dismissed something, there's no reason
   // for it to keep taking up space here — but "All" still shows the full history on request.
@@ -176,10 +232,10 @@ function NotificationsPopover() {
   // event with a home screen), navigates there. Ephemeral POS notices without a route just clear.
   const handleClick = (item: NotifItem) => {
     markOneRead(item);
-    const to = routeForNotification(item);
-    if (to) {
+    const route = routeForNotification(item);
+    if (route) {
       setOpen(false);
-      navigate({ to });
+      navigate(toNavigateTarget(route));
     }
   };
 
@@ -198,9 +254,22 @@ function NotificationsPopover() {
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
           <p className="text-sm font-semibold">Notifications {unread > 0 && <span className="ml-1 text-[10px] font-bold text-destructive">{unread} new</span>}</p>
-          <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Per-device, not per-account: whether sound is wanted depends on the machine (a
+                back-office PC with speakers vs. a shared shop-floor tablet), so it's stored in
+                this browser rather than on the user. */}
+            <button
+              onClick={toggleSound}
+              className="text-muted-foreground hover:text-foreground"
+              title={soundOn ? "Alert sound on — click to mute" : "Alert sound muted — click to unmute"}
+              aria-label={soundOn ? "Mute notification sound" : "Unmute notification sound"}
+            >
+              {soundOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+            </button>
+            <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-1 px-4 py-2 border-b border-border/40">
           <button

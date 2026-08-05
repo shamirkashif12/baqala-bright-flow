@@ -10,6 +10,15 @@ namespace BaqalaPOS.Api.Controllers;
 
 public record OnlineOrderItemRequest(Guid ProductId, decimal Quantity);
 
+// The quote body grew from a bare item list to this so the delivery pin can be priced alongside
+// the basket — the fee depends on where the order is going, so a quote that doesn't know the
+// destination can't show the real total. Latitude/Longitude stay optional: an order placed
+// without a map pin still quotes, it just can't match a geographic rule.
+public record QuoteOnlineOrderRequest(
+    List<OnlineOrderItemRequest> Items, decimal? Latitude, decimal? Longitude);
+
+public record UpdateOnlineOrderDeliveryFeeRequest(decimal Amount, string? Reason);
+
 public record PlaceOnlineOrderRequest(
     List<OnlineOrderItemRequest> Items, string FullName, string Phone, string? Email,
     string AddressLine, decimal? Latitude, decimal? Longitude, string? Notes);
@@ -35,6 +44,7 @@ public class OnlineOrdersController(
     IStockAlertService stockAlerts,
     IAuditService audit,
     IBatchConsumptionService batchConsumption,
+    INotificationService notifications,
     ILogger<OnlineOrdersController> logger) : ControllerBase
 {
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -129,13 +139,14 @@ public class OnlineOrdersController(
     // show a naive unitPrice*qty guess with no visibility into fees until after the order is placed.
     [AllowAnonymous]
     [HttpPost("public/{branchId:guid}/quote")]
-    public async Task<IActionResult> QuotePublicOrder(Guid branchId, [FromBody] List<OnlineOrderItemRequest> items)
+    public async Task<IActionResult> QuotePublicOrder(Guid branchId, [FromBody] QuoteOnlineOrderRequest req)
     {
         var (branch, _) = await ResolveOnlineOrderingBranchAsync(branchId);
         if (branch is null) return NotFound(new { message = "Online ordering isn't available for this branch." });
-        if (items is not { Count: > 0 }) return BadRequest(new { message = "Your cart is empty." });
+        if (req?.Items is not { Count: > 0 }) return BadRequest(new { message = "Your cart is empty." });
 
-        var totals = await pricing.ComputeAsync(branchId, items.Select(i => (i.ProductId, i.Quantity)));
+        var totals = await pricing.ComputeAsync(
+            branchId, req.Items.Select(i => (i.ProductId, i.Quantity)), req.Latitude, req.Longitude);
         return Ok(new
         {
             items = totals.Items.Select(i => new
@@ -148,6 +159,16 @@ public class OnlineOrdersController(
             customFeeAmount = totals.CustomFeeAmount,
             taxAmount = totals.TaxAmount,
             totalAmount = totals.TotalAmount,
+            // The quote reports serviceability as data rather than as an error: the shopper is
+            // still mid-checkout and may well move the pin, so the page needs to show the problem
+            // in place. Placement is where it becomes a hard 400.
+            deliveryFee = totals.Delivery.Amount,
+            deliveryFeeName = totals.Delivery.RuleName,
+            deliveryFeeSource = totals.Delivery.Source,
+            deliveryFeeWaived = totals.Delivery.WaivedByThreshold,
+            deliveryDistanceKm = totals.Delivery.DistanceKm,
+            isServiceable = totals.Delivery.IsServiceable,
+            unserviceableMessage = totals.Delivery.UnserviceableMessage,
         });
     }
 
@@ -190,10 +211,20 @@ public class OnlineOrdersController(
                 return BadRequest(new { message = "One or more items are no longer available." });
         }
 
-        var totals = await pricing.ComputeAsync(branchId, req.Items.Select(i => (i.ProductId, i.Quantity)));
-        if (totals.TotalAmount < settings.OnlineOrderingMinOrderAmountSar)
+        // Delivery is priced from the pin the shopper submitted, server-side — the client's own
+        // quote is a display convenience and is never trusted, same posture as every other number
+        // on this endpoint.
+        var totals = await pricing.ComputeAsync(
+            branchId, req.Items.Select(i => (i.ProductId, i.Quantity)), req.Latitude, req.Longitude);
+
+        if (!totals.Delivery.IsServiceable)
+            return BadRequest(new { message = totals.Delivery.UnserviceableMessage ?? "This branch doesn't deliver to that address." });
+
+        // Gates compare against the GOODS total, not the grand total: a delivery fee must never be
+        // what pushes an order over the branch maximum, nor count towards clearing its minimum.
+        if (totals.GoodsTotal < settings.OnlineOrderingMinOrderAmountSar)
             return BadRequest(new { message = $"Minimum order amount is SAR {settings.OnlineOrderingMinOrderAmountSar:F2}." });
-        if (totals.TotalAmount > settings.OnlineOrderingMaxOrderValueSar)
+        if (totals.GoodsTotal > settings.OnlineOrderingMaxOrderValueSar)
             return BadRequest(new { message = $"This order exceeds the maximum of SAR {settings.OnlineOrderingMaxOrderValueSar:F2} — please contact the branch directly." });
 
         // Combine paid + bonus quantities per product — a bogo/buy_a_get_b offer can add a bonus
@@ -231,6 +262,7 @@ public class OnlineOrdersController(
             TaxAmount = totals.TaxAmount,
             TobaccoFeeAmount = totals.TobaccoFeeAmount,
             CustomFeeAmount = totals.CustomFeeAmount,
+            DeliveryFeeAmount = totals.Delivery.Amount,
             TotalAmount = totals.TotalAmount,
             PaymentStatus = "pending",
             OrderStatus = "pending",
@@ -270,6 +302,11 @@ public class OnlineOrdersController(
             Latitude = req.Latitude,
             Longitude = req.Longitude,
             Notes = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim(),
+            // Snapshot of how the fee was arrived at — the rule can be edited or deleted later,
+            // and "why was I charged this?" is a question asked days afterwards.
+            DeliveryFeeRuleId = totals.Delivery.RuleId,
+            DeliveryFeeRuleName = totals.Delivery.RuleName,
+            DeliveryDistanceKm = totals.Delivery.DistanceKm,
             CreatedAt = DateTime.UtcNow,
         });
 
@@ -283,6 +320,34 @@ public class OnlineOrdersController(
         }
 
         await db.SaveChangesAsync();
+
+        // Tell the branch an order is waiting. This is the only event in the system with nobody
+        // present when it happens — a POS sale has a cashier standing at the till, but an online
+        // order arrives while the shop is doing something else, and it sits at "pending" until a
+        // human approves it. Without this it's found by whoever next happens to open the Orders
+        // page.
+        //
+        // Best-effort, like every other notification call site: a failure here must never fail the
+        // customer's order, which is already committed above.
+        try
+        {
+            var itemCount = totals.Items.Sum(i => i.Quantity);
+            await notifications.NotifyRoleAsync(
+                ["Manager", "Admin"], branchId,
+                "Online Orders", "New Online Order", "New Online Order",
+                $"{order.OrderNumber} — SAR {order.TotalAmount:F2} from {req.FullName.Trim()} " +
+                $"({itemCount:0.##} item{(itemCount == 1 ? "" : "s")}) is waiting for approval",
+                // "info", not "warning": a shop taking orders all day would otherwise have a
+                // permanently amber notification list, and amber would stop meaning anything. The
+                // urgency is carried by the alert sound and the unread badge instead.
+                severity: "info",
+                entityType: "Order", entityId: order.Id);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Notification failed for online order {OrderId}", order.Id);
+        }
+
         return Ok(new { order.OrderNumber, order.TotalAmount });
     }
 
@@ -307,7 +372,8 @@ public class OnlineOrdersController(
             .OrderByDescending(o => o.CreatedAt)
             .Select(o => new
             {
-                o.Id, o.OrderNumber, o.BranchId, o.Subtotal, o.TaxAmount, o.TobaccoFeeAmount, o.CustomFeeAmount, o.TotalAmount,
+                o.Id, o.OrderNumber, o.BranchId, o.Subtotal, o.TaxAmount, o.TobaccoFeeAmount, o.CustomFeeAmount,
+                o.DeliveryFeeAmount, o.TotalAmount,
                 o.PaymentStatus, o.OrderStatus, o.RejectionReason, o.ApprovedAt, o.CreatedAt, o.UpdatedAt,
                 Branch = o.Branch == null ? null : new { o.Branch.Id, o.Branch.Name },
                 Items = o.Items.Select(i => new
@@ -321,6 +387,10 @@ public class OnlineOrdersController(
                 {
                     o.DeliveryDetail.FullName, o.DeliveryDetail.Phone, o.DeliveryDetail.Email,
                     o.DeliveryDetail.AddressLine, o.DeliveryDetail.Latitude, o.DeliveryDetail.Longitude, o.DeliveryDetail.Notes,
+                    o.DeliveryDetail.DeliveryFeeRuleId, o.DeliveryDetail.DeliveryFeeRuleName,
+                    o.DeliveryDetail.DeliveryDistanceKm,
+                    o.DeliveryDetail.DeliveryFeeOverriddenBy, o.DeliveryDetail.DeliveryFeeOverriddenAt,
+                    o.DeliveryDetail.DeliveryFeeOverrideReason,
                 },
             })
             .ToListAsync();
@@ -406,11 +476,72 @@ public class OnlineOrdersController(
         var vatRate = totals.Subtotal > 0 ? totals.TaxAmount / totals.Subtotal : 0m;
         order.Subtotal = subtotal;
         order.TaxAmount = Math.Round(subtotal * vatRate, 2);
-        order.TotalAmount = order.Subtotal + order.TaxAmount;
+        // The already-charged delivery and custom fees carry over rather than being recomputed:
+        // editing which items ship doesn't re-run the delivery quote (the address hasn't moved),
+        // and staff change the fee itself through the dedicated endpoint below. They must still be
+        // ADDED BACK to the total — dropping them, as this line did for custom fees before, made
+        // every edited order silently cheaper than what was agreed.
+        order.TotalAmount = order.Subtotal + order.TaxAmount + order.CustomFeeAmount + order.DeliveryFeeAmount;
         order.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync();
-        return Ok(new { order.Id, order.Subtotal, order.TaxAmount, order.TotalAmount });
+        return Ok(new { order.Id, order.Subtotal, order.TaxAmount, order.DeliveryFeeAmount, order.TotalAmount });
+    }
+
+    /// <summary>
+    /// Override the delivery fee on a pending order.
+    ///
+    /// Rules can only describe the situations an operator anticipated; a specific order is
+    /// routinely different (a regular being waived a fee, a rider quoting more for a hard-to-reach
+    /// address). Without this the only way to correct a fee would be to reject the order and ask
+    /// the customer to place it again.
+    ///
+    /// Pending only, mirroring the item-edit endpoint: after approval a payment row exists for the
+    /// agreed amount, and changing what's owed underneath it would leave the two disagreeing.
+    /// </summary>
+    [RequirePermission("Online Orders", PermAction.Edit)]
+    [HttpPatch("{id:guid}/delivery-fee")]
+    public async Task<IActionResult> UpdateDeliveryFee(Guid id, [FromBody] UpdateOnlineOrderDeliveryFeeRequest req)
+    {
+        if (req.Amount < 0) return BadRequest(new { message = "The delivery fee cannot be negative." });
+
+        var order = await db.Orders
+            .Include(o => o.DeliveryDetail)
+            .FirstOrDefaultAsync(o => o.Id == id && o.Source == "online");
+        if (order is null) return NotFound(new { message = "Online order not found." });
+        if (order.OrderStatus != "pending")
+            return BadRequest(new { message = "Only a pending order's delivery fee can be changed." });
+
+        var previous = order.DeliveryFeeAmount;
+        var amount = Math.Round(req.Amount, 2);
+        if (previous == amount) return Ok(new { order.Id, order.DeliveryFeeAmount, order.TotalAmount });
+
+        // Adjust the total by the delta rather than recomputing it from parts — the order may
+        // carry an item-level price override from UpdateItems that a fresh recompute would undo.
+        order.DeliveryFeeAmount = amount;
+        order.TotalAmount += amount - previous;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        if (order.DeliveryDetail is not null)
+        {
+            order.DeliveryDetail.DeliveryFeeOverriddenBy = CallerId();
+            order.DeliveryDetail.DeliveryFeeOverriddenAt = DateTime.UtcNow;
+            order.DeliveryDetail.DeliveryFeeOverrideReason =
+                string.IsNullOrWhiteSpace(req.Reason) ? null : req.Reason.Trim();
+        }
+
+        await db.SaveChangesAsync();
+
+        var (_, callerBranchId) = GetCallerContext();
+        await audit.LogAsync("Changed online order delivery fee", entityType: "Order", entityId: order.Id,
+            userId: CallerId(), branchId: callerBranchId ?? order.BranchId, module: "Online Orders",
+            severity: "warning",
+            beforeValue: System.Text.Json.JsonSerializer.Serialize(new { deliveryFeeAmount = previous }),
+            details: System.Text.Json.JsonSerializer.Serialize(new { deliveryFeeAmount = amount }),
+            notes: $"{order.OrderNumber}: delivery fee {previous:0.00} → {amount:0.00}"
+                   + (string.IsNullOrWhiteSpace(req.Reason) ? "" : $" ({req.Reason.Trim()})"));
+
+        return Ok(new { order.Id, order.DeliveryFeeAmount, order.TotalAmount });
     }
 
     [RequirePermission("Online Orders", PermAction.Approve)]

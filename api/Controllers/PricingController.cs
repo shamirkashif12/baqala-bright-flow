@@ -23,7 +23,9 @@ public class PricingController(
     IAuditService audit,
     ILogger<PricingController> logger) : ControllerBase
 {
-    private static readonly string[] ValidPriceTypes = ["standard", "online"];
+    // The distribution channels a price rule can target — see SalesChannelCatalog for why the
+    // list is limited to channels something actually resolves prices for.
+    private static readonly string[] ValidPriceTypes = SalesChannelCatalog.All;
     private static readonly string[] ValidTiers = ["standard", "silver", "gold", "platinum"];
     private static readonly string[] ValidUnitTypes = ["unit", "pack"];
 
@@ -69,6 +71,13 @@ public class PricingController(
         [FromQuery] string priceType = "standard",
         [FromQuery] DateTime? at = null)
     {
+        // Same rejection as Resolve above. The resolver itself would silently treat an unknown
+        // channel as "standard" (a deliberate degradation on the POS's hot path), but an admin
+        // asking this endpoint for a channel that doesn't exist wants to be told, not handed the
+        // shelf price as though it were the answer.
+        if (!ValidPriceTypes.Contains(priceType))
+            return BadRequest(new { message = $"priceType must be one of: {string.Join(", ", ValidPriceTypes)}" });
+
         if (!await db.Products.AnyAsync(p => p.Id == productId)) return NotFound();
         var (role, callerBranch) = GetCallerContext();
         var effectiveBranch = role != "tenant_admin" ? callerBranch ?? branchId : branchId;

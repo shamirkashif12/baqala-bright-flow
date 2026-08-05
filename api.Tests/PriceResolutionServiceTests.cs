@@ -84,21 +84,81 @@ public class PriceResolutionServiceTests
         Assert.Equal("base", result.Source);
     }
 
+    // ─── Sales channels ──────────────────────────────────────────────────────
+
     [Fact]
-    public async Task IgnoresRulesForAnotherPriceType()
+    public async Task IgnoresRulesForAnotherChannel()
     {
         using var db = NewDb();
         var productId = SeedProduct(db, 10m);
         var rule = Rule(productId, 5m);
-        rule.PriceType = "wholesale";
+        rule.PriceType = SalesChannelCatalog.Online;
         db.ProductPriceLists.Add(rule);
         await db.SaveChangesAsync();
 
+        // The in-store channel never sees the online price — the fallback runs one way only.
         var standard = await new PriceResolutionService(db).ResolveAsync(productId, BranchA, null);
         Assert.Equal(10m, standard.UnitPrice);
 
-        var wholesale = await new PriceResolutionService(db).ResolveAsync(productId, BranchA, null, priceType: "wholesale");
-        Assert.Equal(5m, wholesale.UnitPrice);
+        var online = await new PriceResolutionService(db)
+            .ResolveAsync(productId, BranchA, null, priceType: SalesChannelCatalog.Online);
+        Assert.Equal(5m, online.UnitPrice);
+        Assert.Equal(SalesChannelCatalog.Online, online.Channel);
+    }
+
+    [Fact]
+    public async Task ChannelFallsBackToStandardRule_WhenChannelHasNoneOfItsOwn()
+    {
+        // The property that makes turning a channel on safe: a product priced per-branch in store,
+        // with no online rule, must still sell online at that branch price — never at BasePrice.
+        using var db = NewDb();
+        var productId = SeedProduct(db, 10m);
+        db.ProductPriceLists.Add(Rule(productId, 7m, branchId: BranchA));
+        await db.SaveChangesAsync();
+
+        var online = await new PriceResolutionService(db)
+            .ResolveAsync(productId, BranchA, null, priceType: SalesChannelCatalog.Online);
+
+        Assert.Equal(7m, online.UnitPrice);
+        Assert.Equal("branch", online.Source);
+        Assert.Equal(SalesChannelCatalog.Standard, online.Channel);
+    }
+
+    [Fact]
+    public async Task ChannelRuleBeatsAMoreSpecificStandardRule()
+    {
+        // Channel is the outermost precedence: an operator who states an online price means it,
+        // even against a standard rule that is otherwise more specific (branch + tier).
+        using var db = NewDb();
+        var productId = SeedProduct(db, 10m);
+        db.ProductPriceLists.Add(Rule(productId, 6m, branchId: BranchA, tier: "gold"));
+        var onlineRule = Rule(productId, 9m);   // tenant-wide, no tier
+        onlineRule.PriceType = SalesChannelCatalog.Online;
+        db.ProductPriceLists.Add(onlineRule);
+        await db.SaveChangesAsync();
+
+        var svc = new PriceResolutionService(db);
+        var inStore = await svc.ResolveAsync(productId, BranchA, "gold");
+        var online = await svc.ResolveAsync(productId, BranchA, "gold", priceType: SalesChannelCatalog.Online);
+
+        Assert.Equal(6m, inStore.UnitPrice);
+        Assert.Equal(9m, online.UnitPrice);
+    }
+
+    [Fact]
+    public async Task UnknownChannelResolvesAsStandard()
+    {
+        // An unrecognised channel must degrade to the shelf price, never to no price at all —
+        // resolution is on the hot path of every POS load.
+        using var db = NewDb();
+        var productId = SeedProduct(db, 10m);
+        db.ProductPriceLists.Add(Rule(productId, 4m));
+        await db.SaveChangesAsync();
+
+        var result = await new PriceResolutionService(db)
+            .ResolveAsync(productId, BranchA, null, priceType: "not-a-channel");
+
+        Assert.Equal(4m, result.UnitPrice);
     }
 
     // ─── Branch-based pricing ────────────────────────────────────────────────

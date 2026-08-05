@@ -151,10 +151,39 @@ function QuoteBreakdown({
         <span className="text-muted-foreground">VAT</span>
         <span className="tabular-nums"><SARIcon />{quote.taxAmount.toFixed(2)}</span>
       </div>
+      {/* Delivery is always shown, including at 0.00 — "Free delivery" is a thing the shopper
+          should see stated, and a silently absent row reads as "not decided yet". Hidden only
+          when the address is undeliverable, where the banner below says so instead. */}
+      {quote.isServiceable && (
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">
+            {t("Delivery")}
+            {quote.deliveryFeeName && (
+              <span className="text-[10px] text-muted-foreground/70 ms-1">({quote.deliveryFeeName})</span>
+            )}
+          </span>
+          {quote.deliveryFee > 0 ? (
+            <span className="tabular-nums"><SARIcon />{quote.deliveryFee.toFixed(2)}</span>
+          ) : (
+            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              {quote.deliveryFeeWaived ? t("Free delivery") : t("Free")}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex justify-between text-sm font-bold pt-2 border-t">
         <span>{t("Estimated total")}</span>
         <span className="tabular-nums text-primary"><SARIcon />{quote.totalAmount.toFixed(2)}</span>
       </div>
+      {/* The pin fell in an area this branch doesn't deliver to. Surfaced here rather than only on
+          submit: the shopper is standing at the map and can move it, which is not true once
+          they've hit Place order and been bounced. */}
+      {!quote.isServiceable && (
+        <p className="text-xs text-destructive flex items-start gap-1.5 pt-2">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          {quote.unserviceableMessage ?? t("This branch doesn't deliver to the selected location.")}
+        </p>
+      )}
     </>
   );
 }
@@ -220,10 +249,11 @@ function PublicOrderPage() {
   const cartCount = cartItems.reduce((s, i) => s + i.qty, 0);
   const cartTotal = cartItems.reduce((s, i) => s + i.qty * i.product.unitPrice, 0);
 
-  // Real server-computed totals (product discount/offers/tobacco/custom fees/VAT — none of which
-  // is safe to duplicate client-side) — fetched whenever the cart drawer is open or the shopper is
-  // on the checkout step, and refreshed whenever the cart's actual contents change (not just
-  // quantity tweaks that don't change composition, thanks to the signature below).
+  // Real server-computed totals (product discount/offers/tobacco/custom fees/VAT/delivery — none
+  // of which is safe to duplicate client-side) — fetched whenever the cart drawer is open or the
+  // shopper is on the checkout step, and refreshed whenever the cart's actual contents change (not
+  // just quantity tweaks that don't change composition, thanks to the signature below) or the
+  // delivery pin moves, since the fee depends on where the order is going.
   const cartSignature = useMemo(
     () => cartItems.map(i => `${i.product.productId}:${i.qty}`).sort().join(","),
     [cartItems],
@@ -231,12 +261,16 @@ function PublicOrderPage() {
   useEffect(() => {
     if ((!cartOpen && step !== "checkout") || cartItems.length === 0) { setQuote(null); return; }
     setQuoteLoading(true);
-    api.quoteOnlineOrder(branchId, cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty })))
+    api.quoteOnlineOrder(
+      branchId,
+      cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty })),
+      { latitude, longitude },
+    )
       .then(setQuote)
       .catch(() => setQuote(null))
       .finally(() => setQuoteLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cartOpen, step, cartSignature]);
+  }, [cartOpen, step, cartSignature, latitude, longitude]);
 
   const setQty = (product: OnlineOrderCatalogProduct, qty: number) => {
     if (qty > product.available) {
@@ -268,6 +302,12 @@ function PublicOrderPage() {
   const handlePlaceOrder = async () => {
     setTouched({ fullName: true, phone: true, email: true, addressLine: true });
     if (hasErrors) return;
+    // The server refuses an undeliverable address anyway — stopping here just keeps the reason on
+    // screen next to the map the shopper needs to fix, instead of as a submit error.
+    if (quote && !quote.isServiceable) {
+      setError(quote.unserviceableMessage ?? "This branch doesn't deliver to the selected location.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -570,7 +610,11 @@ function PublicOrderPage() {
                 <AlertCircle className="h-4 w-4 shrink-0" /> {error}
               </p>
             )}
-            <Button className="w-full h-11 gradient-primary text-primary-foreground border-0" disabled={submitting} onClick={handlePlaceOrder}>
+            <Button
+              className="w-full h-11 gradient-primary text-primary-foreground border-0"
+              disabled={submitting || (!!quote && !quote.isServiceable)}
+              onClick={handlePlaceOrder}
+            >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : t("Place order")}
             </Button>
             {hasErrors && Object.values(touched).some(Boolean) && (

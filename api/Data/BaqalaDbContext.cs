@@ -48,6 +48,7 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     public DbSet<OrderDiscount> OrderDiscounts { get; set; }
     public DbSet<OrderServiceCharge> OrderServiceCharges { get; set; }
     public DbSet<OrderDeliveryDetail> OrderDeliveryDetails { get; set; }
+    public DbSet<DeliveryFeeRule> DeliveryFeeRules { get; set; }
     public DbSet<CustomerReturn> CustomerReturns { get; set; }
     public DbSet<CustomerReturnItem> CustomerReturnItems { get; set; }
 
@@ -310,6 +311,20 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
             .WithOne(o => o.DeliveryDetail)
             .HasForeignKey<OrderDeliveryDetail>(d => d.OrderId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // ─── DeliveryFeeRule: branch scope ───────────────────────────────────
+        // Restrict, not Cascade: deleting a branch must not silently take the tenant's delivery
+        // pricing with it. BranchId is nullable (null = tenant-wide), so the FK is optional.
+        modelBuilder.Entity<DeliveryFeeRule>()
+            .HasOne(r => r.Branch)
+            .WithMany()
+            .HasForeignKey(r => r.BranchId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // IDeliveryFeeService always filters (branch, is_active) first, on every quote and every
+        // placed order.
+        modelBuilder.Entity<DeliveryFeeRule>()
+            .HasIndex(r => new { r.BranchId, r.IsActive });
 
         // ─── StockMovement: created_by ────────────────────────────────────────
         // Without this, CreatedByUser has no Fluent config anywhere and EF never wires it to the

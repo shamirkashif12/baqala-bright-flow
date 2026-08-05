@@ -56,6 +56,7 @@ builder.Services.AddScoped<IPackBreakService, PackBreakService>();
 builder.Services.AddScoped<IPriceResolutionService, PriceResolutionService>();
 builder.Services.AddScoped<IOnlineOrderPricingService, OnlineOrderPricingService>();
 builder.Services.AddScoped<IOfferResolutionService, OfferResolutionService>();
+builder.Services.AddScoped<IDeliveryFeeService, DeliveryFeeService>();
 builder.Services.AddScoped<IStockMovementService, StockMovementService>();
 builder.Services.AddScoped<IOrderVoidService, OrderVoidService>();
 builder.Services.AddScoped<IOrderEditService, OrderEditService>();

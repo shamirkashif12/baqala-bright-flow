@@ -211,8 +211,21 @@ public class PosSettings
     public decimal OnlineOrderingMinOrderAmountSar { get; set; } = 0m;
 
     /// Anti-abuse ceiling on a fully anonymous endpoint — mirrors SelfCheckoutMaxOrderValueSar.
+    /// Checked against the goods total, not the grand total: a delivery fee must never be what
+    /// pushes an order over the maximum or under the minimum.
     [Column("online_ordering_max_order_value_sar")]
     public decimal OnlineOrderingMaxOrderValueSar { get; set; } = 1000m;
+
+    /// The branch's flat delivery fee, charged when no DeliveryFeeRule matches the delivery pin.
+    /// 0 = delivery is free. This alone is the entire delivery-fee configuration for a shop with
+    /// one citywide rate; the rules table only earns its keep once the fee varies by area.
+    [Column("online_ordering_delivery_fee_sar")]
+    public decimal OnlineOrderingDeliveryFeeSar { get; set; } = 0m;
+
+    /// Waive the default fee above this goods subtotal. 0 = never waived. (A matched
+    /// DeliveryFeeRule carries its own threshold and ignores this one.)
+    [Column("online_ordering_free_delivery_above_sar")]
+    public decimal OnlineOrderingFreeDeliveryAboveSar { get; set; } = 0m;
 
     // ── Inventory adjustment policy tab ──────────────────────────────────────
     [Column("require_reason_for_adjustments")]

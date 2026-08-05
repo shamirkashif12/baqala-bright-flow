@@ -38,6 +38,38 @@ public class OrderDeliveryDetail
     [Column("notes")]
     public string? Notes { get; set; }
 
+    // ── How Order.DeliveryFeeAmount was arrived at ───────────────────────────
+    // The fee lives on the order (it's part of the total); this is its provenance. Kept because
+    // the rule that produced it can be edited or deleted afterwards, and "why was I charged 15?"
+    // is a question asked days later, when re-resolving against today's rules would give a
+    // different — and therefore useless — answer.
+
+    /// The DeliveryFeeRule that matched, or null when the branch's default fee applied (or none).
+    /// Not a hard FK: the rule may be deleted later and this row must still mean something.
+    [Column("delivery_fee_rule_id")]
+    public Guid? DeliveryFeeRuleId { get; set; }
+
+    /// Snapshot of the matched rule's name at order time, for the same reason.
+    [MaxLength(255), Column("delivery_fee_rule_name")]
+    public string? DeliveryFeeRuleName { get; set; }
+
+    /// Great-circle distance from the matched radius rule's centre, in km. Null when the address
+    /// had no pin, or the winning rule wasn't distance-based.
+    [Column("delivery_distance_km")]
+    public decimal? DeliveryDistanceKm { get; set; }
+
+    // Staff override trail (PATCH /online-orders/{id}/delivery-fee). Present only when someone
+    // changed the computed fee by hand.
+
+    [Column("delivery_fee_overridden_by")]
+    public Guid? DeliveryFeeOverriddenBy { get; set; }
+
+    [Column("delivery_fee_overridden_at")]
+    public DateTime? DeliveryFeeOverriddenAt { get; set; }
+
+    [MaxLength(500), Column("delivery_fee_override_reason")]
+    public string? DeliveryFeeOverrideReason { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

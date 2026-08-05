@@ -55,6 +55,14 @@ public class Order
     [Column("custom_fee_amount")]
     public decimal CustomFeeAmount { get; set; } = 0;
 
+    // Delivery charge for an online order, resolved from the delivery pin against
+    // DeliveryFeeRule (see IDeliveryFeeService) and included in TotalAmount. Kept as its own
+    // column rather than folded into CustomFeeAmount because it is the one fee a customer
+    // routinely queries and staff routinely override — it has to be separable on the order, in
+    // the admin list and in reporting, not buried in an aggregate. 0 for every non-online order.
+    [Column("delivery_fee_amount")]
+    public decimal DeliveryFeeAmount { get; set; } = 0;
+
     // Sum of Items[].TobaccoFeeAmount — KSA tobacco excise (min 25 SAR or 100% of base price per
     // unit), persisted at checkout instead of being recomputed at report time from a generic
     // TaxFeeRule rate, so the Tobacco Excise/Fee reports reflect exactly what was charged.
