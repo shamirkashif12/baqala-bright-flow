@@ -15,13 +15,13 @@ import {
   Plus, Minus, Eye, Pencil, LayoutGrid, Package, AlertTriangle, CalendarClock,
   Boxes, ScanLine, Loader2, Download, CheckCircle2, Percent, Tag, Sparkles,
   ImageOff, ChevronRight, ChevronDown, Truck, Trash2, ArrowRightLeft, X, Lock,
-  SlidersHorizontal,
+  SlidersHorizontal, Globe,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { TierMultiSelect } from "@/components/tier-multi-select";
-import { api, excludeDisabledBranches, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList, type ProductImage, type ProductVariant, type Product, type UnitOfMeasureOption, type ProductSubstitute } from "@/lib/api";
+import { api, excludeDisabledBranches, PRICE_TYPE_LABELS, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList, type ProductImage, type ProductVariant, type Product, type UnitOfMeasureOption, type ProductSubstitute } from "@/lib/api";
 import { DEFAULT_UNIT, unitSpec, unitSymbol } from "@/lib/units";
 import { SARIcon } from "@/lib/currency";
 import { useAuth } from "@/lib/auth";
@@ -684,9 +684,14 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
   //   • tierPrice    — one optional customer-tier price, applied across the selected branches.
   //     Selecting several tiers (e.g. Silver + Platinum, skipping Gold) creates one rule per tier,
   //     all sharing this one price — each tier is matched exactly, never "and above".
+  //   • onlinePrice   — what this product sells for on the online-ordering page, across every
+  //     branch. A channel price, not a branch or tier one: it decides before either of them, so a
+  //     product with a branch price of 7 and an online price of 13 sells at 13 online. Blank means
+  //     "sell online at whatever the shop sells it for" — the fallback, not a missing price.
   //   • priceSchedule — an optional window applied to the extra prices ("this price until Friday").
   const [pricingOpen, setPricingOpen] = useState(false);
   const [branchPrices, setBranchPrices] = useState<Record<string, string>>({}); // branchId → price
+  const [onlinePrice, setOnlinePrice] = useState("");
   const [tierPrice, setTierPrice] = useState<{ tiers: CustomerTier[]; price: string }>({ tiers: [], price: "" });
   const [priceSchedule, setPriceSchedule] = useState({ from: "", to: "" });
 
@@ -700,6 +705,7 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     setPricingOpen(false);
     setBranchIds([]);
     setBranchPrices({});
+    setOnlinePrice("");
     setTierPrice({ tiers: [], price: "" });
     setPriceSchedule({ from: "", to: "" });
     setTopCategoryId("");
@@ -754,6 +760,9 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
     // the orphan it had just silently created).
     if (!form.quantity || Number(form.quantity) <= 0) {
       return setError("Initial quantity must be greater than zero.");
+    }
+    if (onlinePrice.trim() !== "" && !(Number(onlinePrice) > 0)) {
+      return setError("Online price must be greater than zero, or left blank to sell online at the in-store price.");
     }
     if (Number(form.sellingPrice) <= 0) {
       return setError("Selling price must be greater than zero.");
@@ -832,6 +841,16 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             priceType: "standard", unitType: "unit", effectiveFrom: from, effectiveTo: to,
           });
         }
+      }
+      // The online-ordering price: one tenant-wide channel rule, deliberately created even when it
+      // equals the Selling Price. Skipping it as "the same anyway" would be wrong the moment a
+      // branch price exists — online inherits the branch's in-store price when it has no rule of
+      // its own, so "online is 10" and "online has no rule" are genuinely different statements.
+      if (onlinePrice.trim() !== "") {
+        rules.push({
+          productId: product.id, price: Number(onlinePrice),
+          priceType: "online", unitType: "unit", effectiveFrom: from, effectiveTo: to,
+        });
       }
       if (tierPrice.tiers.length > 0 && tierPrice.price.trim() !== "") {
         // Tenant-wide tier rule(s) (branchId omitted) — independent of the branch rules above. One
@@ -1099,13 +1118,13 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             </FieldRow>
           </div>
 
-          {/* Independent extra prices — per branch / per tier / scheduled (FRD §12) */}
+          {/* Independent extra prices — per channel / per branch / per tier / scheduled (FRD §12) */}
           <div className="col-span-2 border-t border-border/60 pt-3 mt-1">
             <button type="button" onClick={() => setPricingOpen(o => !o)}
               className="w-full flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors">
               <span className="flex items-center gap-1.5">
                 <Tag className="h-3.5 w-3.5" />
-                Different prices per branch / tier (optional)
+                Different prices online / per branch / tier (optional)
                 {!pricingUnlocked && <Lock className="h-3 w-3" />}
               </span>
               {pricingOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -1114,13 +1133,35 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
             {pricingOpen && !pricingUnlocked ? (
               <div className="mt-3"><LockedFeatureNotice feature="Pricing & Promotions" /></div>
             ) : pricingOpen && (
-              branchIds.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground mt-3">
-                  Select one or more branches above first — extra prices apply to the branches the product
-                  is stocked in.
-                </p>
-              ) : (
-                <div className="mt-3 space-y-3">
+              <div className="mt-3 space-y-3">
+                {/* Online-ordering price. Outside the "pick a branch first" gate below because a
+                    channel price is tenant-wide — it isn't scoped to the branches this product is
+                    being stocked into, so requiring one would be asking for an unrelated answer. */}
+                <div className="rounded-lg border border-border/60 p-2.5">
+                  <Label className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                    <Globe className="h-3.5 w-3.5" /> Online ordering price
+                  </Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-muted-foreground">SAR</span>
+                    <Input type="number" step="0.01" min={0} className="h-8 w-40 text-xs"
+                      placeholder="same as in-store"
+                      value={onlinePrice}
+                      onChange={e => { setOnlinePrice(e.target.value); setError(""); }} />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    What customers pay on the online-ordering page. Leave blank to charge the in-store
+                    price. This beats any branch or tier price below — setting it is a statement about
+                    that channel, not a suggestion.
+                  </p>
+                </div>
+
+                {branchIds.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Select one or more branches above first — branch and tier prices apply to the branches
+                    the product is stocked in.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
                   {/* Per-branch price — one independent "extra price" per selected branch */}
                   <div>
                     <Label className="text-[11px] text-muted-foreground">Price per branch</Label>
@@ -1184,12 +1225,13 @@ function AddProductDialog({ open, onClose, categories, branches, onDone }: {
                         onChange={e => { setPriceSchedule(p => ({ ...p, to: e.target.value })); setError(""); }} />
                     </div>
                   </div>
-                  <p className="text-[10px] text-muted-foreground -mt-1.5">
-                    Optional. Blank = starts now, never expires. When the window ends, prices fall back to
-                    the Selling Price above.
-                  </p>
-                </div>
-              )
+                    <p className="text-[10px] text-muted-foreground -mt-1.5">
+                      Optional. Blank = starts now, never expires. When the window ends, prices fall back to
+                      the Selling Price above. Applies to the online price too.
+                    </p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -1271,6 +1313,9 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   // price/schedule for however many tiers are picked, never a separate price per tier.
   const [rules, setRules] = useState<ProductPriceList[]>([]);
   const [ruleBusy, setRuleBusy] = useState(false);
+  // The online-ordering price, as typed. Mirrors the one tenant-wide `online` channel rule below;
+  // blank means there is no such rule and online sells at the in-store price.
+  const [onlinePrice, setOnlinePrice] = useState("");
   // Editing an existing BRANCH rule in place (price/schedule only). Tier rules don't use this —
   // see tierForm/toggleTier/saveTierGroup instead.
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
@@ -1329,7 +1374,12 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   const loadRules = (productId: string) =>
     api.getPriceLists({ productId }).then(list => {
       setRules(list);
-      const tierRules = list.filter(r => !r.branchId && r.minCustomerTier);
+      const online = list.find(r => r.priceType === "online" && !r.branchId && !r.minCustomerTier);
+      setOnlinePrice(online ? String(online.price) : "");
+      // `priceType === "standard"` throughout: a tier or branch rule that targets a channel is a
+      // different statement, and folding it into these groups would let editing the in-store price
+      // silently rewrite an online one.
+      const tierRules = list.filter(r => !r.branchId && r.minCustomerTier && r.priceType === "standard");
       const first = tierRules[0];
       setTierForm({
         tiers: tierRules.map(r => r.minCustomerTier as CustomerTier),
@@ -1455,7 +1505,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   // shared price every other picked tier already has.
   const toggleTier = async (tier: CustomerTier) => {
     if (!item?.product?.id) return;
-    const existing = rules.find(r => !r.branchId && r.minCustomerTier === tier);
+    const existing = rules.find(r => !r.branchId && r.minCustomerTier === tier && r.priceType === "standard");
     if (!existing && (tierForm.price.trim() === "" || Number(tierForm.price) < 0)) {
       return setError("Enter a valid price before picking a tier.");
     }
@@ -1491,7 +1541,7 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
     try {
       const from = tierForm.from ? new Date(tierForm.from).toISOString() : undefined;
       const to = tierForm.to ? new Date(tierForm.to).toISOString() : undefined;
-      const tierRules = rules.filter(r => !r.branchId && r.minCustomerTier);
+      const tierRules = rules.filter(r => !r.branchId && r.minCustomerTier && r.priceType === "standard");
       await Promise.all(tierRules.map(r => api.updatePriceList(r.id, {
         productId: r.productId, branchId: null, priceType: r.priceType,
         price: Number(tierForm.price), minCustomerTier: r.minCustomerTier,
@@ -1553,15 +1603,58 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
 
-  // Branch-scoped rows keep their own per-row edit/delete list — tier rows are unified below.
-  const branchRules = rules.filter(r => r.branchId);
+  // Branch-scoped IN-STORE rows keep their own per-row edit/delete list — tier rows are unified
+  // below, and channel rows are handled separately (a branch row and a branch-scoped online row
+  // would otherwise be indistinguishable in this list, both reading just "Riyadh · SAR 7.00").
+  const branchRules = rules.filter(r => r.branchId && r.priceType === "standard");
+
+  // The one tenant-wide online price this dialog owns. Anything else non-standard (a branch- or
+  // tier-scoped channel rule, a kiosk rule) was made on the Pricing page and is listed read-only
+  // below rather than hidden — an invisible rule is one an operator sets a second time.
+  const onlineRule = rules.find(r => r.priceType === "online" && !r.branchId && !r.minCustomerTier) ?? null;
+  const otherChannelRules = rules.filter(r => r.priceType !== "standard" && r.id !== onlineRule?.id);
+
+  const onlineDirty = onlineRule
+    ? (onlinePrice.trim() === "" || Number(onlinePrice) !== onlineRule.price)
+    : onlinePrice.trim() !== "";
+
+  // Unlike a tier chip, typing a price saves nothing on its own — this button is the commit, and
+  // clearing the field deletes the rule rather than saving a zero (which would give the product
+  // away online).
+  const saveOnlinePrice = async () => {
+    if (!item?.product?.id) return;
+    const raw = onlinePrice.trim();
+    if (raw !== "" && !(Number(raw) > 0)) {
+      return setError("The online price must be greater than zero, or blank to use the in-store price.");
+    }
+    setRuleBusy(true); setError("");
+    try {
+      if (raw === "") {
+        if (onlineRule) await api.deletePriceList(onlineRule.id);
+      } else if (onlineRule) {
+        await api.updatePriceList(onlineRule.id, {
+          productId: onlineRule.productId, branchId: null, priceType: "online",
+          price: Number(raw), unitType: onlineRule.unitType,
+          effectiveFrom: onlineRule.effectiveFrom, effectiveTo: onlineRule.effectiveTo,
+        });
+      } else {
+        await api.createPriceList({
+          productId: item.product.id, price: Number(raw),
+          priceType: "online", unitType: "unit",
+        });
+      }
+      await loadRules(item.product.id);
+      toast.success(raw === "" ? "Online price removed — online now uses the in-store price" : "Online price saved");
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to save the online price."); }
+    finally { setRuleBusy(false); }
+  };
 
   // Picking a tier chip saves immediately (toggleTier), but changing the price/schedule needs an
   // explicit "Save price & schedule" click — easy to miss since nothing else on this screen works
   // that way, so a changed price silently never reaches the server. Surfaced here so the button
   // itself calls out that there's something unsaved, instead of looking identical either way.
   const tierDirty = tierForm.tiers.length > 0 && rules.some(r =>
-    !r.branchId && r.minCustomerTier && tierForm.tiers.includes(r.minCustomerTier as CustomerTier) && (
+    !r.branchId && r.minCustomerTier && r.priceType === "standard" && tierForm.tiers.includes(r.minCustomerTier as CustomerTier) && (
       String(r.price) !== tierForm.price ||
       (r.effectiveFrom ? r.effectiveFrom.slice(0, 10) : "") !== tierForm.from ||
       (r.effectiveTo ? r.effectiveTo.slice(0, 10) : "") !== tierForm.to
@@ -1708,13 +1801,65 @@ function EditProductDialog({ item, onClose, categories, branches, onDone }: {
               Product: whichever tiers are picked share one price/schedule. */}
           <div className="col-span-2 border-t border-border/60 pt-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mb-2">
-              <Tag className="h-3.5 w-3.5" /> Customer-tier &amp; scheduled prices
+              <Tag className="h-3.5 w-3.5" /> Online, customer-tier &amp; scheduled prices
               {!pricingUnlocked && <Lock className="h-3 w-3" />}
             </p>
 
             {!pricingUnlocked ? (
               <LockedFeatureNotice feature="Pricing & Promotions" />
             ) : <>
+            {/* Online-ordering price. First, because it's the one that decides before every other
+                rule here — a product with a branch price of 7 and this set to 13 sells at 13 online. */}
+            <div className="rounded-lg border border-border/60 p-2.5 mb-3 space-y-2">
+              <div>
+                <Label className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                  <Globe className="h-3.5 w-3.5" /> Online ordering price
+                </Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] text-muted-foreground">SAR</span>
+                  <Input type="number" step="0.01" min={0} className="h-8 w-40 text-xs"
+                    placeholder="same as in-store"
+                    value={onlinePrice}
+                    onChange={e => { setOnlinePrice(e.target.value); setError(""); }}
+                    onKeyDown={e => { if (e.key === "Enter" && onlineDirty && !ruleBusy) saveOnlinePrice(); }} />
+                  <Button type="button" size="sm"
+                    variant={onlineDirty ? "default" : "outline"}
+                    className={`h-8 ${onlineDirty ? "gradient-primary text-primary-foreground border-0 shadow-glow" : ""}`}
+                    disabled={ruleBusy || !onlineDirty} onClick={saveOnlinePrice}>
+                    {onlineRule && onlinePrice.trim() === "" ? "Remove" : "Save"}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  What the online-ordering page charges, at every branch. Clear it to sell online at the
+                  in-store price — the fallback, so there's no need to repeat a price that already matches.
+                </p>
+              </div>
+
+              {otherChannelRules.length > 0 && (
+                <div className="rounded-md border border-dashed border-border/60 bg-muted/20 p-2 space-y-1">
+                  <p className="text-[10px] text-muted-foreground">
+                    Also set on the Pricing page — edit them there:
+                  </p>
+                  {otherChannelRules.map(r => (
+                    <div key={r.id} className="flex items-center gap-2 text-[11px]">
+                      <span className="flex-1 truncate">
+                        {PRICE_TYPE_LABELS[r.priceType]}
+                        <span className="text-muted-foreground">
+                          {" · "}{r.branchId ? (branches.find(b => b.id === r.branchId)?.name ?? "Branch") : "All branches"}
+                          {r.minCustomerTier && ` · ${r.minCustomerTier}`}
+                        </span>
+                      </span>
+                      <span className="font-semibold tabular-nums">SAR {r.price.toFixed(2)}</span>
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive"
+                        disabled={ruleBusy} onClick={() => deleteRule(r.id)} title="Remove this price">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {branchRules.length > 0 && (
               <div className="rounded-lg border border-border/60 divide-y divide-border/40 mb-3">
                 {branchRules.map(r => {

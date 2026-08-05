@@ -51,7 +51,10 @@ public class AuditLogsController(BaqalaDbContext db, IAuditService audit) : Cont
         if (!string.IsNullOrWhiteSpace(action))
         {
             var actions = action.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (actions.Length > 0) query = query.Where(a => actions.Contains(a.Action));
+            // WhereIn, not a bare `actions.Contains(...)` — this provider can't type-map a
+            // parameterized IN-list, so any group that expands to 2+ actions 500s. Expanding to an
+            // OR of equalities keeps the filter (and the paging below it) in SQL.
+            query = query.WhereIn(a => a.Action, actions);
         }
         if (!string.IsNullOrEmpty(severity)) query = query.Where(a => a.Severity == severity);
         if (from.HasValue) query = query.Where(a => a.CreatedAt >= from);

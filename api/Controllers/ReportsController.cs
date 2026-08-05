@@ -154,10 +154,17 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var wantRegistered = customerTypes.Contains("registered");
         var wantWalkIn = customerTypes.Contains("walk-in");
 
+        // WhereIn(...), not `array.Contains(column)`, for every multi-select below: this repo's
+        // MySQL EF Core provider can't type-map a parameterized IN-list and throws at query
+        // compile time (see QueryableInExtensions for the full story). A one-value selection is
+        // silently fine because EF folds it to `=`, so this only bites once a user picks 2+ —
+        // which is exactly how the Payment Method / Branch / Terminal / Cashier filters here were
+        // 500ing. These queries group and aggregate in SQL, so the usual materialize-then-filter
+        // -in-memory workaround used elsewhere in this file would be far more expensive.
         var ordersQ = db.Orders.Where(o => o.CreatedAt >= rangeFrom && o.CreatedAt < rangeToExclusive);
-        if (branchIds.Length > 0) ordersQ = ordersQ.Where(o => branchIds.Contains(o.BranchId));
-        if (terminalIds.Length > 0) ordersQ = ordersQ.Where(o => o.TerminalId != null && terminalIds.Contains(o.TerminalId.Value));
-        if (cashierIds.Length > 0) ordersQ = ordersQ.Where(o => o.CashierId.HasValue && cashierIds.Contains(o.CashierId.Value));
+        ordersQ = ordersQ.WhereIn(o => o.BranchId, branchIds);
+        if (terminalIds.Length > 0) ordersQ = ordersQ.Where(o => o.TerminalId != null).WhereIn(o => o.TerminalId!.Value, terminalIds);
+        if (cashierIds.Length > 0) ordersQ = ordersQ.Where(o => o.CashierId.HasValue).WhereIn(o => o.CashierId!.Value, cashierIds);
         if (!string.IsNullOrEmpty(orderStatus)) ordersQ = ordersQ.Where(o => o.OrderStatus == orderStatus);
         if (wantRegistered && !wantWalkIn) ordersQ = ordersQ.Where(o => o.CustomerId != null);
         else if (wantWalkIn && !wantRegistered) ordersQ = ordersQ.Where(o => o.CustomerId == null);
@@ -169,16 +176,16 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         var paymentsQ = db.OrderPayments
             .Include(p => p.Order)
             .Where(p => p.CreatedAt >= rangeFrom && p.CreatedAt < rangeToExclusive && p.Status == "completed" && p.Order != null);
-        if (branchIds.Length > 0) paymentsQ = paymentsQ.Where(p => branchIds.Contains(p.Order!.BranchId));
-        if (terminalIds.Length > 0) paymentsQ = paymentsQ.Where(p => p.Order!.TerminalId != null && terminalIds.Contains(p.Order!.TerminalId!.Value));
-        if (cashierIds.Length > 0) paymentsQ = paymentsQ.Where(p => p.Order!.CashierId.HasValue && cashierIds.Contains(p.Order!.CashierId!.Value));
-        if (paymentMethods.Length > 0) paymentsQ = paymentsQ.Where(p => paymentMethods.Contains(p.PaymentMethod));
+        paymentsQ = paymentsQ.WhereIn(p => p.Order!.BranchId, branchIds);
+        if (terminalIds.Length > 0) paymentsQ = paymentsQ.Where(p => p.Order!.TerminalId != null).WhereIn(p => p.Order!.TerminalId!.Value, terminalIds);
+        if (cashierIds.Length > 0) paymentsQ = paymentsQ.Where(p => p.Order!.CashierId.HasValue).WhereIn(p => p.Order!.CashierId!.Value, cashierIds);
+        paymentsQ = paymentsQ.WhereIn(p => p.PaymentMethod, paymentMethods);
         if (wantRegistered && !wantWalkIn) paymentsQ = paymentsQ.Where(p => p.Order!.CustomerId != null);
         else if (wantWalkIn && !wantRegistered) paymentsQ = paymentsQ.Where(p => p.Order!.CustomerId == null);
         if (hasTobaccoFee) paymentsQ = paymentsQ.Where(p => p.Order!.TobaccoFeeAmount > 0);
 
         var returnsQ = db.CustomerReturns.Where(r => r.CreatedAt >= rangeFrom && r.CreatedAt < rangeToExclusive);
-        if (branchIds.Length > 0) returnsQ = returnsQ.Where(r => branchIds.Contains(r.BranchId));
+        returnsQ = returnsQ.WhereIn(r => r.BranchId, branchIds);
         if (wantRegistered && !wantWalkIn) returnsQ = returnsQ.Where(r => r.CustomerId != null);
         else if (wantWalkIn && !wantRegistered) returnsQ = returnsQ.Where(r => r.CustomerId == null);
         if (hasTobaccoFee) returnsQ = returnsQ.Where(r => r.Order != null && r.Order.TobaccoFeeAmount > 0);
@@ -255,9 +262,9 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
         // previously showed hourly totals only, with no way to see which products made up a day.
         var itemsQ = db.OrderItems.Include(i => i.Product)
             .Where(i => i.Order != null && i.Order.CreatedAt >= rangeFrom && i.Order.CreatedAt < rangeToExclusive);
-        if (branchIds.Length > 0) itemsQ = itemsQ.Where(i => branchIds.Contains(i.Order!.BranchId));
-        if (terminalIds.Length > 0) itemsQ = itemsQ.Where(i => i.Order!.TerminalId != null && terminalIds.Contains(i.Order!.TerminalId!.Value));
-        if (cashierIds.Length > 0) itemsQ = itemsQ.Where(i => i.Order!.CashierId.HasValue && cashierIds.Contains(i.Order!.CashierId!.Value));
+        itemsQ = itemsQ.WhereIn(i => i.Order!.BranchId, branchIds);
+        if (terminalIds.Length > 0) itemsQ = itemsQ.Where(i => i.Order!.TerminalId != null).WhereIn(i => i.Order!.TerminalId!.Value, terminalIds);
+        if (cashierIds.Length > 0) itemsQ = itemsQ.Where(i => i.Order!.CashierId.HasValue).WhereIn(i => i.Order!.CashierId!.Value, cashierIds);
         if (!string.IsNullOrEmpty(orderStatus)) itemsQ = itemsQ.Where(i => i.Order!.OrderStatus == orderStatus);
         if (wantRegistered && !wantWalkIn) itemsQ = itemsQ.Where(i => i.Order!.CustomerId != null);
         else if (wantWalkIn && !wantRegistered) itemsQ = itemsQ.Where(i => i.Order!.CustomerId == null);
@@ -2616,8 +2623,9 @@ public class ReportsController(BaqalaDbContext db, IAuditService audit) : Contro
             .Include(m => m.CreatedByUser)
             .Where(m => m.CreatedAt >= rangeFrom && m.CreatedAt < rangeToExclusive)
             .AsQueryable();
-        if (movementTypes.Length > 0) query = query.Where(m => movementTypes.Contains(m.MovementType));
-        if (productIds.Length > 0) query = query.Where(m => productIds.Contains(m.ProductId));
+        // WhereIn — a bare `array.Contains(...)` here is the same parameterized-IN-list crash that
+        // hit Daily Sales; it 500s as soon as 2+ movement types or products are picked.
+        query = query.WhereIn(m => m.MovementType, movementTypes).WhereIn(m => m.ProductId, productIds);
 
         // Guid[] filters are never .Contains()'d against a DbSet-backed IQueryable on this repo's
         // MySQL provider (ef-mysql-inlist-gotcha memory) — materialize first, then narrow branch/
