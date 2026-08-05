@@ -222,6 +222,16 @@
     font-family: var(--font-display);
     letter-spacing: -0.02em;
   }
+
+  /* The UA stylesheet sets `th { text-align: center }`, and that beats the
+     alignment inherited from the parent <tr> — so headers sat centred while
+     their column data was start-aligned. Obvious in RTL, where the data moves
+     to the right and the header does not. `start` follows the document
+     direction, and any explicit text-center/text-end utility still wins because
+     utilities are layered above base. */
+  th {
+    text-align: start;
+  }
 }
 
 @layer utilities {
@@ -298,4 +308,13 @@
       radial-gradient(circle at 90% 100%, oklch(0.94 0.05 295) 0%, transparent 40%),
       #fff;
   }
+}
+
+/* Leaflet's panes/controls carry z-index 400-1000, which paints them over
+   dialogs, dropdowns and popovers (z-50). Making the map container its own
+   stacking context keeps those layers trapped inside the map. */
+.leaflet-container {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
 }

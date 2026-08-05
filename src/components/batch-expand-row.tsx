@@ -97,7 +97,7 @@ export function BatchExpandRow({
           <div className="text-xs">
             <div className="grid grid-cols-[3fr_1fr_1.2fr_1.2fr_1fr] gap-x-6 items-center border-b border-border/30 pb-1.5 text-muted-foreground font-semibold">
               <span>Batch #</span>
-              <span className="text-right">Remaining</span>
+              <span className="text-end">Remaining</span>
               <span>Received</span>
               <span>Expiry</span>
               <span>Status</span>
@@ -107,7 +107,7 @@ export function BatchExpandRow({
               return (
                 <div key={b.id} className="grid grid-cols-[3fr_1fr_1.2fr_1.2fr_1fr] gap-x-6 items-center border-t border-border/30 py-1.5">
                   <span className="min-w-0 truncate font-mono" title={b.batchNumber}>{b.batchNumber}</span>
-                  <span className="text-right font-medium whitespace-nowrap">{b.remainingQuantity} / {b.quantity}</span>
+                  <span className="text-end font-medium whitespace-nowrap">{b.remainingQuantity} / {b.quantity}</span>
                   <span className="text-muted-foreground whitespace-nowrap">{fmtDate(b.receivedDate)}</span>
                   <span className="whitespace-nowrap">
                     {b.expiryDate ? (
@@ -123,7 +123,7 @@ export function BatchExpandRow({
             {untracked > 0 && (
               <div className="grid grid-cols-[3fr_1fr_1.2fr_1.2fr_1fr] gap-x-6 items-center border-t border-dashed border-border/40 py-1.5 text-muted-foreground">
                 <span className="italic" title="On-hand quantity not backed by an active batch here — e.g. stock received/adjusted before batch tracking, a manual count correction, or a batch that has since expired (see Batch Tracking).">No batch (untracked)</span>
-                <span className="text-right font-medium whitespace-nowrap">{untracked}</span>
+                <span className="text-end font-medium whitespace-nowrap">{untracked}</span>
                 <span>—</span>
                 <span>—</span>
                 <span>—</span>

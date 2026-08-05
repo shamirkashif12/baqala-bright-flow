@@ -118,6 +118,8 @@ public class SettingsController(BaqalaDbContext db, IAuditService audit) : Contr
         settings.OnlineOrderingEnabled                = updated.OnlineOrderingEnabled             ?? settings.OnlineOrderingEnabled;
         settings.OnlineOrderingMinOrderAmountSar      = updated.OnlineOrderingMinOrderAmountSar   ?? settings.OnlineOrderingMinOrderAmountSar;
         settings.OnlineOrderingMaxOrderValueSar       = updated.OnlineOrderingMaxOrderValueSar    ?? settings.OnlineOrderingMaxOrderValueSar;
+        settings.OnlineOrderingDeliveryFeeSar         = updated.OnlineOrderingDeliveryFeeSar      ?? settings.OnlineOrderingDeliveryFeeSar;
+        settings.OnlineOrderingFreeDeliveryAboveSar   = updated.OnlineOrderingFreeDeliveryAboveSar ?? settings.OnlineOrderingFreeDeliveryAboveSar;
 
         settings.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
@@ -297,5 +299,7 @@ public record PosSettingsPatchRequest(
     bool? ManagerApprovalForDamagedItems,
     bool? OnlineOrderingEnabled,
     decimal? OnlineOrderingMinOrderAmountSar,
-    decimal? OnlineOrderingMaxOrderValueSar
+    decimal? OnlineOrderingMaxOrderValueSar,
+    decimal? OnlineOrderingDeliveryFeeSar,
+    decimal? OnlineOrderingFreeDeliveryAboveSar
 );

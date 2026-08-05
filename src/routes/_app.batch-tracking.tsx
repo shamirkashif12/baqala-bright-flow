@@ -425,10 +425,10 @@ function BatchLocationPanel({
         ) : "—";
       },
     },
-    { key: "qty", label: "Qty (rem / recv)", className: "text-right font-medium", render: (b: InventoryBatch) => `${b.remainingQuantity} / ${b.quantity}` },
+    { key: "qty", label: "Qty (rem / recv)", className: "text-end font-medium", render: (b: InventoryBatch) => `${b.remainingQuantity} / ${b.quantity}` },
     { key: "status", label: "Status", render: (b: InventoryBatch) => <BatchStatusBadge status={b.status} /> },
     {
-      key: "actions", label: "", className: "text-right",
+      key: "actions", label: "", className: "text-end",
       render: (b: InventoryBatch) => (
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onView(b)}>
           <Eye className="h-4 w-4" />

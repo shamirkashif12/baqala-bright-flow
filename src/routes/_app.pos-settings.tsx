@@ -14,7 +14,9 @@ import { toast } from "sonner";
 import { api, type PosSettingsRecord } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
+import { DeliveryFeeRules } from "@/components/delivery-fee-rules";
 import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/use-permission";
 import { useTheme } from "@/lib/theme";
 
 export const Route = createFileRoute("/_app/pos-settings")({
@@ -53,6 +55,8 @@ const DEFAULTS: S = {
   onlineOrderingEnabled: false,
   onlineOrderingMinOrderAmountSar: 0,
   onlineOrderingMaxOrderValueSar: 1000,
+  onlineOrderingDeliveryFeeSar: 0,
+  onlineOrderingFreeDeliveryAboveSar: 0,
 };
 
 function Row({
@@ -94,6 +98,10 @@ function PosSettings() {
   const { user } = useAuth();
   const { branches } = useBranch();
   const { theme, toggleTheme } = useTheme();
+  // Delivery zones are their own records gated on the "Online Orders" module, not on "Settings"
+  // which gates this page — someone allowed to read POS settings isn't automatically allowed to
+  // change what an order costs.
+  const perms = usePermission("Online Orders");
   const isAdmin = user?.role === "tenant_admin";
   const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
   const [branchId, setBranchId] = useState(lockedBranchId ?? "");
@@ -142,6 +150,8 @@ function PosSettings() {
           onlineOrderingEnabled:          data.onlineOrderingEnabled         ?? DEFAULTS.onlineOrderingEnabled,
           onlineOrderingMinOrderAmountSar: data.onlineOrderingMinOrderAmountSar ?? DEFAULTS.onlineOrderingMinOrderAmountSar,
           onlineOrderingMaxOrderValueSar: data.onlineOrderingMaxOrderValueSar ?? DEFAULTS.onlineOrderingMaxOrderValueSar,
+          onlineOrderingDeliveryFeeSar:   data.onlineOrderingDeliveryFeeSar   ?? DEFAULTS.onlineOrderingDeliveryFeeSar,
+          onlineOrderingFreeDeliveryAboveSar: data.onlineOrderingFreeDeliveryAboveSar ?? DEFAULTS.onlineOrderingFreeDeliveryAboveSar,
         });
         setLoadError(false);
         setLoading(false);
@@ -343,7 +353,21 @@ function PosSettings() {
           </Card>
           <p className="text-xs text-muted-foreground px-1">
             The maximum is an anti-abuse ceiling on the public, unauthenticated ordering page — orders above it are rejected with a message to contact the branch directly.
+            Both compare against the goods total, so a delivery fee never pushes an order past either.
           </p>
+
+          <Card className="p-4 grid sm:grid-cols-2 gap-3">
+            <NumberField label="Default delivery fee (SAR)" value={s.onlineOrderingDeliveryFeeSar} onChange={n("onlineOrderingDeliveryFeeSar")} />
+            <NumberField label="Free delivery above (SAR)" value={s.onlineOrderingFreeDeliveryAboveSar} onChange={n("onlineOrderingFreeDeliveryAboveSar")} />
+          </Card>
+          <p className="text-xs text-muted-foreground px-1">
+            Charged when no delivery zone below matches the customer's location. 0 = delivery is free.
+            A zone with its own free-delivery threshold ignores the one set here.
+          </p>
+
+          {/* Zones live outside the settings form's Save: they're their own records with their own
+              endpoints, so each edit commits immediately rather than waiting on the page's Save. */}
+          <DeliveryFeeRules branchId={branchId} canEdit={perms.canEdit} />
         </TabsContent>
 
         {/* ── Card Machine (non-DB config) ── */}

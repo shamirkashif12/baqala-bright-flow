@@ -13,7 +13,7 @@ import { TierMultiSelect } from "@/components/tier-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Plus, Loader2, Trash2, Pencil, Power, Tag, Boxes } from "lucide-react";
 import {
-  api, excludeDisabledBranches,
+  api, excludeDisabledBranches, PRICE_TYPE_LABELS,
   type Branch, type Product, type ProductPriceList, type PriceListPayload,
   type PriceType, type CustomerTier,
 } from "@/lib/api";
@@ -24,7 +24,9 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/pricing")({ component: Pricing });
 
-const PRICE_TYPES: PriceType[] = ["standard", "online"];
+// The distribution channels a rule can target. Mirrors the API's SalesChannelCatalog — the server
+// rejects anything not in its own list, so keep the two in step.
+const PRICE_TYPES: PriceType[] = ["standard", "online", "kiosk"];
 
 // Mirrors PriceResolutionService.SourceOf — the same precedence, spelled for a human. Kept in sync
 // by eye; the server is the authority and the Effective price column below shows what it decided.
@@ -189,15 +191,16 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
               <Select value={form.priceType} onValueChange={v => setForm(p => ({ ...p, priceType: v as PriceType }))}>
                 <SelectTrigger className="h-9 mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {PRICE_TYPES.map(t => <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>)}
+                  {PRICE_TYPES.map(t => <SelectItem key={t} value={t}>{PRICE_TYPE_LABELS[t]}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           </div>
           <p className="text-[10px] text-muted-foreground -mt-1.5">
-            Which sales channel this price applies to — "Standard" is regular in-store/POS sales;
-            pick "Online" only if this product is priced differently for online orders.
-            Most rules should stay on Standard.
+            Which sales channel this price applies to. "In-store (POS)" is the shelf price and the
+            fallback for every other channel — a product with no rule for its channel is sold at its
+            in-store price, so you only need a channel rule where the price actually differs.
+            A channel's own price always wins over an in-store one, whatever its branch or tier.
           </p>
 
           <div className="grid grid-cols-2 gap-2">
@@ -302,6 +305,7 @@ function Pricing() {
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState<string[]>([]);
   const [unitTypeFilter, setUnitTypeFilter] = useState<"all" | "unit" | "pack">("all");
+  const [channelFilter, setChannelFilter] = useState<"all" | PriceType>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ProductPriceList | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -312,6 +316,7 @@ function Pricing() {
       setRules(await api.getPriceLists({
         branchId: lockedBranchId ? [lockedBranchId] : (branchFilter.length ? branchFilter : undefined),
         unitType: unitTypeFilter !== "all" ? unitTypeFilter : undefined,
+        priceType: channelFilter !== "all" ? channelFilter : undefined,
       }));
     } catch { setRules([]); }
     finally { setLoading(false); }
@@ -322,7 +327,7 @@ function Pricing() {
     api.getBranches().then((b) => setBranches(excludeDisabledBranches(b))).catch(() => {});
   }, []);
 
-  useEffect(() => { load(); }, [branchFilter, unitTypeFilter, lockedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [branchFilter, unitTypeFilter, channelFilter, lockedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = async (r: ProductPriceList) => {
     setBusyId(r.id);
@@ -350,7 +355,7 @@ function Pricing() {
   return (
     <PageShell
       title="Pricing"
-      subtitle="Extra prices per branch, customer tier & schedule · products with no rule sell at their base price"
+      subtitle="Extra prices per sales channel, branch, customer tier & schedule · products with no rule sell at their base price"
     >
       <div className="flex flex-wrap items-center gap-2">
         <Input placeholder="Search product / SKU / label…" className="h-9 bg-card flex-1 min-w-[200px] max-w-sm"
@@ -371,6 +376,13 @@ function Pricing() {
             <SelectItem value="all">Units + packs</SelectItem>
             <SelectItem value="unit">Unit prices</SelectItem>
             <SelectItem value="pack">Pack prices</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={channelFilter} onValueChange={v => setChannelFilter(v as typeof channelFilter)}>
+          <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All channels</SelectItem>
+            {PRICE_TYPES.map(t => <SelectItem key={t} value={t}>{PRICE_TYPE_LABELS[t]}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="flex-1" />
@@ -396,13 +408,14 @@ function Pricing() {
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 border-b">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Kind</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scope</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Window</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Price</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Product</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Channel</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Kind</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scope</th>
+                    <th className="px-4 py-3 text-start text-xs font-semibold text-muted-foreground uppercase tracking-wider">Window</th>
+                    <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base</th>
+                    <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Price</th>
+                    <th className="px-4 py-3 text-end text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -418,6 +431,17 @@ function Pricing() {
                           <p className="text-xs text-muted-foreground">{p?.sku ?? r.productId.slice(0, 8)}</p>
                         </td>
                         <td className="px-4 py-3">
+                          {/* A non-standard channel is highlighted: it overrides the in-store price
+                              for that channel only, which is the surprising case a reader is
+                              scanning this list for. */}
+                          <Badge
+                            variant={r.priceType === "standard" ? "outline" : "default"}
+                            className="text-[10px] whitespace-nowrap"
+                          >
+                            {PRICE_TYPE_LABELS[r.priceType] ?? r.priceType}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
                           {r.unitType === "pack" ? (
                             <div>
                               <Badge variant="secondary" className="text-[10px]">
@@ -426,7 +450,7 @@ function Pricing() {
                               <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">{r.packBarcode ?? ""}</p>
                             </div>
                           ) : (
-                            <span className="text-xs capitalize text-muted-foreground">{r.priceType}</span>
+                            <span className="text-xs text-muted-foreground">Unit price</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-xs">{scopeLabel(r, branches)}</td>
@@ -437,10 +461,10 @@ function Pricing() {
                                 : "text-muted-foreground"
                           }>{w.text}</span>
                         </td>
-                        <td className="px-4 py-3 text-right text-xs text-muted-foreground tabular-nums">
+                        <td className="px-4 py-3 text-end text-xs text-muted-foreground tabular-nums">
                           {p ? <><SARIcon />{p.basePrice.toFixed(2)}</> : "—"}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                        <td className="px-4 py-3 text-end tabular-nums font-semibold">
                           <SARIcon />{r.price.toFixed(2)}
                           {r.unitType === "pack" && (
                             <p className="text-[10px] font-normal text-muted-foreground">

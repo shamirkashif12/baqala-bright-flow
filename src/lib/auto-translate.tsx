@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useI18n, EN_KEYS, toEnglishKey, translateKey } from "@/lib/i18n";
 
 /**
@@ -31,16 +31,24 @@ const OBSERVER_CONFIG: MutationObserverInit = {
   attributeFilter: [...ATTRS],
 };
 
+/** What we last wrote into a node: its English key, and the exact text we rendered. */
+type Origin = { key: string; rendered: string };
+
 export function AutoTranslate() {
   const { lang } = useI18n();
+
+  // These live OUTSIDE the effect so they survive a language change. Rebuilding
+  // them per-language would force every already-translated node to be resolved
+  // back to English through the reverse index, which is lossy — two languages
+  // can translate different keys to the same string.
+  const textOriginRef = useRef(new WeakMap<Text, Origin>());
+  const attrOriginRef = useRef(new WeakMap<Element, Record<string, Origin>>());
 
   useEffect(() => {
     if (typeof document === "undefined" || !document.body) return;
 
-    // Remember each node's original English source so re-translating between
-    // languages (ar → ur) always resolves from English, not from a translation.
-    const textOrigin = new WeakMap<Text, string>();
-    const attrOrigin = new WeakMap<Element, Record<string, string>>();
+    const textOrigin = textOriginRef.current;
+    const attrOrigin = attrOriginRef.current;
 
     const shouldSkip = (el: Element | null): boolean => {
       for (let n: Element | null = el; n; n = n.parentElement) {
@@ -53,20 +61,19 @@ export function AutoTranslate() {
     };
 
     const englishForText = (node: Text): string | null => {
-      const raw = node.nodeValue ?? "";
-      const trimmed = raw.trim();
+      const trimmed = (node.nodeValue ?? "").trim();
       if (!trimmed) return null;
       const known = textOrigin.get(node);
-      const key = toEnglishKey(trimmed);
-      // React reuses the same Text node across re-renders (e.g. a "Loading…"
-      // placeholder mutating in place into a real, dynamic value), so a cached
-      // origin must be revalidated against the node's *current* content before
-      // being trusted — otherwise this stale mapping keeps stamping the old
-      // placeholder text back over legitimately-changed dynamic content forever.
-      if (known && key === known) return known;
-      if (known) textOrigin.delete(node);
-      if (key) textOrigin.set(node, key);
-      return key;
+      // If the node still shows exactly what we last rendered into it, reuse the
+      // stored key instead of re-deriving one from the current text. Re-deriving
+      // our own output is what made text flicker: a translation can collide with
+      // an unrelated English key (de "Batch" → "Charge", and "Charge" is a key in
+      // its own right → "Belasten"), so the node resolved to a different key, got
+      // rewritten, resolved back, and ping-ponged forever. React only reuses a
+      // Text node with *different* content, which the mismatch below still
+      // catches — so dynamic values are unaffected.
+      if (known && known.rendered === trimmed) return known.key;
+      return toEnglishKey(trimmed);
     };
 
     const applyText = (node: Text) => {
@@ -75,6 +82,9 @@ export function AutoTranslate() {
       const raw = node.nodeValue ?? "";
       const trimmed = raw.trim();
       const target = translateKey(key, lang);
+      // Record what this node now shows so the next pass recognises our own
+      // output rather than trying to reverse-engineer it.
+      textOrigin.set(node, { key, rendered: target });
       if (trimmed === target) return;
       // preserve any leading/trailing whitespace around the label
       const next = raw.replace(trimmed, target);
@@ -88,20 +98,20 @@ export function AutoTranslate() {
         const trimmed = cur.trim();
         if (!trimmed) continue;
         let store = attrOrigin.get(el);
-        let key = store?.[attr];
-        // Same staleness risk as text nodes: an element can be reused with a
-        // different dynamic attribute value, so a cached origin must still
-        // match the attribute's current content before being trusted.
-        if (key && toEnglishKey(trimmed) !== key) key = undefined;
+        const known = store?.[attr];
+        // Same rule as text nodes: if the attribute still holds exactly what we
+        // wrote, reuse the stored key rather than resolving our own output back
+        // through the reverse index, which can land on a different key and flip.
+        let key = known && known.rendered === trimmed ? known.key : undefined;
         if (!key) {
           const resolved = toEnglishKey(trimmed);
           if (!resolved) continue;
           key = resolved;
-          store = store ?? {};
-          store[attr] = key;
-          attrOrigin.set(el, store);
         }
         const target = translateKey(key, lang);
+        store = store ?? {};
+        store[attr] = { key, rendered: target };
+        attrOrigin.set(el, store);
         const next = cur.replace(trimmed, target);
         if (cur !== next) el.setAttribute(attr, next);
       }
@@ -141,8 +151,6 @@ export function AutoTranslate() {
     const flush = () => {
       scheduled = false;
       const batch = pending.splice(0);
-      // Detach while we write so our own mutations don't re-trigger the observer.
-      observer.disconnect();
       try {
         for (const node of batch) {
           if (node.isConnected === false) continue;
@@ -153,8 +161,16 @@ export function AutoTranslate() {
           }
         }
       } finally {
-        // Always re-attach, even if a translation threw, so the observer never dies.
-        observer.observe(document.body, OBSERVER_CONFIG);
+        // Drop only the records our own writes just produced. flush() is
+        // synchronous, so nothing else can have touched the DOM in between.
+        //
+        // This deliberately does NOT disconnect/re-observe. disconnect() also
+        // throws away records already queued but not yet delivered, so any React
+        // commit landing between the observer callback and this animation frame
+        // was silently lost and its nodes stayed untranslated — which is what
+        // left a mix of English and Urdu on screen after switching language,
+        // since a switch triggers a burst of re-renders.
+        observer.takeRecords();
       }
     };
 

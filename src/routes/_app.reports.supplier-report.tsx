@@ -102,13 +102,13 @@ function SupplierReportDetailDrawer({
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="text-muted-foreground">
-                              <th className="text-left font-medium px-3 py-1.5">SKU</th>
-                              <th className="text-left font-medium px-3 py-1.5">Category</th>
-                              <th className="text-left font-medium px-3 py-1.5">UoM</th>
-                              <th className="text-right font-medium px-3 py-1.5">Qty</th>
-                              <th className="text-right font-medium px-3 py-1.5">Returned</th>
-                              <th className="text-right font-medium px-3 py-1.5">Unit Price</th>
-                              <th className="text-right font-medium px-3 py-1.5">Line Total</th>
+                              <th className="text-start font-medium px-3 py-1.5">SKU</th>
+                              <th className="text-start font-medium px-3 py-1.5">Category</th>
+                              <th className="text-start font-medium px-3 py-1.5">UoM</th>
+                              <th className="text-end font-medium px-3 py-1.5">Qty</th>
+                              <th className="text-end font-medium px-3 py-1.5">Returned</th>
+                              <th className="text-end font-medium px-3 py-1.5">Unit Price</th>
+                              <th className="text-end font-medium px-3 py-1.5">Line Total</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -117,10 +117,10 @@ function SupplierReportDetailDrawer({
                                 <td className="px-3 py-1.5 font-mono">{it.sku}</td>
                                 <td className="px-3 py-1.5">{it.category}</td>
                                 <td className="px-3 py-1.5">{it.unitOfMeasure}</td>
-                                <td className="px-3 py-1.5 text-right">{it.quantity}</td>
-                                <td className="px-3 py-1.5 text-right text-destructive">{it.returnedQuantity}</td>
-                                <td className="px-3 py-1.5 text-right"><SARIcon />{fmtSAR(it.unitPrice)}</td>
-                                <td className="px-3 py-1.5 text-right font-semibold"><SARIcon />{fmtSAR(it.lineTotal)}</td>
+                                <td className="px-3 py-1.5 text-end">{it.quantity}</td>
+                                <td className="px-3 py-1.5 text-end text-destructive">{it.returnedQuantity}</td>
+                                <td className="px-3 py-1.5 text-end"><SARIcon />{fmtSAR(it.unitPrice)}</td>
+                                <td className="px-3 py-1.5 text-end font-semibold"><SARIcon />{fmtSAR(it.lineTotal)}</td>
                               </tr>
                             ))}
                           </tbody>

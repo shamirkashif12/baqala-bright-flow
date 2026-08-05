@@ -246,12 +246,12 @@ function WarehouseDetail() {
                     <thead className="bg-muted/40">
                       <tr>
                         <th className="w-8 px-2 py-2.5" />
-                        <th className="text-left px-3 py-2.5 font-semibold">Product</th>
-                        <th className="text-right px-3 py-2.5 font-semibold">On Hand</th>
-                        <th className="text-right px-3 py-2.5 font-semibold">Reserved</th>
-                        <th className="text-right px-3 py-2.5 font-semibold">Available</th>
-                        <th className="text-right px-3 py-2.5 font-semibold">Reorder Level</th>
-                        <th className="text-left px-3 py-2.5 font-semibold">Nearest Expiry</th>
+                        <th className="text-start px-3 py-2.5 font-semibold">Product</th>
+                        <th className="text-end px-3 py-2.5 font-semibold">On Hand</th>
+                        <th className="text-end px-3 py-2.5 font-semibold">Reserved</th>
+                        <th className="text-end px-3 py-2.5 font-semibold">Available</th>
+                        <th className="text-end px-3 py-2.5 font-semibold">Reorder Level</th>
+                        <th className="text-start px-3 py-2.5 font-semibold">Nearest Expiry</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -276,10 +276,10 @@ function WarehouseDetail() {
                                 <p className="font-medium">{s.product?.name ?? "—"}</p>
                                 <p className="text-[11px] font-mono text-muted-foreground">{s.product?.sku ?? "—"}</p>
                               </td>
-                              <td className="px-3 py-2.5 text-right font-semibold">{s.quantity}</td>
-                              <td className="px-3 py-2.5 text-right text-warning-foreground">{s.reservedQuantity}</td>
-                              <td className="px-3 py-2.5 text-right text-success">{Math.max(0, s.quantity - s.reservedQuantity)}</td>
-                              <td className="px-3 py-2.5 text-right text-muted-foreground">{s.reorderLevel}</td>
+                              <td className="px-3 py-2.5 text-end font-semibold">{s.quantity}</td>
+                              <td className="px-3 py-2.5 text-end text-warning-foreground">{s.reservedQuantity}</td>
+                              <td className="px-3 py-2.5 text-end text-success">{Math.max(0, s.quantity - s.reservedQuantity)}</td>
+                              <td className="px-3 py-2.5 text-end text-muted-foreground">{s.reorderLevel}</td>
                               <td className="px-3 py-2.5">
                                 {!earliestExpiry ? <span className="text-muted-foreground">—</span> : (
                                   <span className={days !== null && days < 0 ? "text-destructive font-medium" : days !== null && days <= 30 ? "text-warning-foreground font-medium" : "text-muted-foreground"}>

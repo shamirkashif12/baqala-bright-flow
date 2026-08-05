@@ -18,7 +18,13 @@ public record ZatcaParty(
     string? PartyIdentificationSchemeId = null,
     string? PartyIdentificationId = null);
 
-public record ZatcaInvoiceLineItem(string Name, decimal Quantity, decimal Price, decimal VatPercent);
+/// <param name="UnitCode">
+/// UN/ECE Recommendation 20 code for the line's unit (PCE, KGM, LTR…). Defaults to PCE, which is
+/// also what the template carries — until this field existed, EVERY line was reported to ZATCA as
+/// pieces regardless of what it actually was, so a 2 kg bag of rice was invoiced as "2 pieces".
+/// Resolved from the product's unit of measure by ZatcaService; see UnitOfMeasureCatalog.
+/// </param>
+public record ZatcaInvoiceLineItem(string Name, decimal Quantity, decimal Price, decimal VatPercent, string UnitCode = "PCE");
 
 public record ZatcaInvoiceData(
     string Id,
@@ -247,6 +253,10 @@ public class ZatcaInvoiceXmlBuilder
 
             SetFirstDescendant(newLine, "ID", (index + 1).ToString(CultureInfo.InvariantCulture));
             SetFirstDescendant(newLine, "InvoicedQuantity", FormatDecimal(item.Quantity, 6));
+            // The template hardcodes unitCode="PCE"; only the element's text was ever replaced, so
+            // the attribute survived cloning unchanged on every line of every invoice.
+            var quantityNode = newLine.GetElementsByTagName("InvoicedQuantity", "*").Item(0) as XmlElement;
+            quantityNode?.SetAttribute("unitCode", item.UnitCode);
             SetFirstDescendant(newLine, "LineExtensionAmount", FormatDecimal(lineExtAmount, 2));
 
             var taxTotalNode = newLine.GetElementsByTagName("TaxTotal", "*").Item(0) as XmlElement;

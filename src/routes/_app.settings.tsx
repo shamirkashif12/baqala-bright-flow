@@ -273,7 +273,7 @@ function Settings() {
               <button
                 key={s.title}
                 onClick={() => setActiveSection(s.title)}
-                className={`w-full text-left flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                className={`w-full text-start flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
                   activeSection === s.title ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"
                 }`}
               >

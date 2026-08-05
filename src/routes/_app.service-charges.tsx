@@ -162,12 +162,12 @@ function ServiceCharges() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border/60 bg-muted/40">
-                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">ID</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Charge Name</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Type</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Value</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Applies To</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Status</th>
+                  <th className="text-start px-4 py-2.5 font-medium text-muted-foreground text-xs">ID</th>
+                  <th className="text-start px-4 py-2.5 font-medium text-muted-foreground text-xs">Charge Name</th>
+                  <th className="text-start px-4 py-2.5 font-medium text-muted-foreground text-xs">Type</th>
+                  <th className="text-start px-4 py-2.5 font-medium text-muted-foreground text-xs">Value</th>
+                  <th className="text-start px-4 py-2.5 font-medium text-muted-foreground text-xs">Applies To</th>
+                  <th className="text-start px-4 py-2.5 font-medium text-muted-foreground text-xs">Status</th>
                   <th className="px-4 py-2.5" />
                 </tr>
               </thead>

@@ -89,7 +89,14 @@ export function AddressMapPicker({ latitude, longitude, onLocationChange }: Addr
   return (
     <div className="space-y-1.5">
       <div className="rounded-lg overflow-hidden border border-border/60 relative" style={{ height: 220 }}>
-        <MapContainer center={position} zoom={15} style={{ height: "100%", width: "100%" }}>
+        {/* scrollWheelZoom off. This map is always embedded mid-form inside something scrollable —
+            the "New delivery zone" dialog, the public checkout page — and Leaflet's wheel handler
+            swallows the event to zoom instead of letting it bubble. In the zone dialog that left
+            the form literally unfinishable: 1025px of content in an 808px box, the map parked in
+            the middle of it, so a wheel anywhere over the map scrolled the dialog by nothing and
+            "Create rule" stayed permanently below the fold. Zooming still works via the +/− control
+            and double-click, neither of which is the gesture people use to move down a form. */}
+        <MapContainer center={position} zoom={15} scrollWheelZoom={false} style={{ height: "100%", width: "100%" }}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

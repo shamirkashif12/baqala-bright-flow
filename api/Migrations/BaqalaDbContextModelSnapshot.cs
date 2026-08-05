@@ -3197,6 +3197,10 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("varchar(20)")
                         .HasColumnName("discount_type");
 
+                    b.Property<decimal?>("EstimatedUnitWeight")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("estimated_unit_weight");
+
                     b.Property<string>("ImageUrl")
                         .HasColumnType("longtext")
                         .HasColumnName("image_url");
@@ -3504,6 +3508,39 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("ProductId", "Status");
 
                     b.ToTable("product_recalls");
+                });
+
+            modelBuilder.Entity("BaqalaPOS.Api.Models.ProductSubstitute", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("product_id");
+
+                    b.Property<Guid>("SubstituteProductId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("substitute_product_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubstituteProductId");
+
+                    b.HasIndex("ProductId", "SubstituteProductId")
+                        .IsUnique();
+
+                    b.ToTable("product_substitutes");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ProductVariant", b =>
@@ -7008,6 +7045,25 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Product");
 
                     b.Navigation("Supplier");
+                });
+
+            modelBuilder.Entity("BaqalaPOS.Api.Models.ProductSubstitute", b =>
+                {
+                    b.HasOne("BaqalaPOS.Api.Models.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BaqalaPOS.Api.Models.Product", "SubstituteProduct")
+                        .WithMany()
+                        .HasForeignKey("SubstituteProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+
+                    b.Navigation("SubstituteProduct");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.ProductVariant", b =>

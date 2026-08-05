@@ -247,7 +247,7 @@ function EntriesTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Ref#</th>
                   <th className="px-3 py-3 font-semibold">Description</th>
                   <th className="px-3 py-3 font-semibold">Type</th>
@@ -489,7 +489,7 @@ function TypesTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Name</th>
                   <th className="px-3 py-3 font-semibold">Arabic Name</th>
                   <th className="px-3 py-3 font-semibold">Description</th>
@@ -501,7 +501,7 @@ function TypesTab() {
                 {types.map((t) => (
                   <tr key={t.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
                     <td className="px-3 py-3 font-semibold">{t.name}</td>
-                    <td className="px-3 py-3 text-muted-foreground text-left" dir="rtl">{t.nameAr ?? "—"}</td>
+                    <td className="px-3 py-3 text-muted-foreground text-start" dir="rtl">{t.nameAr ?? "—"}</td>
                     <td className="px-3 py-3 text-xs text-muted-foreground max-w-[200px] truncate">{t.description ?? "—"}</td>
                     <td className="px-3 py-3">
                       <button

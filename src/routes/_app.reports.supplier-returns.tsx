@@ -91,7 +91,7 @@ function SupplierReturnDetailDrawer({ rts, onClose }: { rts: SupplierReturnsRepo
               ] as [string, string][]).map(([l, v]) => (
                 <div key={l} className="flex justify-between border-b border-border/40 pb-2 text-sm">
                   <span className="text-muted-foreground">{l}</span>
-                  <span className="font-medium capitalize text-right max-w-[60%] break-words">{v}</span>
+                  <span className="font-medium capitalize text-end max-w-[60%] break-words">{v}</span>
                 </div>
               ))}
             </div>

@@ -1,13 +1,23 @@
-import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass } from "lucide-react";
+import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass, Globe, Volume2, VolumeX, Monitor, MonitorOff } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useBranch } from "@/lib/branch-context";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { api, NOTIFICATION_CREATED_EVENT } from "@/lib/api";
+import {
+  playNotificationSound, primeNotificationSound,
+  isNotificationSoundEnabled, setNotificationSoundEnabled,
+} from "@/lib/notification-sound";
+import {
+  showDesktopNotification, desktopNotificationPermission, requestDesktopNotificationPermission,
+  isDesktopNotificationEnabled, setDesktopNotificationEnabled,
+  type DesktopNotificationPermission,
+} from "@/lib/desktop-notification";
+import mimonyLogo from "@/assets/mimony-logo.png";
 import { restartDashboardTour } from "@/lib/tour-bus";
 import {
   Popover,
@@ -41,6 +51,7 @@ const TONE_DOT: Record<NotifItem["tone"], string> = {
 
 const CATEGORY_ICON: Record<string, React.FC<{ className?: string }>> = {
   "Sales / Checkout": ShoppingCart,
+  "Online Orders": Globe,
   "Payment": CreditCard,
   "Cashier Shift": AlertTriangle,
   "Inventory": Package,
@@ -62,6 +73,9 @@ const CATEGORY_ICON: Record<string, React.FC<{ className?: string }>> = {
 // (Payment Successful, Item Added to Cart, Coupon Applied, Loyalty Points Earned, …) stay
 // non-navigating — there is no useful tab for them and jumping away would be jarring.
 const TYPE_ROUTE: Record<string, string> = {
+  // Online ordering — ?tab=online, because /orders opens on POS Orders by default and the
+  // pending order this notification is about lives on the other tab.
+  "New Online Order": "/orders?tab=online",
   // Returns / refunds
   "Return Started": "/returns",
   "Return Approval Required": "/returns",
@@ -110,6 +124,15 @@ function routeForNotification(n: { type: string; entityType?: string }): string 
   return TYPE_ROUTE[n.type];
 }
 
+// Splits a TYPE_ROUTE entry into the shape navigate() wants. Entries are plain path strings, but a
+// couple need a query param to land on the right tab of a multi-tab page — navigate() ignores a
+// "?..." embedded in `to`, so it has to be handed over separately.
+function toNavigateTarget(route: string): { to: string; search?: Record<string, string> } {
+  const [to, query] = route.split("?");
+  if (!query) return { to };
+  return { to, search: Object.fromEntries(new URLSearchParams(query)) };
+}
+
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
@@ -120,14 +143,73 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// Notification types that escalate beyond the bell — a sound, and an OS desktop toast in the corner
+// of the screen even when the browser is minimised. Deliberately a short allow-list rather than
+// "anything unread": an alert that fires for every routine event is one staff learn to ignore, which
+// is the same as having no alert at all. A new online order earns it because it is the one event
+// with nobody present when it happens — it sits unapproved until somebody notices.
+const AUDIBLE_TYPES = new Set(["New Online Order"]);
+
 function NotificationsPopover() {
   const [open, setOpen] = useState(false);
   const [persisted, setPersisted] = useState<NotifItem[]>([]);
   const [showAll, setShowAll] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const [desktopOn, setDesktopOn] = useState(false);
+  const [desktopPerm, setDesktopPerm] = useState<DesktopNotificationPermission>("default");
   const navigate = useNavigate();
+
+  // Ids already seen by this tab. The bell replaces its whole list on every poll, so "which of
+  // these is new?" can only be answered against what the previous poll returned. A ref, not state:
+  // updating it must not itself trigger a re-render/refetch.
+  const seenIds = useRef<Set<string> | null>(null);
+
+  // Raises one OS toast for the online orders that just landed, and reports whether it appeared.
+  // Batched rather than one toast per order: three orders arriving inside a single 30s poll should
+  // be one line in the Action Center, not three the user has to dismiss individually.
+  const raiseDesktopAlert = (alerts: { id: string; title: string; message: string; type: string; entityType?: string }[]): boolean => {
+    // When the toast appears it carries the alert sound (the OS plays its own), so `silent` simply
+    // mirrors this device's mute toggle. The in-app beep is the fallback for when no toast was
+    // raised at all — see the caller.
+    const silent = !isNotificationSoundEnabled();
+    const openOrders = () => {
+      const route = routeForNotification(alerts[0]);
+      if (route) navigate(toNavigateTarget(route));
+    };
+
+    if (alerts.length === 1) {
+      const [n] = alerts;
+      return showDesktopNotification({
+        title: n.title, body: n.message, tag: n.id, silent, icon: mimonyLogo, onClick: openOrders,
+      });
+    }
+    return showDesktopNotification({
+      title: `${alerts.length} new online orders`,
+      body: "Open Mimony to review and approve them.",
+      tag: "online-orders-batch",
+      silent, icon: mimonyLogo, onClick: openOrders,
+    });
+  };
 
   const loadPersisted = () => {
     api.getNotifications({ pageSize: 20 }).then(res => {
+      // First load of the tab primes the set without making a sound. Otherwise every page refresh
+      // would replay the beep for orders that arrived — and were dealt with — hours ago.
+      const isFirstLoad = seenIds.current === null;
+      const seen = seenIds.current ?? new Set<string>();
+
+      const arrived = res.items.filter(n => !seen.has(n.id));
+      for (const n of res.items) seen.add(n.id);
+      seenIds.current = seen;
+
+      const alerts = arrived.filter(n => !n.isRead && AUDIBLE_TYPES.has(n.type));
+      if (!isFirstLoad && alerts.length > 0) {
+        // Exactly one sound, whichever channel delivered it. The desktop toast is preferred when
+        // it can be shown: it is the only one that survives the AudioContext being suspended,
+        // which is the norm on a machine left unattended — precisely the case this alert is for.
+        if (!raiseDesktopAlert(alerts)) playNotificationSound();
+      }
+
       setPersisted(res.items.map(n => ({
         id: n.id,
         tone: n.severity,
@@ -144,6 +226,9 @@ function NotificationsPopover() {
   };
 
   useEffect(() => {
+    setSoundOn(isNotificationSoundEnabled());
+    setDesktopOn(isDesktopNotificationEnabled());
+    setDesktopPerm(desktopNotificationPermission());
     loadPersisted();
     const interval = setInterval(loadPersisted, 30000);
     // Backend/other-user-triggered notifications rely on the poll above, but a notification
@@ -151,12 +236,72 @@ function NotificationsPopover() {
     // rather than waiting up to 30s — api.notify() fires this event once its POST resolves.
     const onCreated = () => loadPersisted();
     window.addEventListener(NOTIFICATION_CREATED_EVENT, onCreated);
+    // Browsers keep audio suspended until the user interacts with the page; this arms it on their
+    // first click or keypress so the beep isn't silently dropped later.
+    const unprime = primeNotificationSound();
     return () => {
       clearInterval(interval);
       window.removeEventListener(NOTIFICATION_CREATED_EVENT, onCreated);
+      unprime();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    setNotificationSoundEnabled(next);
+    // Play it on the way ON so the user hears exactly what they've just enabled — and confirms
+    // this machine's speakers actually work, which is the thing they're really checking.
+    if (next) playNotificationSound();
+  };
+
+  // Desktop toasts are live only when this device wants them AND the browser has been granted
+  // permission — the stored preference on its own shows nothing.
+  const desktopLive = desktopOn && desktopPerm === "granted";
+
+  const toggleDesktop = () => {
+    if (desktopPerm === "unsupported") return;
+    if (desktopLive) {
+      setDesktopOn(false);
+      setDesktopNotificationEnabled(false);
+      return;
+    }
+    setDesktopOn(true);
+    setDesktopNotificationEnabled(true);
+    // Safe to call when already granted/denied — it resolves with the existing answer without
+    // prompting. A "denied" here can only be cleared from the browser's own site settings.
+    void requestDesktopNotificationPermission().then(perm => {
+      setDesktopPerm(perm);
+      // Fire a real toast on the way ON, exactly as the sound toggle plays the beep: it confirms
+      // the whole chain in one click — browser permission, Windows notification settings, Focus
+      // Assist — instead of leaving the user to place a test order and guess which link failed.
+      if (perm === "granted") {
+        showDesktopNotification({
+          title: "Desktop alerts are on",
+          body: "New online orders will appear here even when Mimony is minimised.",
+          tag: "mimony-desktop-test",
+          silent: !isNotificationSoundEnabled(),
+          icon: mimonyLogo,
+        });
+      }
+    });
+  };
+
+  const desktopTitle =
+    desktopPerm === "unsupported" ? "Desktop alerts aren't available in this browser (needs https or localhost)"
+      : desktopPerm === "denied" ? "Desktop alerts blocked — allow notifications for this site in your browser settings"
+        : desktopLive ? "Desktop alerts on for new online orders — click to turn off"
+          : "Desktop alerts off — click to get new online orders on screen even when Mimony is minimised";
+
+  // Opening the panel is a real user gesture in exactly the right context, which is where the
+  // permission prompt belongs — asking on page load is both penalised by browsers and reflexively
+  // dismissed by users.
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next && desktopPerm === "default" && isDesktopNotificationEnabled()) {
+      void requestDesktopNotificationPermission().then(setDesktopPerm);
+    }
+  };
 
   // "Unread" is the default view — once you've acted on/dismissed something, there's no reason
   // for it to keep taking up space here — but "All" still shows the full history on request.
@@ -176,15 +321,15 @@ function NotificationsPopover() {
   // event with a home screen), navigates there. Ephemeral POS notices without a route just clear.
   const handleClick = (item: NotifItem) => {
     markOneRead(item);
-    const to = routeForNotification(item);
-    if (to) {
+    const route = routeForNotification(item);
+    if (route) {
       setOpen(false);
-      navigate({ to });
+      navigate(toNavigateTarget(route));
     }
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="h-9 w-9 relative">
           <Bell className="h-4 w-4" />
@@ -198,9 +343,35 @@ function NotificationsPopover() {
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
           <p className="text-sm font-semibold">Notifications {unread > 0 && <span className="ml-1 text-[10px] font-bold text-destructive">{unread} new</span>}</p>
-          <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Per-device, not per-account: whether sound is wanted depends on the machine (a
+                back-office PC with speakers vs. a shared shop-floor tablet), so it's stored in
+                this browser rather than on the user. */}
+            <button
+              onClick={toggleSound}
+              className="text-muted-foreground hover:text-foreground"
+              title={soundOn ? "Alert sound on — click to mute" : "Alert sound muted — click to unmute"}
+              aria-label={soundOn ? "Mute notification sound" : "Unmute notification sound"}
+            >
+              {soundOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+            </button>
+            {/* Desktop toasts for new online orders. Per-device for the same reason as the sound
+                toggle, and additionally gated by a browser permission this can only ask for. */}
+            {desktopPerm !== "unsupported" && (
+              <button
+                onClick={toggleDesktop}
+                className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                disabled={desktopPerm === "denied"}
+                title={desktopTitle}
+                aria-label={desktopTitle}
+              >
+                {desktopLive ? <Monitor className="h-3.5 w-3.5" /> : <MonitorOff className="h-3.5 w-3.5" />}
+              </button>
+            )}
+            <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-1 px-4 py-2 border-b border-border/40">
           <button
@@ -227,7 +398,7 @@ function NotificationsPopover() {
                 key={n.id}
                 onClick={() => handleClick(n)}
                 title={routeForNotification(n) ? "Click to open" : "Click to mark as read"}
-                className={`w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors ${n.isRead ? "opacity-60" : ""}`}
+                className={`w-full flex items-start gap-3 px-4 py-3 text-start hover:bg-muted/40 transition-colors ${n.isRead ? "opacity-60" : ""}`}
               >
                 <div className={`h-2 w-2 rounded-full mt-2 shrink-0 ${TONE_DOT[n.tone]}`} />
                 <div className="flex-1 min-w-0">
@@ -285,7 +456,7 @@ function HelpPopover() {
         <div className="p-2 space-y-0.5">
           <button
             onClick={handleRestartTour}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/60 text-sm transition-colors text-left"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/60 text-sm transition-colors text-start"
           >
             <Compass className="h-4 w-4 text-primary shrink-0" />
             <div>

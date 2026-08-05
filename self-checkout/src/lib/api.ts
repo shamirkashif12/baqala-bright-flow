@@ -274,10 +274,14 @@ export interface ResolvedPrice {
   packs: KioskPackOption[];
 }
 
+// Priced for the "kiosk" sales channel. Safe to send unconditionally: a product with no
+// kiosk-specific rule falls back to its in-store rule and only then to base price (see the API's
+// PriceResolutionService), so this changes nothing until someone sets a kiosk price on purpose.
 export function resolvePrices(branchId: string | null, customerTier?: string | null): Promise<ResolvedPrice[]> {
   const q = new URLSearchParams();
   if (branchId) q.set("branchId", branchId);
   if (customerTier) q.set("customerTier", customerTier);
+  q.set("priceType", "kiosk");
   const qs = q.toString();
   return request<ResolvedPrice[]>(`/api/pricing/resolve${qs ? `?${qs}` : ""}`);
 }

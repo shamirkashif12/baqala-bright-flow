@@ -341,7 +341,7 @@ function PermMatrix({ perms, onChange, onBulkChange }: {
       <div className="overflow-x-auto overflow-y-auto max-h-[60vh] rounded-lg border border-border/60">
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10 bg-background">
-            <tr className="bg-muted/40 border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+            <tr className="bg-muted/40 border-b text-start text-xs uppercase tracking-wider text-muted-foreground">
               <th className="px-4 py-3 font-semibold w-44">Module</th>
               {PERM_FLAGS.map(f => <th key={f} className="px-3 py-3 font-semibold text-center">{PERM_LABELS[f]}</th>)}
             </tr>
@@ -643,7 +643,7 @@ function Roles() {
                 const isActive = active?.id === r.id;
                 return (
                   <div key={r.id} className={`flex items-center rounded-lg transition-colors ${isActive ? "bg-primary text-primary-foreground shadow-glow" : "hover:bg-muted/60"}`}>
-                    <button onClick={() => setActive(r)} className="flex-1 text-left px-3 py-2 text-sm flex items-center justify-between gap-2 min-w-0">
+                    <button onClick={() => setActive(r)} className="flex-1 text-start px-3 py-2 text-sm flex items-center justify-between gap-2 min-w-0">
                       <span className="flex items-center gap-2 min-w-0">
                         <UserCog className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{r.name}</span>

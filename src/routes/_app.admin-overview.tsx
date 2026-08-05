@@ -270,11 +270,11 @@ function AdminOverview() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-4 py-3 font-semibold">Warehouse</th>
                       <th className="px-4 py-3 font-semibold text-center">SKUs</th>
                       <th className="px-4 py-3 font-semibold text-center">Low / OOS</th>
-                      <th className="px-4 py-3 font-semibold text-right">Value (SAR)</th>
+                      <th className="px-4 py-3 font-semibold text-end">Value (SAR)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -283,7 +283,7 @@ function AdminOverview() {
                         <td className="px-4 py-3 font-medium">{warehouse.name}</td>
                         <td className="px-4 py-3 text-center tabular-nums">{skus}</td>
                         <td className="px-4 py-3 text-center tabular-nums">{low} / {oos}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtSAR(value)}</td>
+                        <td className="px-4 py-3 text-end tabular-nums">{fmtSAR(value)}</td>
                       </tr>
                     ))}
                     {warehouseSummaries.length === 0 && (
@@ -304,14 +304,14 @@ function AdminOverview() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                       <th className="px-4 py-3 font-semibold">Branch</th>
                       <th className="px-4 py-3 font-semibold text-center">SKUs</th>
                       <th className="px-4 py-3 font-semibold text-center">Low Stock</th>
                       <th className="px-4 py-3 font-semibold text-center">Out of Stock</th>
                       <th className="px-4 py-3 font-semibold text-center">Expiring ≤7d</th>
                       <th className="px-4 py-3 font-semibold text-center">Warehouses</th>
-                      <th className="px-4 py-3 font-semibold text-right">Inventory Value</th>
+                      <th className="px-4 py-3 font-semibold text-end">Inventory Value</th>
                       <th className="px-4 py-3 font-semibold text-center">Health</th>
                     </tr>
                   </thead>
@@ -345,7 +345,7 @@ function AdminOverview() {
                           <td className="px-4 py-3 text-center text-xs text-muted-foreground">
                             {linked.length > 0 ? linked.map(w => w.code).join(", ") : "—"}
                           </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-sm font-semibold">
+                          <td className="px-4 py-3 text-end tabular-nums text-sm font-semibold">
                             <span className="flex items-center justify-end gap-0.5">
                               <SARIcon />{fmtSAR(value)}
                             </span>

@@ -31,8 +31,15 @@ import { AddressMapPreview } from "@/components/address-map-picker";
 export const Route = createFileRoute("/_app/orders")({
   // Lets other pages (e.g. Sales) deep-link straight to a specific order's detail sheet instead of
   // duplicating the receipt/print/refund UI that already lives here.
-  validateSearch: (search) => ({
+  // Both keys are declared OPTIONAL rather than left to inference: inferred `string | undefined`
+  // is a *required* key holding undefined, so adding `tab` would force every existing
+  // navigate({ to: "/orders", search: { orderId } }) call elsewhere to pass it too.
+  validateSearch: (search): { orderId?: string; tab?: "pos" | "online" } => ({
     orderId: (search.orderId as string) || undefined,
+    // Which tab to open on. Set by the "New Online Order" notification, which is about an order
+    // that lives on the Online tab — landing on POS Orders would show everything except the thing
+    // that was clicked.
+    tab: (search.tab as "pos" | "online" | undefined) || undefined,
   }),
   component: Orders,
 });
@@ -397,7 +404,7 @@ function RefundDialog({ order, open, onClose, onDone }: {
                         onClick={() => setItemStates(prev => ({ ...prev, [i]: { ...prev[i], qty: prev[i].qty + 1 } }))}
                       >+</button>
                     </div>
-                    <p className="text-sm font-semibold w-20 text-right tabular-nums">
+                    <p className="text-sm font-semibold w-20 text-end tabular-nums">
                       SAR {(item.unitPrice * s.qty).toFixed(2)}
                     </p>
                   </div>
@@ -660,7 +667,7 @@ function EditOrderDialog({ order, open, onClose, onDone }: {
                   {productResults.map(p => (
                     <button
                       key={p.id} onClick={() => addProduct(p)}
-                      className="w-full flex items-center justify-between text-xs rounded px-2 py-1.5 hover:bg-muted text-left"
+                      className="w-full flex items-center justify-between text-xs rounded px-2 py-1.5 hover:bg-muted text-start"
                     >
                       <span className="truncate">{p.name}</span>
                       <span className="flex items-center gap-2 shrink-0 ml-2 text-muted-foreground">
@@ -1279,7 +1286,7 @@ function POSTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Order#</th>
                   <th className="px-3 py-3 font-semibold">Branch</th>
                   <th className="px-3 py-3 font-semibold">Cashier</th>
@@ -1482,6 +1489,9 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
   const [rejectReason, setRejectReason] = useState("");
   const [delivering, setDelivering] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [feeOpen, setFeeOpen] = useState(false);
+  const [feeAmount, setFeeAmount] = useState(String(order.deliveryFeeAmount ?? 0));
+  const [feeReason, setFeeReason] = useState("");
 
   const editable = order.orderStatus === "pending";
   const subtotal = items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
@@ -1534,6 +1544,26 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
       onStatusChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to reject order");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveDeliveryFee = async () => {
+    const amount = Number(feeAmount);
+    if (Number.isNaN(amount) || amount < 0) {
+      toast.error("Enter a valid delivery fee.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.updateOnlineOrderDeliveryFee(order.id, amount, feeReason.trim() || undefined);
+      toast.success("Delivery fee updated.");
+      setFeeOpen(false);
+      setFeeReason("");
+      onItemsSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update the delivery fee");
     } finally {
       setBusy(false);
     }
@@ -1608,6 +1638,31 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
           <span>Subtotal</span>
           <span className="tabular-nums"><SARIcon />{subtotal.toFixed(2)}</span>
         </div>
+
+        {/* Delivery is shown in both states, unlike the other fees: it's the line staff most often
+            need to change, and while the order is pending it's editable in place. */}
+        <div className="flex justify-between items-center text-xs text-muted-foreground gap-2">
+          <span className="min-w-0 truncate">
+            Delivery
+            {order.delivery?.deliveryFeeRuleName && ` · ${order.delivery.deliveryFeeRuleName}`}
+            {order.delivery?.deliveryDistanceKm != null && ` · ${order.delivery.deliveryDistanceKm} km`}
+          </span>
+          <span className="flex items-center gap-1.5 shrink-0">
+            <span className="tabular-nums"><SARIcon />{(order.deliveryFeeAmount ?? 0).toFixed(2)}</span>
+            {editable && (
+              <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px]"
+                onClick={() => { setFeeAmount(String(order.deliveryFeeAmount ?? 0)); setFeeOpen(true); }}>
+                Change
+              </Button>
+            )}
+          </span>
+        </div>
+        {order.delivery?.deliveryFeeOverriddenAt && (
+          <p className="text-[10px] text-muted-foreground italic">
+            Fee changed by staff{order.delivery.deliveryFeeOverrideReason ? ` — ${order.delivery.deliveryFeeOverrideReason}` : ""}
+          </p>
+        )}
+
         {!editable && (
           <>
             {order.tobaccoFeeAmount > 0 && (
@@ -1680,6 +1735,27 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
             <Button variant="outline" onClick={() => setRejecting(false)} disabled={busy}>Cancel</Button>
             <Button variant="destructive" disabled={!rejectReason.trim() || busy} onClick={reject}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reject"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={feeOpen} onOpenChange={v => !busy && setFeeOpen(v)}>
+        <DialogContent className="sm:max-w-sm">
+          <DHeader><DTitle className="text-base">Change delivery fee</DTitle></DHeader>
+          <DialogDescription>
+            Replaces the fee the delivery zones worked out for this address. The order total adjusts by the difference.
+          </DialogDescription>
+          <div className="space-y-2">
+            <Input type="number" step="0.01" min={0} className="h-9" value={feeAmount}
+              onChange={e => setFeeAmount(e.target.value)} placeholder="0.00" />
+            <Input className="h-9" value={feeReason} onChange={e => setFeeReason(e.target.value)}
+              placeholder="Reason (optional — recorded in the audit trail)" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFeeOpen(false)} disabled={busy}>Cancel</Button>
+            <Button onClick={saveDeliveryFee} disabled={busy}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save fee"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1763,7 +1839,7 @@ function OnlineTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border/60 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-3 py-3 font-semibold">Order#</th>
                   <th className="px-3 py-3 font-semibold">Branch</th>
                   <th className="px-3 py-3 font-semibold">Customer</th>
@@ -1841,9 +1917,12 @@ function OnlineTab() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 function Orders() {
+  // `defaultValue`, not a controlled value: the URL decides where you LAND, then switching tabs by
+  // hand works normally without rewriting the address bar on every click.
+  const { tab } = Route.useSearch();
   return (
     <PageShell title="Orders" subtitle="POS and online order management">
-      <Tabs defaultValue="pos">
+      <Tabs defaultValue={tab ?? "pos"}>
         <TabsList className="mb-4">
           <TabsTrigger value="pos">POS Orders</TabsTrigger>
           <TabsTrigger value="online" className="gap-1.5">

@@ -158,7 +158,7 @@ function BranchDetail() {
                       {t.assignedCashier ? t.assignedCashier.fullName : "Unassigned"} · Sync {t.lastSync ? new Date(t.lastSync).toLocaleTimeString("en-SA", { hour: "2-digit", minute: "2-digit" }) : "—"}
                     </div>
                   </div>
-                  <div className="text-right text-[11px] tabular-nums text-muted-foreground">
+                  <div className="text-end text-[11px] tabular-nums text-muted-foreground">
                     {t.uptimeMinutes ? `${Math.floor(t.uptimeMinutes / 60)}h ${t.uptimeMinutes % 60}m` : "—"}
                   </div>
                 </div>

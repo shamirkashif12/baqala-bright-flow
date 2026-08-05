@@ -121,7 +121,7 @@ function PublicLoyaltyPage() {
                 <p className="font-semibold">{result.fullName}</p>
                 <p className="text-xs text-muted-foreground capitalize">{result.tier} member</p>
               </div>
-              <div className="text-right">
+              <div className="text-end">
                 <p className="text-2xl font-bold tabular-nums" style={{ color: brandColor }}>
                   {result.loyaltyBalance.toLocaleString()} pts
                 </p>

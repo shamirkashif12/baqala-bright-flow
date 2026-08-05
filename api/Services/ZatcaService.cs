@@ -260,7 +260,11 @@ public class ZatcaService(
         var items = invoice.Order.Items.Select(i =>
         {
             var exciseUnitPrice = i.Quantity > 0 ? i.TobaccoFeeAmount / i.Quantity : 0m;
-            return new ZatcaInvoiceLineItem(i.Product?.Name ?? "Item", i.Quantity, i.UnitPrice + exciseUnitPrice, vatPercent);
+            // A weighed line must declare KGM/LTR, not the template's blanket PCE — a 2 kg sale
+            // reported as "2 pieces" misstates the quantity on a signed government invoice.
+            return new ZatcaInvoiceLineItem(
+                i.Product?.Name ?? "Item", i.Quantity, i.UnitPrice + exciseUnitPrice, vatPercent,
+                UnitOfMeasureCatalog.ZatcaCode(i.Product?.UnitOfMeasure));
         }).ToList();
 
         var data = new ZatcaInvoiceData(

@@ -198,6 +198,26 @@ export const api = {
   deleteProduct: (id: string, reason?: string) =>
     request<{ message: string; approvalRequestId: string }>(`/api/products/${id}`, { method: "DELETE", body: JSON.stringify({ reason }) }),
 
+  // The unit picker's options. Served rather than duplicated as a frontend constant so the list
+  // the operator picks from is definitionally the list the API accepts.
+  getUnitsOfMeasure: () => request<UnitOfMeasureOption[]>("/api/products/units"),
+
+  // Distinct brands already in the catalogue — feeds the Add/Edit typeahead so "Nestle"/"nestle"
+  // don't fragment into separate brands and split the POS brand filter.
+  getBrands: () => request<string[]>("/api/products/brands"),
+
+  // Interchangeable products, for offering an alternative when this one is out of stock. Pass a
+  // branch to get each substitute's on-hand there (a substitute with no stock is no use).
+  getProductSubstitutes: (productId: string, branchId?: string) =>
+    request<ProductSubstitute[]>(`/api/products/${productId}/substitutes${branchId ? `?branchId=${branchId}` : ""}`),
+  // Linked in both directions server-side, so the suggestion appears whichever of the pair runs out.
+  addProductSubstitute: (productId: string, substituteProductId: string) =>
+    request<{ message: string }>(`/api/products/${productId}/substitutes`, {
+      method: "POST", body: JSON.stringify({ substituteProductId }),
+    }),
+  removeProductSubstitute: (productId: string, substituteId: string) =>
+    request<void>(`/api/products/${productId}/substitutes/${substituteId}`, { method: "DELETE" }),
+
   // Gallery images — additive, optional extras alongside Product.imageUrl (the "primary" image).
   // Needs a real product id, so only available once a product has been saved at least once.
   getProductImages: (productId: string) =>
@@ -309,6 +329,10 @@ export const api = {
   breakPack: (data: { packProductId: string; branchId: string; packs: number }) =>
     request<{ packStock: { productId: string; branchId: string; quantity: number }; looseStock: { productId: string; branchId: string; quantity: number } }>(
       "/api/inventory/break-pack", { method: "POST", body: JSON.stringify(data) }),
+  // What's actually sellable at a branch, counting units still inside unopened packs — 4 loose
+  // eggs beside 3 unopened dozens is 40 available, not 4.
+  getPackAwareAvailability: (productId: string, branchId: string) =>
+    request<PackAwareAvailability>(`/api/inventory/availability/${productId}?branchId=${branchId}`),
 
   // Stock Counts (Stocking Review)
   getStockCounts: (params?: { branchId?: string[]; warehouseId?: string; status?: string; from?: string; to?: string }) =>
@@ -344,8 +368,12 @@ export const api = {
     request<{ total: number; page: number; pageSize: number; items: Order[] }>(`/api/orders${toQuery(params)}`),
   getOrder: (id: string) => request<Order>(`/api/orders/${id}`),
   getOrderByNumber: (num: string) => request<Order>(`/api/orders/by-number/${encodeURIComponent(num)}`),
-  createOrder: (data: Partial<Order>) =>
-    request<Order>("/api/orders", { method: "POST", body: JSON.stringify(data) }),
+  // allowPackBreak: the cashier has confirmed that unopened packs may be broken open to cover a
+  // shortfall of loose units. Without it the server rejects such a sale with a 400 carrying a
+  // `packBreakSuggestion` (see PackBreakSuggestion) describing exactly what to open — opening a
+  // carton is a physical act, so it is never done without asking.
+  createOrder: (data: Partial<Order>, allowPackBreak = false) =>
+    request<Order>(`/api/orders${allowPackBreak ? "?allowPackBreak=true" : ""}`, { method: "POST", body: JSON.stringify(data) }),
   updateOrderStatus: (id: string, status: string) =>
     request<Order>(`/api/orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   // Both return the updated Order on a 200, or a 202 `{ message, approvalRequestId }` when the
@@ -364,11 +392,22 @@ export const api = {
   getOnlineOrderCatalog: (branchId: string) =>
     request<OnlineOrderCatalog>(`/api/online-orders/public/${branchId}/catalog`),
   // Read-only preview of the real server-computed totals (product discount, offers, tobacco
-  // excise, custom fees, VAT) — creates nothing. None of that pricing logic is safe to duplicate
-  // client-side, so the checkout page's order summary calls this instead of estimating locally.
-  quoteOnlineOrder: (branchId: string, items: Array<{ productId: string; quantity: number }>) =>
+  // excise, custom fees, VAT, delivery) — creates nothing. None of that pricing logic is safe to
+  // duplicate client-side, so the checkout page's order summary calls this instead of estimating
+  // locally. `coords` is the delivery pin: without it the quote can't match a distance/area
+  // delivery rule and falls back to the branch's flat fee.
+  quoteOnlineOrder: (
+    branchId: string,
+    items: Array<{ productId: string; quantity: number }>,
+    coords?: { latitude?: number | null; longitude?: number | null },
+  ) =>
     request<OnlineOrderQuote>(`/api/online-orders/public/${branchId}/quote`, {
-      method: "POST", body: JSON.stringify(items),
+      method: "POST",
+      body: JSON.stringify({
+        items,
+        latitude: coords?.latitude ?? null,
+        longitude: coords?.longitude ?? null,
+      }),
     }),
   placeOnlineOrder: (branchId: string, data: PlaceOnlineOrderPayload) =>
     request<{ orderNumber: string; totalAmount: number }>(`/api/online-orders/public/${branchId}`, {
@@ -377,8 +416,32 @@ export const api = {
   getOnlineOrdersPaged: (params: { branchId?: string[]; status?: string[]; page: number; pageSize: number }) =>
     request<{ total: number; page: number; pageSize: number; items: OnlineOrder[] }>(`/api/online-orders${toQuery(params)}`),
   updateOnlineOrderItems: (id: string, items: OnlineOrderItemEdit[]) =>
-    request<{ id: string; subtotal: number; taxAmount: number; totalAmount: number }>(
+    request<{ id: string; subtotal: number; taxAmount: number; deliveryFeeAmount: number; totalAmount: number }>(
       `/api/online-orders/${id}/items`, { method: "PATCH", body: JSON.stringify({ items }) }),
+  // Override the delivery fee on a PENDING order — rules can only describe what the operator
+  // anticipated; a specific order (a regular being waived, a hard-to-reach address) often differs.
+  // Audited at warning severity.
+  updateOnlineOrderDeliveryFee: (id: string, amount: number, reason?: string) =>
+    request<{ id: string; deliveryFeeAmount: number; totalAmount: number }>(
+      `/api/online-orders/${id}/delivery-fee`,
+      { method: "PATCH", body: JSON.stringify({ amount, reason: reason ?? null }) }),
+
+  // Delivery fee rules (admin) — see DeliveryFeeRule. Gated on the "Online Orders" permission
+  // module, the same one that gates approving/editing the orders these price.
+  getDeliveryFeeRules: (params?: { branchId?: string[]; isActive?: boolean }) =>
+    request<DeliveryFeeRule[]>(`/api/delivery-fees${toQuery(params)}`),
+  createDeliveryFeeRule: (data: DeliveryFeeRulePayload) =>
+    request<DeliveryFeeRule>("/api/delivery-fees", { method: "POST", body: JSON.stringify(data) }),
+  updateDeliveryFeeRule: (id: string, data: DeliveryFeeRulePayload) =>
+    request<DeliveryFeeRule>(`/api/delivery-fees/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  toggleDeliveryFeeRule: (id: string) =>
+    request<DeliveryFeeRule>(`/api/delivery-fees/${id}/toggle`, { method: "PATCH" }),
+  deleteDeliveryFeeRule: (id: string) =>
+    request<void>(`/api/delivery-fees/${id}`, { method: "DELETE" }),
+  // "What would we charge to deliver here?" against the real resolver, creating nothing — the
+  // effect of overlapping geographic rules isn't readable off the list.
+  previewDeliveryFee: (data: { branchId: string; latitude?: number | null; longitude?: number | null; orderSubtotal?: number }) =>
+    request<DeliveryFeeQuote>("/api/delivery-fees/preview", { method: "POST", body: JSON.stringify(data) }),
   approveOnlineOrder: (id: string, paymentMethod: string) =>
     request<{ id: string; orderStatus: string; approvedAt: string }>(
       `/api/online-orders/${id}/approve`, { method: "PATCH", body: JSON.stringify({ paymentMethod }) }),
@@ -1323,6 +1386,15 @@ export interface Product {
   discount?: number; discountType?: "percentage" | "fixed";
   imageUrl?: string;
   description?: string;
+  // The unit this product is stocked, counted and priced in — basePrice is always the price of ONE
+  // of these (per kg, per litre, per piece). Server-normalised to a UNIT_OF_MEASURE code; it decides
+  // whether fractional quantities are legal, so `weightBased` is now derived from it server-side
+  // rather than set independently (they can no longer disagree).
+  unitOfMeasure?: string;
+  // Average weight/volume of one physical item, in this product's own unit (0.12 for a tomato on a
+  // per-kg product). Only set on a weight/volume product. Its presence is what lets the POS ring up
+  // a weighed item by the piece — see qtyFromUnitCount.
+  estimatedUnitWeight?: number | null;
   // Pack & unit pricing (FRD §12): "single" (default) or "pack". A pack is sold as one unit at its
   // own basePrice; itemsPerPack is informational (items inside one pack).
   saleUnitType?: "single" | "pack";
@@ -1331,6 +1403,41 @@ export interface Product {
   // pack links to the individual-egg single product). Only meaningful when saleUnitType is "pack".
   looseUnitProductId?: string | null;
   category?: { id: string; name: string; nameAr?: string };
+}
+
+// Mirrors the server's UnitOfMeasureCatalog entry (GET /api/products/units).
+export interface UnitOfMeasureOption {
+  code: string;
+  category: "count" | "weight" | "volume" | "length";
+  decimalPlaces: number;
+  fractional: boolean;
+  subUnitLabel?: string | null;
+  subUnitsPerUnit?: number | null;
+}
+
+// A product offered in place of one that's out of stock, with its on-hand at the queried branch.
+export interface ProductSubstitute {
+  id: string; name: string; nameAr?: string; sku: string; barcode?: string;
+  brand?: string; basePrice: number; unitOfMeasure?: string; weightBased: boolean;
+  imageUrl?: string; status: string; quantity: number;
+}
+
+// What's actually sellable, counting units still inside unopened packs. The raw stock row
+// understates a loose product whose cartons haven't been broken yet.
+export interface PackAwareAvailability {
+  productId: string; branchId: string;
+  looseOnHand: number; totalAvailable: number;
+  packProductId?: string | null; packProductName?: string | null;
+  packOnHand: number; itemsPerPack: number;
+}
+
+// Returned by createOrder as a 400 when the sale needs packs opened and the cashier hasn't yet
+// confirmed. Retry with allowPackBreak once they do.
+export interface PackBreakSuggestion {
+  productId: string; productName?: string;
+  packProductId: string; packProductName: string;
+  itemsPerPack: number; packsNeeded: number;
+  looseOnHand: number; totalAvailable: number;
 }
 
 export interface ProductImage {
@@ -1362,7 +1469,18 @@ export interface ReceiveBatchPayload {
 
 // ─── Pricing (FRD §12) ───────────────────────────────────────────────────────
 
-export type PriceType = "standard" | "online" | "aggregator" | "wholesale";
+// The distribution channel a price rule targets. Mirrors the API's SalesChannelCatalog — keep the
+// two in step; the server rejects anything not in its own list.
+//   standard — in-store POS. Also the FALLBACK every other channel inherits from: a product with
+//              no rule for its channel is priced at its in-store rule, and only then at basePrice.
+//   online   — the public online-ordering page.
+//   kiosk    — the self-checkout app.
+export type PriceType = "standard" | "online" | "kiosk";
+export const PRICE_TYPE_LABELS: Record<PriceType, string> = {
+  standard: "In-store (POS)",
+  online: "Online ordering",
+  kiosk: "Self-checkout",
+};
 export type CustomerTier = "standard" | "silver" | "gold" | "platinum";
 
 // One price rule. branchId null = every branch; minCustomerTier null = every customer;
@@ -1418,6 +1536,56 @@ export interface ResolvedPrice {
   priceListId?: string | null;
   source: "base" | "branch" | "tier" | "branch_tier" | "scheduled" | "list";
   packs: PackOption[];
+  // The channel the winning rule was written for — the requested channel when a channel-specific
+  // rule won, "standard" when the request fell back to the in-store price.
+  channel?: PriceType;
+}
+
+// ─── Delivery fees (online orders) ───────────────────────────────────────────
+
+// How a rule decides whether it applies to a delivery address.
+//   flat   — every delivery in scope; the catch-all/base fee
+//   radius — between min/max km of a centre point, great-circle
+//   bbox   — inside a latitude/longitude rectangle, for areas a circle can't describe
+export type DeliveryFeeRuleType = "flat" | "radius" | "bbox";
+
+export interface DeliveryFeeRule {
+  id: string;
+  // null = every branch (tenant-wide). A branch's own rule always beats a tenant-wide one.
+  branchId?: string | null;
+  name: string;
+  ruleType: DeliveryFeeRuleType;
+  centerLatitude?: number | null; centerLongitude?: number | null;
+  minDistanceKm?: number | null; maxDistanceKm?: number | null;
+  minLatitude?: number | null; maxLatitude?: number | null;
+  minLongitude?: number | null; maxLongitude?: number | null;
+  feeAmount: number;
+  // Waive the fee once the goods subtotal reaches this. null = never waived.
+  freeAboveOrderAmount?: number | null;
+  // false = outside the delivery zone; an order with a pin here is refused at checkout.
+  isServiceable: boolean;
+  unserviceableMessage?: string | null;
+  priority: number;
+  isActive: boolean;
+  createdAt: string; updatedAt: string;
+  branch?: { id: string; name: string };
+}
+
+export type DeliveryFeeRulePayload = Omit<
+  DeliveryFeeRule, "id" | "createdAt" | "updatedAt" | "branch"
+>;
+
+// source: "rule" (a rule matched the pin) | "settings" (branch default fee) | "none" (free) |
+// "blocked" (matched rule marks the area undeliverable — amount is meaningless).
+export interface DeliveryFeeQuote {
+  amount: number;
+  ruleId?: string | null;
+  ruleName?: string | null;
+  source: "rule" | "settings" | "none" | "blocked";
+  isServiceable: boolean;
+  unserviceableMessage?: string | null;
+  distanceKm?: number | null;
+  waivedByThreshold: boolean;
 }
 
 // ─── Recalls (FRD §13) ───────────────────────────────────────────────────────
@@ -1651,6 +1819,21 @@ export interface OnlineOrderQuote {
   customFeeAmount: number;
   taxAmount: number;
   totalAmount: number;
+  // Delivery, resolved server-side from the map pin against the branch's delivery-fee rules.
+  // Already included in totalAmount.
+  deliveryFee: number;
+  // The matched rule's name ("Outer city zone"), null when the branch's default fee applied.
+  deliveryFeeName?: string | null;
+  // "rule" | "settings" | "none" | "blocked" — which answer this is; see DeliveryFeeService.
+  deliveryFeeSource: string;
+  // A fee was configured but zeroed because the order cleared a free-delivery threshold. Shown as
+  // "Free delivery" rather than a silent 0.00.
+  deliveryFeeWaived: boolean;
+  deliveryDistanceKm?: number | null;
+  // false = the branch doesn't deliver to this pin. The quote reports it as data (the shopper can
+  // still move the pin); placing the order is what turns it into a hard error.
+  isServiceable: boolean;
+  unserviceableMessage?: string | null;
 }
 
 export interface PlaceOnlineOrderPayload {
@@ -1665,13 +1848,22 @@ export interface OnlineOrderItemEdit { orderItemId?: string; productId: string; 
 export interface OnlineOrderDeliveryDetail {
   fullName: string; phone: string; email?: string; addressLine: string;
   latitude?: number; longitude?: number; notes?: string;
+  // Provenance of the order's deliveryFeeAmount, snapshotted at order time — the rule itself may
+  // have been edited or deleted since.
+  deliveryFeeRuleId?: string | null;
+  deliveryFeeRuleName?: string | null;
+  deliveryDistanceKm?: number | null;
+  deliveryFeeOverriddenBy?: string | null;
+  deliveryFeeOverriddenAt?: string | null;
+  deliveryFeeOverrideReason?: string | null;
 }
 
 export interface OnlineOrderServiceCharge { id: string; name: string; amount: number; }
 
 export interface OnlineOrder {
   id: string; orderNumber: string; branchId: string;
-  subtotal: number; taxAmount: number; tobaccoFeeAmount: number; customFeeAmount: number; totalAmount: number;
+  subtotal: number; taxAmount: number; tobaccoFeeAmount: number; customFeeAmount: number;
+  deliveryFeeAmount: number; totalAmount: number;
   paymentStatus: string; orderStatus: string;
   rejectionReason?: string; approvedAt?: string;
   createdAt: string; updatedAt: string;
@@ -1921,6 +2113,10 @@ export interface PosSettingsRecord {
   onlineOrderingEnabled: boolean;
   onlineOrderingMinOrderAmountSar: number;
   onlineOrderingMaxOrderValueSar: number;
+  // The branch's flat delivery fee, charged when no DeliveryFeeRule matches the pin. 0 = free.
+  onlineOrderingDeliveryFeeSar: number;
+  // Waive that default above this goods subtotal. 0 = never. (A matched rule carries its own.)
+  onlineOrderingFreeDeliveryAboveSar: number;
 }
 
 export interface ComplianceRule {

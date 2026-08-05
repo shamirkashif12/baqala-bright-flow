@@ -435,7 +435,7 @@ export function AppSidebar() {
         <div className="w-full flex items-center gap-2.5 rounded-xl p-2 bg-sidebar-accent/40 hover:bg-sidebar-accent/60 transition-colors">
           <button
             onClick={() => navigate({ to: "/profile" })}
-            className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
+            className="flex items-center gap-2.5 flex-1 min-w-0 text-start"
           >
             <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center text-primary-foreground text-xs font-bold shrink-0">
               {user?.initials ?? "U"}

@@ -35,35 +35,45 @@ public record PackOption(
 //   tier           — tenant-wide rule gated on customer tier
 //   scheduled      — tenant-wide rule with a time window
 //   list           — tenant-wide open-ended rule
+//
+// Channel is the distribution channel the winning rule was written for — the requested channel
+// when a channel-specific rule won, "standard" when the request fell back to the in-store price,
+// and "standard" for a base-price answer (there is no per-channel BasePrice). It is what lets the
+// UI say "this is the ONLINE price" versus "this is the shelf price, shown online".
 public record ResolvedPrice(
     Guid ProductId,
     decimal UnitPrice,
     decimal BasePrice,
     Guid? PriceListId,
     string Source,
-    IReadOnlyList<PackOption> Packs);
+    IReadOnlyList<PackOption> Packs,
+    string Channel = SalesChannelCatalog.Standard);
 
+// `priceType` on every method is the distribution channel being priced for — see
+// SalesChannelCatalog. It is channel-first with a standard fallback, never channel-only:
+// asking for "online" prices a product that has no online rule at its in-store rule (and only
+// then at BasePrice), so turning a channel on never blanks out prices an operator already set.
 public interface IPriceResolutionService
 {
     Task<ResolvedPrice> ResolveAsync(
         Guid productId, Guid? branchId, string? customerTier,
-        string priceType = "standard", DateTime? at = null, CancellationToken ct = default);
+        string priceType = SalesChannelCatalog.Standard, DateTime? at = null, CancellationToken ct = default);
 
     Task<IReadOnlyDictionary<Guid, ResolvedPrice>> ResolveManyAsync(
         IEnumerable<Guid> productIds, Guid? branchId, string? customerTier,
-        string priceType = "standard", DateTime? at = null, CancellationToken ct = default);
+        string priceType = SalesChannelCatalog.Standard, DateTime? at = null, CancellationToken ct = default);
 
     // Resolve every active product for a branch — what the POS calls once on load.
     Task<IReadOnlyDictionary<Guid, ResolvedPrice>> ResolveCatalogAsync(
         Guid? branchId, string? customerTier,
-        string priceType = "standard", DateTime? at = null, CancellationToken ct = default);
+        string priceType = SalesChannelCatalog.Standard, DateTime? at = null, CancellationToken ct = default);
 }
 
 public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionService
 {
     public async Task<ResolvedPrice> ResolveAsync(
         Guid productId, Guid? branchId, string? customerTier,
-        string priceType = "standard", DateTime? at = null, CancellationToken ct = default)
+        string priceType = SalesChannelCatalog.Standard, DateTime? at = null, CancellationToken ct = default)
     {
         var map = await ResolveManyAsync([productId], branchId, customerTier, priceType, at, ct);
         // Absent only when the product doesn't exist — see Build. Callers of the single-product
@@ -76,10 +86,12 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
 
     public async Task<IReadOnlyDictionary<Guid, ResolvedPrice>> ResolveManyAsync(
         IEnumerable<Guid> productIds, Guid? branchId, string? customerTier,
-        string priceType = "standard", DateTime? at = null, CancellationToken ct = default)
+        string priceType = SalesChannelCatalog.Standard, DateTime? at = null, CancellationToken ct = default)
     {
         var ids = productIds.Distinct().ToList();
         if (ids.Count == 0) return new Dictionary<Guid, ResolvedPrice>();
+
+        var channel = SalesChannelCatalog.Normalize(priceType);
 
         // `.Contains()` against a DbSet-backed IQueryable throws on this repo's MySQL provider
         // ("Expression '@ids' ... does not have a type mapping assigned") — filter in-memory after
@@ -91,18 +103,22 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
             .Where(p => idSet.Contains(p.Id))
             .ToDictionary(p => p.Id, p => p.BasePrice);
 
+        // Both the requested channel AND the standard channel are pulled, because standard is the
+        // fallback every channel inherits from — Build decides per product which one wins. For a
+        // standard request the second predicate is the same set, so nothing extra is read.
         var rules = (await db.ProductPriceLists
-                .Where(r => r.IsActive && r.PriceType == priceType)
+                .Where(r => r.IsActive &&
+                            (r.PriceType == channel || r.PriceType == SalesChannelCatalog.Standard))
                 .ToListAsync(ct))
             .Where(r => idSet.Contains(r.ProductId))
             .ToList();
 
-        return Build(ids, basePrices, rules, branchId, customerTier, at ?? DateTime.UtcNow);
+        return Build(ids, basePrices, rules, branchId, customerTier, at ?? DateTime.UtcNow, channel);
     }
 
     public async Task<IReadOnlyDictionary<Guid, ResolvedPrice>> ResolveCatalogAsync(
         Guid? branchId, string? customerTier,
-        string priceType = "standard", DateTime? at = null, CancellationToken ct = default)
+        string priceType = SalesChannelCatalog.Standard, DateTime? at = null, CancellationToken ct = default)
     {
         var products = await db.Products
             .Where(p => p.Status == "active")
@@ -111,14 +127,16 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
 
         var ids = products.Select(p => p.Id).ToList();
         var basePrices = products.ToDictionary(p => p.Id, p => p.BasePrice);
+        var channel = SalesChannelCatalog.Normalize(priceType);
 
         // Only pull rules for products that have any — the table is sparse by design, so this is a
         // far smaller read than the catalog itself.
         var rules = await db.ProductPriceLists
-            .Where(r => r.IsActive && r.PriceType == priceType)
+            .Where(r => r.IsActive &&
+                        (r.PriceType == channel || r.PriceType == SalesChannelCatalog.Standard))
             .ToListAsync(ct);
 
-        return Build(ids, basePrices, rules, branchId, customerTier, at ?? DateTime.UtcNow);
+        return Build(ids, basePrices, rules, branchId, customerTier, at ?? DateTime.UtcNow, channel);
     }
 
     // Pure matching over already-fetched rows, done in memory rather than SQL: the candidate set
@@ -130,7 +148,8 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
         List<ProductPriceList> rules,
         Guid? branchId,
         string? customerTier,
-        DateTime now)
+        DateTime now,
+        string channel)
     {
         var byProduct = rules.GroupBy(r => r.ProductId).ToDictionary(g => g.Key, g => g.ToList());
         var result = new Dictionary<Guid, ResolvedPrice>(ids.Count);
@@ -151,24 +170,37 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
 
             var applicable = candidates.Where(r => Applies(r, branchId, customerTier, now)).ToList();
 
-            // Precedence — a customer's tier price is a loyalty benefit that must win over an
-            // ordinary branch price: a platinum shopper standing in a branch that has its own
+            // Precedence — the CHANNEL decides first. A rule written for the channel being priced
+            // (e.g. "online") outranks every standard-channel rule, however specific that one is:
+            // an operator who sets an online price for a product is stating the price for that
+            // channel outright, not offering a suggestion that a branch or tier rule may override.
+            // Where no channel rule applies, the standard rules resolve exactly as they always did,
+            // which is what makes the whole channel feature a no-op on an untouched database.
+            //
+            // Within one channel: a customer's tier price is a loyalty benefit that must win over
+            // an ordinary branch price — a platinum shopper standing in a branch that has its own
             // shelf price should still get the platinum price, not the branch's. So a rule gated on
             // a customer tier outranks one that isn't. (A walk-in never matches a tier rule at all
             // — see Applies — so they still get the branch price.) Only when tier-specificity ties
             // does branch-specificity, then priority, and schedule decide.
             var unitRule = applicable
                 .Where(r => !IsPack(r))
-                .OrderByDescending(r => r.MinCustomerTier != null)  // a tier (loyalty) price wins first
+                .OrderByDescending(r => IsChannel(r, channel))      // the channel's own price wins first
+                .ThenByDescending(r => r.MinCustomerTier != null)   // then a tier (loyalty) price
                 .ThenByDescending(r => r.BranchId.HasValue)         // then a branch-specific price
                 .ThenByDescending(r => r.Priority)                  // then explicit operator intent
                 .ThenByDescending(r => r.EffectiveFrom)             // then the latest-starting schedule
                 .ThenByDescending(r => r.CreatedAt)                 // deterministic final tiebreak
                 .FirstOrDefault();
 
-            var packs = applicable
-                .Where(IsPack)
-                .Where(r => r.PackSize is > 0)
+            // Pack options follow the unit price's channel rather than mixing the two: once a
+            // channel defines any pack of its own, showing the in-store packs alongside it would
+            // offer buying options the operator never priced for that channel.
+            var applicablePacks = applicable.Where(IsPack).Where(r => r.PackSize is > 0).ToList();
+            if (applicablePacks.Any(r => IsChannel(r, channel)))
+                applicablePacks = applicablePacks.Where(r => IsChannel(r, channel)).ToList();
+
+            var packs = applicablePacks
                 .OrderBy(r => r.PackSize)
                 .Select(r => new PackOption(
                     r.Id,
@@ -184,7 +216,8 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
 
             result[id] = unitRule is null
                 ? new ResolvedPrice(id, basePrice, basePrice, null, "base", packs)
-                : new ResolvedPrice(id, unitRule.Price, basePrice, unitRule.Id, SourceOf(unitRule), packs);
+                : new ResolvedPrice(id, unitRule.Price, basePrice, unitRule.Id, SourceOf(unitRule), packs,
+                    SalesChannelCatalog.Normalize(unitRule.PriceType));
         }
 
         return result;
@@ -192,6 +225,9 @@ public class PriceResolutionService(BaqalaDbContext db) : IPriceResolutionServic
 
     private static bool IsPack(ProductPriceList r) =>
         string.Equals(r.UnitType, "pack", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsChannel(ProductPriceList r, string channel) =>
+        string.Equals(r.PriceType, channel, StringComparison.OrdinalIgnoreCase);
 
     private static bool Applies(ProductPriceList r, Guid? branchId, string? customerTier, DateTime now)
     {
