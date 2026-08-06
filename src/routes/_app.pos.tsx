@@ -15,7 +15,7 @@ import {
   Plus, Minus, Trash2, CreditCard, Banknote, Split,
   Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode,
   Building2, PrinterCheck, RefreshCw, AlertCircle, ImageOff, ClipboardCheck,
-  Hash, PackageOpen,
+  Hash, PackageOpen, Copy, MonitorSmartphone,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
@@ -26,6 +26,8 @@ import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { useAuth } from "@/lib/auth";
+import { HubConnectionState, type HubConnection } from "@microsoft/signalr";
+import { createCustomerDisplayConnection, type CustomerDisplayStatus, type CustomerDisplayAmountLine, type CustomerDisplaySnapshot } from "@/lib/customer-display";
 import { SARIcon } from "@/lib/currency";
 import { ModuleGate } from "@/components/role-gate";
 import { uuid, POS_ADMIN_BRANCH_KEY } from "@/lib/utils";
@@ -654,7 +656,7 @@ function PrinterSetupDialog() {
 
 function POS() {
   // ─── Branch: page-local filter, not the header ────────────────────────────────
-  const { user } = useAuth();
+  const { user, canViewModule } = useAuth();
   const { branches } = useBranch();
   const isAdmin = user?.role === "tenant_admin";
   const lockedBranchId = !isAdmin ? (user?.branchId ?? null) : null;
@@ -819,6 +821,24 @@ function POS() {
   const [branchSwitchBanner, setBranchSwitchBanner] = useState<string | null>(null);
   const needsCheckInRef = useRef(false);
 
+  // ─── Customer Display connection state ────────────────────────────────────────
+  const hubRef = useRef<HubConnection | null>(null);
+  // True only once JoinTerminal has actually resolved on the current connection — guards the live
+  // push effect against firing while the join is still an in-flight promise (e.g. right after
+  // mount, or mid-reconnect), so a push never races ahead of the authorization it depends on.
+  const joinedRef = useRef(false);
+  // Timestamp (ms) until which live pushes are suppressed — set for ~5s after an Approved push so
+  // the thank-you screen isn't immediately stomped by the Idle push the following cart reset would
+  // otherwise trigger.
+  const holdUntilRef = useRef(0);
+  // Recomputed every render (see below) so async callbacks (reconnect, join) always read the
+  // latest status without needing to be re-created on every cart change.
+  const currentStatusRef = useRef<CustomerDisplayStatus>("Idle");
+  const buildSnapshotRef = useRef<
+    ((status: CustomerDisplayStatus, opts?: { orderNo?: string | null; totalOverride?: number; extraFees?: CustomerDisplayAmountLine[] }) => CustomerDisplaySnapshot) | undefined
+  >(undefined);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+
   // ─── Customer ─────────────────────────────────────────────────────────────────
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [customerPhone, setCustomerPhone] = useState("");
@@ -876,6 +896,12 @@ function POS() {
   // its BranchId actually matches the branch currently selected on this page.
   const shiftForBranch = activeShift && branch && activeShift.branchId === branch.id ? activeShift : null;
   const needsCheckIn = !loading && needsActiveShift && !shiftForBranch;
+
+  // ─── Customer Display (second-screen live mirror) ─────────────────────────────
+  // "Which terminal is this checkout screen on" has no standalone concept in POS — it's derived
+  // from the cashier's own active shift, same as everywhere else this app reasons about terminals
+  // (CashierSalesReport, TerminalReport, etc).
+  const terminalId = shiftForBranch?.terminalId ?? null;
 
   // ─── Active Offers & Discounts ────────────────────────────────────────────────
   const [allActiveOffers, setActiveOffers] = useState<Offer[]>([]);
@@ -1783,6 +1809,102 @@ function POS() {
   const minQtyForProduct = (productId: string) => minQty(unitOf(productId));
   const clampQtyForProduct = (productId: string, qty: number) => normalizeQty(unitOf(productId), qty);
 
+  // ─── Customer Display snapshot ─────────────────────────────────────────────────
+  // The single function mapping this screen's cart/customer/totals state to the wire shape the
+  // Customer Display mirrors — reused for every live push AND the one-off post-payment "Approved"
+  // push (via opts), so the two paths can never drift apart. Redefined each render (cheap; these
+  // are all plain reads off already-computed locals) rather than memoized, since almost every one
+  // of those locals changes on any cart edit anyway.
+  function buildCustomerDisplaySnapshot(
+    status: CustomerDisplayStatus,
+    opts?: { orderNo?: string | null; totalOverride?: number; extraFees?: CustomerDisplayAmountLine[] },
+  ): CustomerDisplaySnapshot {
+    const discounts: CustomerDisplayAmountLine[] = [];
+    if (couponDiscount > 0) discounts.push({ label: appliedCoupon ? `Coupon (${appliedCoupon.code})` : "Coupon", amount: couponDiscount });
+    for (const d of appliedDiscounts) {
+      const amount = computeDiscountSaving(d);
+      if (amount > 0) discounts.push({ label: d.name, amount });
+    }
+    for (const m of manualDiscounts) {
+      const amount = computeManualDiscountSaving(m);
+      if (amount > 0) discounts.push({ label: m.name, amount });
+    }
+    if (productDiscountTotal > 0) discounts.push({ label: "Product Discounts", amount: productDiscountTotal });
+    if (loyaltyDiscount > 0) discounts.push({ label: `Loyalty Redeemed (${Math.min(redeemPoints, maxRedeemablePoints)} pts)`, amount: loyaltyDiscount });
+
+    const fees: CustomerDisplayAmountLine[] = serviceChargeRows.map((r) => ({ label: r.name, amount: r.amount }));
+    if (tobaccoExcise > 0) fees.push({ label: "Tobacco Excise", amount: tobaccoExcise });
+    if (opts?.extraFees) fees.push(...opts.extraFees);
+
+    return {
+      status,
+      lines: displayCart.map((item) => ({
+        name: item.name,
+        qty: item.qty,
+        uom: unitSymbol(unitOf(item.productId).unitOfMeasure),
+        unitPrice: item.price,
+        lineTotal: item.qty * item.price,
+      })),
+      subtotal,
+      discounts,
+      fees,
+      vat: vatAmount,
+      total: opts?.totalOverride ?? total,
+      customerName: customer?.fullName ?? null,
+      orderNo: opts?.orderNo ?? null,
+      customerLoyaltyTier: customer?.tier ?? null,
+      customerLoyaltyPoints: customer?.loyaltyBalance ?? null,
+      customerLoyaltyPointsSarValue: customer && loyaltyProgram ? customer.loyaltyBalance * loyaltyProgram.redemptionValuePerPoint : null,
+    };
+  }
+  buildSnapshotRef.current = buildCustomerDisplaySnapshot;
+  currentStatusRef.current = paymentProcessing ? "Processing" : displayCart.length === 0 ? "Idle" : "Building";
+
+  // ─── Customer Display connection lifecycle ─────────────────────────────────────
+  // Opens as soon as this session's terminal is known — even before any display window exists
+  // (pushes with nobody listening are simply dropped, relay pattern, not a queue).
+  useEffect(() => {
+    if (!terminalId) return;
+    joinedRef.current = false;
+    const hub = createCustomerDisplayConnection();
+    hubRef.current = hub;
+
+    const join = () =>
+      hub.invoke("JoinTerminal", terminalId)
+        .then(() => {
+          joinedRef.current = true;
+          // Re-sync current state right after (re)joining — covers both a reconnect after a
+          // network blip and the initial async join racing the very first cart-change push.
+          if (Date.now() < holdUntilRef.current) return;
+          return hub.invoke("PushCartSnapshot", terminalId, buildSnapshotRef.current!(currentStatusRef.current)).catch(() => {});
+        })
+        .catch(() => { joinedRef.current = false; });
+
+    hub.onreconnecting(() => { joinedRef.current = false; });
+    hub.onreconnected(() => { void join(); });
+    hub.start().then(join).catch(() => {});
+
+    return () => {
+      joinedRef.current = false;
+      hub.stop();
+      if (hubRef.current === hub) hubRef.current = null;
+    };
+  }, [terminalId]);
+
+  // Push a fresh snapshot on every cart/customer/totals change — skipped while the post-payment
+  // thank-you hold window is active so a cart reset can't stomp it (see handleCharge).
+  useEffect(() => {
+    const hub = hubRef.current;
+    if (!hub || !terminalId || !joinedRef.current || hub.state !== HubConnectionState.Connected) return;
+    if (Date.now() < holdUntilRef.current) return;
+    hub.invoke("PushCartSnapshot", terminalId, buildSnapshotRef.current!(currentStatusRef.current)).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    terminalId, paymentProcessing, displayCart, customer, subtotal, total, vatAmount,
+    appliedCoupon, appliedDiscounts, manualDiscounts, redeemPoints, loyaltyProgram,
+    productDiscountTotal, tobaccoExcise, serviceChargeRows,
+  ]);
+
   const updateQty = (sku: string, d: number) => {
     let blockedByStock = false;
     setCart((c) => c.map((i) => {
@@ -2245,6 +2367,10 @@ function POS() {
     paymentMethod: string,
     splitPayments?: Array<{ method: string; amount: number }>
   ) => {
+    // Drives the Customer Display's "Processing payment…" banner — true for the whole in-flight
+    // window between this call and its resolution (success or failure), reset via `finally` below.
+    setPaymentProcessing(true);
+    try {
     if (!branch) throw new Error("No branch configured");
     if (!cart.length) throw new Error("Cart is empty");
     // FR-CHK-06: Cashier, Branch Manager, and Tenant Administrator accounts can all hold a shift
@@ -2384,7 +2510,32 @@ function POS() {
       zatcaQrCode: order.zatcaQrCode,
       logoEscPos,
     };
+
+    // Final Customer Display push: the confirmed order number/total, then a hold window so the
+    // thank-you screen survives the cart reset that's about to happen (resetSale, in onPaymentDone)
+    // instead of being immediately overwritten by the Idle push that reset would otherwise trigger.
+    if (terminalId && hubRef.current && joinedRef.current) {
+      const hub = hubRef.current;
+      const approvedSnapshot = buildSnapshotRef.current!("Approved", {
+        orderNo: order.orderNumber,
+        totalOverride: finalTotal,
+        extraFees: hasCardPortion ? cardSurchargeRows.map((r) => ({ label: r.name, amount: r.amount })) : undefined,
+      });
+      holdUntilRef.current = Date.now() + 5000;
+      hub.invoke("PushCartSnapshot", terminalId, approvedSnapshot).catch(() => {});
+      // Once the hold expires, explicitly push whatever the (by-then-reset) cart looks like —
+      // this is what actually carries the display from "Approved" back to "Idle", since the hub
+      // never re-pushes anything on its own.
+      setTimeout(() => {
+        if (hubRef.current !== hub || !joinedRef.current) return;
+        hub.invoke("PushCartSnapshot", terminalId, buildSnapshotRef.current!(currentStatusRef.current)).catch(() => {});
+      }, 5000);
+    }
+
     setInvoice(invoiceData);
+    } finally {
+      setPaymentProcessing(false);
+    }
   };
 
   const onPaymentDone = () => {
@@ -2392,6 +2543,15 @@ function POS() {
     setPayOpen(false);
     setInvOpen(true);
     resetSale();
+  };
+
+  // ─── Customer Display trigger UI ───────────────────────────────────────────────
+  const customerDisplayPath = terminalId ? `/customer-display?terminal=${terminalId}` : "/customer-display";
+  // Fixed window name: repeated clicks re-focus the same window/tab instead of spawning duplicates.
+  const openCustomerDisplay = () => window.open(customerDisplayPath, "customer-display");
+  const copyCustomerDisplayLink = async () => {
+    await navigator.clipboard.writeText(`${window.location.origin}${customerDisplayPath}`);
+    toast.success("Customer Display link copied");
   };
 
   // Auto-print receipt — uses QZ Tray (all browsers) or local agent depending on setting.
@@ -2430,6 +2590,29 @@ function POS() {
       actions={
         <>
           <BranchFilter branches={branches} value={branchId} onChange={setBranchId} locked={!!lockedBranchId} />
+          {canViewModule("Customer Display") && (
+            <div className="flex items-center rounded-md border border-input overflow-hidden">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 rounded-none gap-1.5"
+                onClick={openCustomerDisplay}
+              >
+                <MonitorSmartphone className="h-3.5 w-3.5" />
+                Customer Display
+              </Button>
+              <div className="h-4 w-px bg-input" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-none"
+                title="Copy Customer Display link"
+                onClick={copyCustomerDisplayLink}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
           <PrinterSetupDialog />
         </>
       }

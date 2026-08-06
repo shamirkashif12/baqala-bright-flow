@@ -472,6 +472,10 @@ export const api = {
   // Terminals
   getTerminals: (params?: { branchId?: string[]; status?: string[] }) =>
     request<Terminal[]>(`/api/terminals${toQuery(params)}`),
+  // Customer Display register picker — only ever returns terminals the hub's own JoinTerminal
+  // call would actually let this user pair with (see TerminalAccessCheck on the API side).
+  getPairableTerminals: () =>
+    request<PairableTerminal[]>("/api/terminals/pairable"),
   createTerminal: (data: Partial<Terminal>) =>
     request<Terminal>("/api/terminals", { method: "POST", body: JSON.stringify(data) }),
   updateTerminal: (id: string, data: Partial<Terminal>) =>
@@ -1735,6 +1739,12 @@ export interface Terminal {
   assignedCashier?: { id: string; fullName: string };
 }
 
+export interface PairableTerminal {
+  id: string; terminalCode?: string; name: string; branchId: string;
+  assignedCashierId?: string; status: string;
+  branch?: { id: string; name: string };
+}
+
 export interface Supplier {
   id: string; supplierCode: string; name: string; warehouseName?: string;
   contactPerson?: string; contactNumber?: string; email?: string;
@@ -1810,6 +1820,7 @@ export interface OnlineOrderCatalogProduct {
 
 export interface OnlineOrderCatalog {
   branchName: string;
+  logoDataUrl?: string;
   products: OnlineOrderCatalogProduct[];
 }
 

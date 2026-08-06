@@ -62,6 +62,30 @@ public class TerminalsController(BaqalaDbContext db, INotificationService notifi
         return Ok(scoped.ToList());
     }
 
+    // Customer Display register picker — lists only the terminals JoinTerminal (CustomerDisplayHub)
+    // would actually let this caller pair with, using the exact same TerminalAccessCheck logic, so
+    // the dropdown never offers a terminal that then rejects the join.
+    [HttpGet("pairable")]
+    public async Task<IActionResult> GetPairable()
+    {
+        var callerId = CallerId();
+        if (callerId is null) return Unauthorized();
+        if (!await TerminalAccessCheck.HasPagePermissionAsync(User, db)) return Ok(Array.Empty<object>());
+
+        var canOverride = await PermissionCheck.HasPermissionAsync(User, db, "Orders", PermAction.Approve);
+        var terminals = await db.Terminals.Include(t => t.Branch).ToListAsync();
+        var operators = await TerminalAccessCheck.ResolveOperatorsByTerminalAsync(db, terminals.Select(t => t.Id));
+
+        var pairable = terminals
+            .Where(t => TerminalAccessCheck.CanAccessTerminal(User, t, operators.GetValueOrDefault(t.Id, t.AssignedCashierId), callerId.Value, canOverride))
+            .Select(t => new
+            {
+                t.Id, t.TerminalCode, t.Name, t.BranchId, t.AssignedCashierId, t.Status,
+                Branch = t.Branch == null ? null : new { t.Branch.Id, t.Branch.Name },
+            });
+        return Ok(pairable);
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {

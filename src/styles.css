@@ -246,6 +246,9 @@
   .gradient-brand {
     background: var(--gradient-brand);
   }
+  .gradient-sidebar {
+    background: var(--gradient-sidebar);
+  }
   .gradient-text {
     background: var(--gradient-primary);
     -webkit-background-clip: text;
