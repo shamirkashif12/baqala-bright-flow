@@ -19,6 +19,7 @@ const en: Record<string, string> = {
   "Add": "Add",
   "Edit": "Edit",
   "Delete": "Delete",
+  "Start the guided tour": "Start the guided tour",
   "Status": "Status",
   "Date": "Date",
   "Branch": "Branch",
@@ -28,6 +29,7 @@ const en: Record<string, string> = {
   "Customize": "Customize",
   "Loading…": "Loading…",
   "Active": "Active",
+  "Tutorial": "Tutorial",
   "User": "User",
   "Logout": "Logout",
   "Log out": "Log out",
@@ -89,9 +91,11 @@ const en: Record<string, string> = {
   "ZATCA Phase 2 Settings": "ZATCA Phase 2 Settings",
   "Compliance": "Compliance",
   "POS Settings": "POS Settings",
+  "General Settings": "General Settings",
   "Audit Logs": "Audit Logs",
   "Plans & Pricing": "Plans & Pricing",
   "Settings": "Settings",
+  "Business & Security Settings": "Business & Security Settings",
 
   // ── Roles ──────────────────────────────────────────────────────────────────
   "Owner": "Owner",

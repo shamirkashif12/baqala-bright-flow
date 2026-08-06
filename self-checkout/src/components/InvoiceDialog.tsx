@@ -22,6 +22,11 @@ export interface InvoiceSnapshot {
   vatNumber: string;
   sellerName: string;
   zatcaQrCode?: string;
+  // On-screen preview + pre-rasterized ESC/POS bytes for the receipt logo — self-checkout is
+  // always the customer-facing device, so these are only ever set when
+  // CompanyProfile.showLogoOnCustomerSlip is on (see SessionProvider).
+  logoDataUrl?: string;
+  logoEscPos?: string;
 }
 
 export function getZatcaQr(invoice: InvoiceSnapshot): string {
@@ -45,6 +50,7 @@ export function printInvoice(invoice: InvoiceSnapshot, zatcaQr: string, onPrinte
     total: invoice.total,
     taxLabel: invoice.taxLabel,
     zatcaQrCode: zatcaQr,
+    logoEscPos: invoice.logoEscPos,
   };
 
   // QZ Tray prints client-side from raw ESC/POS bytes built in the browser; the local agent
@@ -94,6 +100,9 @@ export function InvoiceDialog({
         {invoice && (
           <div id="self-checkout-invoice" className="rounded-xl bg-muted/40 p-5 font-mono text-xs space-y-2">
             <div className="text-center space-y-0.5">
+              {invoice.logoDataUrl && (
+                <img src={invoice.logoDataUrl} alt="" className="h-12 mx-auto mb-1 object-contain" />
+              )}
               <p className="font-bold text-sm">{invoice.sellerName}</p>
               <p className="text-muted-foreground">VAT {invoice.vatNumber}</p>
               <p className="text-muted-foreground text-[10px] tracking-widest uppercase mt-1">Invoice No.</p>

@@ -18,6 +18,7 @@ import { api, type Category } from "@/lib/api";
 import { RoleGate } from "@/components/role-gate";
 import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/categories")({
   component: () => (
@@ -252,7 +253,12 @@ function CategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
-  const [showInactive, setShowInactive] = useState(false);
+  // "active"/"inactive" isolate exactly that subset (what the two metric cards below do);
+  // "all" shows both — what the "Show Inactive" button next to search does. Previously this was
+  // a single showInactive boolean, so clicking the "Inactive" card only ever added inactive rows
+  // alongside active ones (same as "Show Inactive") rather than isolating them.
+  const [visibilityFilter, setVisibilityFilter] = useState<"active" | "inactive" | "all">("active");
+  const showInactive = visibilityFilter === "all";
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [addParentId, setAddParentId] = useState<string | undefined>(undefined);
@@ -310,7 +316,8 @@ function CategoriesPage() {
 
   const matches = (c: Category) =>
     !q || c.name.toLowerCase().includes(q.toLowerCase()) || (c.nameAr ?? "").includes(q);
-  const visible = (c: Category) => showInactive || c.isActive;
+  const visible = (c: Category) =>
+    visibilityFilter === "all" ? true : visibilityFilter === "inactive" ? !c.isActive : c.isActive;
 
   const rows = topCategories
     .map(top => ({ top, children: subcategoriesOf(top.id).filter(visible) }))
@@ -359,7 +366,14 @@ function CategoriesPage() {
             <p className="text-2xl font-black">{subcategoryCount}</p>
           </div>
         </div>
-        <div className="rounded-2xl border border-success/30 bg-success/5 shadow-card p-4 flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => setVisibilityFilter(v => v === "active" ? "all" : "active")}
+          className={cn(
+            "rounded-2xl border border-success/30 bg-success/5 shadow-card p-4 flex items-center gap-4 text-start cursor-pointer transition-all hover:ring-2 hover:ring-success/30",
+            visibilityFilter === "active" && "ring-2 ring-success",
+          )}
+        >
           <div className="h-11 w-11 rounded-xl bg-success/20 flex items-center justify-center shrink-0">
             <ToggleRight className="h-5 w-5 text-success" />
           </div>
@@ -367,19 +381,23 @@ function CategoriesPage() {
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Active</p>
             <p className="text-2xl font-black text-success">{active}</p>
           </div>
-        </div>
-        <div className="rounded-2xl border border-border/60 bg-card shadow-card p-4 flex items-center gap-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => setVisibilityFilter(v => v === "inactive" ? "all" : "inactive")}
+          className={cn(
+            "rounded-2xl border border-border/60 bg-card shadow-card p-4 flex items-center gap-4 text-start cursor-pointer transition-all hover:ring-2 hover:ring-primary/30",
+            visibilityFilter === "inactive" && "ring-2 ring-primary",
+          )}
+        >
           <div className="h-11 w-11 rounded-xl bg-muted flex items-center justify-center shrink-0">
             <ToggleLeft className="h-5 w-5 text-muted-foreground" />
           </div>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Inactive</p>
-            {/* Hidden inactive rows aren't part of what's currently on screen, so the tile reads 0
-                to match the tree below — the "Show Inactive (N)" button is where the true count
-                still surfaces, so nothing is actually hidden from the user. */}
-            <p className="text-2xl font-black">{showInactive ? inactive : 0}</p>
+            <p className="text-2xl font-black">{inactive}</p>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* ── Search ── */}
@@ -392,7 +410,7 @@ function CategoriesPage() {
         <Button
           size="sm" variant={showInactive ? "default" : "outline"}
           className={`h-9 gap-1.5 text-xs ${showInactive ? "gradient-primary text-primary-foreground border-0" : ""}`}
-          onClick={() => setShowInactive(v => !v)}
+          onClick={() => setVisibilityFilter(v => v === "all" ? "active" : "all")}
         >
           {showInactive ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
           {showInactive ? "Hide Inactive" : `Show Inactive (${inactive})`}

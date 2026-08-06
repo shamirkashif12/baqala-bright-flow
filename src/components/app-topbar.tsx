@@ -1,4 +1,4 @@
-import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass, Globe, Volume2, VolumeX, Monitor, MonitorOff } from "lucide-react";
+import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass, Globe, Volume2, VolumeX, Monitor, MonitorOff, MapPin } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -41,6 +41,8 @@ type NotifItem = {
   isRead: boolean;
   type: string;
   entityType?: string;
+  branchName?: string;
+  terminalName?: string;
 };
 
 const TONE_DOT: Record<NotifItem["tone"], string> = {
@@ -76,6 +78,14 @@ const TYPE_ROUTE: Record<string, string> = {
   // Online ordering — ?tab=online, because /orders opens on POS Orders by default and the
   // pending order this notification is about lives on the other tab.
   "New Online Order": "/orders?tab=online",
+  // Approvals raised elsewhere and waiting on this user — each lands on the screen that owns the
+  // decision, not on a generic queue.
+  "approval_pending": "/reports/approval-center",
+  "Stock Count Review Required": "/stocktaking",
+  "Stock Count Approval Required": "/stocktaking",
+  "Wastage Approval Required": "/stocks",
+  "Leave Approval Required": "/leaves",
+  "Stock Request Approval Required": "/warehouses",
   // Returns / refunds
   "Return Started": "/returns",
   "Return Approval Required": "/returns",
@@ -112,14 +122,23 @@ const TYPE_ROUTE: Record<string, string> = {
   "Daily Expiry Summary": "/batches",
 };
 
-// "Manager Approval Granted"/"Rejected" is reused for PO, Return, and Stock Transfer approvals —
-// the entity it points at decides where clicking should land.
+// "Manager Approval Granted"/"Rejected" is the single type every maker-checker flow emits back to
+// whoever raised the request — the entity it points at decides where clicking should land.
+const APPROVAL_ENTITY_ROUTE: Record<string, string> = {
+  PurchaseOrder: "/purchase-orders",
+  CustomerReturn: "/returns",
+  StockTransfer: "/stock-transfers",
+  StockCount: "/stocktaking",
+  InventoryAdjustment: "/stocks",
+  LeaveRequest: "/leaves",
+  WarehouseRequest: "/warehouses",
+  CashierShift: "/cashier-shift",
+  ApprovalRequest: "/reports/approval-center",
+};
+
 function routeForNotification(n: { type: string; entityType?: string }): string | undefined {
   if (n.type === "Manager Approval Granted" || n.type === "Manager Approval Rejected") {
-    if (n.entityType === "PurchaseOrder") return "/purchase-orders";
-    if (n.entityType === "CustomerReturn") return "/returns";
-    if (n.entityType === "StockTransfer") return "/stock-transfers";
-    return undefined;
+    return n.entityType ? APPROVAL_ENTITY_ROUTE[n.entityType] : undefined;
   }
   return TYPE_ROUTE[n.type];
 }
@@ -221,6 +240,8 @@ function NotificationsPopover() {
         isRead: n.isRead,
         type: n.type,
         entityType: n.entityType,
+        branchName: n.branchName,
+        terminalName: n.terminalName,
       })));
     }).catch(() => {});
   };
@@ -282,6 +303,8 @@ function NotificationsPopover() {
           tag: "mimony-desktop-test",
           silent: !isNotificationSoundEnabled(),
           icon: mimonyLogo,
+          // Unlike a real order alert, this one should slide away on its own.
+          requireInteraction: false,
         });
       }
     });
@@ -404,7 +427,15 @@ function NotificationsPopover() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium">{n.title}</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
-                  <p className="text-[10px] text-muted-foreground/70 mt-1">{n.relTime}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-[10px] text-muted-foreground/70">{n.relTime}</p>
+                    {(n.branchName || n.terminalName) && (
+                      <p className="flex items-center gap-0.5 text-[10px] text-muted-foreground/70 truncate">
+                        <MapPin className="h-2.5 w-2.5 shrink-0" />
+                        {[n.branchName, n.terminalName].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <n.Icon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${n.tone === "error" ? "text-destructive" : n.tone === "warning" ? "text-amber-500" : "text-primary"}`} />
               </button>

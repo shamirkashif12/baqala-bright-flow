@@ -289,7 +289,11 @@ public class PrinterController(IConfiguration config) : ControllerBase
         // Order.LoyaltyPointsRedeemed/LoyaltyDiscountAmount, so the printed receipt can show it as
         // its own line instead of folding it silently into "Discount".
         double? LoyaltyPointsRedeemed = null,
-        double? LoyaltyDiscountAmount = null
+        double? LoyaltyDiscountAmount = null,
+        // Pre-rasterized ESC/POS "GS v 0" bitmap bytes (base64), from CompanyProfile.LogoEscPosBase64
+        // — computed once client-side at upload time (src/lib/image.ts), never re-rasterized here.
+        // Caller only sends this when the logo's show-on-staff/show-on-customer scope matches.
+        string? LogoEscPos = null
     );
 
     [HttpPost("print-receipt")]
@@ -366,6 +370,15 @@ public class PrinterController(IConfiguration config) : ControllerBase
 
         // ── Init ────────────────────────────────────────────────────────────
         Raw(0x1B, 0x40); // ESC @ — initialize
+
+        // ── Logo — pre-rasterized ESC/POS bytes (see PrintReceiptRequest.LogoEscPos), spliced in
+        // verbatim ────────────────────────────────────────────────────────────
+        if (!string.IsNullOrEmpty(r.LogoEscPos))
+        {
+            Center();
+            buf.AddRange(Convert.FromBase64String(r.LogoEscPos));
+            Lf();
+        }
 
         // ── Header ──────────────────────────────────────────────────────────
         Center(); Bold(true); DoubleSize(true);

@@ -135,6 +135,9 @@ type InvoiceSnapshot = {
   // Real ZATCA-signed QR (base64 TLV) returned by checkout when Phase 2 is onboarded for the
   // branch. Falls back to a locally-built Phase-1-style QR when absent.
   zatcaQrCode?: string;
+  // Pre-rasterized ESC/POS bytes (base64) for the receipt logo — only set when
+  // CompanyProfile.showLogoOnStaffReceipt is on, since this screen only prints the staff receipt.
+  logoEscPos?: string;
 };
 
 // ─── By-the-piece entry for a weighed product ─────────────────────────────────
@@ -718,6 +721,8 @@ function POS() {
   const [vatNumber, setVatNumber] = useState("300123456700003");
   const [sellerName, setSellerName] = useState("");
   const [crNumber, setCrNumber] = useState("");
+  const [logoDataUrl, setLogoDataUrl] = useState<string | undefined>();
+  const [logoEscPos, setLogoEscPos] = useState<string | undefined>();
   const [activeShift, setActiveShift] = useState<CashierShift | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -1073,7 +1078,12 @@ function POS() {
       .catch(() => {});
 
     api.getCompanyProfile()
-      .then((c) => { if (c.crNumber) setCrNumber(c.crNumber); })
+      .then((c) => {
+        if (c.crNumber) setCrNumber(c.crNumber);
+        // This screen only ever prints the staff-facing receipt (Order.Source "pos").
+        setLogoDataUrl(c.showLogoOnStaffReceipt ? c.logoDataUrl : undefined);
+        setLogoEscPos(c.showLogoOnStaffReceipt ? c.logoEscPosBase64 : undefined);
+      })
       .catch(() => {});
 
     // POS Settings' "cashier can apply coupon"/"cashier can hold order" toggles previously had
@@ -2372,6 +2382,7 @@ function POS() {
       tobaccoExcise: tobaccoExcise > 0 ? tobaccoExcise : undefined,
       fees: finalServiceChargeRows.length > 0 ? finalServiceChargeRows.map(r => ({ name: r.name, amount: r.amount })) : undefined,
       zatcaQrCode: order.zatcaQrCode,
+      logoEscPos,
     };
     setInvoice(invoiceData);
   };
@@ -3381,6 +3392,9 @@ function POS() {
             return (
               <div id="pos-invoice" className="rounded-xl bg-muted/40 p-5 font-mono text-xs space-y-2">
                 <div className="text-center space-y-0.5">
+                  {logoDataUrl && (
+                    <img src={logoDataUrl} alt="" className="h-12 mx-auto mb-1 object-contain" />
+                  )}
                   <p className="font-bold text-sm">{invoice.sellerName}</p>
                   <p className="text-muted-foreground">VAT {invoice.vatNumber}</p>
                   {invoice.crNumber && <p className="text-muted-foreground">CR {invoice.crNumber}</p>}

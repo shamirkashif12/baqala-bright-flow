@@ -4,9 +4,10 @@ using System.Text.Json.Serialization;
 
 namespace BaqalaPOS.Api.Models;
 
-// Handles ALL 6 transfer directions:
-//   supplier_to_warehouse | warehouse_to_branch | branch_to_warehouse
-//   branch_to_branch (mart_to_mart) | warehouse_to_warehouse | warehouse_to_supplier (RTS)
+// Handles ALL 8 transfer directions:
+//   supplier_to_warehouse | supplier_to_branch | warehouse_to_branch | branch_to_warehouse
+//   branch_to_branch (mart_to_mart) | warehouse_to_warehouse
+//   warehouse_to_supplier (RTS) | branch_to_supplier (RTS)
 [Table("stock_transfers")]
 public class StockTransfer
 {
@@ -16,8 +17,8 @@ public class StockTransfer
     [MaxLength(50), Column("transfer_number")]
     public string? TransferNumber { get; set; }
 
-    // supplier_to_warehouse | warehouse_to_branch | branch_to_warehouse
-    // branch_to_branch | warehouse_to_warehouse | warehouse_to_supplier
+    // supplier_to_warehouse | supplier_to_branch | warehouse_to_branch | branch_to_warehouse
+    // branch_to_branch | warehouse_to_warehouse | warehouse_to_supplier | branch_to_supplier
     [Required, MaxLength(30), Column("transfer_type")]
     public string TransferType { get; set; } = default!;
 

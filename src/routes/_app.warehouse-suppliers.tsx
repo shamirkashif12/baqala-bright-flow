@@ -51,6 +51,7 @@ function WarehouseSuppliers() {
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [cityFilter, setCityFilter] = useState<string[]>([]);
   const [paymentTermsFilter, setPaymentTermsFilter] = useState<string[]>([]);
+  const [supplyTypeQuick, setSupplyTypeQuick] = useState<"warehouse" | "mart_to_mart" | null>(null);
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [form, setForm] = useState<WarehouseSupplierForm>(emptyForm);
   // Snapshot of the form as loaded for the supplier currently being edited — lets handleSave tell
@@ -179,16 +180,33 @@ function WarehouseSuppliers() {
     const mc = !(categoryFilter.length && !categoryFilter.includes(s.category ?? ""));
     const mcity = !(cityFilter.length && !cityFilter.includes(s.city ?? ""));
     const mpt = !(paymentTermsFilter.length && !paymentTermsFilter.includes(s.paymentTerms ?? ""));
-    return mq && ms && mc && mcity && mpt;
+    const mst = !supplyTypeQuick || s.supplyType === supplyTypeQuick || s.supplyType === "both";
+    return mq && ms && mc && mcity && mpt && mst;
   });
 
   return (
     <PageShell title="Warehouse Suppliers" subtitle="Bulk supply partners feeding all branches">
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Total Suppliers" value={String(total)} icon={Warehouse} accent="primary" />
-        <MetricCard label="Active" value={String(active)} icon={PackageCheck} accent="success" />
-        <MetricCard label="Warehouse" value={String(warehouseCount)} icon={Truck} />
-        <MetricCard label="Mart-to-Mart" value={String(martCount)} icon={Store} accent="warning" />
+        <MetricCard
+          label="Total Suppliers" value={String(total)} icon={Warehouse} accent="primary"
+          onClick={() => { setStatusFilter([]); setSupplyTypeQuick(null); }}
+          active={statusFilter.length === 0 && supplyTypeQuick === null}
+        />
+        <MetricCard
+          label="Active" value={String(active)} icon={PackageCheck} accent="success"
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "active" ? [] : ["active"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "active"}
+        />
+        <MetricCard
+          label="Warehouse" value={String(warehouseCount)} icon={Truck}
+          onClick={() => setSupplyTypeQuick(v => v === "warehouse" ? null : "warehouse")}
+          active={supplyTypeQuick === "warehouse"}
+        />
+        <MetricCard
+          label="Mart-to-Mart" value={String(martCount)} icon={Store} accent="warning"
+          onClick={() => setSupplyTypeQuick(v => v === "mart_to_mart" ? null : "mart_to_mart")}
+          active={supplyTypeQuick === "mart_to_mart"}
+        />
       </div>
       <Toolbar
         placeholder="Search suppliers…"

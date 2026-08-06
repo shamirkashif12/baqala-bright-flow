@@ -20,8 +20,15 @@ public class InventoryController(
     IBatchConsumptionService batchConsumption,
     IPackBreakService packBreaks,
     IAuditService audit,
+    IApprovalNotificationService approvals,
     ILogger<InventoryController> logger) : ControllerBase
 {
+    // How a held write-off reads in a notification: "Damage — Coca-Cola 330ml ×5". The type is what
+    // the approver judges on (theft is not spoilage) and the quantity is what makes it worth
+    // stopping for, so both belong in the one line the bell shows.
+    private static string WriteOffLabel(string adjustmentType, string? productName, decimal quantity) =>
+        $"{char.ToUpperInvariant(adjustmentType[0])}{adjustmentType[1..]} write-off — {productName ?? "product"} ×{quantity:0.##}";
+
     // Branch-scoped roles (anything but tenant_admin) may only see/write their own branch's
     // batches — mirrors the scoping the frontend already applies to the plain stock list.
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -280,6 +287,9 @@ public class InventoryController(
     {
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Received quantity must be greater than zero." });
+        // Exactly one of Branch/Warehouse, same convention InventoryBatch itself documents.
+        if (req.BranchId.HasValue == req.WarehouseId.HasValue)
+            return BadRequest(new { message = "Specify exactly one of branchId or warehouseId." });
         // A past expiry is rejected outright unless the caller documents why (a damaged
         // shipment or a supplier return being logged for write-off, not for resale). The
         // resulting batch's past ExpiryDate still keeps it out of the sellable-stock check
@@ -289,7 +299,7 @@ public class InventoryController(
             return BadRequest(new { message = "Expiry date cannot be in the past — provide a damagedOrReturnReason to log it as damaged/return stock instead of resalable inventory." });
 
         var (role, callerBranchId) = GetCallerContext();
-        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && callerBranchId != req.BranchId)
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && req.BranchId.HasValue && callerBranchId != req.BranchId)
             return Forbid();
 
         var product = await db.Products.FindAsync(req.ProductId);
@@ -303,6 +313,7 @@ public class InventoryController(
             BatchNumber = !string.IsNullOrEmpty(req.BatchNumber) ? req.BatchNumber : $"BATCH-{DateTime.UtcNow:yyyyMMddHHmm}-{batchId.ToString()[..4].ToUpper()}",
             ProductId = req.ProductId,
             BranchId = req.BranchId,
+            WarehouseId = req.WarehouseId,
             SupplierId = req.SupplierId,
             Quantity = req.Quantity,
             RemainingQuantity = req.Quantity,
@@ -318,28 +329,52 @@ public class InventoryController(
         };
         db.InventoryBatches.Add(batch);
 
-        var stock = await db.InventoryStocks
-            .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
-        // Captured before the mutation for the same reason Adjust does it: receiving stock is an
-        // inventory movement, and a reviewer needs the on-hand quantity either side of it.
-        var quantityBefore = stock?.Quantity ?? 0m;
-        if (stock is null)
+        decimal quantityBefore;
+        if (req.BranchId.HasValue)
         {
-            db.InventoryStocks.Add(new InventoryStock
+            var stock = await db.InventoryStocks
+                .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
+            // Captured before the mutation for the same reason Adjust does it: receiving stock is
+            // an inventory movement, and a reviewer needs the on-hand quantity either side of it.
+            quantityBefore = stock?.Quantity ?? 0m;
+            if (stock is null)
             {
-                Id = Guid.NewGuid(), ProductId = req.ProductId, BranchId = req.BranchId,
-                Quantity = req.Quantity, ReorderLevel = req.ReorderLevel ?? 10,
-                LastUpdated = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
-            });
+                db.InventoryStocks.Add(new InventoryStock
+                {
+                    Id = Guid.NewGuid(), ProductId = req.ProductId, BranchId = req.BranchId.Value,
+                    Quantity = req.Quantity, ReorderLevel = req.ReorderLevel ?? 10,
+                    LastUpdated = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                stock.Quantity += req.Quantity;
+                stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
+            }
         }
         else
         {
-            stock.Quantity += req.Quantity;
-            stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
+            var stock = await db.WarehouseStocks
+                .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.WarehouseId == req.WarehouseId);
+            quantityBefore = stock?.Quantity ?? 0m;
+            if (stock is null)
+            {
+                db.WarehouseStocks.Add(new WarehouseStock
+                {
+                    Id = Guid.NewGuid(), ProductId = req.ProductId, WarehouseId = req.WarehouseId!.Value,
+                    Quantity = req.Quantity, ReorderLevel = req.ReorderLevel ?? 10,
+                    LastUpdated = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                stock.Quantity += req.Quantity;
+                stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         stockMovements.Record(
-            req.ProductId, req.BranchId, warehouseId: null, movementType: "manual_receive", quantity: req.Quantity,
+            req.ProductId, req.BranchId, req.WarehouseId, movementType: "manual_receive", quantity: req.Quantity,
             batchId: batch.Id, referenceType: "manual_receive", referenceId: batch.Id, notes: req.DamagedOrReturnReason,
             createdBy: CallerId(),
             quantityBefore: quantityBefore, quantityAfter: quantityBefore + req.Quantity);
@@ -628,12 +663,16 @@ public class InventoryController(
 
         // Employee Audit Center — inventory adjustments are a listed employee action. Best-effort:
         // the stock write is already committed, so a failed audit write must not 500 the caller.
+        // Declared out here because the approval notification below names the same product; left
+        // null-if-it-fails rather than hoisted out of the try, so a lookup hiccup still can't 500 a
+        // request whose stock write already committed.
+        string? productName = null;
         try
         {
             // Denormalise the product name into the audit payload so the trail says WHAT was adjusted
             // ("Coca-Cola 330ml"), not just a GUID — reviewers and the CSV export shouldn't need a
             // second lookup, and a product later renamed/deleted still reads correctly at audit time.
-            var productName = await db.Products.Where(p => p.Id == req.ProductId)
+            productName = await db.Products.Where(p => p.Id == req.ProductId)
                 .Select(p => p.Name).FirstOrDefaultAsync();
             await audit.LogAsync(
                 action: "inventory_adjustment",
@@ -652,6 +691,19 @@ public class InventoryController(
                 beforeValue: System.Text.Json.JsonSerializer.Serialize(new { QuantityBefore = quantityBefore }));
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for adjustment {AdjustmentId}", adjustment.Id); }
+
+        // A held write-off blocks real stock from moving until someone signs it off, and nothing
+        // told that someone it existed — the queue was only discoverable by opening the Wastage tab.
+        if (requiresApproval)
+        {
+            await approvals.NotifyApproversAsync(
+                module: "Stocks", branchId: req.BranchId, requestedBy: actingUserId,
+                category: "Wastage / Spoilage",
+                type: "Wastage Approval Required", title: "Wastage Approval Required",
+                message: $"{WriteOffLabel(req.AdjustmentType, productName, req.Quantity)} needs approval"
+                    + (string.IsNullOrWhiteSpace(req.Reason) ? "" : $" — \"{req.Reason.Trim()}\""),
+                entityType: "InventoryAdjustment", entityId: adjustment.Id);
+        }
 
         // Low-stock re-check only when on-hand actually dropped just now. A pending write-off hasn't
         // moved stock yet — that check runs when it's approved. Best-effort: never fail the write.
@@ -916,6 +968,18 @@ public class InventoryController(
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for adjustment review {AdjustmentId}", adjustment.Id); }
 
+        // Back to whoever raised it. They're the one who has to explain the shrinkage either way —
+        // an approval means the stock is now gone, a rejection means it is still on the books.
+        var reviewedProductName = await db.Products.Where(p => p.Id == adjustment.ProductId)
+            .Select(p => p.Name).FirstOrDefaultAsync();
+        await approvals.NotifyRequesterAsync(
+            requestedBy: adjustment.AdjustedBy, decidedBy: reviewerId, approved: req.Approved,
+            category: "Wastage / Spoilage",
+            subject: WriteOffLabel(adjustment.AdjustmentType, reviewedProductName, adjustment.Quantity),
+            reason: req.Reason,
+            entityType: "InventoryAdjustment", entityId: adjustment.Id, branchId: adjustment.BranchId,
+            warehouseId: adjustment.WarehouseId);
+
         return Ok(adjustment);
     }
 }
@@ -940,7 +1004,7 @@ public record BreakPackRequest(
 
 public record ReceiveBatchRequest(
     Guid ProductId,
-    Guid BranchId,
+    Guid? BranchId,
     Guid? SupplierId,
     decimal Quantity,
     decimal? PurchaseCost,
@@ -948,5 +1012,6 @@ public record ReceiveBatchRequest(
     string? BatchNumber,
     string? Notes,
     int? ReorderLevel,
-    string? DamagedOrReturnReason = null
+    string? DamagedOrReturnReason = null,
+    Guid? WarehouseId = null
 );

@@ -20,6 +20,11 @@ export interface ReceiptData {
   // Real ZATCA-signed QR (base64 TLV, 9 tags) from the submitted ZatcaInvoice, when available.
   // Falls back to a locally-built Phase-1-style 5-tag QR otherwise.
   zatcaQrCode?: string;
+  // Pre-rasterized ESC/POS "GS v 0" bitmap bytes (base64), from CompanyProfile.LogoEscPosBase64 —
+  // computed once at upload time (src/lib/image.ts fileToLogoAssets), never re-rasterized here.
+  // Self-checkout is always the "customer slip" case, so this is sent whenever
+  // CompanyProfile.showLogoOnCustomerSlip is on.
+  logoEscPos?: string;
 }
 
 const WIDTH = 48;
@@ -56,6 +61,14 @@ export function buildEscPos(r: ReceiptData): Uint8Array {
 
   // Init
   raw(0x1b, 0x40);
+
+  // Logo — pre-rasterized ESC/POS bytes (see ReceiptData.logoEscPos), spliced in verbatim.
+  if (r.logoEscPos) {
+    center();
+    const binary = atob(r.logoEscPos);
+    for (let i = 0; i < binary.length; i++) buf.push(binary.charCodeAt(i));
+    lf();
+  }
 
   // Header
   center(); bold(true); dblSz(true);

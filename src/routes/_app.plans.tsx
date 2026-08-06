@@ -4,7 +4,8 @@ import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Check, Crown, Zap, Building2, Store, Globe, AlertTriangle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Check, Crown, Zap, Building2, Store, Globe, AlertTriangle, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
@@ -134,10 +135,85 @@ function handlePlanAction(plan: Plan, cycle: Cycle) {
   });
 }
 
+// Side-by-side feature comparison between the tenant's current plan and whichever card's
+// "View Details" / "Compare features" button was clicked — a real diff instead of the old
+// toast that just dumped the target plan's feature array into a description string.
+function PlanDetailsDialog({ plan, currentPlan, usage, onClose }: {
+  plan: Plan | null;
+  currentPlan: Plan;
+  usage: Usage | null;
+  onClose: () => void;
+}) {
+  if (!plan) return null;
+  const allFeatures = [...new Set([...currentPlan.f, ...plan.f])];
+  const limitRows: { label: string; current?: number; target?: number; used?: number }[] = [
+    { label: "Branches", current: currentPlan.limits.branches, target: plan.limits.branches, used: usage?.branches },
+    { label: "Terminals", current: currentPlan.limits.terminals, target: plan.limits.terminals, used: usage?.terminals },
+    { label: "Users", current: currentPlan.limits.users, target: plan.limits.users, used: usage?.users },
+  ];
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <plan.icon className="h-4 w-4 text-primary" /> {plan.name} vs {currentPlan.name} (your plan)
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Limits</p>
+            <div className="rounded-lg border border-border/60 divide-y divide-border/60">
+              {limitRows.map(r => (
+                <div key={r.label} className="grid grid-cols-3 gap-2 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">{r.label}</span>
+                  <span className="text-center">{r.current ?? "∞"} {r.used != null && <span className="text-xs text-muted-foreground">({r.used} used)</span>}</span>
+                  <span className={cn("text-center font-medium", (r.target ?? Infinity) > (r.current ?? Infinity) && "text-success")}>{r.target ?? "∞"}</span>
+                </div>
+              ))}
+              <div className="grid grid-cols-3 gap-2 px-3 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                <span></span><span className="text-center">Your plan</span><span className="text-center">{plan.name}</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Features</p>
+            <ul className="space-y-1.5">
+              {allFeatures.map(f => {
+                const inCurrent = currentPlan.f.includes(f);
+                const inTarget = plan.f.includes(f);
+                return (
+                  <li key={f} className="flex items-center gap-2 text-sm">
+                    {inTarget
+                      ? <Check className="h-3.5 w-3.5 text-success shrink-0" />
+                      : <Minus className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />}
+                    <span className={cn(!inTarget && "text-muted-foreground/60 line-through")}>{f}</span>
+                    {inTarget && !inCurrent && <Badge variant="secondary" className="text-[10px] py-0">New</Badge>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          {plan.status === "upgrade" && (
+            <Button className="gradient-primary text-primary-foreground border-0" onClick={() => { handlePlanAction(plan, "Monthly"); onClose(); }}>
+              Upgrade to {plan.name}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function Plans() {
   const [cycle, setCycle] = useState<Cycle>("Monthly");
   const [usage, setUsage] = useState<Usage | null>(null);
   const [tenantPlan, setTenantPlan] = useState<TenantPlanInfo | null>(null);
+  const [detailsPlan, setDetailsPlan] = useState<Plan | null>(null);
   const notified = useRef(false);
 
   useEffect(() => {
@@ -267,16 +343,20 @@ function Plans() {
                     p.status === "current" ? "bg-success/20 text-success border border-success/30 hover:bg-success/30" :
                     "gradient-primary text-primary-foreground border-0"
                   )}
-                  onClick={() => handlePlanAction(p, cycle)}
+                  onClick={() => p.status === "active" ? setDetailsPlan(p) : handlePlanAction(p, cycle)}
                 >
                   {p.status === "current" ? "Current Plan" : p.status === "contact" ? "Contact Sales" : p.status === "active" ? "View Details" : "Upgrade Now"}
                 </Button>
-                {p.status !== "current" && (
+                {/* "View Details" (status "active") already opens this same comparison dialog —
+                    a second "Compare features" button doing the identical thing was redundant.
+                    Kept only for Upgrade/Contact Sales cards, where it's a genuinely distinct
+                    action from the primary button (which starts the real upgrade/contact flow). */}
+                {(p.status === "upgrade" || p.status === "contact") && (
                   <Button
                     variant={p.featured ? "secondary" : "outline"}
                     className="w-full"
                     size="sm"
-                    onClick={() => toast.info(`${p.name} plan details`, { description: p.f.join(" · ") })}
+                    onClick={() => setDetailsPlan(p)}
                   >
                     Compare features
                   </Button>
@@ -307,6 +387,8 @@ function Plans() {
           </div>
         </div>
       </Card>
+
+      <PlanDetailsDialog plan={detailsPlan} currentPlan={CURRENT_PLAN} usage={usage} onClose={() => setDetailsPlan(null)} />
     </PageShell>
   );
 }

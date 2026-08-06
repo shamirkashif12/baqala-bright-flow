@@ -176,9 +176,20 @@ function Devices() {
     <PageShell title="Devices" subtitle="Hardware fleet + behavior in one place">
       {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Total Devices" value={String(total)} icon={HardDrive} accent="primary" />
-        <MetricCard label="Healthy" value={String(healthy)} icon={Activity} accent="success" />
-        <MetricCard label="Maintenance" value={String(maintenance)} icon={Power} accent="warning" />
+        <MetricCard
+          label="Total Devices" value={String(total)} icon={HardDrive} accent="primary"
+          onClick={() => setSt([])} active={st.length === 0}
+        />
+        <MetricCard
+          label="Healthy" value={String(healthy)} icon={Activity} accent="success"
+          onClick={() => setSt(v => v.length === 1 && v[0] === "active" ? [] : ["active"])}
+          active={st.length === 1 && st[0] === "active"}
+        />
+        <MetricCard
+          label="Maintenance" value={String(maintenance)} icon={Power} accent="warning"
+          onClick={() => setSt(v => v.length === 2 && v.includes("maintenance") && v.includes("offline") ? [] : ["maintenance", "offline"])}
+          active={st.length === 2 && st.includes("maintenance") && st.includes("offline")}
+        />
         <MetricCard label="Network OK" value={`${synced}/${total}`} icon={Wifi} />
       </div>
 

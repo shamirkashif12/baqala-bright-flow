@@ -244,7 +244,7 @@ function Settings() {
 
   return (
     <PageShell
-      title="Settings"
+      title="Business & Security Settings"
       subtitle="Business · tax · operations · security"
       actions={
         <div className="flex items-end gap-2">

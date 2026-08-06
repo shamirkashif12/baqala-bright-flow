@@ -142,6 +142,7 @@ export const api = {
   // Branches
   getBranches: (status?: string) =>
     request<Branch[]>(`/api/branches${status ? `?status=${status}` : ""}`),
+  getBranch: (id: string) => request<Branch>(`/api/branches/${id}`),
   createBranch: (data: Partial<Branch>) =>
     request<Branch>("/api/branches", { method: "POST", body: JSON.stringify(data) }),
   updateBranch: (id: string, data: Partial<Branch>) =>
@@ -632,6 +633,7 @@ export const api = {
     request<PurchaseOrder>(`/api/purchase-orders/by-number/${encodeURIComponent(number)}`),
   getPurchaseOrdersByBatch: (batchId: string) =>
     request<PurchaseOrder[]>(`/api/purchase-orders/batch/${encodeURIComponent(batchId)}`),
+  getPurchaseOrderPdf: (id: string) => requestBlob(`/api/purchase-orders/${id}/pdf`),
   createPurchaseOrder: (data: Partial<PurchaseOrder>) =>
     request<PurchaseOrder>("/api/purchase-orders", { method: "POST", body: JSON.stringify(data) }),
   updatePoStatus: (id: string, status: string, approvedBy?: string) =>
@@ -699,6 +701,8 @@ export const api = {
   getCompanyProfile: () => request<CompanyProfile>("/api/compliance/company-profile"),
   updateCompanyProfile: (data: Partial<CompanyProfile>) =>
     request<CompanyProfile>("/api/compliance/company-profile", { method: "PUT", body: JSON.stringify(data) }),
+  updateCompanyLogo: (data: { logoDataUrl?: string; logoEscPosBase64?: string; showLogoOnStaffReceipt: boolean; showLogoOnCustomerSlip: boolean }) =>
+    request<CompanyProfile>("/api/compliance/company-profile/logo", { method: "PUT", body: JSON.stringify(data) }),
   generateZatcaCsr: (branchId: string) =>
     request<{ csr: string; egsSerial: string }>(`/api/compliance/zatca/onboarding/${branchId}/csr`, { method: "POST" }),
   getZatcaComplianceCsid: (branchId: string, otp: string) =>
@@ -1034,7 +1038,7 @@ export const api = {
     request<SupplierCreditNote>(`/api/supply-chain/discrepancies/${id}/raise-debit-note`, { method: "POST", body: JSON.stringify({}) }),
   raiseShortageDebitNote: (data: { poId: string; productId: string; expectedQuantity: number; receivedQuantity: number; unitCost: number }) =>
     request<{ discrepancy: StockDiscrepancy; creditNote: SupplierCreditNote }>(`/api/supply-chain/raise-shortage-debit-note`, { method: "POST", body: JSON.stringify(data) }),
-  getCreditNotes: (params?: { supplierId?: string; status?: string; creditType?: string; poId?: string; transferId?: string; sourceWarehouseId?: string }) => {
+  getCreditNotes: (params?: { supplierId?: string; status?: string; creditType?: string; poId?: string; transferId?: string; sourceWarehouseId?: string; sourceBranchId?: string }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
     return request<SupplierCreditNote[]>(`/api/supply-chain/credit-notes${q ? `?${q}` : ""}`);
   },
@@ -1079,6 +1083,7 @@ export const api = {
     splitBreakdown?: { method: string; amount: number }[];
     printerName?: string;
     zatcaQrCode?: string;
+    logoEscPos?: string;
   }) =>
     printerRequest<{ message: string; jobId?: string }>("/api/printer/print-receipt", { method: "POST", body: JSON.stringify(invoice) }),
   getPrintJobs: (printer?: string) =>
@@ -1461,7 +1466,7 @@ export interface InventoryBatch {
 }
 
 export interface ReceiveBatchPayload {
-  productId: string; branchId: string; supplierId?: string;
+  productId: string; branchId?: string; warehouseId?: string; supplierId?: string;
   quantity: number; purchaseCost?: number; expiryDate?: string;
   batchNumber?: string; notes?: string; reorderLevel?: number;
   damagedOrReturnReason?: string;
@@ -2013,6 +2018,8 @@ export interface ApprovalRow {
 
 export interface CompanyProfile {
   id?: string; legalName?: string; crNumber?: string; vatNumber?: string;
+  logoDataUrl?: string; logoEscPosBase64?: string;
+  showLogoOnStaffReceipt?: boolean; showLogoOnCustomerSlip?: boolean;
   updatedBy?: string; createdAt?: string; updatedAt?: string;
 }
 
@@ -2076,6 +2083,7 @@ export interface Notification {
   severity: "info" | "warning" | "error";
   entityType?: string; entityId?: string;
   isRead: boolean; readAt?: string; createdAt: string;
+  branchName?: string; terminalName?: string;
 }
 
 export interface PosSettingsRecord {

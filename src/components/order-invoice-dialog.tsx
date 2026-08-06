@@ -64,6 +64,8 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
   const [sellerName, setSellerName] = useState("");
   const [vatNumber, setVatNumber] = useState("");
   const [crNumber, setCrNumber] = useState("");
+  const [logoDataUrl, setLogoDataUrl] = useState<string | undefined>();
+  const [logoEscPos, setLogoEscPos] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [printing, setPrinting] = useState(false);
 
@@ -72,6 +74,7 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
     setLoading(true);
     setOrder(null);
     setSellerName(""); setVatNumber(""); setCrNumber("");
+    setLogoDataUrl(undefined); setLogoEscPos(undefined);
     api.getOrder(orderId)
       .then(o => {
         setOrder(o);
@@ -81,10 +84,16 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
         api.getZatcaSettings(o.branchId)
           .then(z => { setVatNumber(z.vatRegistrationNumber ?? ""); setSellerName(z.sellerName ?? ""); })
           .catch(() => {});
+        api.getCompanyProfile().then(c => {
+          setCrNumber(c.crNumber ?? "");
+          // o.source: "pos" is the staff-receipt scope; "online"/"kiosk" are the customer-slip scope.
+          const scopeOk = o.source === "pos" ? c.showLogoOnStaffReceipt : c.showLogoOnCustomerSlip;
+          setLogoDataUrl(scopeOk ? c.logoDataUrl : undefined);
+          setLogoEscPos(scopeOk ? c.logoEscPosBase64 : undefined);
+        }).catch(() => {});
       })
       .catch(() => { toast.error("Failed to load invoice."); onClose(); })
       .finally(() => setLoading(false));
-    api.getCompanyProfile().then(c => setCrNumber(c.crNumber ?? "")).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose is stable enough here; re-running on it would refetch on every parent re-render
   }, [orderId]);
 
@@ -109,6 +118,7 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
     fees: order.serviceCharges?.length ? order.serviceCharges.map(s => ({ name: s.name, amount: s.amount })) : undefined,
     splitBreakdown: (order.payments?.length ?? 0) > 1 ? order.payments!.map(p => ({ method: p.paymentMethod, amount: p.amount })) : undefined,
     zatcaQrCode: order.zatcaQrCode,
+    logoEscPos,
   } : null;
 
   const zatcaQr = receipt && (qrCodeOverride || receipt.zatcaQrCode || (vatNumber
@@ -146,6 +156,9 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
         ) : receipt ? (
           <div id="order-invoice" className="rounded-xl bg-muted/40 p-5 font-mono text-xs space-y-2">
             <div className="text-center space-y-0.5">
+              {logoDataUrl && (
+                <img src={logoDataUrl} alt="" className="h-12 mx-auto mb-1 object-contain" />
+              )}
               <p className="font-bold text-sm">{receipt.sellerName}</p>
               {receipt.vatNumber && <p className="text-muted-foreground">VAT {receipt.vatNumber}</p>}
               {receipt.crNumber && <p className="text-muted-foreground">CR {receipt.crNumber}</p>}

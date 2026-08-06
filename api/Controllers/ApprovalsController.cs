@@ -20,7 +20,7 @@ namespace BaqalaPOS.Api.Controllers;
 public class ApprovalsController(
     BaqalaDbContext db,
     IAuditService audit,
-    INotificationService notifications,
+    IApprovalNotificationService approvals,
     IOrderVoidService orderVoidService,
     IOrderEditService orderEditService,
     IProductDeletionService productDeletion,
@@ -411,22 +411,14 @@ public class ApprovalsController(
             employeeId: employeeId);
 
         // Close the loop for whoever raised it — until now the requester had no way to learn the
-        // outcome short of re-opening the Approval Center and looking for their own row.
-        if (pending.RequestedBy != Guid.Empty && pending.RequestedBy != actorId)
-        {
-            await notifications.NotifyUserAsync(
-                pending.RequestedBy,
-                category: "Admin / Security",
-                type: "approval_decision",
-                title: req.Approved ? "Request approved" : "Request rejected",
-                message: $"{EntityLabel(pending)} was {(req.Approved ? "approved" : "rejected")}"
-                    + (string.IsNullOrWhiteSpace(req.Reason) ? "." : $" — \"{req.Reason}\"."),
-                severity: req.Approved ? "info" : "warning",
-                entityType: "ApprovalRequest",
-                entityId: pending.Id,
-                branchId: pending.BranchId,
-                triggeredBy: actorId);
-        }
+        // outcome short of re-opening the Approval Center and looking for their own row. Routed
+        // through the shared helper so this decision reads (and deep-links) exactly like every other
+        // flow's, and names who signed it off and at which branch.
+        await approvals.NotifyRequesterAsync(
+            requestedBy: pending.RequestedBy, decidedBy: actorId, approved: req.Approved,
+            category: "Admin / Security",
+            subject: EntityLabel(pending), reason: req.Reason,
+            entityType: "ApprovalRequest", entityId: pending.Id, branchId: pending.BranchId);
 
         return Ok(pending);
     }

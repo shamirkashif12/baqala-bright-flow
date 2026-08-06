@@ -295,6 +295,30 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         return Ok(profile);
     }
 
+    // Separate from UpdateCompanyProfile above deliberately: that endpoint requires the
+    // "zatca_compliance" plan feature and "Compliance" permission, both wrong gates for a receipt
+    // logo, which is edited from POS Settings (a "Settings" permission surface) by any tenant on
+    // any plan. Always sends the logo's full state (upload/remove, both flags) rather than
+    // patch-merging — this is a single small widget with its own Save action, not a shared
+    // multi-tab form like PosSettings.
+    [RequirePermission("Settings", PermAction.Edit)]
+    [HttpPut("company-profile/logo")]
+    public async Task<IActionResult> UpdateCompanyLogo([FromBody] CompanyLogoUpdateRequest req)
+    {
+        var profile = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId)
+            ?? throw new InvalidOperationException("Company profile row missing — migration seed did not run.");
+
+        profile.LogoDataUrl = req.LogoDataUrl;
+        profile.LogoEscPosBase64 = req.LogoEscPosBase64;
+        profile.ShowLogoOnStaffReceipt = req.ShowLogoOnStaffReceipt;
+        profile.ShowLogoOnCustomerSlip = req.ShowLogoOnCustomerSlip;
+        profile.UpdatedBy = Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var logoUid) ? logoUid : null;
+        profile.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+        return Ok(profile);
+    }
+
     // ─── Rules Engine ─────────────────────────────────────────────────────────
     [HttpGet("rules")]
     public async Task<IActionResult> GetRules([FromQuery] string? ruleType, [FromQuery] Guid? branchId, [FromQuery] bool includeInactive = false)
@@ -369,6 +393,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
 public record ZatcaStatusRequest(string Status, string? Response);
 public record ZatcaOtpRequest(string Otp);
 public record CompanyProfileUpdateRequest(string? LegalName, string? CrNumber, string? VatNumber);
+public record CompanyLogoUpdateRequest(string? LogoDataUrl, string? LogoEscPosBase64, bool ShowLogoOnStaffReceipt, bool ShowLogoOnCustomerSlip);
 
 // Request body for PUT zatca/settings/{branchId} — branch display fields plus the mart-wide
 // shared Phase2Enabled/Environment flags (which the controller writes onto ZatcaIdentity).

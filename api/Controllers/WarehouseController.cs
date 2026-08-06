@@ -1,6 +1,7 @@
 using BaqalaPOS.Api.Authorization;
 using BaqalaPOS.Api.Data;
 using BaqalaPOS.Api.Models;
+using BaqalaPOS.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,7 +10,7 @@ namespace BaqalaPOS.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequirePlanFeature("warehouse_management")]
-public class WarehouseController(BaqalaDbContext db) : ControllerBase
+public class WarehouseController(BaqalaDbContext db, IApprovalNotificationService approvals) : ControllerBase
 {
     // Mirrors GetCallerContext elsewhere. Every role that holds "Warehouses" view also holds
     // "Stock Transfers" view per the RolePermissions matrix (Cashier/Marketing hold neither), so
@@ -131,6 +132,26 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
         foreach (var item in request.Items) { item.Id = Guid.NewGuid(); item.RequestId = request.Id; }
         db.WarehouseRequests.Add(request);
         await db.SaveChangesAsync();
+
+        // Where the stock is being pulled FROM is the first thing an approver checks (another
+        // branch's shelves vs. a supplier order are different decisions), so it goes in the message
+        // rather than making them open the request to find out.
+        var sourceName = request.SourceBranchId.HasValue
+            ? await db.Branches.Where(b => b.Id == request.SourceBranchId).Select(b => b.Name).FirstOrDefaultAsync()
+            : request.SupplierId.HasValue
+                ? await db.Suppliers.Where(s => s.Id == request.SupplierId).Select(s => s.Name).FirstOrDefaultAsync()
+                : null;
+
+        // Scoped to the DESTINATION branch — that's the branch this stock is for, and the one whose
+        // approvers own the decision.
+        await approvals.NotifyApproversAsync(
+            module: "Stock Transfers", branchId: request.DestinationBranchId, requestedBy: request.RequestedBy,
+            category: "Inventory",
+            type: "Stock Request Approval Required", title: "Stock Request Approval Required",
+            message: $"Stock request {request.RequestNumber} — {request.Items.Count} line(s)"
+                + (sourceName is null ? "" : $" from {sourceName}"),
+            entityType: "WarehouseRequest", entityId: request.Id);
+
         return CreatedAtAction(nameof(GetRequestById), new { id = request.Id }, request);
     }
 
@@ -140,10 +161,22 @@ public class WarehouseController(BaqalaDbContext db) : ControllerBase
     {
         var request = await db.WarehouseRequests.FindAsync(id);
         if (request is null) return NotFound();
+        // Same convention as RequestedBy above: the JWT is the source of truth for who acted, with
+        // the body kept only as a fallback for callers that carry no usable claim. A client-asserted
+        // approver would otherwise be recorded verbatim on a permission-gated decision.
+        var approverId = Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var aid)
+            ? aid : req.ApprovedBy;
         request.ApprovalStatus = req.Approved ? "approved" : "unapproved";
-        request.ApprovedBy = req.ApprovedBy;
+        request.ApprovedBy = approverId;
         request.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        await approvals.NotifyRequesterAsync(
+            requestedBy: request.RequestedBy, decidedBy: approverId, approved: req.Approved,
+            category: "Inventory",
+            subject: $"Stock request {request.RequestNumber}", reason: null,
+            entityType: "WarehouseRequest", entityId: request.Id, branchId: request.DestinationBranchId);
+
         return Ok(request);
     }
 

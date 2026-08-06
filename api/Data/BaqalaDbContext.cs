@@ -141,7 +141,11 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
         modelBuilder.Entity<Customer>().HasIndex(c => c.CustomerCode).IsUnique();
         modelBuilder.Entity<Customer>().HasIndex(c => c.Phone).IsUnique();
         modelBuilder.Entity<Product>().HasIndex(p => p.Sku).IsUnique();
-        modelBuilder.Entity<Product>().HasIndex(p => p.Barcode).IsUnique();
+        // Barcode uniqueness is enforced per-active-product, not globally — a discontinued product's
+        // barcode must be freely reusable (ProductsController's duplicate check already assumes this).
+        // That's carried by the DB-only barcode_active generated column and its unique index
+        // (see migration AddPartialUniqueBarcodeForActiveProducts); invisible to EF, so no property here.
+        modelBuilder.Entity<Product>().HasIndex(p => p.Barcode);
         modelBuilder.Entity<Supplier>().HasIndex(s => s.SupplierCode).IsUnique();
         modelBuilder.Entity<Terminal>().HasIndex(t => t.TerminalCode).IsUnique();
         modelBuilder.Entity<Coupon>().HasIndex(c => c.Code).IsUnique();

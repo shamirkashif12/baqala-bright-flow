@@ -16,6 +16,7 @@ public class ReturnsController(
     IBatchConsumptionService batchConsumption,
     IStockMovementService stockMovements,
     IAuditService audit,
+    IApprovalNotificationService approvals,
     ILogger<ReturnsController> logger) : ControllerBase
 {
     // Reads the real, tenant-editable "Manager approval above (SAR)" field from the Returns
@@ -181,11 +182,15 @@ public class ReturnsController(
                     terminalId: order.TerminalId, triggeredBy: ret.ProcessedBy);
             }
 
-            await notifications.NotifyRoleAsync(["Manager", "Admin"], ret.BranchId,
-                "Returns", "Return Approval Required", "Return Approval Required",
-                $"Return {ret.ReturnNumber} requires approval (SAR {ret.RefundAmount:F2})",
-                severity: "warning", entityType: "CustomerReturn", entityId: ret.Id,
-                terminalId: order.TerminalId, triggeredBy: ret.ProcessedBy);
+            // Resolved from who actually holds Returns:Approve rather than the ["Manager","Admin"]
+            // role names this used to hardcode — a tenant whose Supervisor role approves refunds was
+            // never told a return was waiting. The cashier's name and branch ride along in the message.
+            await approvals.NotifyApproversAsync(
+                module: "Returns", branchId: ret.BranchId, requestedBy: ret.ProcessedBy,
+                category: "Returns",
+                type: "Return Approval Required", title: "Return Approval Required",
+                message: $"Return {ret.ReturnNumber} requires approval (SAR {ret.RefundAmount:F2})",
+                entityType: "CustomerReturn", entityId: ret.Id, terminalId: order.TerminalId);
         }
         catch (Exception ex) { logger.LogError(ex, "Notification failed for return {ReturnId}", ret.Id); }
 
@@ -253,25 +258,14 @@ public class ReturnsController(
             beforeValue: beforeSnapshot,
             module: "Returns", employeeId: await ResolveEmployeeIdAsync(CallerId()), terminalId: terminalId);
 
-        // Notify both the cashier who raised the return and the manager who acted on it.
-        // Previously only ProcessedBy was notified (and only when set), so approving a return that
-        // had no ProcessedBy surfaced no "Manager Approval Granted/Rejected" notification at all.
-        var approvalRecipients = new List<Guid>();
-        if (ret.ProcessedBy.HasValue) approvalRecipients.Add(ret.ProcessedBy.Value);
-        if (CallerId() is { } approvalCaller) approvalRecipients.Add(approvalCaller);
-        if (approvalRecipients.Count > 0)
-        {
-            await notifications.NotifyUsersAsync(approvalRecipients,
-                "Admin / Security",
-                req.Approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                req.Approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                req.Approved
-                    ? $"Return {ret.ReturnNumber} was approved"
-                    : $"Return {ret.ReturnNumber} was rejected",
-                severity: req.Approved ? "info" : "warning",
-                entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId,
-                terminalId: terminalId, triggeredBy: CallerId());
-        }
+        // Notify both the cashier who raised the return and the manager who acted on it — the
+        // decider's copy is a receipt of their own action, which is why alsoNotifyDecider is set.
+        await approvals.NotifyRequesterAsync(
+            requestedBy: ret.ProcessedBy, decidedBy: CallerId(), approved: req.Approved,
+            category: "Admin / Security",
+            subject: $"Return {ret.ReturnNumber} (SAR {ret.RefundAmount:F2})", reason: null,
+            entityType: "CustomerReturn", entityId: ret.Id, branchId: ret.BranchId,
+            terminalId: terminalId, alsoNotifyDecider: true);
 
         return Ok(ret);
     }

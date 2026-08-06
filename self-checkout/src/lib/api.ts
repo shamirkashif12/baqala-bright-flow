@@ -441,6 +441,19 @@ export function getZatcaSettings(branchId: string): Promise<ZatcaSettings> {
   return request<ZatcaSettings>(`/api/compliance/zatca/settings/${branchId}`);
 }
 
+export interface CompanyProfile {
+  crNumber?: string;
+  logoDataUrl?: string;
+  logoEscPosBase64?: string;
+  showLogoOnCustomerSlip?: boolean;
+}
+
+// Self-checkout is always the customer-facing device, so the caller only ever needs the
+// showLogoOnCustomerSlip scope — see CompanyProfile.ShowLogoOnCustomerSlip on the backend.
+export function getCompanyProfile(): Promise<CompanyProfile> {
+  return request<CompanyProfile>("/api/compliance/company-profile");
+}
+
 export interface PrintReceiptInput {
   orderNumber: string;
   createdAt: string;
@@ -457,6 +470,7 @@ export interface PrintReceiptInput {
   taxLabel: string;
   printerName?: string;
   zatcaQrCode?: string;
+  logoEscPos?: string;
 }
 
 export function printReceipt(invoice: PrintReceiptInput): Promise<{ message: string; jobId?: string }> {

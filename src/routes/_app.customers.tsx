@@ -20,6 +20,7 @@ import { StatusBadge } from "@/components/module-placeholder";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
 import { isValidContactPersonName, sanitizeNameInput, CONTACT_PERSON_MAX_LENGTH } from "@/lib/validation";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/customers")({ component: Customers });
 
@@ -557,12 +558,20 @@ function Customers() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "Total Customers", value: filtered.length, icon: <ShoppingBag className="h-4 w-4" /> },
+          { label: "Total Customers", value: filtered.length, icon: <ShoppingBag className="h-4 w-4" />, onClick: () => setTierFilter("all"), active: tierFilter === "all" },
           { label: "Total Spend", value: <><SARIcon />{totalSpend.toLocaleString("en-SA", { maximumFractionDigits: 0 })}</>, icon: <TrendingUp className="h-4 w-4" /> },
           { label: "Loyalty Points", value: totalLoyalty.toLocaleString(), icon: <Star className="h-4 w-4" /> },
-          { label: "Platinum Members", value: platinum, icon: <Star className="h-4 w-4 text-purple-500" /> },
+          { label: "Platinum Members", value: platinum, icon: <Star className="h-4 w-4 text-purple-500" />, onClick: () => setTierFilter(v => v === "platinum" ? "all" : "platinum"), active: tierFilter === "platinum" },
         ].map(s => (
-          <Card key={s.label} className="p-4 border-border/60 shadow-card">
+          <Card
+            key={s.label}
+            onClick={s.onClick}
+            className={cn(
+              "p-4 border-border/60 shadow-card",
+              s.onClick && "cursor-pointer transition-all hover:ring-2 hover:ring-primary/30",
+              s.active && "ring-2 ring-primary",
+            )}
+          >
             <div className="flex items-center gap-2 text-muted-foreground mb-1">{s.icon}<span className="text-xs">{s.label}</span></div>
             <p className="text-xl font-bold tabular-nums">{s.value}</p>
           </Card>

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check } from "lucide-react";
+import { FileText, Package, DollarSign, CheckCircle, Truck, Plus, Trash2, Eye, CreditCard, Loader2, ShoppingCart, AlertCircle, X, ChevronDown, Check, Download } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { api, excludeDisabledBranches, type PurchaseOrder, type PurchaseOrderItem, type Supplier, type Warehouse, type Branch, type Product, type SupplierCreditNote, type StockTransfer, type User } from "@/lib/api";
@@ -22,6 +22,7 @@ import { usePermission } from "@/lib/use-permission";
 import { isValidSaudiPhone, isValidSaudiCr, isValidSaudiVat, sanitizePhoneInput, sanitizeDigitsInput, PHONE_MAX_LENGTH } from "@/lib/validation";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { cn, localDateStr, uuid } from "@/lib/utils";
+import { downloadBlob } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_app/purchase-orders")({ component: PurchaseOrders });
 
@@ -814,6 +815,7 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
   const [payError, setPayError] = useState("");
   const [raisedDns, setRaisedDns] = useState<Set<string>>(new Set());
   const [raisingDn, setRaisingDn] = useState<string | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   // Reset raised-DN tracking and the warehouse switcher when opening a different PO/batch
   useEffect(() => { if (!open) setRaisedDns(new Set()); setActiveIdx(0); }, [open, po?.id]);
@@ -825,6 +827,16 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
   // status all act on this specific PO, since a batch order is really N independent per-warehouse
   // POs that each progress (and get received) on their own schedule.
   const activePo = (isBatch ? batchGroup[activeIdx] : null) ?? po;
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      const blob = await api.getPurchaseOrderPdf(activePo.id);
+      downloadBlob(blob, `${activePo.poNumber}.pdf`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to download PDF");
+    } finally { setDownloadingPdf(false); }
+  };
 
   const handleRaiseShortage = async (item: PurchaseOrderItem) => {
     const key = item.productId;
@@ -868,6 +880,9 @@ function ViewPOSheet({ open, onClose, po, batchGroup = [], onRefresh }: {
               {activePo.poNumber}
               <StatusBadge status={activePo.status} />
               <PayBadge status={activePo.paymentStatus} />
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1 ms-auto me-6" disabled={downloadingPdf} onClick={handleDownloadPdf}>
+                {downloadingPdf ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} PDF
+              </Button>
             </SheetTitle>
           </SheetHeader>
 
@@ -1125,6 +1140,8 @@ function PurchaseOrders() {
   const [approvedBy, setApprovedBy] = useState<string[]>([]);
   const [branchIds, setBranchIds] = useState<string[]>([]);
   const [warehouseIds, setWarehouseIds] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState("pos");
+  const [poQuickFilter, setPoQuickFilter] = useState<"outstanding" | "paidThisMonth" | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
@@ -1170,13 +1187,18 @@ function PurchaseOrders() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
+    const now = new Date();
     return pos.filter(p => {
       const matchQ = !q || p.poNumber.toLowerCase().includes(q) || (p.supplier?.name ?? "").toLowerCase().includes(q);
       const mdf = !dateFrom || (!!p.createdAt && p.createdAt >= dateFrom);
       const mdt = !dateTo || (!!p.createdAt && p.createdAt <= dateTo + "T23:59:59");
-      return matchQ && mdf && mdt;
+      const mqf = !poQuickFilter
+        || (poQuickFilter === "outstanding" && p.paymentStatus !== "paid" && p.status !== "cancelled")
+        || (poQuickFilter === "paidThisMonth" && p.paymentStatus === "paid"
+          && new Date(p.updatedAt).getMonth() === now.getMonth() && new Date(p.updatedAt).getFullYear() === now.getFullYear());
+      return matchQ && mdf && mdt && mqf;
     });
-  }, [pos, search, dateFrom, dateTo]);
+  }, [pos, search, dateFrom, dateTo, poQuickFilter]);
 
   const filteredSupplierTransfers = useMemo(() => {
     const q = search.toLowerCase();
@@ -1265,6 +1287,17 @@ function PurchaseOrders() {
     } finally { setActionLoading(null); }
   };
 
+  const [downloadingPoId, setDownloadingPoId] = useState<string | null>(null);
+  const handleDownloadPdf = async (po: PurchaseOrder) => {
+    setDownloadingPoId(po.id);
+    try {
+      const blob = await api.getPurchaseOrderPdf(po.id);
+      downloadBlob(blob, `${po.poNumber}.pdf`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to download PDF");
+    } finally { setDownloadingPoId(null); }
+  };
+
   const refreshView = () => {
     load();
     if (!viewPO) return;
@@ -1305,14 +1338,33 @@ function PurchaseOrders() {
     >
       {/* Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard label="Total POs"            value={String(totalPOs)}                          icon={ShoppingCart} accent="primary" />
-        <MetricCard label="Outstanding Payables" value={<><SARIcon />{" "}{fmt(outstandingPayables)}</>}         icon={DollarSign}   accent="warning" />
-        <MetricCard label="Supplier Credits"     value={<><SARIcon />{" "}{fmt(supplierCredits)}</>}             icon={FileText}     accent="primary" />
-        <MetricCard label="Paid This Month"      value={<><SARIcon />{" "}{fmt(paidThisMonth)}</>}               icon={CheckCircle}  accent="success" />
+        <MetricCard
+          label="Total POs" value={String(totalPOs)} icon={ShoppingCart} accent="primary"
+          onClick={() => {
+            setActiveTab("pos"); setSearch(""); setDateFrom(""); setDateTo("");
+            setCreatedBy([]); setApprovedBy([]); setBranchIds([]); setWarehouseIds([]); setPoQuickFilter(null);
+          }}
+          active={activeTab === "pos" && poQuickFilter === null}
+        />
+        <MetricCard
+          label="Outstanding Payables" value={<><SARIcon />{" "}{fmt(outstandingPayables)}</>} icon={DollarSign} accent="warning"
+          onClick={() => { setActiveTab("pos"); setPoQuickFilter(v => v === "outstanding" ? null : "outstanding"); }}
+          active={activeTab === "pos" && poQuickFilter === "outstanding"}
+        />
+        <MetricCard
+          label="Supplier Credits" value={<><SARIcon />{" "}{fmt(supplierCredits)}</>} icon={FileText} accent="primary"
+          onClick={() => setActiveTab("returns")}
+          active={activeTab === "returns"}
+        />
+        <MetricCard
+          label="Paid This Month" value={<><SARIcon />{" "}{fmt(paidThisMonth)}</>} icon={CheckCircle} accent="success"
+          onClick={() => { setActiveTab("pos"); setPoQuickFilter(v => v === "paidThisMonth" ? null : "paidThisMonth"); }}
+          active={activeTab === "pos" && poQuickFilter === "paidThisMonth"}
+        />
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="pos">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="flex items-center justify-between flex-wrap gap-2">
           <TabsList>
             <TabsTrigger value="pos" className="gap-1.5"><FileText className="h-3.5 w-3.5" />Purchase Orders</TabsTrigger>
@@ -1437,6 +1489,9 @@ function PurchaseOrders() {
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setViewPO(po); setViewPOGroup(group); }} title="View"><Eye className="h-3.5 w-3.5" /></Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownloadPdf(po)} disabled={downloadingPoId === po.id} title="Download PDF">
+                              {downloadingPoId === po.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                            </Button>
                             {group.some(p => AWAITING_APPROVAL_STATUSES.has(p.status)) && canApprove && (
                               <div className="flex gap-1">
                                 <Button size="sm" className="h-7 text-xs px-2 gradient-primary text-primary-foreground border-0" onClick={() => handleApprove(group)} disabled={isApproving || isRejecting}>

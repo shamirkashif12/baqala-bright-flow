@@ -1,9 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +16,7 @@ import { api, type Branch, type TenantPlanInfo } from "@/lib/api";
 import { toast } from "sonner";
 import { usePermission } from "@/lib/use-permission";
 import { isValidSaudiPhone, sanitizePhoneInput, PHONE_MAX_LENGTH } from "@/lib/validation";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/branches")({ component: Branches });
 
@@ -278,6 +279,7 @@ function Branches() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState("");
+  const [activeOnly, setActiveOnly] = useState(false);
   const [viewBranch, setViewBranch] = useState<Branch | null>(null);
   const [editBranch, setEditBranch] = useState<Branch | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -317,10 +319,11 @@ function Branches() {
   };
 
   const filtered = branches.filter(b =>
-    !q
-    || b.name.toLowerCase().includes(q.toLowerCase())
-    || b.branchCode.toLowerCase().includes(q.toLowerCase())
-    || (b.city ?? "").toLowerCase().includes(q.toLowerCase())
+    (!activeOnly || b.status === "active")
+    && (!q
+      || b.name.toLowerCase().includes(q.toLowerCase())
+      || b.branchCode.toLowerCase().includes(q.toLowerCase())
+      || (b.city ?? "").toLowerCase().includes(q.toLowerCase()))
   );
 
   const maxBranches = planInfo?.plan.limits.maxBranches ?? null;
@@ -347,7 +350,13 @@ function Branches() {
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Summary strip */}
       <div className="grid grid-cols-3 gap-3">
-        <Card className="p-3 border-border/60 flex items-center gap-3">
+        <Card
+          onClick={() => setActiveOnly(v => !v)}
+          className={cn(
+            "p-3 border-border/60 flex items-center gap-3 cursor-pointer transition-all hover:ring-2 hover:ring-primary/30",
+            activeOnly && "ring-2 ring-primary",
+          )}
+        >
           <div className="h-9 w-9 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
             <Building2 className="h-4 w-4 text-green-600" />
           </div>
@@ -456,6 +465,7 @@ function Branches() {
                 {/* Actions */}
                 <div className="flex gap-2 mt-3">
                   <Button variant="outline" size="sm" className="flex-1" onClick={() => setViewBranch(b)}>View</Button>
+                  <Link to="/branches/$branchId" params={{ branchId: b.id }} search={{ tab: "ledger" }} className={buttonVariants({ variant: "outline", size: "sm" }) + " flex-1"}>Ledger</Link>
                   {canEdit && (
                     <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0"
                       onClick={() => setEditBranch(b)}>Manage</Button>

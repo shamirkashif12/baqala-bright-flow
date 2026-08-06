@@ -212,6 +212,26 @@ public class CompanyProfile
     [MaxLength(20), Column("vat_number")]
     public string? VatNumber { get; set; }
 
+    // Receipt logo. LogoDataUrl is a compressed preview data URL for on-screen invoice dialogs;
+    // LogoEscPosBase64 is the SAME image pre-rasterized to monochrome ESC/POS "GS v 0" raster
+    // command bytes (base64) at upload time on the client — spliced verbatim into the byte stream
+    // by both print paths (local print-agent + QZ Tray) so neither needs an image library at
+    // print time. The two show/hide flags key off Order.Source ("pos" = staff receipt; "online"/
+    // "kiosk" = customer-facing slip), matching the user's own "Customer device online order or
+    // slip" framing rather than a per-branch setting — this is company-wide identity, same as
+    // LegalName/CrNumber/VatNumber above.
+    [Column("logo_data_url", TypeName = "longtext")]
+    public string? LogoDataUrl { get; set; }
+
+    [Column("logo_esc_pos_base64", TypeName = "longtext")]
+    public string? LogoEscPosBase64 { get; set; }
+
+    [Column("show_logo_on_staff_receipt")]
+    public bool ShowLogoOnStaffReceipt { get; set; } = false;
+
+    [Column("show_logo_on_customer_slip")]
+    public bool ShowLogoOnCustomerSlip { get; set; } = false;
+
     [Column("updated_by")]
     public Guid? UpdatedBy { get; set; }
 

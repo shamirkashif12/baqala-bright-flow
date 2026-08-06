@@ -21,7 +21,7 @@ import { PrinterSetupDialog } from "../components/PrinterSetup";
 export default function ScanScreen() {
   const navigate = useNavigate();
   const cart = useCart();
-  const { branchId, branchName, sellerName, vatNumber } = useSession();
+  const { branchId, branchName, sellerName, vatNumber, logoDataUrl, logoEscPos } = useSession();
   const [query, setQuery] = useState("");
   const [couponCode, setCouponCode] = useState("");
   const [message, setMessage] = useState<{ text: string; tone: "error" | "info" } | null>(null);
@@ -244,6 +244,8 @@ export default function ScanScreen() {
       vatNumber: vatNumber ?? "",
       sellerName: sellerName || branchName || "",
       zatcaQrCode: order.zatcaQrCode,
+      logoDataUrl: logoDataUrl || undefined,
+      logoEscPos: logoEscPos || undefined,
     });
   }
 

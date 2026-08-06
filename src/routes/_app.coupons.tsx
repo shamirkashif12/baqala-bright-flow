@@ -208,6 +208,7 @@ function CouponsTab() {
   const [editItem, setEditItem] = useState<Coupon | null>(null);
   const [form, setForm] = useState<CouponForm>(emptyCoupon);
   const [saving, setSaving] = useState(false);
+  const [activeOnly, setActiveOnly] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -279,6 +280,7 @@ function CouponsTab() {
   const setS = (k: keyof CouponForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
 
   const active = coupons.filter(c => (c.effectiveStatus ?? c.status) === "active").length;
+  const visibleCoupons = activeOnly ? coupons.filter(c => (c.effectiveStatus ?? c.status) === "active") : coupons;
 
   return (
     <div className="space-y-4">
@@ -292,8 +294,8 @@ function CouponsTab() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard label="Active Coupons" value={String(active)} icon={TicketCheck} accent="primary" />
-        <MetricCard label="Total Coupons" value={String(coupons.length)} icon={Tag} accent="default" />
+        <MetricCard label="Active Coupons" value={String(active)} icon={TicketCheck} accent="primary" onClick={() => setActiveOnly(v => !v)} active={activeOnly} />
+        <MetricCard label="Total Coupons" value={String(coupons.length)} icon={Tag} accent="default" onClick={() => setActiveOnly(false)} active={!activeOnly} />
       </div>
 
       {loading ? (
@@ -315,7 +317,7 @@ function CouponsTab() {
                 </tr>
               </thead>
               <tbody>
-                {coupons.map(c => (
+                {visibleCoupons.map(c => (
                   <tr key={c.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
                     <td className="px-4 py-3 font-medium">{c.name}</td>
                     <td className="px-4 py-3">
@@ -340,7 +342,7 @@ function CouponsTab() {
                     </td>
                   </tr>
                 ))}
-                {coupons.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-muted-foreground text-sm">No coupons yet.</td></tr>}
+                {visibleCoupons.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-muted-foreground text-sm">{coupons.length === 0 ? "No coupons yet." : "No active coupons."}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -469,6 +471,7 @@ function DiscountsTab() {
   const [editItem, setEditItem] = useState<Discount | null>(null);
   const [form, setForm] = useState<DiscountForm>(emptyDiscount);
   const [saving, setSaving] = useState(false);
+  const [activeOnly, setActiveOnly] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -546,6 +549,7 @@ function DiscountsTab() {
   const setS = (k: keyof DiscountForm) => (v: string) => setForm(p => ({ ...p, [k]: v }));
 
   const active = discounts.filter(d => d.isActive).length;
+  const visibleDiscounts = activeOnly ? discounts.filter(d => d.isActive) : discounts;
 
   const appliesToLabel = (d: Discount) => {
     if (d.appliesTo === "product") return d.product?.name ?? "Specific product";
@@ -566,8 +570,8 @@ function DiscountsTab() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard label="Active Discounts" value={String(active)} icon={PercentCircle} accent="primary" />
-        <MetricCard label="Total Discounts" value={String(discounts.length)} icon={PercentCircle} accent="default" />
+        <MetricCard label="Active Discounts" value={String(active)} icon={PercentCircle} accent="primary" onClick={() => setActiveOnly(v => !v)} active={activeOnly} />
+        <MetricCard label="Total Discounts" value={String(discounts.length)} icon={PercentCircle} accent="default" onClick={() => setActiveOnly(false)} active={!activeOnly} />
       </div>
 
       {loading ? (
@@ -586,7 +590,7 @@ function DiscountsTab() {
                 </tr>
               </thead>
               <tbody>
-                {discounts.map((d, i) => (
+                {visibleDiscounts.map((d, i) => (
                   <tr key={d.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
                     <td className="px-4 py-3">
                       <p className="font-medium">{d.name}</p>
@@ -606,7 +610,7 @@ function DiscountsTab() {
                     </td>
                   </tr>
                 ))}
-                {discounts.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-muted-foreground text-sm">No discounts yet.</td></tr>}
+                {visibleDiscounts.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-muted-foreground text-sm">{discounts.length === 0 ? "No discounts yet." : "No active discounts."}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -765,6 +769,7 @@ function OffersTab() {
   // Combo: list of selected product IDs
   const [comboIds, setComboIds] = useState<string[]>([]);
   const [comboPickId, setComboPickId] = useState("");
+  const [activeOnly, setActiveOnly] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -878,6 +883,7 @@ function OffersTab() {
   };
 
   const active = offers.filter(o => o.isActive).length;
+  const visibleOffers = activeOnly ? offers.filter(o => o.isActive) : offers;
   const fmtDate = (s: string) => new Date(s).toLocaleDateString("en-SA", { day: "2-digit", month: "short", year: "2-digit" });
 
   return (
@@ -892,8 +898,8 @@ function OffersTab() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard label="Live Offers" value={String(active)} icon={Gift} accent="primary" />
-        <MetricCard label="Total Offers" value={String(offers.length)} icon={Zap} accent="default" />
+        <MetricCard label="Live Offers" value={String(active)} icon={Gift} accent="primary" onClick={() => setActiveOnly(v => !v)} active={activeOnly} />
+        <MetricCard label="Total Offers" value={String(offers.length)} icon={Zap} accent="default" onClick={() => setActiveOnly(false)} active={!activeOnly} />
       </div>
 
       {loading ? (
@@ -915,7 +921,7 @@ function OffersTab() {
                 </tr>
               </thead>
               <tbody>
-                {offers.map((o, i) => (
+                {visibleOffers.map((o, i) => (
                   <tr key={o.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
                     <td className="px-4 py-3">
                       <p className="font-medium">{o.name}</p>
@@ -940,7 +946,7 @@ function OffersTab() {
                     </td>
                   </tr>
                 ))}
-                {offers.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-muted-foreground text-sm">No offers yet.</td></tr>}
+                {visibleOffers.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-muted-foreground text-sm">{offers.length === 0 ? "No offers yet." : "No live offers."}</td></tr>}
               </tbody>
             </table>
           </div>

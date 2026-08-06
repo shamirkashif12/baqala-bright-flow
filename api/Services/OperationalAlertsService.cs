@@ -53,11 +53,10 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
         var notifications = scope.ServiceProvider.GetRequiredService<INotificationService>();
-        var stockMovements = scope.ServiceProvider.GetRequiredService<IStockMovementService>();
         var audit = scope.ServiceProvider.GetRequiredService<IAuditService>();
 
         await ScanStockLevelsAsync(db, notifications, ct);
-        await ScanExpiringBatchesAsync(db, notifications, stockMovements, ct);
+        await ScanExpiringBatchesAsync(db, notifications, ct);
         await ScanUnrecalledExpiredBatchesAsync(db, notifications, ct);
         await SendDailyExpiryDigestAsync(db, notifications, ct);
         await ScanOfflineTerminalsAsync(db, notifications, ct);
@@ -90,20 +89,18 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
         var horizon = now.AddDays(NearExpiryDays);
         var todayStart = now.Date;
 
-        // Note the RemainingQuantity filter deliberately does NOT apply to the expired side.
-        // ScanExpiringBatchesAsync runs earlier in this same scan and writes an expired batch down
-        // to RemainingQuantity = 0, so filtering on > 0 across the board would make the "expired"
-        // half of this digest permanently empty — the summary would silently only ever report
-        // near-expiry. An expired batch is counted if it was written off today, which is exactly
-        // the thing the morning summary exists to report.
+        // Expired batches keep their RemainingQuantity (ScanExpiringBatchesAsync no longer
+        // zeroes it on transition — see that method), so both halves of this digest use the
+        // same RemainingQuantity > 0 filter: an expired batch keeps showing up here every
+        // morning until someone Discards or Reclaims it, not just on the day it expired.
         var atRisk = await db.InventoryBatches
             .Include(b => b.Product)
-            .Where(b => b.ExpiryDate != null && b.ExpiryDate <= horizon &&
+            .Where(b => b.ExpiryDate != null && b.ExpiryDate <= horizon && b.RemainingQuantity > 0 &&
                         (
                             // Near expiry: still sellable, still on the shelf.
-                            (b.Status != "consumed" && b.Status != "expired" && b.RemainingQuantity > 0) ||
-                            // Expired: written off (or awaiting write-off) today.
-                            (b.Status == "expired" && b.UpdatedAt >= todayStart)
+                            (b.Status != "consumed" && b.Status != "expired") ||
+                            // Expired: awaiting Discard/Reclaim.
+                            b.Status == "expired"
                         ))
             .ToListAsync(ct);
 
@@ -162,6 +159,11 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
             .Include(s => s.Product)
             .Where(s => s.Product != null && s.Product.Status == "active" && s.Quantity <= s.ReorderLevel)
             .ToListAsync(ct);
+        if (lowOrOutStocks.Count == 0) return;
+
+        // InventoryStock has no Branch navigation property — one small dictionary lookup for the
+        // whole sweep (instead of a per-row query) names the branch in every message.
+        var branchNames = await db.Branches.ToDictionaryAsync(b => b.Id, b => b.Name, ct);
 
         foreach (var stock in lowOrOutStocks)
         {
@@ -172,9 +174,10 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
                 n.Type == type && n.EntityId == stock.ProductId && n.BranchId == stock.BranchId && !n.IsRead, ct);
             if (alreadyNotified) continue;
 
+            var branchSuffix = branchNames.TryGetValue(stock.BranchId, out var bn) ? $" at {bn}" : "";
             var message = isOutOfStock
-                ? $"Out of stock: {stock.Product!.Name}"
-                : $"Low stock: {stock.Product!.Name} only {stock.Quantity:F0} units left";
+                ? $"Out of stock: {stock.Product!.Name}{branchSuffix}"
+                : $"Low stock: {stock.Product!.Name} only {stock.Quantity:F0} units left{branchSuffix}";
 
             await notifications.NotifyRoleAsync(["Manager", "Admin"], stock.BranchId,
                 "Inventory", type, type, message,
@@ -183,90 +186,46 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
         }
     }
 
-    // Previously this only sent notifications and never touched the batch itself — Status stayed
-    // "active" forever, RemainingQuantity was never written off, and the aggregate stock
-    // (InventoryStock/WarehouseStock) kept counting expired units as sellable on-hand stock. Now
-    // it actually transitions the batch (active → near_expiry → expired), and on the transition
-    // INTO expired, writes off the batch's remaining quantity: decrements the aggregate stock,
-    // zeroes the batch, and logs an InventoryAdjustment audit row (AdjustmentType "expired") — that
-    // adjustment log, plus the Batches & Expiry page filtered to status=expired, IS the "expiry
-    // table" the write-off lands in; no separate table needed.
-    private async Task ScanExpiringBatchesAsync(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, CancellationToken ct)
+    // Transitions the batch (active → near_expiry → expired) and fires the matching alert.
+    // Deliberately does NOT write off the batch's remaining quantity on the transition into
+    // expired — that used to happen here automatically (decrementing aggregate stock, zeroing
+    // RemainingQuantity, logging an InventoryAdjustment), which pre-empted the manual
+    // Discard/Reclaim flow on the Batches & Expiry page: by the time a person looked at an
+    // "Expired" row, RemainingQuantity was already 0 and there was nothing left to action.
+    // Now expiry only flips Status (which already blocks sale — OrdersController checks
+    // ExpiryDate/Status directly, not RemainingQuantity) and RemainingQuantity stays real until
+    // a person actually Discards (wastage, maker-checker approved — InventoryController) or
+    // Reclaims (return-to-supplier) it.
+    private async Task ScanExpiringBatchesAsync(BaqalaDbContext db, INotificationService notifications, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
         var horizon = now.AddDays(NearExpiryDays);
 
-        // Status == "expired" is included here too, not just active/near_expiry: a batch can
-        // reach "expired" status with RemainingQuantity still > 0 through a path other than this
-        // scan's own write-off transition below (e.g. seeded/imported data whose Status was set
-        // directly) — if we only matched non-expired statuses, that batch would be invisible to
-        // this query forever and its leftover quantity would never be reconciled out of on-hand.
-        // RemainingQuantity > 0 is what keeps this idempotent (a processed batch is zeroed below),
-        // not the Status filter.
+        // Status == "expired" is included here too, not just active/near_expiry, so a batch that's
+        // already expired but still sitting with real stock (nobody has Discarded/Reclaimed it yet)
+        // keeps getting picked up on every sweep — the Status flip below only fires once, but the
+        // batch itself needs to keep surfacing until it's actually actioned. RemainingQuantity > 0
+        // is what makes this idempotent-in-effect: once a person zeroes it out via Discard or
+        // Reclaim, the batch drops out of this query on its own.
         var batches = await db.InventoryBatches
             .Include(b => b.Product)
             .Where(b => b.Status != "consumed" && b.RemainingQuantity > 0
                 && b.ExpiryDate != null && b.ExpiryDate <= horizon)
             .ToListAsync(ct);
 
+        // Named once for the whole sweep — a batch is branch- or warehouse-held, never both, so
+        // exactly one of these two lookups resolves per batch below.
+        var branchNames = batches.Count > 0 ? await db.Branches.ToDictionaryAsync(b => b.Id, b => b.Name, ct) : new Dictionary<Guid, string>();
+        var warehouseNames = batches.Count > 0 ? await db.Warehouses.ToDictionaryAsync(w => w.Id, w => w.Name, ct) : new Dictionary<Guid, string>();
+
         foreach (var batch in batches)
         {
             var isExpired = batch.ExpiryDate!.Value.Date < now.Date;
-            var writtenOff = batch.RemainingQuantity;
 
             if (isExpired)
             {
-                // On-hand either side of the write-off, for the audit trail. Read from the stock row
-                // rather than derived from writtenOff: the removal clamps at zero, so a location
-                // already short moves by less than the batch's remaining quantity.
-                decimal? quantityBefore = null, quantityAfter = null;
-
-                if (batch.BranchId.HasValue)
-                {
-                    var stock = await db.InventoryStocks.FirstOrDefaultAsync(s => s.BranchId == batch.BranchId && s.ProductId == batch.ProductId, ct);
-                    if (stock != null)
-                    {
-                        quantityBefore = stock.Quantity;
-                        stock.Quantity = Math.Max(0, stock.Quantity - writtenOff);
-                        quantityAfter = stock.Quantity;
-                        stock.LastUpdated = stock.UpdatedAt = now;
-                    }
-                }
-                else if (batch.WarehouseId.HasValue)
-                {
-                    var stock = await db.WarehouseStocks.FirstOrDefaultAsync(s => s.WarehouseId == batch.WarehouseId && s.ProductId == batch.ProductId, ct);
-                    if (stock != null)
-                    {
-                        quantityBefore = stock.Quantity;
-                        stock.Quantity = Math.Max(0, stock.Quantity - writtenOff);
-                        quantityAfter = stock.Quantity;
-                        stock.LastUpdated = stock.UpdatedAt = now;
-                    }
-                }
-
-                db.InventoryAdjustments.Add(new Models.InventoryAdjustment
-                {
-                    Id = Guid.NewGuid(),
-                    ProductId = batch.ProductId,
-                    BranchId = batch.BranchId,
-                    WarehouseId = batch.WarehouseId,
-                    BatchId = batch.Id,
-                    AdjustmentType = "expired",
-                    Quantity = writtenOff,
-                    Reason = "Automatic write-off: batch expired",
-                    AdjustedBy = null,
-                    CreatedAt = now,
-                });
-
                 batch.Status = "expired";
-                batch.RemainingQuantity = 0;
                 batch.UpdatedAt = now;
-
-                stockMovements.Record(
-                    batch.ProductId, batch.BranchId, batch.WarehouseId, "expired", -writtenOff,
-                    batchId: batch.Id, referenceType: "batch_expiry", referenceId: batch.Id,
-                    notes: "Automatic write-off: batch expired",
-                    quantityBefore: quantityBefore, quantityAfter: quantityAfter);
 
                 await TryAutoRecallAsync(db, notifications, batch, now, ct);
             }
@@ -281,9 +240,13 @@ public class OperationalAlertsService(IServiceScopeFactory scopeFactory, ILogger
                 n.Type == type && n.EntityId == batch.ProductId && n.BranchId == batch.BranchId && !n.IsRead, ct);
             if (!alreadyNotified)
             {
+                var locationName =
+                    (batch.BranchId.HasValue && branchNames.TryGetValue(batch.BranchId.Value, out var bn)) ? bn :
+                    (batch.WarehouseId.HasValue && warehouseNames.TryGetValue(batch.WarehouseId.Value, out var wn)) ? wn : null;
+                var locationSuffix = locationName is null ? "" : $" at {locationName}";
                 var message = isExpired
-                    ? $"Expired item detected: {batch.Product?.Name} — {writtenOff} unit(s) written off"
-                    : $"Expiry alert: {batch.Product?.Name} expires in {Math.Max(0, (int)(batch.ExpiryDate!.Value.Date - now.Date).TotalDays)} days";
+                    ? $"Expired item detected: {batch.Product?.Name}{locationSuffix} — {batch.RemainingQuantity} unit(s) awaiting write-off"
+                    : $"Expiry alert: {batch.Product?.Name}{locationSuffix} expires in {Math.Max(0, (int)(batch.ExpiryDate!.Value.Date - now.Date).TotalDays)} days";
 
                 await notifications.NotifyRoleAsync(["Manager", "Admin"], batch.BranchId,
                     "Expiry / Perishable", type, type, message,

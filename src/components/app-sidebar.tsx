@@ -152,16 +152,16 @@ const navGroups: NavGroup[] = [
       // { title: "MPOS App Preview",    url: "/mpos-app",      icon: Smartphone,
       //   roles: ["tenant_admin"] },
       { title: "Orders",              url: "/orders",        icon: ShoppingBag,    module: "Orders" },
+      { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
+      { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
+      { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower", planFeature: "control_tower_approval_centre" },
+      { title: "Approval Centre",     url: "/reports/approval-center", icon: Gavel, module: "Reports", planFeature: "control_tower_approval_centre" },
       // No longer a children/dropdown item — it was the only sidebar entry using that nested
       // pattern, its children bypassed canSee's permission gating entirely (NavItem.children has
       // no module/roles field), and both children pointed at routes that already have their own
       // standalone Finance-group entries below ("Coupons, Discounts & Offers", "Loyalty Program"),
       // so every role saw each of those two pages listed twice under two different labels.
-      { title: "Customers & Loyalty", url: "/customers",     icon: Users,          module: "Customers" },
-      { title: "Cashier Workspace",   url: "/cashier",       icon: Briefcase,      module: "Cashier Workspace" },
-      { title: "Cashier Shift",       url: "/cashier-shift", icon: ClipboardCheck, module: "Cashier Shifts", blockRoles: ["finance_user", "marketing_user"] },
-      { title: "Control Tower",       url: "/control-tower", icon: Radar,          module: "Control Tower", planFeature: "control_tower_approval_centre" },
-      { title: "Approval Centre",     url: "/reports/approval-center", icon: Gavel, module: "Reports", planFeature: "control_tower_approval_centre" },
+      { title: "Customers",           url: "/customers",     icon: Users,          module: "Customers" },
     ],
   },
   {
@@ -262,10 +262,10 @@ const navGroups: NavGroup[] = [
       { title: "ZATCA Invoices",         url: "/zatca",          icon: ReceiptText, module: "Compliance", planFeature: "zatca_compliance" },
       { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2,  module: "Compliance", planFeature: "zatca_compliance" },
       { title: "Compliance",             url: "/compliance",     icon: ShieldCheck, module: "Compliance", planFeature: "zatca_compliance" },
-      { title: "POS Settings",           url: "/pos-settings",   icon: Sliders,     module: "Settings" },
+      { title: "General Settings",       url: "/pos-settings",   icon: Sliders,     module: "Settings" },
       { title: "Audit Logs",             url: "/audit-logs",     icon: History,     module: "Audit Logs" },
       { title: "Plans & Pricing",        url: "/plans",          icon: Crown,       roles: ["tenant_admin"] },
-      { title: "Settings",               url: "/settings",       icon: Settings,    module: "Settings" },
+      { title: "Business & Security Settings", url: "/settings", icon: Settings,    module: "Settings" },
     ],
   },
 ];
@@ -416,7 +416,10 @@ export function AppSidebar() {
                 onOpenChange={(v) => setOpenGroups((s) => ({ ...s, [group.label]: v }))}
               >
                 <CollapsibleTrigger asChild>
-                  <button className="w-full flex items-center justify-between px-3 py-2 text-[13px] font-bold uppercase tracking-[0.08em] text-sidebar-foreground/90 hover:text-sidebar-foreground transition-colors">
+                  <button
+                    data-tour={`sidebar-group-${group.label}`}
+                    className="w-full flex items-center justify-between px-3 py-2 text-[13px] font-bold uppercase tracking-[0.08em] text-sidebar-foreground/90 hover:text-sidebar-foreground transition-colors"
+                  >
                     <span>{t(group.label)}</span>
                     <ChevronDown
                       className={`h-4 w-4 transition-transform ${open ? "" : "-rotate-90"}`}

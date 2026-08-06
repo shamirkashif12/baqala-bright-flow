@@ -33,9 +33,12 @@ public class StockAlertService(BaqalaDbContext db, INotificationService notifica
             n.Type == type && n.EntityId == stock.ProductId && n.BranchId == stock.BranchId && !n.IsRead, ct);
         if (alreadyNotified) return;
 
+        // InventoryStock has no Branch navigation property — a small extra lookup names the
+        // branch in the message itself so the alert is useful without opening the item.
+        var branchName = await db.Branches.Where(b => b.Id == stock.BranchId).Select(b => b.Name).FirstOrDefaultAsync(ct);
         var message = isOutOfStock
-            ? $"Out of stock: {stock.Product.Name}"
-            : $"Low stock: {stock.Product.Name} only {stock.Quantity:F0} units left";
+            ? $"Out of stock: {stock.Product.Name}{(branchName is null ? "" : $" at {branchName}")}"
+            : $"Low stock: {stock.Product.Name} only {stock.Quantity:F0} units left{(branchName is null ? "" : $" at {branchName}")}";
 
         await notifications.NotifyRoleAsync(["Manager", "Admin"], stock.BranchId,
             "Inventory", type, type, message,

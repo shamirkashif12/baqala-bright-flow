@@ -9,7 +9,9 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotificationService notifications) : ControllerBase
+public class ShiftsController(
+    BaqalaDbContext db, IAuditService audit, INotificationService notifications,
+    IApprovalNotificationService approvals) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
@@ -401,11 +403,15 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
                 $"Cash variance detected: SAR {varianceAbs:F2}",
                 severity: "warning", entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId,
                 terminalId: shift.TerminalId, triggeredBy: actorId);
-            await notifications.NotifyRoleAsync(["Manager", "Admin"], shift.BranchId,
-                "Cashier Shift", "Cash Variance Alert", "Cash Variance Alert",
-                $"Cash variance detected: SAR {varianceAbs:F2} — pending manager approval",
-                severity: "warning", entityType: "CashierShift", entityId: shift.Id,
-                terminalId: shift.TerminalId, triggeredBy: actorId);
+            // Resolved from who holds Cashier Shifts:Approve rather than the old ["Manager","Admin"]
+            // role-name list, so a tenant that delegates variance sign-off to a custom role (a
+            // Supervisor, a Head Cashier) actually gets told. Also names the cashier and branch.
+            await approvals.NotifyApproversAsync(
+                module: "Cashier Shifts", branchId: shift.BranchId, requestedBy: shift.CashierId,
+                category: "Cashier Shift",
+                type: "Cash Variance Alert", title: "Cash Variance Alert",
+                message: $"Cash variance of SAR {varianceAbs:F2} pending approval",
+                entityType: "CashierShift", entityId: shift.Id, terminalId: shift.TerminalId);
         }
 
         return Ok(shift);
@@ -433,6 +439,15 @@ public class ShiftsController(BaqalaDbContext db, IAuditService audit, INotifica
             branchId: shift.BranchId,
             details: $"Variance SAR {shift.Variance:F2} reviewed and cleared.",
             severity: "warning");
+
+        // The disputed path already told the cashier; a clean clearance didn't, so the one outcome
+        // they most want to hear ("your drawer is settled") was the silent one.
+        await approvals.NotifyRequesterAsync(
+            requestedBy: shift.CashierId, decidedBy: shift.ApprovedBy, approved: true,
+            category: "Cashier Shift",
+            subject: $"Cash variance of SAR {shift.Variance:F2}", reason: null,
+            entityType: "CashierShift", entityId: shift.Id, branchId: shift.BranchId,
+            terminalId: shift.TerminalId);
 
         return Ok(shift);
     }

@@ -66,6 +66,8 @@ function ServiceCharges() {
 
   const charges = rules.filter(r => r.ruleType === "custom_fee");
   const activeChargesCount = charges.filter(r => r.status === "active").length;
+  const [activeOnly, setActiveOnly] = useState(false);
+  const visibleCharges = activeOnly ? charges.filter(r => r.status === "active") : charges;
 
   const openCreate = () => { setEditRule(null); setForm({ ...emptyFeeForm, status: "active" }); setFeeDialogOpen(true); };
   const openEdit = (r: TaxFeeRule) => {
@@ -136,8 +138,8 @@ function ServiceCharges() {
     <PageShell title="Service Charges" subtitle="Business-configured surcharges (delivery fee, card surcharge) — not a tax. See Tax, Fees & Tobacco for VAT and tobacco excise.">
       {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Active Service Charges" value={String(activeChargesCount)} icon={Truck} accent="primary" />
-        <MetricCard label="Total Configured" value={String(charges.length)} icon={Receipt} />
+        <MetricCard label="Active Service Charges" value={String(activeChargesCount)} icon={Truck} accent="primary" onClick={() => setActiveOnly(v => !v)} active={activeOnly} />
+        <MetricCard label="Total Configured" value={String(charges.length)} icon={Receipt} onClick={() => setActiveOnly(false)} active={!activeOnly} />
       </div>
 
       <div className="flex justify-between items-center">
@@ -151,10 +153,10 @@ function ServiceCharges() {
         )}
       </div>
 
-      {charges.length === 0 ? (
+      {visibleCharges.length === 0 ? (
         <Card className="p-10 text-center text-muted-foreground">
           <Receipt className="h-8 w-8 mx-auto mb-2 opacity-40" />
-          <p className="text-sm">No service charges yet. Click "+ New Charge" to add one.</p>
+          <p className="text-sm">{charges.length === 0 ? "No service charges yet. Click \"+ New Charge\" to add one." : "No active service charges."}</p>
         </Card>
       ) : (
         <Card className="overflow-hidden">
@@ -172,7 +174,7 @@ function ServiceCharges() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40">
-                {charges.map((r, idx) => {
+                {visibleCharges.map((r, idx) => {
                   const { type, value } = feeTypeDisplay(r);
                   return (
                     <tr key={r.id} className="hover:bg-muted/30">
