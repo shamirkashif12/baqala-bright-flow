@@ -92,6 +92,16 @@ builder.Services.AddScoped<IZatcaService, ZatcaService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
+// ─── SignalR (Customer Display second-screen live mirror) ───────────────────
+// Own PayloadSerializerOptions, separate from AddControllers().AddJsonOptions above — SignalR's
+// JSON hub protocol doesn't inherit MVC's serializer config, so without this the CartUpdated
+// payload would go over the wire as PascalCase while every frontend type (CustomerDisplaySnapshot)
+// expects camelCase, same as every REST response already does.
+builder.Services.AddSignalR().AddJsonProtocol(options =>
+{
+    options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+});
+
 // ─── JWT authentication ──────────────────────────────────────────────────────
 // Populates HttpContext.User from the same bearer token AuthController.GenerateJwt
 // issues, so controllers can read the caller's role/branchId claims. A global
@@ -126,6 +136,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2),
+        };
+        // A browser's WebSocket/SSE handshake can't attach a custom Authorization header, so the
+        // SignalR JS client's accessTokenFactory instead appends the token as an "access_token"
+        // query param on the negotiate/connect requests. Without this event, JwtBearer only ever
+        // looks at the header, so every hub connection would 401 before OnConnectedAsync — this is
+        // the standard ASP.NET Core SignalR+JWT pattern, scoped to /hubs so it doesn't loosen auth
+        // for any normal REST endpoint.
+        options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            },
         };
     });
 builder.Services.AddAuthorization(options =>
@@ -406,5 +432,6 @@ app.Use(async (context, next) =>
 
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<BaqalaPOS.Api.Hubs.CustomerDisplayHub>("/hubs/customer-display");
 
 app.Run();

@@ -104,9 +104,13 @@ public class OnlineOrdersController(
             .GroupBy(i => i.ProductId)
             .ToDictionary(g => g.Key, g => g.Select(i => i.FileUrl).ToList());
 
+        var companyProfile = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId);
+        var logoDataUrl = companyProfile?.ShowLogoOnCustomerSlip == true ? companyProfile.LogoDataUrl : null;
+
         return Ok(new
         {
             branchName = branch.Name,
+            logoDataUrl,
             products = stocks.Select(s =>
             {
                 var line = priceByProduct.GetValueOrDefault(s.ProductId);

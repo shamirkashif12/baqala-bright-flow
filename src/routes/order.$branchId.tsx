@@ -363,6 +363,9 @@ function PublicOrderPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
         <Card className="p-8 text-center max-w-sm space-y-4 shadow-elegant">
+          {catalog.logoDataUrl && (
+            <img src={catalog.logoDataUrl} alt="" className="h-12 mx-auto object-contain" />
+          )}
           <div className="h-16 w-16 rounded-full mx-auto flex items-center justify-center bg-green-100 dark:bg-green-500/10">
             <CheckCircle2 className="h-9 w-9 text-green-600" />
           </div>
@@ -409,8 +412,12 @@ function PublicOrderPage() {
                 <ArrowLeft className="h-4 w-4" />
               </Button>
             )}
-            <div className="h-9 w-9 rounded-lg gradient-primary flex items-center justify-center shrink-0">
-              <Store className="h-4.5 w-4.5 text-primary-foreground" />
+            <div className="h-9 w-9 rounded-lg gradient-primary flex items-center justify-center shrink-0 overflow-hidden">
+              {catalog.logoDataUrl ? (
+                <img src={catalog.logoDataUrl} alt="" className="h-full w-full object-contain bg-background" />
+              ) : (
+                <Store className="h-4.5 w-4.5 text-primary-foreground" />
+              )}
             </div>
             <div className="min-w-0">
               <p className="font-semibold truncate leading-tight">{catalog.branchName}</p>
