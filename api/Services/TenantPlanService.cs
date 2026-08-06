@@ -194,12 +194,42 @@ public class TenantPlanService(BaqalaDbContext db) : ITenantPlanService
         return features.TryGetValue(key, out var enabled) && enabled;
     }
 
+    // The Tenant Admin Dashboard's enabledModules are marketing-style bundle keys
+    // ("grocery-stock-transfers-stocktaking-warehouse-management"), while every gate in this app
+    // (RequirePlanFeature attributes, the sidebar/route-guard planFeature keys) uses internal
+    // snake_case feature keys — with no overlap at all, a fully-enabled Premium tenant still saw
+    // every gated item locked. Expand each known Dashboard bundle into the internal key(s) it
+    // grants. Done at READ time (not when provisioning writes FeaturesJson) so rows already
+    // provisioned with Dashboard keys are fixed without waiting for the next entitlements event.
+    private static readonly Dictionary<string, string[]> DashboardModuleAliases = new()
+    {
+        ["grocery-control-tower-approval-centre"] = ["control_tower_approval_centre"],
+        ["grocery-stock-transfers-stocktaking-warehouse-management"] = ["stocktaking", "warehouse_management"],
+        ["grocery-branch-tier-pricing-batch-tracking-expiry"] = ["batch_tracking", "pricing_promotions"],
+        ["grocery-pricing-discounts-coupons"] = ["pricing_promotions"],
+        ["grocery-purchase-orders-supplier-returns-rts"] = ["purchase_orders", "supplier_returns"],
+        ["grocery-zatca-compliance-invoicing"] = ["zatca_compliance"],
+        ["grocery-full-hr-suite-attendance-shifts-leave-documents-payroll"] = ["employee_shift_management"],
+        ["grocery-kpi-evaluation-business-intelligence"] = ["kpi_bi"],
+        ["grocery-analytics-category-supplier-product-performance"] = ["kpi_bi"],
+        ["grocery-self-service-kiosk"] = ["self_service_kiosk"],
+    };
+
     // A blank FeaturesJson (the seeded/unprovisioned state) means "no features set" — same as
     // "{}" — see the seed comment in BaqalaDbContext.OnModelCreating for why it's seeded blank.
-    internal static Dictionary<string, bool> ParseFeatures(string featuresJson) =>
-        string.IsNullOrWhiteSpace(featuresJson)
-            ? new()
+    internal static Dictionary<string, bool> ParseFeatures(string featuresJson)
+    {
+        var features = string.IsNullOrWhiteSpace(featuresJson)
+            ? new Dictionary<string, bool>()
             : JsonSerializer.Deserialize<Dictionary<string, bool>>(featuresJson) ?? new();
+        foreach (var (moduleKey, featureKeys) in DashboardModuleAliases)
+        {
+            if (!features.TryGetValue(moduleKey, out var granted) || !granted) continue;
+            foreach (var key in featureKeys)
+                features.TryAdd(key, true); // TryAdd: an explicitly-written internal key still wins
+        }
+        return features;
+    }
 }
 
 public class TenantPlanProvisionRequest
