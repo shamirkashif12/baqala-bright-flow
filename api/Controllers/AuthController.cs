@@ -103,6 +103,19 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         if (string.IsNullOrEmpty(gwKey))
             return StatusCode(501, new { message = "Gateway SSO is not configured on this instance yet." });
 
+        // Microsoft.IdentityModel.Tokens rejects HS256 keys under 256 bits by default, even for
+        // validation (not just signing) — silently folded into the same generic "signature
+        // validation failed" exception as an actual mismatch, so a too-short key and a wrong key
+        // are indistinguishable from the error alone. The Dashboard's vendor-confirmed key for
+        // this ECR is genuinely short (136 bits) — same reason their minting side had to hand-roll
+        // raw HMACSHA256 instead of JwtSecurityTokenHandler.CreateToken. ShortKeyCryptoProviderFactory
+        // is the validation-side equivalent of that same workaround, not a security loosening: HS256
+        // security depends on the key being unguessable, not on it padding out to 32 bytes.
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(gwKey))
+        {
+            CryptoProviderFactory = new ShortKeyCryptoProviderFactory(),
+        };
+
         ClaimsPrincipal principal;
         try
         {
@@ -113,7 +126,7 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
                 ValidateAudience = !string.IsNullOrEmpty(gwAudience),
                 ValidAudience = gwAudience,
                 ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(gwKey)),
+                IssuerSigningKey = signingKey,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.FromMinutes(2),
             }, out _);
@@ -216,3 +229,36 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
 
 public record LoginRequest(string Email, string Password);
 public record GatewayLoginRequest(string GatewayAccessToken);
+
+// Microsoft.IdentityModel.Tokens hard-enforces a >= 256-bit HMAC key size even for verifying (not
+// just signing) — see AuthController.GatewayLogin's comment. Setting SymmetricSignatureProvider's
+// MinimumSymmetricKeySizeInBits property does NOT bypass this: the actual check lives in
+// CryptoProviderFactory.CreateKeyedHashAlgorithm (called lazily from Verify, not from
+// CreateForVerifying), which is not virtual and ignores that property entirely — confirmed by
+// direct test against this exact package version. The only way around it is to skip the library's
+// pooled HMAC allocator altogether and do the HMAC ourselves, mirroring the raw-HMACSHA256
+// workaround the Dashboard's minting side already uses for the same short-key reason.
+public class ShortKeyCryptoProviderFactory : CryptoProviderFactory
+{
+    public override SignatureProvider CreateForVerifying(SecurityKey key, string algorithm) =>
+        new RawHmacSha256SignatureProvider(key, algorithm);
+
+    public override SignatureProvider CreateForSigning(SecurityKey key, string algorithm) =>
+        new RawHmacSha256SignatureProvider(key, algorithm);
+}
+
+public sealed class RawHmacSha256SignatureProvider(SecurityKey key, string algorithm) : SignatureProvider(key, algorithm)
+{
+    private readonly byte[] _keyBytes = ((SymmetricSecurityKey)key).Key;
+
+    public override byte[] Sign(byte[] input)
+    {
+        using var hmac = new System.Security.Cryptography.HMACSHA256(_keyBytes);
+        return hmac.ComputeHash(input);
+    }
+
+    public override bool Verify(byte[] input, byte[] signature) =>
+        System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(Sign(input), signature);
+
+    protected override void Dispose(bool disposing) { }
+}
