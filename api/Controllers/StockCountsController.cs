@@ -18,8 +18,14 @@ namespace BaqalaPOS.Api.Controllers;
 public class StockCountsController(
     BaqalaDbContext db, IAuditService audit, IStockAlertService stockAlerts,
     IStockMovementService stockMovements, IBatchConsumptionService batchConsumption,
+    IApprovalNotificationService approvals,
     ILogger<StockCountsController> logger) : ControllerBase
 {
+    // A count session reads as a different thing depending on why it was started — naming the two
+    // apart keeps the notification honest about what is actually waiting.
+    private static string SessionLabel(StockCount count) =>
+        count.CountType == "reconciliation" ? "Stock reconciliation" : "Stocking review";
+
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id)
             ? id : null;
@@ -204,6 +210,17 @@ public class StockCountsController(
             $"{{\"itemsCounted\":{count.Items.Count(i => i.CountedQuantity.HasValue)},\"variances\":{varianceCount}}}",
             varianceCount > 0 ? "warning" : "info");
 
+        // Until now a submitted count sat in the queue with nobody told about it — the person who
+        // signs it off only found out by going to look. Announced to whoever holds Stocks:Approve
+        // (the eventual decider) rather than every Edit-holder, which would include the counters.
+        await approvals.NotifyApproversAsync(
+            module: "Stocks", branchId: count.BranchId, requestedBy: completedBy,
+            category: "Inventory",
+            type: "Stock Count Review Required", title: "Stock Count Review Required",
+            message: $"{SessionLabel(count)} submitted for review — {varianceCount} variance(s) across {count.Items.Count(i => i.CountedQuantity.HasValue)} counted item(s)",
+            entityType: "StockCount", entityId: count.Id,
+            severity: varianceCount > 0 ? "warning" : "info", warehouseId: count.WarehouseId);
+
         var result = await WithIncludes().Include(c => c.Items).ThenInclude(i => i.Product).FirstAsync(c => c.Id == count.Id);
         return Ok(result);
     }
@@ -240,6 +257,23 @@ public class StockCountsController(
         await audit.LogAsync(req.Approved ? "review_stock_count" : "reject_stock_count", "StockCount", count.Id,
             reviewerId, count.BranchId, req.Approved ? null : $"{{\"reason\":{System.Text.Json.JsonSerializer.Serialize(req.Reason)}}}",
             req.Approved ? "info" : "warning");
+
+        if (req.Approved)
+            // Passed review — now it's the approver's turn, so the queue moves on and so does the ping.
+            await approvals.NotifyApproversAsync(
+                module: "Stocks", branchId: count.BranchId, requestedBy: count.CompletedBy,
+                category: "Inventory",
+                type: "Stock Count Approval Required", title: "Stock Count Approval Required",
+                message: $"{SessionLabel(count)} passed review and is awaiting final approval",
+                entityType: "StockCount", entityId: count.Id, warehouseId: count.WarehouseId);
+        else
+            // Rejected at review: the count is dead and the counter has to know, otherwise they wait
+            // on a session that will never be approved.
+            await approvals.NotifyRequesterAsync(
+                requestedBy: count.CompletedBy, decidedBy: reviewerId, approved: false,
+                category: "Inventory", subject: SessionLabel(count), reason: req.Reason,
+                entityType: "StockCount", entityId: count.Id, branchId: count.BranchId,
+                warehouseId: count.WarehouseId);
 
         var result = await WithIncludes().Include(c => c.Items).ThenInclude(i => i.Product).FirstAsync(c => c.Id == count.Id);
         return Ok(result);
@@ -279,6 +313,11 @@ public class StockCountsController(
             await db.SaveChangesAsync();
             await audit.LogAsync("reject_stock_count", "StockCount", count.Id, approverId, count.BranchId,
                 $"{{\"reason\":{System.Text.Json.JsonSerializer.Serialize(req.Reason)}}}", "warning");
+            await approvals.NotifyRequesterAsync(
+                requestedBy: count.CompletedBy, decidedBy: approverId, approved: false,
+                category: "Inventory", subject: SessionLabel(count), reason: req.Reason,
+                entityType: "StockCount", entityId: count.Id, branchId: count.BranchId,
+                warehouseId: count.WarehouseId);
             var rejected = await WithIncludes().Include(c => c.Items).ThenInclude(i => i.Product).FirstAsync(c => c.Id == count.Id);
             return Ok(rejected);
         }
@@ -374,6 +413,16 @@ public class StockCountsController(
         await audit.LogAsync("approve_stock_count", "StockCount", count.Id, approverId, count.BranchId,
             $"{{\"itemsCounted\":{count.Items.Count(i => i.CountedQuantity.HasValue)},\"adjustments\":{adjustments.Count}}}",
             adjustments.Count > 0 ? "warning" : "info");
+
+        await approvals.NotifyRequesterAsync(
+            requestedBy: count.CompletedBy, decidedBy: approverId, approved: true,
+            category: "Inventory",
+            // Says what the approval actually did to stock, not just that it passed — the counter's
+            // next question is always "did my variances post?".
+            subject: $"{SessionLabel(count)} ({adjustments.Count} stock adjustment(s) posted)",
+            reason: null,
+            entityType: "StockCount", entityId: count.Id, branchId: count.BranchId,
+            warehouseId: count.WarehouseId);
 
         // A physical count that revised on-hand downward can drop a product below its reorder
         // point — fire the low-stock alert now rather than waiting for the background sweep.

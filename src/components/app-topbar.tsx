@@ -76,6 +76,14 @@ const TYPE_ROUTE: Record<string, string> = {
   // Online ordering — ?tab=online, because /orders opens on POS Orders by default and the
   // pending order this notification is about lives on the other tab.
   "New Online Order": "/orders?tab=online",
+  // Approvals raised elsewhere and waiting on this user — each lands on the screen that owns the
+  // decision, not on a generic queue.
+  "approval_pending": "/reports/approval-center",
+  "Stock Count Review Required": "/stocktaking",
+  "Stock Count Approval Required": "/stocktaking",
+  "Wastage Approval Required": "/stocks",
+  "Leave Approval Required": "/leaves",
+  "Stock Request Approval Required": "/warehouses",
   // Returns / refunds
   "Return Started": "/returns",
   "Return Approval Required": "/returns",
@@ -112,14 +120,23 @@ const TYPE_ROUTE: Record<string, string> = {
   "Daily Expiry Summary": "/batches",
 };
 
-// "Manager Approval Granted"/"Rejected" is reused for PO, Return, and Stock Transfer approvals —
-// the entity it points at decides where clicking should land.
+// "Manager Approval Granted"/"Rejected" is the single type every maker-checker flow emits back to
+// whoever raised the request — the entity it points at decides where clicking should land.
+const APPROVAL_ENTITY_ROUTE: Record<string, string> = {
+  PurchaseOrder: "/purchase-orders",
+  CustomerReturn: "/returns",
+  StockTransfer: "/stock-transfers",
+  StockCount: "/stocktaking",
+  InventoryAdjustment: "/stocks",
+  LeaveRequest: "/leaves",
+  WarehouseRequest: "/warehouses",
+  CashierShift: "/cashier-shift",
+  ApprovalRequest: "/reports/approval-center",
+};
+
 function routeForNotification(n: { type: string; entityType?: string }): string | undefined {
   if (n.type === "Manager Approval Granted" || n.type === "Manager Approval Rejected") {
-    if (n.entityType === "PurchaseOrder") return "/purchase-orders";
-    if (n.entityType === "CustomerReturn") return "/returns";
-    if (n.entityType === "StockTransfer") return "/stock-transfers";
-    return undefined;
+    return n.entityType ? APPROVAL_ENTITY_ROUTE[n.entityType] : undefined;
   }
   return TYPE_ROUTE[n.type];
 }

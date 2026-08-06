@@ -22,7 +22,7 @@ import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowRight,
   LayoutDashboard, Timer, Warehouse, Undo2, Cigarette, Settings2,
-  TrendingUp, TrendingDown, Boxes, AlertTriangle, ShoppingCart, Ban, RefreshCw, type LucideIcon,
+  TrendingUp, TrendingDown, Boxes, AlertTriangle, ShoppingCart, Ban, RefreshCw, Compass, type LucideIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/dashboard")({ component: Dashboard });
@@ -554,6 +554,11 @@ function Dashboard() {
             {updatedLabel && (
               <span className="text-xs text-muted-foreground hidden sm:inline">Updated {updatedLabel}</span>
             )}
+            <Button size="sm" variant="outline" className="h-9 gap-1.5 text-xs" title="Start the guided tour"
+              onClick={() => setTourOpen(true)}>
+              <Compass className="h-3.5 w-3.5 text-primary" />
+              <span className="hidden sm:inline">Tutorial</span>
+            </Button>
             <Button size="icon" variant="outline" className="h-9 w-9" disabled={loading} title="Refresh" onClick={loadDashboard}>
               <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             </Button>

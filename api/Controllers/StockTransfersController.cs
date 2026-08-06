@@ -9,7 +9,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/stock-transfers")]
-public class StockTransfersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, IAuditService audit, ILogger<StockTransfersController> logger) : ControllerBase
+public class StockTransfersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, IAuditService audit, IApprovalNotificationService approvals, ILogger<StockTransfersController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
@@ -562,14 +562,18 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         // here must not turn into a 500 for a transfer that actually succeeded.
         try
         {
-            if (transfer.DestBranchId.HasValue)
-            {
-                await notifications.NotifyRoleAsync(["Manager", "Admin"], transfer.DestBranchId,
-                    "Inventory", "Stock Transfer Pending Acceptance", "Stock Transfer Pending Acceptance",
-                    $"Transfer {transfer.TransferNumber} pending acceptance",
-                    entityType: "StockTransfer", entityId: transfer.Id,
-                    triggeredBy: transfer.CreatedBy == Guid.Empty ? CallerId() : transfer.CreatedBy);
-            }
+            // Resolved from who holds Stock Transfers:Approve instead of the ["Manager","Admin"]
+            // names this hardcoded, and no longer skipped when there's no destination branch — a
+            // warehouse-to-warehouse transfer still needs somebody to accept it, and previously
+            // nobody was told about it at all.
+            await approvals.NotifyApproversAsync(
+                module: "Stock Transfers", branchId: transfer.DestBranchId ?? transfer.SourceBranchId,
+                requestedBy: transfer.CreatedBy == Guid.Empty ? CallerId() : transfer.CreatedBy,
+                category: "Inventory",
+                type: "Stock Transfer Pending Acceptance", title: "Stock Transfer Pending Acceptance",
+                message: $"Transfer {transfer.TransferNumber} pending acceptance",
+                entityType: "StockTransfer", entityId: transfer.Id,
+                warehouseId: transfer.DestWarehouseId ?? transfer.SourceWarehouseId);
 
             // Return-to-supplier transfer — confirm to whoever created it, since there's no branch
             // recipient to notify (the "destination" is the supplier, not a Users-linked entity).
@@ -896,24 +900,16 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
 
         if ((req.Status == "approved" || req.Status == "rejected") && prev != req.Status)
         {
-            var approved = req.Status == "approved";
-            // Notify both the transfer's creator and the manager who acted. Previously only
-            // CreatedBy was notified and only when set, so an approval could surface to no one.
-            var recipients = new List<Guid>();
-            if (transfer.CreatedBy != Guid.Empty) recipients.Add(transfer.CreatedBy);
-            if (CallerId() is { } caller) recipients.Add(caller);
-            if (recipients.Count > 0)
-            {
-                await notifications.NotifyUsersAsync(recipients,
-                    "Admin / Security", approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                    approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                    approved
-                        ? $"Transfer {transfer.TransferNumber} was approved"
-                        : $"Transfer {transfer.TransferNumber} was rejected",
-                    severity: approved ? "info" : "warning",
-                    entityType: "StockTransfer", entityId: transfer.Id, branchId: transfer.DestBranchId ?? transfer.SourceBranchId,
-                    triggeredBy: CallerId());
-            }
+            // Notify both the transfer's creator and the manager who acted (alsoNotifyDecider) —
+            // the creator's copy is the one that closes the loop on their request.
+            await approvals.NotifyRequesterAsync(
+                requestedBy: transfer.CreatedBy, decidedBy: CallerId() ?? req.ApprovedBy, approved: req.Status == "approved",
+                category: "Admin / Security",
+                subject: $"Transfer {transfer.TransferNumber}", reason: req.CancelReason,
+                entityType: "StockTransfer", entityId: transfer.Id,
+                branchId: transfer.DestBranchId ?? transfer.SourceBranchId,
+                warehouseId: transfer.DestWarehouseId ?? transfer.SourceWarehouseId,
+                alsoNotifyDecider: true);
         }
 
         // FRD §2.4 — record the status transition in the audit trail. One action per lifecycle step

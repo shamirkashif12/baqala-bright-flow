@@ -10,8 +10,13 @@ namespace BaqalaPOS.Api.Controllers;
 [ApiController]
 [Route("api/leaves")]
 [RequirePlanFeature("employee_shift_management")]
-public class LeaveController(BaqalaDbContext db, IAuditService audit) : ControllerBase
+public class LeaveController(BaqalaDbContext db, IAuditService audit, IApprovalNotificationService approvals) : ControllerBase
 {
+    // Dates included because a leave request is judged on WHEN, not on who asked — an approver
+    // seeing "Ali Hassan · 12 Aug – 15 Aug (4d)" can decide from the bell without opening the page.
+    private static string LeaveLabel(LeaveRequest leave, string employeeName) =>
+        $"Leave request — {employeeName}, {leave.FromDate:dd MMM} – {leave.ToDate:dd MMM} ({leave.TotalDays}d)";
+
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 
@@ -159,6 +164,17 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
         await audit.LogAsync(action: "Leave applied", entityType: "LeaveRequest", entityId: leave.Id,
             userId: CallerId(), branchId: employee.BranchId, details: $"{employee.FullName}: {req.FromDate}–{req.ToDate} ({totalDays}d)", module: "Leave Management", employeeId: employee.Id);
 
+        // Applying for leave was entirely silent — the request sat "pending" until the employee
+        // chased someone in person. Fans out to whoever holds Leave Management:Approve at the
+        // employee's branch (not a hardcoded manager role).
+        await approvals.NotifyApproversAsync(
+            module: "Leave Management", branchId: employee.BranchId, requestedBy: CallerId(),
+            category: "Admin / Security",
+            type: "Leave Approval Required", title: "Leave Approval Required",
+            message: $"{LeaveLabel(leave, employee.FullName)} awaiting approval"
+                + (string.IsNullOrWhiteSpace(req.Reason) ? "" : $" — \"{req.Reason.Trim()}\""),
+            entityType: "LeaveRequest", entityId: leave.Id);
+
         return CreatedAtAction(nameof(GetAll), leave);
     }
 
@@ -205,6 +221,14 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
         await audit.LogAsync(action: "Leave approved", entityType: "LeaveRequest", entityId: leave.Id,
             userId: CallerId(), branchId: leave.Employee.BranchId, details: $"{leave.Employee.FullName}: {leave.FromDate}–{leave.ToDate}", module: "Leave Management", employeeId: leave.EmployeeId);
 
+        // Addressed to the employee's own login (LeaveRequest keys on EmployeeId, which is not a
+        // user id) — the outcome matters to whoever is taking the leave, not to whoever filed it.
+        await approvals.NotifyRequesterAsync(
+            requestedBy: leave.Employee.UserId, decidedBy: CallerId(), approved: true,
+            category: "Admin / Security",
+            subject: LeaveLabel(leave, leave.Employee.FullName), reason: null,
+            entityType: "LeaveRequest", entityId: leave.Id, branchId: leave.Employee.BranchId);
+
         return Ok(leave);
     }
 
@@ -227,6 +251,12 @@ public class LeaveController(BaqalaDbContext db, IAuditService audit) : Controll
 
         await audit.LogAsync(action: "Leave rejected", entityType: "LeaveRequest", entityId: leave.Id,
             userId: CallerId(), branchId: leave.Employee!.BranchId, notes: $"Reason: {req.RejectionReason}", module: "Leave Management", employeeId: leave.EmployeeId);
+
+        await approvals.NotifyRequesterAsync(
+            requestedBy: leave.Employee.UserId, decidedBy: CallerId(), approved: false,
+            category: "Admin / Security",
+            subject: LeaveLabel(leave, leave.Employee.FullName), reason: req.RejectionReason,
+            entityType: "LeaveRequest", entityId: leave.Id, branchId: leave.Employee.BranchId);
 
         return Ok(leave);
     }

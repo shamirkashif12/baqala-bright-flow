@@ -20,8 +20,15 @@ public class InventoryController(
     IBatchConsumptionService batchConsumption,
     IPackBreakService packBreaks,
     IAuditService audit,
+    IApprovalNotificationService approvals,
     ILogger<InventoryController> logger) : ControllerBase
 {
+    // How a held write-off reads in a notification: "Damage — Coca-Cola 330ml ×5". The type is what
+    // the approver judges on (theft is not spoilage) and the quantity is what makes it worth
+    // stopping for, so both belong in the one line the bell shows.
+    private static string WriteOffLabel(string adjustmentType, string? productName, decimal quantity) =>
+        $"{char.ToUpperInvariant(adjustmentType[0])}{adjustmentType[1..]} write-off — {productName ?? "product"} ×{quantity:0.##}";
+
     // Branch-scoped roles (anything but tenant_admin) may only see/write their own branch's
     // batches — mirrors the scoping the frontend already applies to the plain stock list.
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -628,12 +635,16 @@ public class InventoryController(
 
         // Employee Audit Center — inventory adjustments are a listed employee action. Best-effort:
         // the stock write is already committed, so a failed audit write must not 500 the caller.
+        // Declared out here because the approval notification below names the same product; left
+        // null-if-it-fails rather than hoisted out of the try, so a lookup hiccup still can't 500 a
+        // request whose stock write already committed.
+        string? productName = null;
         try
         {
             // Denormalise the product name into the audit payload so the trail says WHAT was adjusted
             // ("Coca-Cola 330ml"), not just a GUID — reviewers and the CSV export shouldn't need a
             // second lookup, and a product later renamed/deleted still reads correctly at audit time.
-            var productName = await db.Products.Where(p => p.Id == req.ProductId)
+            productName = await db.Products.Where(p => p.Id == req.ProductId)
                 .Select(p => p.Name).FirstOrDefaultAsync();
             await audit.LogAsync(
                 action: "inventory_adjustment",
@@ -652,6 +663,19 @@ public class InventoryController(
                 beforeValue: System.Text.Json.JsonSerializer.Serialize(new { QuantityBefore = quantityBefore }));
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for adjustment {AdjustmentId}", adjustment.Id); }
+
+        // A held write-off blocks real stock from moving until someone signs it off, and nothing
+        // told that someone it existed — the queue was only discoverable by opening the Wastage tab.
+        if (requiresApproval)
+        {
+            await approvals.NotifyApproversAsync(
+                module: "Stocks", branchId: req.BranchId, requestedBy: actingUserId,
+                category: "Wastage / Spoilage",
+                type: "Wastage Approval Required", title: "Wastage Approval Required",
+                message: $"{WriteOffLabel(req.AdjustmentType, productName, req.Quantity)} needs approval"
+                    + (string.IsNullOrWhiteSpace(req.Reason) ? "" : $" — \"{req.Reason.Trim()}\""),
+                entityType: "InventoryAdjustment", entityId: adjustment.Id);
+        }
 
         // Low-stock re-check only when on-hand actually dropped just now. A pending write-off hasn't
         // moved stock yet — that check runs when it's approved. Best-effort: never fail the write.
@@ -915,6 +939,18 @@ public class InventoryController(
                 notes: req.Reason);
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log failed for adjustment review {AdjustmentId}", adjustment.Id); }
+
+        // Back to whoever raised it. They're the one who has to explain the shrinkage either way —
+        // an approval means the stock is now gone, a rejection means it is still on the books.
+        var reviewedProductName = await db.Products.Where(p => p.Id == adjustment.ProductId)
+            .Select(p => p.Name).FirstOrDefaultAsync();
+        await approvals.NotifyRequesterAsync(
+            requestedBy: adjustment.AdjustedBy, decidedBy: reviewerId, approved: req.Approved,
+            category: "Wastage / Spoilage",
+            subject: WriteOffLabel(adjustment.AdjustmentType, reviewedProductName, adjustment.Quantity),
+            reason: req.Reason,
+            entityType: "InventoryAdjustment", entityId: adjustment.Id, branchId: adjustment.BranchId,
+            warehouseId: adjustment.WarehouseId);
 
         return Ok(adjustment);
     }

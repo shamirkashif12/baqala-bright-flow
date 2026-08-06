@@ -14,7 +14,7 @@ namespace BaqalaPOS.Api.Controllers;
 // (receiving goods against a PO) and the Suppliers page's PO-history tab both depend on them.
 // Only actual PO administration (creating/approving new POs, recording supplier payments) is
 // gated below; the dedicated /purchase-orders page itself still stays locked via route-guard.
-public class PurchaseOrdersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, IAuditService audit, ILogger<PurchaseOrdersController> logger) : ControllerBase
+public class PurchaseOrdersController(BaqalaDbContext db, INotificationService notifications, IStockMovementService stockMovements, IAuditService audit, IApprovalNotificationService approvals, ILogger<PurchaseOrdersController> logger) : ControllerBase
 {
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
@@ -234,13 +234,27 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         // not turn into a 500 for a purchase order that actually succeeded.
         try
         {
-            var poRoles = po.BranchId.HasValue ? new[] { "Manager", "Admin" } : new[] { "Admin" };
-            await notifications.NotifyRoleAsync(poRoles, po.BranchId,
-                "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
-                $"Purchase Order {po.PoNumber} created",
-                entityType: "PurchaseOrder", entityId: po.Id,
-                alsoUserId: po.OrderedBy != Guid.Empty ? po.OrderedBy : null,
-                triggeredBy: CallerId() ?? (po.OrderedBy != Guid.Empty ? po.OrderedBy : null));
+            var ordererId = po.OrderedBy != Guid.Empty ? po.OrderedBy : (Guid?)null;
+            // Approvers resolved from who holds Purchase Orders:Approve, not the old
+            // ["Manager","Admin"] names, and the message now says it needs approval (and for how
+            // much) rather than the flat "created" that read as an FYI nobody had to act on.
+            await approvals.NotifyApproversAsync(
+                module: "Purchase Orders", branchId: po.BranchId, requestedBy: ordererId,
+                category: "Suppliers / Purchase Orders",
+                type: "Purchase Order Created", title: "Purchase Order Created",
+                message: $"Purchase Order {po.PoNumber} raised for approval (SAR {po.TotalAmount:F2})",
+                entityType: "PurchaseOrder", entityId: po.Id, warehouseId: po.WarehouseId);
+
+            // The orderer's own confirmation — kept separate now that the fan-out above deliberately
+            // excludes the requester (alsoUserId no longer applies).
+            if (ordererId is { } orderer)
+            {
+                await notifications.NotifyUserAsync(orderer,
+                    "Suppliers / Purchase Orders", "Purchase Order Created", "Purchase Order Created",
+                    $"Purchase Order {po.PoNumber} created (SAR {po.TotalAmount:F2})",
+                    entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId,
+                    triggeredBy: CallerId() ?? orderer);
+            }
         }
         catch (Exception ex)
         {
@@ -265,25 +279,15 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
 
         if ((req.Status == "approved" || req.Status == "rejected") && prevStatus != req.Status)
         {
-            var approved = req.Status == "approved";
-            // Notify both the orderer and the manager who acted. Previously only OrderedBy was
-            // notified and only when it was set, so a PO with no orderer (or approved by the same
-            // manager who has no personal orderer link) surfaced no approval notification at all.
-            var recipients = new List<Guid>();
-            if (po.OrderedBy != Guid.Empty) recipients.Add(po.OrderedBy);
-            if (CallerId() is { } caller) recipients.Add(caller);
-            if (recipients.Count > 0)
-            {
-                await notifications.NotifyUsersAsync(recipients,
-                    "Admin / Security", approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                    approved ? "Manager Approval Granted" : "Manager Approval Rejected",
-                    approved
-                        ? $"Purchase Order {po.PoNumber} was approved"
-                        : $"Purchase Order {po.PoNumber} was rejected",
-                    severity: approved ? "info" : "warning",
-                    entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId,
-                    triggeredBy: CallerId());
-            }
+            // Notify both the orderer and the manager who acted (alsoNotifyDecider) — the orderer's
+            // copy is the one that closes the loop on the PO they raised.
+            await approvals.NotifyRequesterAsync(
+                requestedBy: po.OrderedBy, decidedBy: CallerId() ?? req.ApprovedBy,
+                approved: req.Status == "approved",
+                category: "Admin / Security",
+                subject: $"Purchase Order {po.PoNumber} (SAR {po.TotalAmount:F2})", reason: null,
+                entityType: "PurchaseOrder", entityId: po.Id, branchId: po.BranchId,
+                warehouseId: po.WarehouseId, alsoNotifyDecider: true);
         }
 
         return Ok(po);
