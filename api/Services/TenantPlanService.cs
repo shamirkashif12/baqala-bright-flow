@@ -76,7 +76,13 @@ public class TenantPlanService(BaqalaDbContext db) : ITenantPlanService
         // must never be silently replaced by whatever a later/retried payload happens to carry.
         if (string.IsNullOrWhiteSpace(plan.WebhookSharedSecret) && !string.IsNullOrWhiteSpace(req.WebhookSharedSecret))
             plan.WebhookSharedSecret = req.WebhookSharedSecret;
-        if (string.IsNullOrWhiteSpace(plan.GatewayJwtKey) && !string.IsNullOrWhiteSpace(req.GatewayJwtKey))
+        // TEMPORARY, testing only: set-once guard disabled while multiple test businesses share
+        // this one staging instance — each provision call's gatewayJwtKey was getting locked in by
+        // whichever business provisioned first, so every later business's real key was silently
+        // dropped and its gateway-login always failed with a signature mismatch. Restore the guard
+        // (`if (string.IsNullOrWhiteSpace(plan.GatewayJwtKey) && ...)`) once each client gets their
+        // own dedicated instance again, matching the documented v2 contract.
+        if (!string.IsNullOrWhiteSpace(req.GatewayJwtKey))
             plan.GatewayJwtKey = req.GatewayJwtKey;
         if (string.IsNullOrWhiteSpace(plan.GatewayJwtIssuer) && !string.IsNullOrWhiteSpace(req.GatewayJwtIssuer))
             plan.GatewayJwtIssuer = req.GatewayJwtIssuer;
