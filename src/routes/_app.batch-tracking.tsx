@@ -5,16 +5,16 @@ import { LoadErrorBanner } from "@/components/load-error-banner";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PaginatedDataTable, type Column } from "@/components/module-placeholder";
-import { Boxes, PackageCheck, CalendarClock, Download, X, Loader2, Eye, Building2, Warehouse as WarehouseIcon, ArrowDownUp, Lock } from "lucide-react";
+import { Boxes, PackageCheck, CalendarClock, Download, X, Loader2, Eye, Building2, Warehouse as WarehouseIcon, ArrowDownUp, Lock, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { api, excludeDisabledBranches, type InventoryBatch, type Branch, type Warehouse, type StockMovement, type InventoryAdjustment } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge } from "@/components/batch-status-badge";
+import { NewBatchDialog } from "@/components/new-batch-dialog";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { SARIcon, fmtSAR } from "@/lib/currency";
@@ -337,6 +337,8 @@ function PickingStrategyCard({ branchId, branchName, canEdit }: {
   );
 }
 
+// ─── New Batch dialog — standalone batch creation, independent of any receiving flow ──────────
+
 // ─── Per-location-type panel (one for Branches, one for Warehouses) ───────────
 
 function BatchLocationPanel({
@@ -350,6 +352,7 @@ function BatchLocationPanel({
   onView: (b: InventoryBatch) => void;
 }) {
   const { canEdit: canEditStrategy } = usePermission("Settings");
+  const { canCreate: canCreateBatch } = usePermission("Batches");
   const companyHeader = useCompanyHeader();
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -359,15 +362,18 @@ function BatchLocationPanel({
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [expiryFrom, setExpiryFrom] = useState("");
   const [expiryTo, setExpiryTo] = useState("");
+  const [newBatchOpen, setNewBatchOpen] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
       const locationIds = lockedLocationId ? [lockedLocationId] : (locationFilter.length ? locationFilter : undefined);
+      // statusFilter is applied client-side (see `filtered` below), never sent to the server —
+      // so the Total / Active / Near-Expiry-or-Expired card counts stay correct even while one
+      // of them is the active quick filter.
       const data = await api.getBatches({
         branchId: locationType === "branch" ? locationIds : undefined,
         warehouseId: locationType === "warehouse" ? locationIds : undefined,
-        status: statusFilter.length ? statusFilter : undefined,
         locationType,
       });
       setBatches(data ?? []);
@@ -386,7 +392,7 @@ function BatchLocationPanel({
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationFilter, statusFilter]);
+  }, [locationFilter]);
 
   const total = batches.length;
   const active = batches.filter(b => b.status === "active").length;
@@ -397,7 +403,8 @@ function BatchLocationPanel({
     const mq = !q || b.product?.name?.toLowerCase().includes(q) || b.product?.sku?.toLowerCase().includes(q) || b.batchNumber.toLowerCase().includes(q);
     const mef = !expiryFrom || (!!b.expiryDate && b.expiryDate >= expiryFrom);
     const met = !expiryTo || (!!b.expiryDate && b.expiryDate <= expiryTo + "T23:59:59");
-    return mq && mef && met;
+    const ms = statusFilter.length === 0 || statusFilter.includes(b.status);
+    return mq && mef && met && ms;
   });
 
   const columns: Column[] = useMemo(() => [
@@ -451,9 +458,20 @@ function BatchLocationPanel({
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Metrics */}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Total Batches" value={String(total)} icon={Boxes} accent="default" />
-        <MetricCard label="Active" value={String(active)} icon={PackageCheck} accent="success" />
-        <MetricCard label="Near Expiry / Expired" value={String(wastageRisk)} icon={CalendarClock} accent="warning" />
+        <MetricCard
+          label="Total Batches" value={String(total)} icon={Boxes} accent="default"
+          onClick={() => setStatusFilter([])} active={statusFilter.length === 0}
+        />
+        <MetricCard
+          label="Active" value={String(active)} icon={PackageCheck} accent="success"
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "active" ? [] : ["active"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "active"}
+        />
+        <MetricCard
+          label="Near Expiry / Expired" value={String(wastageRisk)} icon={CalendarClock} accent="warning"
+          onClick={() => setStatusFilter(v => v.length === 2 && v.includes("near_expiry") && v.includes("expired") ? [] : ["near_expiry", "expired"])}
+          active={statusFilter.length === 2 && statusFilter.includes("near_expiry") && statusFilter.includes("expired")}
+        />
       </div>
 
       {/* Per-branch FIFO / FEFO picking strategy — always shown on the Branches tab so the control
@@ -499,6 +517,11 @@ function BatchLocationPanel({
         <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => exportCSV(locationType, filtered, branches, warehouses, companyHeader)} disabled={filtered.length === 0}>
           <Download className="h-4 w-4" /> Export ({filtered.length})
         </Button>
+        {canCreateBatch && (
+          <Button size="sm" className="h-9 gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => setNewBatchOpen(true)}>
+            <Plus className="h-4 w-4" /> New Batch
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -511,6 +534,15 @@ function BatchLocationPanel({
           emptyMessage={batches.length === 0 ? `No batches found at any ${locationLabel.toLowerCase()}.` : "No batches match your search."}
         />
       )}
+
+      <NewBatchDialog
+        open={newBatchOpen}
+        onOpenChange={setNewBatchOpen}
+        locationType={locationType}
+        locations={locations}
+        lockedLocationId={lockedLocationId}
+        onCreated={load}
+      />
     </div>
   );
 }

@@ -287,6 +287,9 @@ public class InventoryController(
     {
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Received quantity must be greater than zero." });
+        // Exactly one of Branch/Warehouse, same convention InventoryBatch itself documents.
+        if (req.BranchId.HasValue == req.WarehouseId.HasValue)
+            return BadRequest(new { message = "Specify exactly one of branchId or warehouseId." });
         // A past expiry is rejected outright unless the caller documents why (a damaged
         // shipment or a supplier return being logged for write-off, not for resale). The
         // resulting batch's past ExpiryDate still keeps it out of the sellable-stock check
@@ -296,7 +299,7 @@ public class InventoryController(
             return BadRequest(new { message = "Expiry date cannot be in the past — provide a damagedOrReturnReason to log it as damaged/return stock instead of resalable inventory." });
 
         var (role, callerBranchId) = GetCallerContext();
-        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && callerBranchId != req.BranchId)
+        if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && req.BranchId.HasValue && callerBranchId != req.BranchId)
             return Forbid();
 
         var product = await db.Products.FindAsync(req.ProductId);
@@ -310,6 +313,7 @@ public class InventoryController(
             BatchNumber = !string.IsNullOrEmpty(req.BatchNumber) ? req.BatchNumber : $"BATCH-{DateTime.UtcNow:yyyyMMddHHmm}-{batchId.ToString()[..4].ToUpper()}",
             ProductId = req.ProductId,
             BranchId = req.BranchId,
+            WarehouseId = req.WarehouseId,
             SupplierId = req.SupplierId,
             Quantity = req.Quantity,
             RemainingQuantity = req.Quantity,
@@ -325,28 +329,52 @@ public class InventoryController(
         };
         db.InventoryBatches.Add(batch);
 
-        var stock = await db.InventoryStocks
-            .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
-        // Captured before the mutation for the same reason Adjust does it: receiving stock is an
-        // inventory movement, and a reviewer needs the on-hand quantity either side of it.
-        var quantityBefore = stock?.Quantity ?? 0m;
-        if (stock is null)
+        decimal quantityBefore;
+        if (req.BranchId.HasValue)
         {
-            db.InventoryStocks.Add(new InventoryStock
+            var stock = await db.InventoryStocks
+                .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.BranchId == req.BranchId);
+            // Captured before the mutation for the same reason Adjust does it: receiving stock is
+            // an inventory movement, and a reviewer needs the on-hand quantity either side of it.
+            quantityBefore = stock?.Quantity ?? 0m;
+            if (stock is null)
             {
-                Id = Guid.NewGuid(), ProductId = req.ProductId, BranchId = req.BranchId,
-                Quantity = req.Quantity, ReorderLevel = req.ReorderLevel ?? 10,
-                LastUpdated = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
-            });
+                db.InventoryStocks.Add(new InventoryStock
+                {
+                    Id = Guid.NewGuid(), ProductId = req.ProductId, BranchId = req.BranchId.Value,
+                    Quantity = req.Quantity, ReorderLevel = req.ReorderLevel ?? 10,
+                    LastUpdated = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                stock.Quantity += req.Quantity;
+                stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
+            }
         }
         else
         {
-            stock.Quantity += req.Quantity;
-            stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
+            var stock = await db.WarehouseStocks
+                .FirstOrDefaultAsync(s => s.ProductId == req.ProductId && s.WarehouseId == req.WarehouseId);
+            quantityBefore = stock?.Quantity ?? 0m;
+            if (stock is null)
+            {
+                db.WarehouseStocks.Add(new WarehouseStock
+                {
+                    Id = Guid.NewGuid(), ProductId = req.ProductId, WarehouseId = req.WarehouseId!.Value,
+                    Quantity = req.Quantity, ReorderLevel = req.ReorderLevel ?? 10,
+                    LastUpdated = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                stock.Quantity += req.Quantity;
+                stock.LastUpdated = stock.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         stockMovements.Record(
-            req.ProductId, req.BranchId, warehouseId: null, movementType: "manual_receive", quantity: req.Quantity,
+            req.ProductId, req.BranchId, req.WarehouseId, movementType: "manual_receive", quantity: req.Quantity,
             batchId: batch.Id, referenceType: "manual_receive", referenceId: batch.Id, notes: req.DamagedOrReturnReason,
             createdBy: CallerId(),
             quantityBefore: quantityBefore, quantityAfter: quantityBefore + req.Quantity);
@@ -976,7 +1004,7 @@ public record BreakPackRequest(
 
 public record ReceiveBatchRequest(
     Guid ProductId,
-    Guid BranchId,
+    Guid? BranchId,
     Guid? SupplierId,
     decimal Quantity,
     decimal? PurchaseCost,
@@ -984,5 +1012,6 @@ public record ReceiveBatchRequest(
     string? BatchNumber,
     string? Notes,
     int? ReorderLevel,
-    string? DamagedOrReturnReason = null
+    string? DamagedOrReturnReason = null,
+    Guid? WarehouseId = null
 );

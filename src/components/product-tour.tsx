@@ -151,6 +151,19 @@ export function ProductTour({
     if (cardRef.current) setCardH(cardRef.current.offsetHeight || CARD_H_ESTIMATE);
   }, [step, rect]);
 
+  // A step whose target isn't in the DOM (e.g. a sidebar section this role can't see) would
+  // otherwise render nothing at all — no card, no Next button, no way to move past it. Skip it
+  // instead of leaving the tour silently stuck. Queried directly rather than via `rect` so this
+  // doesn't race useTargetRect's own querySelector on the same step transition.
+  useEffect(() => {
+    if (!step) return;
+    if (!document.querySelector(step.target)) {
+      if (stepIndex >= steps.length - 1) onFinish();
+      else setStepIndex((i) => i + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   if (!active) return null;
 
   const end = () => onFinish();

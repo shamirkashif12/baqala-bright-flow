@@ -40,33 +40,38 @@ export const Route = createFileRoute("/_app/stock-transfers")({ component: Stock
 
 type TransferType =
   | "supplier_to_warehouse"
+  | "supplier_to_branch"
   | "warehouse_to_branch"
   | "branch_to_warehouse"
   | "branch_to_branch"
   | "warehouse_to_warehouse"
-  | "warehouse_to_supplier";
+  | "warehouse_to_supplier"
+  | "branch_to_supplier";
 
 const TRANSFER_TYPES: { value: TransferType; label: string; description: string; icon: React.ElementType }[] = [
   { value: "supplier_to_warehouse", label: "Supplier → Warehouse", description: "Inbound from supplier to warehouse (linked to PO)", icon: Truck },
+  { value: "supplier_to_branch", label: "Supplier → Branch", description: "Inbound from supplier direct to branch (linked to PO)", icon: Truck },
   { value: "warehouse_to_branch", label: "Warehouse → Branch", description: "Replenish branch from warehouse", icon: Warehouse },
   { value: "branch_to_warehouse", label: "Branch → Warehouse", description: "Return expired/damaged stock to warehouse", icon: Building2 },
   { value: "branch_to_branch", label: "Branch → Branch (Mart to Mart)", description: "Inter-branch transfer", icon: ArrowLeftRight },
   { value: "warehouse_to_warehouse", label: "Warehouse → Warehouse", description: "Redistribute between warehouses", icon: RefreshCcw },
   { value: "warehouse_to_supplier", label: "Warehouse → Supplier (RTS)", description: "Return to supplier (defective/overstocked)", icon: Package },
+  { value: "branch_to_supplier", label: "Branch → Supplier (RTS)", description: "Return to supplier direct from a branch (defective/overstocked)", icon: Package },
 ];
 
-// Any type touching a warehouse needs warehouse_management; the supplier-return type is really
-// the RTS feature wearing this wizard's clothes (the dedicated /supplier-returns page is just
-// this same transfer type pre-filtered). branch_to_branch has no plan-feature requirement — it's
-// the one type that must always work regardless of tier. Without this, a tenant without
-// warehouse_management would pick a warehouse-involving type and hit a silently-empty warehouse
-// picker instead of a clear "this needs an upgrade" state.
+// Any type touching a warehouse needs warehouse_management; the supplier-return types are really
+// the RTS feature wearing this wizard's clothes (the dedicated /supplier-returns page creates the
+// exact same transfer types, just pre-filtered to one). branch_to_branch/supplier_to_branch have
+// no plan-feature requirement — branch-only flows must always work regardless of tier. Without
+// this, a tenant without warehouse_management would pick a warehouse-involving type and hit a
+// silently-empty warehouse picker instead of a clear "this needs an upgrade" state.
 const PLAN_FEATURE_FOR_TYPE: Partial<Record<TransferType, string>> = {
   supplier_to_warehouse: "warehouse_management",
   warehouse_to_branch: "warehouse_management",
   branch_to_warehouse: "warehouse_management",
   warehouse_to_warehouse: "warehouse_management",
   warehouse_to_supplier: "supplier_returns",
+  branch_to_supplier: "supplier_returns",
 };
 
 const STATUS_OPTIONS = [
@@ -120,11 +125,11 @@ function getTypeLabel(value: string): string {
 }
 
 function needsReturnReason(type: string) {
-  return type === "branch_to_warehouse" || type === "warehouse_to_supplier";
+  return type === "branch_to_warehouse" || type === "warehouse_to_supplier" || type === "branch_to_supplier";
 }
 
 function isReturnType(type: string) {
-  return type === "branch_to_warehouse" || type === "warehouse_to_supplier";
+  return type === "branch_to_warehouse" || type === "warehouse_to_supplier" || type === "branch_to_supplier";
 }
 
 function todayStr() {
@@ -396,6 +401,27 @@ function SourceDestStep({
           </FieldRow>
         </>
       )}
+      {transferType === "supplier_to_branch" && (
+        <>
+          <SelectField label="Source — Supplier" value={form.sourceSupplierId} placeholder="Select supplier" options={supplierOptions} onValueChange={v => onChange({ sourceSupplierId: v })} />
+          <FieldRow label={`Destination — Branch(es) *${destIds.length > 0 ? ` (${destIds.length} selected)` : ""}`}>
+            <MultiSelect options={branchOptions} value={destIds} onChange={onDestIdsChange} placeholder="Select branch(es)…" />
+            {destIds.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {destIds.map(id => {
+                  const lbl = branchOptions.find(o => o.value === id)?.label ?? id;
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20">
+                      {lbl}<button type="button" onClick={() => onDestIdsChange(destIds.filter(v => v !== id))} className="hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {destIds.length > 1 && <p className="text-xs text-primary mt-0.5">{destIds.length} transfers will be created.</p>}
+          </FieldRow>
+        </>
+      )}
       {transferType === "warehouse_to_branch" && (
         <>
           <SelectField label="Source — Warehouse" value={form.sourceWarehouseId} placeholder="Select warehouse" options={warehouseOptions} onValueChange={v => onChange({ sourceWarehouseId: v })} />
@@ -430,7 +456,7 @@ function SourceDestStep({
           <SelectField label="Destination — Warehouse" value={form.destWarehouseId} placeholder="Select destination warehouse" options={warehouseOptions.filter(w => w.value !== form.sourceWarehouseId)} onValueChange={v => onChange({ destWarehouseId: v })} />
         </>
       )}
-      {/* warehouse_to_supplier is handled via PO lookup in step 2 */}
+      {/* warehouse_to_supplier / branch_to_supplier are handled via PO lookup in step 2 */}
     </div>
   );
 }
@@ -1047,19 +1073,20 @@ function CreateTransferSheet({
           }));
         }
       } else {
-        // RTS (warehouse_to_supplier) and supplier_to_warehouse use PO number.
-        // Also accept supplier_to_warehouse stock transfers (PO-xxx IDs) as valid RTS origin.
+        // RTS (warehouse_to_supplier / branch_to_supplier) and supplier_to_warehouse use PO number.
+        // Also accept supplier_to_warehouse/supplier_to_branch stock transfers (PO-xxx IDs) as
+        // valid RTS origin.
         let po: PurchaseOrder | null = null;
         let originTransfer: StockTransfer | null = null;
 
         try {
           po = await api.getPurchaseOrderByNumber(poNumber.trim());
         } catch {
-          // Not a real PO — try as a supplier_to_warehouse stock transfer (PO-xxx style ID)
-          if (transferType === "warehouse_to_supplier") {
+          // Not a real PO — try as a supplier_to_warehouse/supplier_to_branch stock transfer (PO-xxx style ID)
+          if (transferType === "warehouse_to_supplier" || transferType === "branch_to_supplier") {
             try {
               const t = await api.getStockTransferByNumber(poNumber.trim());
-              if (t.transferType === "supplier_to_warehouse") originTransfer = t;
+              if (t.transferType === "supplier_to_warehouse" || t.transferType === "supplier_to_branch") originTransfer = t;
             } catch { /* not found */ }
           }
         }
@@ -1110,19 +1137,42 @@ function CreateTransferSheet({
                 destSupplierId: po!.supplierId ?? p.destSupplierId,
               }));
             }
+          } else if (transferType === "branch_to_supplier") {
+            // If batch PO, find all sibling POs → collect all branch IDs (they are sources for RTS)
+            if (po.batchId) {
+              const siblings = await api.getPurchaseOrdersByBatch(po.batchId);
+              const seen = new Set<string>();
+              const opts = siblings
+                .filter(s => s.branchId)
+                .map(s => ({ value: s.branchId!, label: s.branch?.name ?? s.branchId! }))
+                .filter(o => !seen.has(o.value) && !!seen.add(o.value));
+              setAllSrcOptions(opts);
+              setSrcIds(opts.map(o => o.value));
+              setForm(p => ({ ...p, destSupplierId: po!.supplierId ?? p.destSupplierId }));
+            } else {
+              setAllSrcOptions([]);
+              setSrcIds([]);
+              setForm(p => ({
+                ...p,
+                sourceBranchId: po!.branchId ?? p.sourceBranchId,
+                destSupplierId: po!.supplierId ?? p.destSupplierId,
+              }));
+            }
           }
         } else if (originTransfer) {
-          // supplier_to_warehouse transfer used as RTS origin — destWarehouse becomes RTS source.
-          // Use the transfer's linked purchaseOrderId (if any) so the RTS doesn't point to a transfer UUID as a PO FK.
+          // supplier_to_warehouse/supplier_to_branch transfer used as RTS origin — its destination
+          // becomes the RTS source. Use the transfer's linked purchaseOrderId (if any) so the RTS
+          // doesn't point to a transfer UUID as a PO FK.
+          const originIsBranch = originTransfer.transferType === "supplier_to_branch";
           fetched = {
             id: originTransfer.purchaseOrderId ?? undefined,
             poNumber: originTransfer.transferNumber ?? "",
             supplierId: originTransfer.sourceSupplierId ?? "",
-            warehouseId: originTransfer.destWarehouseId ?? "",
-            branchId: undefined,
+            warehouseId: originIsBranch ? undefined : (originTransfer.destWarehouseId ?? ""),
+            branchId: originIsBranch ? originTransfer.destBranchId : undefined,
             supplierName: originTransfer.sourceSupplier?.name ?? "",
-            warehouseName: originTransfer.destWarehouse?.name,
-            branchName: undefined,
+            warehouseName: originIsBranch ? undefined : originTransfer.destWarehouse?.name,
+            branchName: originIsBranch ? originTransfer.destBranch?.name : undefined,
             items: (originTransfer.items ?? []).map(item => ({
               productId: item.productId,
               productName: item.product?.name ?? String(item.productId),
@@ -1131,20 +1181,29 @@ function CreateTransferSheet({
             })),
           };
           if (originTransfer.batchId) {
-            // Batch transfer — collect all sibling dest warehouses as RTS sources
+            // Batch transfer — collect all sibling dest locations as RTS sources
             const siblings = await api.getStockTransfersByBatch(originTransfer.batchId);
             const seen = new Set<string>();
-            const opts = siblings
-              .filter(s => s.destWarehouseId)
-              .map(s => ({ value: s.destWarehouseId!, label: s.destWarehouse?.name ?? s.destWarehouseId! }))
-              .filter(o => !seen.has(o.value) && !!seen.add(o.value));
+            const opts = originIsBranch
+              ? siblings
+                  .filter(s => s.destBranchId)
+                  .map(s => ({ value: s.destBranchId!, label: s.destBranch?.name ?? s.destBranchId! }))
+                  .filter(o => !seen.has(o.value) && !!seen.add(o.value))
+              : siblings
+                  .filter(s => s.destWarehouseId)
+                  .map(s => ({ value: s.destWarehouseId!, label: s.destWarehouse?.name ?? s.destWarehouseId! }))
+                  .filter(o => !seen.has(o.value) && !!seen.add(o.value));
             setAllSrcOptions(opts);
             setSrcIds(opts.map(o => o.value));
             setForm(p => ({ ...p, destSupplierId: originTransfer!.sourceSupplierId ?? p.destSupplierId }));
           } else {
             setAllSrcOptions([]);
             setSrcIds([]);
-            setForm(p => ({
+            setForm(p => (originIsBranch ? {
+              ...p,
+              sourceBranchId: originTransfer!.destBranchId ?? p.sourceBranchId,
+              destSupplierId: originTransfer!.sourceSupplierId ?? p.destSupplierId,
+            } : {
               ...p,
               sourceWarehouseId: originTransfer!.destWarehouseId ?? p.sourceWarehouseId,
               destSupplierId: originTransfer!.sourceSupplierId ?? p.destSupplierId,
@@ -1158,8 +1217,8 @@ function CreateTransferSheet({
       // Block the RTS before the user spends time on Steps 2/3 if a return for this PO already
       // exists (the backend rejects it on submit too — see StockTransfersController.Create —
       // but catching it here at lookup time avoids a wasted trip through the whole wizard).
-      if (transferType === "warehouse_to_supplier" && fetched.id) {
-        const existing = await api.getStockTransfers({ purchaseOrderId: fetched.id, transferType: "warehouse_to_supplier" });
+      if ((transferType === "warehouse_to_supplier" || transferType === "branch_to_supplier") && fetched.id) {
+        const existing = await api.getStockTransfers({ purchaseOrderId: fetched.id, transferType });
         const blocking = existing.find(t => t.status !== "rejected" && t.status !== "cancelled");
         if (blocking) {
           setPoError(`A return (${blocking.transferNumber}) already exists for this purchase order. Cancel or reject it before creating another.`);
@@ -1194,7 +1253,7 @@ function CreateTransferSheet({
   const handleCreate = async () => {
     if (!transferType) return;
     setSaving(true);
-    const isMultiDest = transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse";
+    const isMultiDest = transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse" || transferType === "supplier_to_branch";
     const isMultiSrc = isReturnType(transferType) && allSrcOptions.length > 1;
 
     // Determine what to loop over
@@ -1215,10 +1274,10 @@ function CreateTransferSheet({
         const payload: Partial<StockTransfer> = {
           transferType,
           status: "draft",
-          sourceBranchId: (transferType === "branch_to_warehouse" && isMultiSrc ? loopId : form.sourceBranchId) || undefined,
+          sourceBranchId: ((transferType === "branch_to_warehouse" || transferType === "branch_to_supplier") && isMultiSrc ? loopId : form.sourceBranchId) || undefined,
           sourceWarehouseId: (transferType === "warehouse_to_supplier" && isMultiSrc ? loopId : form.sourceWarehouseId) || undefined,
           sourceSupplierId: form.sourceSupplierId || undefined,
-          destBranchId: (transferType === "warehouse_to_branch" && isMultiDest ? loopId : form.destBranchId) || undefined,
+          destBranchId: ((transferType === "warehouse_to_branch" || transferType === "supplier_to_branch") && isMultiDest ? loopId : form.destBranchId) || undefined,
           destWarehouseId: ((transferType === "supplier_to_warehouse" && isMultiDest ? loopId : form.destWarehouseId) as string) || undefined,
           destSupplierId: form.destSupplierId || undefined,
           purchaseOrderId: transferType !== "branch_to_warehouse" ? fetchedPo?.id || undefined : undefined,
@@ -1254,7 +1313,9 @@ function CreateTransferSheet({
     // Return types require a fetched PO (source/dest auto-filled from it)
     if (transferType === "branch_to_warehouse") return fetchedPo !== null && (allSrcOptions.length === 0 || srcIds.length > 0);
     if (transferType === "warehouse_to_supplier") return fetchedPo !== null && (allSrcOptions.length === 0 || srcIds.length > 0);
+    if (transferType === "branch_to_supplier") return fetchedPo !== null && (allSrcOptions.length === 0 || srcIds.length > 0);
     if (transferType === "supplier_to_warehouse") return !!form.sourceSupplierId && destIds.length > 0;
+    if (transferType === "supplier_to_branch") return !!form.sourceSupplierId && destIds.length > 0;
     if (transferType === "warehouse_to_branch") return !!form.sourceWarehouseId && destIds.length > 0;
     if (transferType === "branch_to_branch") return !!form.sourceBranchId && !!form.destBranchId && form.sourceBranchId !== form.destBranchId;
     if (transferType === "warehouse_to_warehouse") return !!form.sourceWarehouseId && !!form.destWarehouseId && form.sourceWarehouseId !== form.destWarehouseId;
@@ -1369,7 +1430,7 @@ function CreateTransferSheet({
                 sourceBatches={sourceBatches}
                 onChange={setItems}
                 destCount={
-                  (transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse")
+                  (transferType === "warehouse_to_branch" || transferType === "supplier_to_warehouse" || transferType === "supplier_to_branch")
                     ? destIds.length
                     : 1
                 }
@@ -1900,19 +1961,22 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
     Promise.allSettled([
       api.getPurchaseOrders(),
       api.getStockTransfers({ transferType: "supplier_to_warehouse" }),
-    ]).then(([posRes, trfRes]) => {
+      api.getStockTransfers({ transferType: "supplier_to_branch" }),
+    ]).then(([posRes, whTrfRes, brTrfRes]) => {
       if (posRes.status === "fulfilled") setPurchaseOrders(posRes.value);
-      if (trfRes.status === "fulfilled") {
-        // Only show transfers that are NOT linked to an existing PO (to avoid duplicate rows)
-        setSupplierTransfers(trfRes.value.filter(t => !t.purchaseOrderId));
-      }
+      // Only show transfers that are NOT linked to an existing PO (to avoid duplicate rows)
+      const unlinked = [
+        ...(whTrfRes.status === "fulfilled" ? whTrfRes.value : []),
+        ...(brTrfRes.status === "fulfilled" ? brTrfRes.value : []),
+      ].filter(t => !t.purchaseOrderId);
+      setSupplierTransfers(unlinked);
     }).finally(() => setLoading(false));
   }, [refreshKey]);
 
   const filtered = useMemo(() => {
     const s = q.toLowerCase();
     return purchaseOrders.filter(po => {
-      if (s && !po.poNumber.toLowerCase().includes(s) && !(po.supplier?.name.toLowerCase().includes(s)) && !(po.warehouse?.name.toLowerCase().includes(s))) return false;
+      if (s && !po.poNumber.toLowerCase().includes(s) && !(po.supplier?.name.toLowerCase().includes(s)) && !(po.warehouse?.name.toLowerCase().includes(s)) && !(po.branch?.name.toLowerCase().includes(s))) return false;
       if (statusFilter.length && !statusFilter.includes(po.status)) return false;
       return true;
     });
@@ -1921,7 +1985,7 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
   const filteredTransfers = useMemo(() => {
     const s = q.toLowerCase();
     return supplierTransfers.filter(t => {
-      if (s && !t.transferNumber.toLowerCase().includes(s) && !(t.sourceSupplier?.name.toLowerCase().includes(s)) && !(t.destWarehouse?.name.toLowerCase().includes(s))) return false;
+      if (s && !t.transferNumber.toLowerCase().includes(s) && !(t.sourceSupplier?.name.toLowerCase().includes(s)) && !(t.destWarehouse?.name.toLowerCase().includes(s)) && !(t.destBranch?.name.toLowerCase().includes(s))) return false;
       if (statusFilter.length && !statusFilter.includes(t.status)) return false;
       return true;
     });
@@ -1958,7 +2022,7 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
             </div>
           ) : filtered.length === 0 && filteredTransfers.length === 0 ? (
             <div className="py-20 text-center text-sm text-muted-foreground">
-              {purchaseOrders.length === 0 && supplierTransfers.length === 0 ? "No purchase orders yet. Create one from the Purchase Orders page or via Supplier → WH transfer." : "No POs match your filters."}
+              {purchaseOrders.length === 0 && supplierTransfers.length === 0 ? "No purchase orders yet. Create one from the Purchase Orders page or via a Supplier → Warehouse/Branch transfer." : "No POs match your filters."}
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -1966,7 +2030,7 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
                 <tr className="border-b border-border/60 bg-muted/30">
                   <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">PO / Transfer #</th>
                   <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Supplier</th>
-                  <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Warehouse</th>
+                  <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Warehouse/Branch</th>
                   <th className="text-center py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</th>
                   <th className="text-end py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
                   <th className="text-start py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
@@ -2016,7 +2080,7 @@ function PurchaseOrdersTab({ refreshKey }: { refreshKey: number }) {
                         <span className="text-sm">{t.sourceSupplier?.name ?? "—"}</span>
                       </td>
                       <td className="py-3 px-4">
-                        <span className="text-sm text-muted-foreground">{t.destWarehouse?.name ?? "—"}</span>
+                        <span className="text-sm text-muted-foreground">{t.destWarehouse?.name ?? t.destBranch?.name ?? "—"}</span>
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className="text-sm font-medium">{t.items?.length ?? 0}</span>
@@ -2174,10 +2238,28 @@ function StockTransfers() {
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard label="Total Transfers" value={String(totalTransfers)} icon={ArrowLeftRight} accent="default" />
-        <MetricCard label="In Transit" value={String(inTransit)} icon={Truck} accent="primary" />
-        <MetricCard label="Pending Approval" value={String(pendingApproval)} icon={Clock} accent="warning" />
-        <MetricCard label="Completed Today" value={String(completedToday)} icon={CheckCircle2} accent="success" />
+        <MetricCard
+          label="Total Transfers" value={String(totalTransfers)} icon={ArrowLeftRight} accent="default"
+          onClick={() => setStatusFilter([])} active={statusFilter.length === 0}
+        />
+        <MetricCard
+          label="In Transit" value={String(inTransit)} icon={Truck} accent="primary"
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "in_transit" ? [] : ["in_transit"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "in_transit"}
+        />
+        <MetricCard
+          label="Pending Approval" value={String(pendingApproval)} icon={Clock} accent="warning"
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "pending_approval" ? [] : ["pending_approval"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "pending_approval"}
+        />
+        <MetricCard
+          label="Completed Today" value={String(completedToday)} icon={CheckCircle2} accent="success"
+          // "Today" narrows the count above by completedDate, but the date-range filter below
+          // only matches createdAt — the two aren't the same field, so this card filters to all
+          // completed transfers rather than exactly today's, to avoid hiding/mismatching rows.
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "completed" ? [] : ["completed"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "completed"}
+        />
       </div>
 
       {/* Quick-filter chips */}
@@ -2185,23 +2267,25 @@ function StockTransfers() {
         {[
           { label: "All Transfers", value: "all" },
           { label: "Supplier → WH (POs)", value: "supplier_to_warehouse" },
+          { label: "Supplier → Branch (POs)", value: "supplier_to_branch" },
           { label: "WH → Branch", value: "warehouse_to_branch" },
           { label: "Branch → WH", value: "branch_to_warehouse" },
           { label: "Return to Supplier (RTS)", value: "warehouse_to_supplier" },
+          { label: "Branch → Supplier (RTS)", value: "branch_to_supplier" },
         ].map(chip => (
           <button
             key={chip.value}
             onClick={() => setTypeFilter(chip.value)}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${typeFilter === chip.value ? "bg-primary text-primary-foreground border-primary" : "bg-background text-muted-foreground border-border/60 hover:border-primary/40"} ${chip.value === "warehouse_to_supplier" && typeFilter !== chip.value ? "border-warning/60 text-warning-foreground hover:bg-warning/10" : ""}`}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${typeFilter === chip.value ? "bg-primary text-primary-foreground border-primary" : "bg-background text-muted-foreground border-border/60 hover:border-primary/40"} ${(chip.value === "warehouse_to_supplier" || chip.value === "branch_to_supplier") && typeFilter !== chip.value ? "border-warning/60 text-warning-foreground hover:bg-warning/10" : ""}`}
           >
             {chip.label}
-            {chip.value === "warehouse_to_supplier" && <span className="ml-1 text-[10px] font-bold uppercase tracking-wide opacity-70">RTS</span>}
+            {(chip.value === "warehouse_to_supplier" || chip.value === "branch_to_supplier") && <span className="ml-1 text-[10px] font-bold uppercase tracking-wide opacity-70">RTS</span>}
           </button>
         ))}
       </div>
 
-      {typeFilter === "supplier_to_warehouse" ? (
-        /* Supplier → WH chip shows Purchase Orders instead of transfer list */
+      {typeFilter === "supplier_to_warehouse" || typeFilter === "supplier_to_branch" ? (
+        /* Supplier → WH/Branch chips show Purchase Orders instead of transfer list */
         <div className="mt-4">
           <PurchaseOrdersTab refreshKey={poRefreshKey} />
         </div>
@@ -2224,7 +2308,7 @@ function StockTransfers() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
-                {TRANSFER_TYPES.filter(t => t.value !== "supplier_to_warehouse").map(t => (
+                {TRANSFER_TYPES.filter(t => t.value !== "supplier_to_warehouse" && t.value !== "supplier_to_branch").map(t => (
                   <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
                 ))}
               </SelectContent>

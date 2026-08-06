@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { clearPairing, getStoredPairing, getStoredToken, getZatcaSettings, pairKiosk, storePairing } from "./api";
+import { clearPairing, getCompanyProfile, getStoredPairing, getStoredToken, getZatcaSettings, pairKiosk, storePairing } from "./api";
 
 interface SessionState {
   paired: boolean;
@@ -8,6 +8,8 @@ interface SessionState {
   terminalName: string | null;
   sellerName: string | null;
   vatNumber: string | null;
+  logoDataUrl: string | null;
+  logoEscPos: string | null;
 }
 
 interface SessionContextValue extends SessionState {
@@ -22,6 +24,8 @@ const BRANCH_NAME_KEY = "selfcheckout_branch_name";
 const TERMINAL_NAME_KEY = "selfcheckout_terminal_name";
 const SELLER_NAME_KEY = "selfcheckout_seller_name";
 const VAT_NUMBER_KEY = "selfcheckout_vat_number";
+const LOGO_DATA_URL_KEY = "selfcheckout_logo_data_url";
+const LOGO_ESC_POS_KEY = "selfcheckout_logo_esc_pos";
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SessionState>(() => ({
@@ -31,6 +35,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     terminalName: localStorage.getItem(TERMINAL_NAME_KEY),
     sellerName: localStorage.getItem(SELLER_NAME_KEY),
     vatNumber: localStorage.getItem(VAT_NUMBER_KEY),
+    logoDataUrl: localStorage.getItem(LOGO_DATA_URL_KEY),
+    logoEscPos: localStorage.getItem(LOGO_ESC_POS_KEY),
   }));
 
   // Refresh seller/VAT details (used on the printed receipt) once per session —
@@ -50,6 +56,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
   }, [state.paired, state.branchId]);
 
+  // Refresh the receipt logo once per session — self-checkout is always the customer-facing
+  // device, so it only ever cares about CompanyProfile.showLogoOnCustomerSlip.
+  useEffect(() => {
+    if (!state.paired) return;
+    getCompanyProfile()
+      .then((c) => {
+        const logoDataUrl = c.showLogoOnCustomerSlip ? c.logoDataUrl ?? "" : "";
+        const logoEscPos = c.showLogoOnCustomerSlip ? c.logoEscPosBase64 ?? "" : "";
+        localStorage.setItem(LOGO_DATA_URL_KEY, logoDataUrl);
+        localStorage.setItem(LOGO_ESC_POS_KEY, logoEscPos);
+        setState((s) => ({ ...s, logoDataUrl, logoEscPos }));
+      })
+      .catch(() => {
+        /* receipt prints without a logo */
+      });
+  }, [state.paired]);
+
   async function pair(terminalCode: string, pairingSecret: string) {
     const res = await pairKiosk(terminalCode, pairingSecret);
     storePairing(terminalCode, pairingSecret, res.token);
@@ -63,6 +86,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       terminalName: res.terminalName,
       sellerName: null,
       vatNumber: null,
+      logoDataUrl: null,
+      logoEscPos: null,
     });
   }
 
@@ -73,7 +98,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(TERMINAL_NAME_KEY);
     localStorage.removeItem(SELLER_NAME_KEY);
     localStorage.removeItem(VAT_NUMBER_KEY);
-    setState({ paired: false, branchId: null, branchName: null, terminalName: null, sellerName: null, vatNumber: null });
+    localStorage.removeItem(LOGO_DATA_URL_KEY);
+    localStorage.removeItem(LOGO_ESC_POS_KEY);
+    setState({ paired: false, branchId: null, branchName: null, terminalName: null, sellerName: null, vatNumber: null, logoDataUrl: null, logoEscPos: null });
   }
 
   return <SessionContext.Provider value={{ ...state, pair, unpair }}>{children}</SessionContext.Provider>;

@@ -365,16 +365,17 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         if (purchaseOrderId.HasValue) query = query.Where(t => t.PurchaseOrderId == purchaseOrderId);
         if (sourceSupplierId.HasValue) query = query.Where(t => t.SourceSupplierId == sourceSupplierId);
 
-        // RTS (warehouse_to_supplier) rows are governed by the "Supplier Returns" module — a
-        // separate matrix row from "Stock Transfers" (Storekeeper/Supervisor hold Stock Transfers
-        // view but are fully denied Supplier Returns), so a static [RequirePermission] on this
-        // action can't express it. Explicitly requesting RTS data without that permission is
-        // refused; broader queries silently exclude RTS rows instead of failing the whole call.
+        // RTS (warehouse_to_supplier / branch_to_supplier) rows are governed by the "Supplier
+        // Returns" module — a separate matrix row from "Stock Transfers" (Storekeeper/Supervisor
+        // hold Stock Transfers view but are fully denied Supplier Returns), so a static
+        // [RequirePermission] on this action can't express it. Explicitly requesting RTS data
+        // without that permission is refused; broader queries silently exclude RTS rows instead
+        // of failing the whole call.
         if (!await PermissionCheck.HasPermissionAsync(User, db, "Supplier Returns", PermAction.View))
         {
-            if (transferType == "warehouse_to_supplier")
+            if (transferType is "warehouse_to_supplier" or "branch_to_supplier")
                 return StatusCode(403, new { message = "You do not have permission to view Supplier Returns." });
-            query = query.Where(t => t.TransferType != "warehouse_to_supplier");
+            query = query.Where(t => t.TransferType != "warehouse_to_supplier" && t.TransferType != "branch_to_supplier");
         }
 
         var (role, callerBranchId) = GetCallerContext();
@@ -463,12 +464,14 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
         // times — nothing stopped a second return being drafted, submitted, approved, or even
         // completed while another one for the same PO already existed. A PO should only ever have
         // one live-or-finished return; only a rejected/cancelled prior attempt frees the PO up for
-        // a fresh one (it never went through).
-        if (req.TransferType == "warehouse_to_supplier" && req.PurchaseOrderId.HasValue)
+        // a fresh one (it never went through). Applies to both warehouse and branch RTS — a branch
+        // return with no linked PO (the common case) is unaffected since this only fires when
+        // PurchaseOrderId is set.
+        if (req.TransferType is "warehouse_to_supplier" or "branch_to_supplier" && req.PurchaseOrderId.HasValue)
         {
             var hasExistingReturn = await db.StockTransfers.AnyAsync(t =>
                 t.PurchaseOrderId == req.PurchaseOrderId
-                && t.TransferType == "warehouse_to_supplier"
+                && (t.TransferType == "warehouse_to_supplier" || t.TransferType == "branch_to_supplier")
                 && t.Status != "rejected" && t.Status != "cancelled");
             if (hasExistingReturn)
                 return BadRequest(new { message = "A return has already been created for this purchase order. Cancel or reject it before creating another." });
@@ -489,14 +492,17 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             CreatedAt = DateTime.UtcNow,
         }).ToList();
 
-        var transferNumber = req.TransferType == "supplier_to_warehouse"
+        var transferNumber = req.TransferType is "supplier_to_warehouse" or "supplier_to_branch"
             ? $"PO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}"
             : $"TRF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
 
-        // Auto-create a linked PurchaseOrder for every supplier_to_warehouse transfer so both
-        // the Stock Transfers tab and the Purchase Orders tab share one source of truth.
+        // Auto-create a linked PurchaseOrder for every supplier_to_warehouse/supplier_to_branch
+        // transfer so both the Stock Transfers tab and the Purchase Orders tab share one source
+        // of truth. PurchaseOrder.WarehouseId/BranchId are the same nullable-pair convention used
+        // everywhere else in this codebase — exactly one is set, matching whichever destination
+        // this transfer targets.
         Guid? linkedPoId = req.PurchaseOrderId;
-        if (req.TransferType == "supplier_to_warehouse" && linkedPoId == null && req.SourceSupplierId.HasValue)
+        if (req.TransferType is "supplier_to_warehouse" or "supplier_to_branch" && linkedPoId == null && req.SourceSupplierId.HasValue)
         {
             var poItems = items.Select(i => new PurchaseOrderItem
             {
@@ -515,6 +521,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 PoNumber = transferNumber,
                 SupplierId = req.SourceSupplierId.Value,
                 WarehouseId = req.DestWarehouseId,
+                BranchId = req.DestBranchId,
                 OrderedBy = req.CreatedBy ?? Guid.Empty,
                 // Required FK to users — was never set here, so it defaulted to Guid.Empty and every
                 // supplier_to_warehouse transfer 500'd on FK_purchase_orders_users_created_by.
@@ -577,7 +584,7 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
 
             // Return-to-supplier transfer — confirm to whoever created it, since there's no branch
             // recipient to notify (the "destination" is the supplier, not a Users-linked entity).
-            if (transfer.TransferType == "warehouse_to_supplier" && transfer.CreatedBy != Guid.Empty)
+            if (transfer.TransferType is "warehouse_to_supplier" or "branch_to_supplier" && transfer.CreatedBy != Guid.Empty)
             {
                 await notifications.NotifyUserAsync(transfer.CreatedBy,
                     "Suppliers / Purchase Orders", "Supplier Return Created", "Supplier Return Created",
@@ -705,8 +712,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
             }
         }
 
-        // Auto-create credit note when return-to-supplier transfer is completed
-        if (transfer.TransferType == "warehouse_to_supplier" && transfer.DestSupplierId.HasValue
+        // Auto-create credit note when return-to-supplier transfer (warehouse or branch) is completed
+        if (transfer.TransferType is "warehouse_to_supplier" or "branch_to_supplier" && transfer.DestSupplierId.HasValue
             && !await db.SupplierCreditNotes.AnyAsync(cn => cn.TransferId == transfer.Id))
         {
             // Prefer item-level unit cost; fall back to product cost price so RTS notes are never 0
@@ -843,8 +850,8 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
                 await CreditDestinationAsync(transfer, item, qty, damagedOrReturnReason: null);
             }
 
-            // Auto-create credit note for RTS when completed via status patch
-            if (transfer.TransferType == "warehouse_to_supplier" && transfer.DestSupplierId.HasValue
+            // Auto-create credit note for RTS (warehouse or branch) when completed via status patch
+            if (transfer.TransferType is "warehouse_to_supplier" or "branch_to_supplier" && transfer.DestSupplierId.HasValue
                 && !await db.SupplierCreditNotes.AnyAsync(cn => cn.TransferId == transfer.Id))
             {
                 decimal creditAmount = 0;

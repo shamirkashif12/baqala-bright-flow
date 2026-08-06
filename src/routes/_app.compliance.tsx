@@ -194,8 +194,16 @@ function Compliance() {
     <PageShell title="Compliance — Permissible Items" subtitle="Rules that the POS enforces in real time">
       {rulesLoadError && <LoadErrorBanner onRetry={loadRules} />}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Active Rules" value={String(activeCount)} icon={ShieldCheck} accent="primary" />
-        <MetricCard label="Blocked SKUs" value={String(inactiveCount)} icon={Ban} accent="destructive" />
+        <MetricCard
+          label="Active Rules" value={String(activeCount)} icon={ShieldCheck} accent="primary"
+          onClick={() => toggleStatusFilter("active")} active={statusFilter.includes("active")}
+        />
+        <MetricCard
+          label="Blocked SKUs" value={String(inactiveCount)} icon={Ban} accent="destructive"
+          onClick={() => toggleStatusFilter("inactive")} active={statusFilter.includes("inactive")}
+        />
+        {/* "Triggered Today" and "Restricted by Role" have no backing data yet (static "—") —
+            left non-clickable rather than wiring a filter with nothing behind it. */}
         <MetricCard label="Triggered Today" value="—" icon={AlertTriangle} accent="warning" />
         <MetricCard label="Restricted by Role" value="—" icon={Lock} />
       </div>

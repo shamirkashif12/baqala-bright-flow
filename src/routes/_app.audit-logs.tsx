@@ -262,9 +262,20 @@ function AuditLogs() {
         : "Every cashier, manager, system & device action — tamper-proof trail"}
     >
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Total Events" value={String(total)} icon={ScanBarcode} accent="primary" />
-        <MetricCard label="Critical" value={String(critical)} icon={ShieldAlert} accent="destructive" />
-        <MetricCard label="Warnings" value={String(warnings)} icon={Undo2} accent="warning" />
+        <MetricCard
+          label="Total Events" value={String(total)} icon={ScanBarcode} accent="primary"
+          onClick={() => setSevFilter([])} active={sevFilter.length === 0}
+        />
+        <MetricCard
+          label="Critical" value={String(critical)} icon={ShieldAlert} accent="destructive"
+          onClick={() => setSevFilter(v => v.includes("critical") ? v.filter(s => s !== "critical") : [...v, "critical"])}
+          active={sevFilter.includes("critical")}
+        />
+        <MetricCard
+          label="Warnings" value={String(warnings)} icon={Undo2} accent="warning"
+          onClick={() => setSevFilter(v => v.includes("warning") ? v.filter(s => s !== "warning") : [...v, "warning"])}
+          active={sevFilter.includes("warning")}
+        />
         <MetricCard label="Loaded" value={String(logs.length)} icon={LogIn} accent="success" />
       </div>
 

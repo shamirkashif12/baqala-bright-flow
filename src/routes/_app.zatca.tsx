@@ -133,10 +133,22 @@ function Zatca() {
       </Card>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Accepted" value={String(clearedCount)} icon={ShieldCheck} accent="success" />
-        <MetricCard label="Pending" value={String(pendingCount)} icon={RefreshCw} accent="warning" />
-        <MetricCard label="Rejected" value={String(rejectedCount)} icon={FileWarning} accent={rejectedCount > 0 ? "destructive" : "success"} />
-        <MetricCard label="Total" value={String(invoices.length)} icon={QrCode} accent="primary" />
+        <MetricCard
+          label="Accepted" value={String(clearedCount)} icon={ShieldCheck} accent="success"
+          onClick={() => toggleStatusFilter("accepted")} active={statusFilter.includes("accepted")}
+        />
+        <MetricCard
+          label="Pending" value={String(pendingCount)} icon={RefreshCw} accent="warning"
+          onClick={() => toggleStatusFilter("pending")} active={statusFilter.includes("pending")}
+        />
+        <MetricCard
+          label="Rejected" value={String(rejectedCount)} icon={FileWarning} accent={rejectedCount > 0 ? "destructive" : "success"}
+          onClick={() => toggleStatusFilter("rejected")} active={statusFilter.includes("rejected")}
+        />
+        <MetricCard
+          label="Total" value={String(invoices.length)} icon={QrCode} accent="primary"
+          onClick={() => setStatusFilter([])} active={statusFilter.length === 0}
+        />
       </div>
 
       <Toolbar

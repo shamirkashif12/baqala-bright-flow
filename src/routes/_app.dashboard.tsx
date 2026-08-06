@@ -45,6 +45,16 @@ const DASHBOARD_TOUR_STEPS: TourStep[] = [
   { target: '[data-tour="lang-switcher"]', placement: "bottom", text: "Change the language from here." },
   { target: '[data-tour="branch-selector"]', placement: "bottom", text: "Select your branch from here." },
   { target: '[data-tour="sidebar-nav"]', placement: "right", text: "Use the sidebar to navigate." },
+  // One short stop per sidebar section — a group with nothing visible for this role is simply
+  // skipped by the tour (its target won't exist in the DOM), no dead steps shown.
+  { target: '[data-tour="sidebar-group-Operate"]', placement: "right", text: "Operate: run checkout, orders, customers and shift approvals here." },
+  { target: '[data-tour="sidebar-group-Stock"]', placement: "right", text: "Stock: track inventory, batches, expiry and stock transfers here." },
+  { target: '[data-tour="sidebar-group-Finance"]', placement: "right", text: "Finance: manage pricing, promotions, loyalty and expenses here." },
+  { target: '[data-tour="sidebar-group-Suppliers"]', placement: "right", text: "Suppliers: handle supplier records, purchase orders and returns here." },
+  { target: '[data-tour="sidebar-group-Network"]', placement: "right", text: "Network: oversee branches, warehouses and terminal devices here." },
+  { target: '[data-tour="sidebar-group-Insights"]', placement: "right", text: "Insights: view KPIs, reports and business intelligence here." },
+  { target: '[data-tour="sidebar-group-Human Resources"]', placement: "right", text: "Human Resources: manage employees, attendance, leave and payroll here." },
+  { target: '[data-tour="sidebar-group-Admin"]', placement: "right", text: "Admin: configure users, roles, settings and compliance here." },
   { target: '[data-tour="customize-dashboard"]', placement: "bottom", text: "Customize your dashboard here." },
   { target: '[data-tour="alerts-row"]', placement: "bottom", text: "Review urgent operational alerts and information here." },
   { target: '[data-tour="stat-cards"]', placement: "top", text: "Track orders, sales, cashiers, terminals, and stock health." },

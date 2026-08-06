@@ -140,6 +140,58 @@ public class PurchaseOrdersController(BaqalaDbContext db, INotificationService n
         return Ok(po);
     }
 
+    // A management-readable one-page PDF for a single PO — same ReportPdfWriter template every
+    // report export already uses (title/company header/KPI tiles/table), just fed this one PO's
+    // own line items instead of a report's rows.
+    [HttpGet("{id:guid}/pdf")]
+    public async Task<IActionResult> GetPdf(Guid id)
+    {
+        var po = await db.PurchaseOrders
+            .Include(p => p.Supplier)
+            .Include(p => p.Warehouse)
+            .Include(p => p.Branch)
+            .Include(p => p.Items).ThenInclude(i => i.Product)
+            .Include(p => p.Payments)
+            .FirstOrDefaultAsync(p => p.Id == id);
+        if (po is null) return NotFound();
+
+        var (callerRole, callerBranchId) = GetCallerContext();
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && !IsOwnBranchOrUnscoped(po, callerBranchId))
+            return NotFound();
+
+        var company = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId);
+        var companyHeader = ExportFileBuilder.FormatCompanyHeader(company);
+
+        var destination = po.Warehouse?.Name ?? po.Branch?.Name ?? "—";
+        var filterSummary = $"Supplier: {po.Supplier?.Name ?? "—"} · Destination: {destination} · "
+            + $"Payment terms: {po.PaymentTerms ?? "—"} · Expected delivery: {(po.ExpectedDeliveryDate is { } exp ? exp.ToString("yyyy-MM-dd") : "—")} · "
+            + $"Received: {(po.ReceivedDate is { } rec ? rec.ToString("yyyy-MM-dd") : "—")}";
+
+        var kpis = new (string Label, string Value)[]
+        {
+            ("PO Number", po.PoNumber ?? po.Id.ToString()[..8]),
+            ("Status", po.Status),
+            ("Payment Status", po.PaymentStatus),
+            ("Total Amount", po.TotalAmount.ToString("0.##")),
+            ("Paid Amount", po.PaidAmount.ToString("0.##")),
+            ("Balance Due", (po.TotalAmount - po.PaidAmount).ToString("0.##")),
+        };
+
+        var headers = new[] { "Product", "SKU", "Ordered Qty", "Received Qty", "Unit Cost", "Subtotal" };
+        var rows = po.Items.Select(i => new object?[]
+        {
+            i.Product?.Name ?? i.ProductId.ToString(),
+            i.Product?.Sku ?? "—",
+            i.OrderedQuantity,
+            i.ReceivedQuantity,
+            i.UnitCost,
+            i.Subtotal,
+        }).ToList();
+
+        var pdfBytes = ReportPdfWriter.Write($"Purchase Order {po.PoNumber}", filterSummary, kpis, headers, rows, companyHeader);
+        return File(pdfBytes, "application/pdf", $"{po.PoNumber ?? po.Id.ToString()[..8]}.pdf");
+    }
+
     // Same cross-module lookup exemption as GetByBatchId above.
     [HttpGet("by-number/{number}")]
     public async Task<IActionResult> GetByNumber(string number)

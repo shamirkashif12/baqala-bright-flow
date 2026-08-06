@@ -2361,6 +2361,10 @@ function Inventory() {
   const [updatedFrom, setUpdatedFrom] = useState("");
   const [updatedTo, setUpdatedTo] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Clicking a summary card above the table quick-filters it to that card's subset; clicking the
+  // same card again (or "Total SKUs") clears back to the full list.
+  const [quickFilter, setQuickFilter] = useState<"lowStock" | "expiring" | "outOfStock" | null>(null);
+  const toggleQuickFilter = (f: "lowStock" | "expiring" | "outOfStock") => setQuickFilter(v => v === f ? null : f);
 
   const [viewItem, setViewItem] = useState<StockItem | null>(null);
   const [adjustItem, setAdjustItem] = useState<StockItem | null>(null);
@@ -2536,8 +2540,12 @@ function Inventory() {
     const met = !expiryTo || (!!s.expiryDate && s.expiryDate <= expiryTo + "T23:59:59");
     const muf = !updatedFrom || (!!s.lastUpdated && s.lastUpdated >= updatedFrom);
     const mut = !updatedTo || (!!s.lastUpdated && s.lastUpdated <= updatedTo + "T23:59:59");
-    return mq && mc && mb && mp && mef && met && muf && mut;
-  }), [stock, q, categoryFilters, branchFilters, productFilters, expiryFrom, expiryTo, updatedFrom, updatedTo]);
+    const mqf = !quickFilter
+      || (quickFilter === "lowStock" && s.quantity > 0 && s.quantity <= s.reorderLevel)
+      || (quickFilter === "outOfStock" && s.quantity === 0)
+      || (quickFilter === "expiring" && (d => d !== null && d >= 0 && d <= 7)(daysLeft(s.expiryDate)));
+    return mq && mc && mb && mp && mef && met && muf && mut && mqf;
+  }), [stock, q, categoryFilters, branchFilters, productFilters, expiryFrom, expiryTo, updatedFrom, updatedTo, quickFilter]);
 
   const advancedFilterCount = productFilters.length + (expiryFrom ? 1 : 0) + (expiryTo ? 1 : 0) + (updatedFrom ? 1 : 0) + (updatedTo ? 1 : 0);
 
@@ -2577,27 +2585,48 @@ function Inventory() {
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ── Alert Banners ── */}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <div className="rounded-2xl border border-warning/30 bg-warning/10 p-4 flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => toggleQuickFilter("expiring")}
+          className={cn(
+            "rounded-2xl border border-warning/30 bg-warning/10 p-4 flex items-center gap-4 text-start cursor-pointer transition-all hover:ring-2 hover:ring-warning/30",
+            quickFilter === "expiring" && "ring-2 ring-warning",
+          )}
+        >
           <CalendarClock className="h-8 w-8 text-warning shrink-0" />
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-warning/80">Near Expiry Items</p>
             <p className="text-2xl font-black text-warning">{expiringSoon.length} SKUs</p>
             <p className="text-xs text-warning/70">Next 7 days · review now</p>
           </div>
-        </div>
-        <div className="rounded-2xl border border-destructive/30 bg-destructive/8 p-4 flex items-center gap-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleQuickFilter("lowStock")}
+          className={cn(
+            "rounded-2xl border border-destructive/30 bg-destructive/8 p-4 flex items-center gap-4 text-start cursor-pointer transition-all hover:ring-2 hover:ring-destructive/30",
+            quickFilter === "lowStock" && "ring-2 ring-destructive",
+          )}
+        >
           <AlertTriangle className="h-8 w-8 text-destructive shrink-0" />
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-destructive/80">Low Stock Items</p>
             <p className="text-2xl font-black text-destructive">{lowStockItems.length} SKUs</p>
             <p className="text-xs text-destructive/70">{criticalCount} critical · reorder soon</p>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* ── Metrics ── */}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <div className="rounded-2xl border border-border/60 bg-card shadow-card p-4">
+        <button
+          type="button"
+          onClick={() => setQuickFilter(null)}
+          className={cn(
+            "rounded-2xl border border-border/60 bg-card shadow-card p-4 text-start cursor-pointer transition-all hover:ring-2 hover:ring-primary/30",
+            quickFilter === null && "ring-2 ring-primary",
+          )}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total SKUs</p>
@@ -2605,8 +2634,15 @@ function Inventory() {
             </div>
             <div className="h-12 w-12 rounded-xl gradient-primary flex items-center justify-center"><Boxes className="h-6 w-6 text-primary-foreground" /></div>
           </div>
-        </div>
-        <div className="rounded-2xl border border-warning/30 bg-warning/5 shadow-card p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleQuickFilter("lowStock")}
+          className={cn(
+            "rounded-2xl border border-warning/30 bg-warning/5 shadow-card p-4 text-start cursor-pointer transition-all hover:ring-2 hover:ring-warning/30",
+            quickFilter === "lowStock" && "ring-2 ring-warning",
+          )}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Low Stock</p>
@@ -2615,8 +2651,15 @@ function Inventory() {
             </div>
             <div className="h-12 w-12 rounded-xl bg-warning/20 flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-warning" /></div>
           </div>
-        </div>
-        <div className="rounded-2xl border border-border/60 bg-card shadow-card p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleQuickFilter("expiring")}
+          className={cn(
+            "rounded-2xl border border-border/60 bg-card shadow-card p-4 text-start cursor-pointer transition-all hover:ring-2 hover:ring-orange-400/40",
+            quickFilter === "expiring" && "ring-2 ring-orange-400",
+          )}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Expiring Soon</p>
@@ -2624,8 +2667,15 @@ function Inventory() {
             </div>
             <div className="h-12 w-12 rounded-xl bg-orange-100 dark:bg-orange-950/40 flex items-center justify-center"><CalendarClock className="h-6 w-6 text-orange-500" /></div>
           </div>
-        </div>
-        <div className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-card p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleQuickFilter("outOfStock")}
+          className={cn(
+            "rounded-2xl border border-destructive/20 bg-destructive/5 shadow-card p-4 text-start cursor-pointer transition-all hover:ring-2 hover:ring-destructive/30",
+            quickFilter === "outOfStock" && "ring-2 ring-destructive",
+          )}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Out of Stock</p>
@@ -2633,7 +2683,7 @@ function Inventory() {
             </div>
             <div className="h-12 w-12 rounded-xl bg-destructive/15 flex items-center justify-center"><Package className="h-6 w-6 text-destructive" /></div>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* ── Tag Chips ── */}

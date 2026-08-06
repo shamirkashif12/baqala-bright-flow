@@ -1199,12 +1199,16 @@ function Stocks() {
   const [loading, setLoading] = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [expiringSoonCount, setExpiringSoonCount] = useState(0);
+  // Holds the actual batches (not just a count) so the "Expiring (30d)" card can filter the
+  // Overview stock table by product+branch — expiringSoonCount alone couldn't drive a filter
+  // since it's a batch-level number with no rows behind it.
+  const [expiringSoonBatches, setExpiringSoonBatches] = useState<InventoryBatch[]>([]);
 
   const [tab, setTab] = useState("overview");
   const [search, setSearch] = useState("");
   const [overviewBranchIds, setOverviewBranchIds] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
   const [categoryFilterIds, setCategoryFilterIds] = useState<string[]>([]);
+  const [overviewQuickFilter, setOverviewQuickFilter] = useState<"lowStock" | "expiringSoon" | null>(null);
   const [allCategoryOptions, setAllCategoryOptions] = useState<{ id: string; name: string }[]>([]);
 
   // Sub-tab filters — passed to BE when tab is active
@@ -1356,7 +1360,7 @@ function Stocks() {
   useEffect(() => {
     api.getBranches().then(br => setBranches(excludeDisabledBranches(br ?? []))).catch(() => {});
     api.getWarehouses().then(wh => setWarehouses(wh ?? [])).catch(() => {});
-    api.getExpiringBatches(undefined, 30).then(bt => setExpiringSoonCount(bt?.length ?? 0)).catch(() => {});
+    api.getExpiringBatches(undefined, 30).then(bt => setExpiringSoonBatches(bt ?? [])).catch(() => {});
   }, []);
 
   // Sync branch filters when user loads (auth hydration after mount)
@@ -1408,16 +1412,26 @@ function Stocks() {
   const q = search.toLowerCase();
   // Branch/Category/search are all applied client-side over the unfiltered fetch (see
   // fetchOverview) so Branch and Category can both be multi-select.
-  const filteredStock = stock.filter(s =>
+  const baseFilteredStock = stock.filter(s =>
     (!q || s.product?.name?.toLowerCase().includes(q)) &&
     (overviewBranchIds.length === 0 || overviewBranchIds.includes(s.branchId)) &&
     (categoryFilterIds.length === 0 || (!!s.product?.category?.id && categoryFilterIds.includes(s.product.category.id)))
   );
+  // expiringSoonBatches is a separate (batch-level) fetch, not a field on InventoryStock rows —
+  // matched here by product+branch so the "Expiring (30d)" card can narrow the same stock table.
+  const expiringSoonKeys = new Set(expiringSoonBatches.filter(b => b.branchId).map(b => `${b.productId}:${b.branchId}`));
+  // The quick-filter cards narrow the table only — kept off `baseFilteredStock` so the metric
+  // cards themselves (computed below) don't go stale/zero while one of them is active.
+  const filteredStock = baseFilteredStock.filter(s =>
+    !overviewQuickFilter
+    || (overviewQuickFilter === "lowStock" && s.quantity <= s.reorderLevel)
+    || (overviewQuickFilter === "expiringSoon" && expiringSoonKeys.has(`${s.productId}:${s.branchId}`))
+  );
 
   // Metrics reflect the active Branch/Category filters, not just search.
-  const totalSKUs = filteredStock.length;
-  const totalUnits = filteredStock.reduce((s, x) => s + x.quantity, 0);
-  const lowStockCount = filteredStock.filter(x => x.quantity <= x.reorderLevel).length;
+  const totalSKUs = baseFilteredStock.length;
+  const totalUnits = baseFilteredStock.reduce((s, x) => s + x.quantity, 0);
+  const lowStockCount = baseFilteredStock.filter(x => x.quantity <= x.reorderLevel).length;
 
   // Sub-tabs: data already fetched from BE with status filter; apply date range FE-side only.
   // The batches endpoint orders by ExpiryDate (FEFO, for the expiry-watch views) — this
@@ -1450,8 +1464,16 @@ function Stocks() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <MetricCard label="Total SKUs" value={String(totalSKUs)} icon={Boxes} />
         <MetricCard label="Total Units" value={fmt(totalUnits)} icon={Package} />
-        <MetricCard label="Low Stock" value={String(lowStockCount)} icon={AlertTriangle} trend={lowStockCount > 0 ? "down" : undefined} />
-        <MetricCard label="Expiring (30d)" value={String(expiringSoonCount)} icon={TrendingUp} />
+        <MetricCard
+          label="Low Stock" value={String(lowStockCount)} icon={AlertTriangle} trend={lowStockCount > 0 ? "down" : undefined}
+          onClick={() => { setTab("overview"); setOverviewQuickFilter(v => v === "lowStock" ? null : "lowStock"); }}
+          active={overviewQuickFilter === "lowStock"}
+        />
+        <MetricCard
+          label="Expiring (30d)" value={String(expiringSoonBatches.length)} icon={TrendingUp}
+          onClick={() => { setTab("overview"); setOverviewQuickFilter(v => v === "expiringSoon" ? null : "expiringSoon"); }}
+          active={overviewQuickFilter === "expiringSoon"}
+        />
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>

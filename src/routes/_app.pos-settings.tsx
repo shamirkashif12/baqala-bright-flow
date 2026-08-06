@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Loader2, Moon, Sun } from "lucide-react";
+import { Loader2, Moon, Sun, Image as ImageIcon, Upload, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type PosSettingsRecord } from "@/lib/api";
 import { useBranch } from "@/lib/branch-context";
@@ -18,6 +18,7 @@ import { DeliveryFeeRules } from "@/components/delivery-fee-rules";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { useTheme } from "@/lib/theme";
+import { fileToLogoAssets } from "@/lib/image";
 
 export const Route = createFileRoute("/_app/pos-settings")({
   component: () => (
@@ -91,6 +92,119 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
       <Label className="text-xs">{label}</Label>
       <Input className="h-9" type="number" step="0.01" min={0} value={value} onChange={e => onChange(Number(e.target.value) || 0)} />
     </div>
+  );
+}
+
+// Company-wide receipt logo. Lives outside the page's per-branch Save (same reasoning as
+// DeliveryFeeRules below): CompanyProfile is one shared record across every branch, not a
+// per-branch PosSettings field, so it commits immediately via its own endpoint/button rather
+// than riding along with `handleSave`.
+function ReceiptLogoCard() {
+  const { canEdit } = usePermission("Settings");
+  const [dataUrl, setDataUrl] = useState<string | undefined>();
+  const [escPosBase64, setEscPosBase64] = useState<string | undefined>();
+  const [showOnStaff, setShowOnStaff] = useState(false);
+  const [showOnCustomer, setShowOnCustomer] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getCompanyProfile()
+      .then(p => {
+        if (cancelled) return;
+        setDataUrl(p.logoDataUrl);
+        setEscPosBase64(p.logoEscPosBase64);
+        setShowOnStaff(!!p.showLogoOnStaffReceipt);
+        setShowOnCustomer(!!p.showLogoOnCustomerSlip);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const assets = await fileToLogoAssets(file);
+      setDataUrl(assets.dataUrl);
+      setEscPosBase64(assets.escPosBase64);
+      setDirty(true);
+    } catch {
+      toast.error("Failed to process image. Try a smaller PNG/JPG.");
+    }
+  }
+
+  function handleRemove() {
+    setDataUrl(undefined);
+    setEscPosBase64(undefined);
+    setDirty(true);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await api.updateCompanyLogo({
+        logoDataUrl: dataUrl, logoEscPosBase64: escPosBase64,
+        showLogoOnStaffReceipt: showOnStaff, showLogoOnCustomerSlip: showOnCustomer,
+      });
+      toast.success("Receipt logo saved.");
+      setDirty(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save receipt logo.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return <div className="flex items-center gap-2 text-xs text-muted-foreground py-2"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading logo…</div>;
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div>
+        <p className="text-sm font-semibold flex items-center gap-1.5"><ImageIcon className="h-4 w-4 text-primary" /> Receipt Logo</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Company-wide logo shown on invoices/slips — applies to every branch. Choose where it prints below.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="h-16 w-16 rounded-lg border border-dashed border-border/60 bg-muted/30 flex items-center justify-center overflow-hidden shrink-0">
+          {dataUrl ? <img src={dataUrl} alt="Receipt logo" className="h-full w-full object-contain" /> : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
+        </div>
+        {canEdit && (
+          <div className="flex flex-col gap-1.5">
+            <label className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-input bg-background text-xs font-medium cursor-pointer hover:bg-muted">
+              <Upload className="h-3.5 w-3.5" /> {dataUrl ? "Replace" : "Upload"}
+              <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFile} />
+            </label>
+            {dataUrl && (
+              <button type="button" onClick={handleRemove} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium text-destructive hover:bg-destructive/10">
+                <Trash2 className="h-3.5 w-3.5" /> Remove
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Row title="Staff POS Receipt" desc="Printed in-store, for the cashier's own record"
+          checked={showOnStaff} onChange={v => { setShowOnStaff(v); setDirty(true); }} />
+        <Row title="Customer Slip — Online Order & Self-Checkout" desc="Shown/printed for customer-device orders (online ordering, self-checkout kiosk)"
+          checked={showOnCustomer} onChange={v => { setShowOnCustomer(v); setDirty(true); }} />
+      </div>
+
+      {canEdit && (
+        <Button size="sm" className="gradient-primary text-primary-foreground border-0" disabled={!dirty || saving} onClick={handleSave}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save Logo
+        </Button>
+      )}
+    </Card>
   );
 }
 
@@ -192,7 +306,7 @@ function PosSettings() {
 
   return (
     <PageShell
-      title="POS Settings"
+      title="General Settings"
       subtitle="Configure cashier, terminal, payments, printing and permissions"
       actions={
         <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-1.5">
@@ -286,6 +400,7 @@ function PosSettings() {
 
         {/* ── Invoice ── */}
         <TabsContent value="invoice" className="space-y-3 mt-4">
+          <ReceiptLogoCard />
           <Card className="p-4 grid sm:grid-cols-2 gap-3">
             <Field label="Invoice Prefix" value="INV-" />
             <Field label="Footer Message" value="شكراً لزيارتكم — Thank you for shopping" />

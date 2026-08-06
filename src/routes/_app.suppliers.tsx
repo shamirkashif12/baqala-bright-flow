@@ -914,9 +914,20 @@ function SuppliersTab() {
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* Metric cards */}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Total Suppliers" value={String(totalSuppliers)} icon={Truck} accent="primary" />
-        <MetricCard label="Active" value={String(activeSuppliers)} icon={CheckCircle} accent="success" />
-        <MetricCard label="Inactive" value={String(totalSuppliers - activeSuppliers)} icon={Clock} accent="warning" />
+        <MetricCard
+          label="Total Suppliers" value={String(totalSuppliers)} icon={Truck} accent="primary"
+          onClick={() => setStatusFilter([])} active={statusFilter.length === 0}
+        />
+        <MetricCard
+          label="Active" value={String(activeSuppliers)} icon={CheckCircle} accent="success"
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "active" ? [] : ["active"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "active"}
+        />
+        <MetricCard
+          label="Inactive" value={String(totalSuppliers - activeSuppliers)} icon={Clock} accent="warning"
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "inactive" ? [] : ["inactive"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "inactive"}
+        />
         <MetricCard label="Supply Types" value={String(new Set(suppliers.map(s => s.supplyType)).size)} icon={Package} accent="default" />
       </div>
 

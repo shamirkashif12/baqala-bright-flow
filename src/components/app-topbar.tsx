@@ -1,4 +1,4 @@
-import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass, Globe, Volume2, VolumeX, Monitor, MonitorOff } from "lucide-react";
+import { Bell, HelpCircle, ChevronDown, X, BookOpen, MessageCircle, ExternalLink, CheckCheck, AlertTriangle, Package, WifiOff, RotateCcw, Truck, FileText, ShieldCheck, ShoppingCart, CreditCard, Tag, User as UserIcon, Trash2, Printer, Clock, Compass, Globe, Volume2, VolumeX, Monitor, MonitorOff, MapPin } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -41,6 +41,8 @@ type NotifItem = {
   isRead: boolean;
   type: string;
   entityType?: string;
+  branchName?: string;
+  terminalName?: string;
 };
 
 const TONE_DOT: Record<NotifItem["tone"], string> = {
@@ -238,6 +240,8 @@ function NotificationsPopover() {
         isRead: n.isRead,
         type: n.type,
         entityType: n.entityType,
+        branchName: n.branchName,
+        terminalName: n.terminalName,
       })));
     }).catch(() => {});
   };
@@ -423,7 +427,15 @@ function NotificationsPopover() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium">{n.title}</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
-                  <p className="text-[10px] text-muted-foreground/70 mt-1">{n.relTime}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-[10px] text-muted-foreground/70">{n.relTime}</p>
+                    {(n.branchName || n.terminalName) && (
+                      <p className="flex items-center gap-0.5 text-[10px] text-muted-foreground/70 truncate">
+                        <MapPin className="h-2.5 w-2.5 shrink-0" />
+                        {[n.branchName, n.terminalName].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <n.Icon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${n.tone === "error" ? "text-destructive" : n.tone === "warning" ? "text-amber-500" : "text-primary"}`} />
               </button>

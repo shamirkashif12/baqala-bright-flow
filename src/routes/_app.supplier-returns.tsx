@@ -16,7 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button";
 import { RotateCcw, Loader2, Plus, Search, ChevronDown, Check, X, CheckCircle, Truck, DollarSign } from "lucide-react";
 import { toast } from "sonner";
-import { api, type StockTransfer, type Warehouse, type Supplier, type StockTransferItem } from "@/lib/api";
+import { api, type StockTransfer, type Warehouse, type Branch, type InventoryStock, type Supplier, type StockTransferItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
@@ -98,15 +98,37 @@ function MultiSelect({
 // more of an item than was originally bought, only ever that much or less.
 interface RtsItem { productId: string; productName: string; requestedQuantity: number; maxQuantity: number; unitCost: string }
 
+// Pre-fills step 2 directly from an already-known expired batch (the Batches & Expiry page's
+// "Reclaim" action) — skips step 1's order-number lookup entirely, since there's no PO/WR number
+// to look up from a batch row. Works for either a warehouse- or branch-held batch, mirroring the
+// two sourceMode options below.
+export interface RtsInitialBatch {
+  productId: string; productName: string;
+  sourceMode: "warehouse" | "branch";
+  locationId: string; locationName: string;
+  supplierId: string; supplierName: string;
+  quantity: number; unitCost?: number;
+}
+
 // ─── RTS Sheet — step 1: lookup, step 2: configure ────────────────────────────
-function RtsSheet({ open, onOpenChange, onCreated }: {
+export function RtsSheet({ open, onOpenChange, onCreated, initialBatch }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreated: () => void;
+  initialBatch?: RtsInitialBatch | null;
 }) {
   const { user } = useAuth();
   const [step, setStep] = useState<1 | 2>(1);
+  // Which kind of location this return ships from. Branch mode is deliberately narrower than
+  // Warehouse mode below: a branch purchase order is always single-destination (no WR/batch-PO
+  // fan-out concept exists for branches), so it only supports the PO-number lookup, not the
+  // warehouse-request or supplier_to_warehouse-transfer fallbacks.
+  const [sourceMode, setSourceMode] = useState<"warehouse" | "branch">("warehouse");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  // On-hand stock for the resolved branch, in Branch mode only — Branch (unlike Warehouse) never
+  // embeds its stock rows, so this is fetched on demand once a branch is resolved in step 1.
+  const [branchStock, setBranchStock] = useState<InventoryStock[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   // Step 1
@@ -136,8 +158,38 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
   useEffect(() => {
     if (!open) return;
     api.getWarehouses().then(setWarehouses);
+    api.getBranches().then(setBranches);
     api.getSuppliers().then(setSuppliers);
   }, [open]);
+
+  // Refresh the resolved branch's on-hand stock whenever it changes, for the same overstock
+  // guard Warehouse mode gets for free from Warehouse.stock.
+  useEffect(() => {
+    if (sourceMode !== "branch" || selectedWhIds.length !== 1) { setBranchStock([]); return; }
+    api.getStock({ branchId: selectedWhIds[0] }).then(setBranchStock).catch(() => setBranchStock([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceMode, selectedWhIds[0]]);
+
+  // Reclaim entry point from a known batch — jump straight to step 2, no order-number lookup.
+  useEffect(() => {
+    if (!open || !initialBatch) return;
+    setSourceMode(initialBatch.sourceMode);
+    setFetchedSupplierId(initialBatch.supplierId);
+    setFetchedSupplierName(initialBatch.supplierName);
+    setManualSupplierId("");
+    setAllWhOptions([{ id: initialBatch.locationId, label: initialBatch.locationName }]);
+    setSelectedWhIds([initialBatch.locationId]);
+    setWhToPoId({});
+    setItems([{
+      productId: initialBatch.productId,
+      productName: initialBatch.productName,
+      requestedQuantity: initialBatch.quantity,
+      maxQuantity: initialBatch.quantity,
+      unitCost: initialBatch.unitCost != null ? String(initialBatch.unitCost) : "",
+    }]);
+    setReturnReason("expired");
+    setStep(2);
+  }, [open, initialBatch]);
 
   const resetForm = () => {
     setStep(1);
@@ -153,6 +205,37 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
     setFetching(true); setFetchError(""); setWhToPoId({});
 
     try {
+      // ── Branch mode: only a PO-number lookup exists — a branch purchase order is always
+      // single-destination, so there's no WR/batch-PO fan-out to expand. ──
+      if (sourceMode === "branch") {
+        try {
+          const po = await api.getPurchaseOrderByNumber(num);
+          if (po?.branchId) {
+            const supplier = suppliers.find(s => s.id === po.supplierId);
+            setFetchedSupplierId(po.supplierId);
+            setFetchedSupplierName(supplier?.name ?? po.supplier?.name ?? "");
+            const br = branches.find(b => b.id === po.branchId);
+            const whPairs = [{ id: po.branchId, label: br?.name ?? "Branch" }];
+            setAllWhOptions(whPairs);
+            setSelectedWhIds(whPairs.map(w => w.id));
+            setWhToPoId({ [po.branchId]: po.id });
+            if (po.items?.length) {
+              setItems(po.items.map((i: { productId: string; product?: { name: string; costPrice?: number }; orderedQuantity: number; unitCost: number }) => ({
+                productId: i.productId,
+                productName: i.product?.name ?? i.productId,
+                requestedQuantity: i.orderedQuantity,
+                maxQuantity: i.orderedQuantity,
+                unitCost: String(i.unitCost ?? i.product?.costPrice ?? ""),
+              })));
+            }
+            setStep(2);
+            return;
+          }
+        } catch { /* PO not found, fall through to error below */ }
+        setFetchError(`Purchase order "${num}" not found for a branch. Try a PO number, e.g. PO-2024-001.`);
+        return;
+      }
+
       // ── Try warehouse request lookup first (covers multi-destination batch case) ──
       const allReqs = await api.getWarehouseRequests();
       const matches = allReqs.filter(r => r.requestNumber?.toLowerCase() === num.toLowerCase());
@@ -322,6 +405,11 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
   // the same problem at creation time instead.
   const maxAvailableFor = (productId: string): number | null => {
     if (selectedWhIds.length === 0) return null;
+    // Branch mode: always exactly one destination, and Branch (unlike Warehouse) doesn't embed
+    // its stock rows, so this reads the separately-fetched branchStock instead.
+    if (sourceMode === "branch") {
+      return branchStock.find(s => s.productId === productId)?.quantity ?? 0;
+    }
     const quantities = selectedWhIds.map(whId => {
       const wh = warehouses.find(w => w.id === whId);
       return wh?.stock?.find(s => s.productId === productId)?.quantity ?? 0;
@@ -334,12 +422,12 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
   });
 
   const handleSubmit = async () => {
-    if (selectedWhIds.length === 0) { setError("Select at least one warehouse to return from."); return; }
+    if (selectedWhIds.length === 0) { setError(`Select at least one ${sourceMode} to return from.`); return; }
     if (!effectiveSupplierId) { setError("Select a supplier to return to."); return; }
     if (!returnReason) { setError("Select a return reason."); return; }
     if (validItems.length === 0) { setError("No valid items to return."); return; }
     if (overStockItems.length > 0) {
-      setError(`${overStockItems[0].productName} — only ${maxAvailableFor(overStockItems[0].productId)} available at the selected warehouse(s). Reduce the quantity or deselect that warehouse.`);
+      setError(`${overStockItems[0].productName} — only ${maxAvailableFor(overStockItems[0].productId)} available at the selected ${sourceMode}(s). Reduce the quantity or deselect that ${sourceMode}.`);
       return;
     }
     setSaving(true); setError("");
@@ -347,9 +435,10 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
       const batchId = selectedWhIds.length > 1 ? uuid() : undefined;
       for (const whId of selectedWhIds) {
         await api.createStockTransfer({
-          transferType: "warehouse_to_supplier",
+          transferType: sourceMode === "branch" ? "branch_to_supplier" : "warehouse_to_supplier",
           status: "draft",
-          sourceWarehouseId: whId,
+          sourceWarehouseId: sourceMode === "warehouse" ? whId : undefined,
+          sourceBranchId: sourceMode === "branch" ? whId : undefined,
           destSupplierId: effectiveSupplierId,
           purchaseOrderId: whToPoId[whId] || undefined,
           returnReason,
@@ -397,16 +486,33 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
         {step === 1 && (
           <div className="mt-5 space-y-5">
             <div className="space-y-2">
-              <Label className="text-xs font-medium">Order / Request Number *</Label>
+              <Label className="text-xs font-medium">Returning From *</Label>
+              <div className="inline-flex rounded-lg border bg-muted/40 p-0.5" role="group" aria-label="Source type">
+                {(["warehouse", "branch"] as const).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setSourceMode(m); setOrderNumber(""); setFetchError(""); }}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition-colors ${sourceMode === m ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">{sourceMode === "branch" ? "Purchase Order Number *" : "Order / Request Number *"}</Label>
               <p className="text-xs text-muted-foreground">
-                Enter the original supply request number (WR-...) or purchase order number (PO-...) to auto-populate the return.
+                {sourceMode === "branch"
+                  ? "Enter the purchase order number (PO-...) this branch received the stock on."
+                  : "Enter the original supply request number (WR-...) or purchase order number (PO-...) to auto-populate the return."}
               </p>
               <div className="flex gap-2">
                 <Input
                   value={orderNumber}
                   onChange={e => { setOrderNumber(e.target.value); setFetchError(""); }}
                   onKeyDown={e => e.key === "Enter" && lookupOrder()}
-                  placeholder="e.g. WR-2024-001 or PO-2024-001"
+                  placeholder={sourceMode === "branch" ? "e.g. PO-2024-001" : "e.g. WR-2024-001 or PO-2024-001"}
                   className="h-9 text-sm flex-1 font-mono"
                   autoFocus
                 />
@@ -444,7 +550,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
               )}
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Original destinations</span>
-                <span className="font-semibold">{allWhOptions.length} warehouse{allWhOptions.length !== 1 ? "s" : ""}</span>
+                <span className="font-semibold">{allWhOptions.length} {sourceMode}{allWhOptions.length !== 1 ? "es" : ""}</span>
               </div>
               <button
                 type="button"
@@ -510,7 +616,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
               </div>
             ) : allWhOptions.length === 1 ? (
               <div className="space-y-1.5">
-                <Label className="text-xs font-medium">Source Warehouse</Label>
+                <Label className="text-xs font-medium">{sourceMode === "branch" ? "Source Branch" : "Source Warehouse"}</Label>
                 <div className="h-9 flex items-center px-3 rounded-md bg-muted/50 border border-border/60 text-sm font-medium">
                   {allWhOptions[0].label}
                 </div>
@@ -532,7 +638,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
             <div className="space-y-2">
               <Label className="text-xs font-medium">
                 Items
-                <span className="ml-1.5 text-muted-foreground font-normal">(per warehouse)</span>
+                <span className="ml-1.5 text-muted-foreground font-normal">(per {sourceMode})</span>
               </Label>
               <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
                 {/* Header */}
@@ -571,7 +677,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
                       </p>
                       {maxAvailable !== null && (
                         <p className={`text-[10px] text-end pr-1 ${isOverStock ? "text-destructive" : "text-muted-foreground"}`}>
-                          {maxAvailable} available at selected warehouse(s)
+                          {maxAvailable} available at selected {sourceMode}(s)
                         </p>
                       )}
                     </div>
@@ -582,7 +688,7 @@ function RtsSheet({ open, onOpenChange, onCreated }: {
                 )}
               </div>
               <p className="text-xs text-muted-foreground text-end">
-                {validItems.length} item{validItems.length !== 1 ? "s" : ""} · {validItems.reduce((s, i) => s + i.requestedQuantity, 0)} units per warehouse
+                {validItems.length} item{validItems.length !== 1 ? "s" : ""} · {validItems.reduce((s, i) => s + i.requestedQuantity, 0)} units per {sourceMode}
               </p>
             </div>
 
@@ -666,8 +772,13 @@ function SupplierReturns() {
 
   const load = () => {
     setLoading(true);
-    api.getStockTransfers({ transferType: "warehouse_to_supplier" })
-      .then(ts => { setTransfers(ts); setLoadError(false); })
+    // Two calls, not one — the backend's transferType filter is a single value, and RTS now
+    // covers both warehouse and branch sources.
+    Promise.all([
+      api.getStockTransfers({ transferType: "warehouse_to_supplier" }),
+      api.getStockTransfers({ transferType: "branch_to_supplier" }),
+    ])
+      .then(([wh, br]) => { setTransfers([...wh, ...br]); setLoadError(false); })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   };
@@ -698,7 +809,8 @@ function SupplierReturns() {
     const s = q.toLowerCase();
     if (s && !t.transferNumber.toLowerCase().includes(s) &&
         !(t.destSupplier?.name.toLowerCase().includes(s)) &&
-        !(t.sourceWarehouse?.name.toLowerCase().includes(s))) return false;
+        !(t.sourceWarehouse?.name.toLowerCase().includes(s)) &&
+        !(t.sourceBranch?.name.toLowerCase().includes(s))) return false;
     if (statusFilter.length && !statusFilter.includes(t.status)) return false;
     return true;
   });
@@ -726,11 +838,18 @@ function SupplierReturns() {
   );
 
   return (
-    <PageShell title="Supplier Returns (RTS)" subtitle="Warehouse-to-supplier return transfers and credit notes">
+    <PageShell title="Supplier Returns (RTS)" subtitle="Branch/warehouse-to-supplier return transfers and credit notes">
       {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <MetricCard label="Total RTS" value={String(transfers.length)} icon={RotateCcw} accent="default" />
-        <MetricCard label="Completed" value={String(completed.length)} icon={CheckCircle} accent="success" />
+        <MetricCard
+          label="Total RTS" value={String(transfers.length)} icon={RotateCcw} accent="default"
+          onClick={() => setStatusFilter([])} active={statusFilter.length === 0}
+        />
+        <MetricCard
+          label="Completed" value={String(completed.length)} icon={CheckCircle} accent="success"
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "completed" ? [] : ["completed"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "completed"}
+        />
         <MetricCard label="Total Credit Value" value={`SAR ${totalRtsValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={DollarSign} accent="primary" />
       </div>
 
@@ -738,7 +857,7 @@ function SupplierReturns() {
         <Input
           value={q}
           onChange={e => setQ(e.target.value)}
-          placeholder="Search transfer#, supplier, warehouse…"
+          placeholder="Search transfer#, supplier, branch/warehouse…"
           className="h-9 w-72 flex-shrink-0"
         />
         <div className="w-44">
@@ -779,7 +898,7 @@ function SupplierReturns() {
                 <tr className="bg-muted/40 border-b border-border/60 text-start text-xs uppercase tracking-wider text-muted-foreground">
                   <th className="px-4 py-3 font-semibold">Transfer #</th>
                   <th className="px-4 py-3 font-semibold">Supplier</th>
-                  <th className="px-4 py-3 font-semibold">Warehouse</th>
+                  <th className="px-4 py-3 font-semibold">Source</th>
                   <th className="px-4 py-3 font-semibold">Reason</th>
                   <th className="px-4 py-3 font-semibold text-center">Items</th>
                   <th className="px-4 py-3 font-semibold text-end">Credit Value</th>
@@ -797,8 +916,8 @@ function SupplierReturns() {
                     ), 0
                   );
                   const allWarehouses = isBatch
-                    ? group.map(tr => tr.sourceWarehouse?.name).filter(Boolean).join(", ")
-                    : (t.sourceWarehouse?.name ?? "—");
+                    ? group.map(tr => tr.sourceWarehouse?.name ?? tr.sourceBranch?.name).filter(Boolean).join(", ")
+                    : (t.sourceWarehouse?.name ?? t.sourceBranch?.name ?? "—");
                   return (
                     <tr key={key} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
                       <td className="px-4 py-3 font-mono text-xs font-bold">

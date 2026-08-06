@@ -118,30 +118,33 @@ function ApprovalCenter() {
 
   const load = useCallback(() => {
     setLoading(true);
+    // Status is never sent to the server — it's applied purely client-side below, in both the
+    // headline counts and the table. Previously a single-status pick (e.g. the "pending" default)
+    // was sent as a server param, which narrowed `rows` itself — so Approved/Rejected always read
+    // 0 while the Status filter (or a quick-filter card) was pinned to "pending" alone.
     api.getApprovals({
       branchId: scopedBranchId,
-      status: statuses.length === 1 ? statuses[0] : undefined,
       type: types.length === 1 ? types[0] : undefined,
       from: `${from}T00:00:00Z`,
       to: `${to}T23:59:59Z`,
     })
       .then((data) => {
-        // Client-side narrows the rest — the API only takes a single status/type value, this
-        // page lets a manager multi-select either filter.
-        const filtered = data
-          .filter((r) => statuses.length === 0 || statuses.includes(r.status))
-          .filter((r) => types.length === 0 || types.includes(r.requestType));
+        const filtered = data.filter((r) => types.length === 0 || types.includes(r.requestType));
         setRows(filtered);
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load approvals"))
       .finally(() => setLoading(false));
-  }, [scopedBranchId, statuses, types, from, to]);
+  }, [scopedBranchId, types, from, to]);
 
   useEffect(() => { load(); }, [load]);
 
   const pendingCount = useMemo(() => rows.filter((r) => r.status === "pending" || r.status === "pending_review" || r.status === "pending_approval").length, [rows]);
   const approvedCount = useMemo(() => rows.filter((r) => r.status === "approved" || r.status === "completed").length, [rows]);
   const rejectedCount = useMemo(() => rows.filter((r) => r.status === "rejected").length, [rows]);
+  const displayRows = useMemo(() => rows.filter((r) => statuses.length === 0 || statuses.includes(r.status)), [rows, statuses]);
+
+  const PENDING_STATUSES = ["pending", "pending_review", "pending_approval"];
+  const APPROVED_STATUSES = ["approved", "completed"];
 
   const submitReview = async (approved: boolean) => {
     if (!review) return;
@@ -248,9 +251,21 @@ function ApprovalCenter() {
       </Collapsible>
 
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Pending" value={String(pendingCount)} icon={Clock} accent="warning" />
-        <MetricCard label="Approved" value={String(approvedCount)} icon={CheckCircle2} accent="success" />
-        <MetricCard label="Rejected" value={String(rejectedCount)} icon={XCircle} accent="destructive" />
+        <MetricCard
+          label="Pending" value={String(pendingCount)} icon={Clock} accent="warning"
+          onClick={() => setStatuses(v => v.join(",") === PENDING_STATUSES.join(",") ? [] : PENDING_STATUSES)}
+          active={statuses.join(",") === PENDING_STATUSES.join(",")}
+        />
+        <MetricCard
+          label="Approved" value={String(approvedCount)} icon={CheckCircle2} accent="success"
+          onClick={() => setStatuses(v => v.join(",") === APPROVED_STATUSES.join(",") ? [] : APPROVED_STATUSES)}
+          active={statuses.join(",") === APPROVED_STATUSES.join(",")}
+        />
+        <MetricCard
+          label="Rejected" value={String(rejectedCount)} icon={XCircle} accent="destructive"
+          onClick={() => setStatuses(v => v.length === 1 && v[0] === "rejected" ? [] : ["rejected"])}
+          active={statuses.length === 1 && statuses[0] === "rejected"}
+        />
       </div>
 
       {loading ? (
@@ -308,7 +323,7 @@ function ApprovalCenter() {
               },
             },
           ]}
-          rows={rows}
+          rows={displayRows}
         />
       )}
 

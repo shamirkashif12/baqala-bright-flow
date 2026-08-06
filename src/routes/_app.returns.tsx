@@ -15,6 +15,7 @@ import { LoadErrorBanner } from "@/components/load-error-banner";
 import { useBranch } from "@/lib/branch-context";
 import { usePermission } from "@/lib/use-permission";
 import { SARIcon } from "@/lib/currency";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/returns")({ component: Returns });
 
@@ -242,16 +243,19 @@ function Returns() {
 
   const load = useCallback(() => {
     setLoading(true);
+    // Status is applied client-side only (see `filtered` below), never sent to the server —
+    // sending it here used to narrow `returns` itself, so the summary cards (all computed from
+    // `returns`) would read 0 for every status except whichever one the filter/a quick-filter
+    // card was pinned to.
     // Keep whatever returns list is already on screen if this fails — previously had no
     // .catch() at all, so a failed fetch left `returns` in whatever state it was in with no
     // signal to the cashier that the tiles/table might be stale (86eyag3ny).
     api.getReturns({
       branchId: branchFilter.length ? branchFilter : undefined,
-      status: statusFilter.length ? statusFilter : undefined,
     }).then(r => { setReturns(r); setLoadError(false); })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
-  }, [branchFilter, statusFilter]);
+  }, [branchFilter]);
   useEffect(() => { load(); }, [load]);
 
 
@@ -269,7 +273,8 @@ function Returns() {
       || r.order?.orderNumber?.toLowerCase().includes(q.toLowerCase());
     const mdf = !dateFrom || (!!r.createdAt && r.createdAt >= dateFrom);
     const mdt = !dateTo || (!!r.createdAt && r.createdAt <= dateTo + "T23:59:59");
-    return matchQ && mdf && mdt;
+    const ms = statusFilter.length === 0 || statusFilter.includes(r.status);
+    return matchQ && mdf && mdt && ms;
   });
 
   const setF = (k: keyof ReturnForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -449,10 +454,10 @@ function Returns() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
         {[
-          { label: "Pending Review", value: String(returns.filter(r => r.status === "pending").length), color: "text-amber-600" },
-          { label: "Approved", value: String(returns.filter(r => r.status === "approved").length), color: "text-blue-600" },
-          { label: "Completed", value: String(returns.filter(r => r.status === "completed").length), color: "text-green-600" },
-          { label: "Rejected", value: String(returns.filter(r => r.status === "rejected").length), color: "text-red-500" },
+          { label: "Pending Review", value: String(returns.filter(r => r.status === "pending").length), color: "text-amber-600", status: "pending" },
+          { label: "Approved", value: String(returns.filter(r => r.status === "approved").length), color: "text-blue-600", status: "approved" },
+          { label: "Completed", value: String(returns.filter(r => r.status === "completed").length), color: "text-green-600", status: "completed" },
+          { label: "Rejected", value: String(returns.filter(r => r.status === "rejected").length), color: "text-red-500", status: "rejected" },
           {
             label: "Total Refunds",
             value: <><SARIcon />{returns.filter(r => r.status === "completed").reduce((s, r) => s + (r.refundAmount ?? 0), 0).toFixed(2)}</>,
@@ -463,12 +468,23 @@ function Returns() {
             value: <><SARIcon />{returns.filter(r => r.status === "pending").reduce((s, r) => s + (r.refundAmount ?? 0), 0).toFixed(2)}</>,
             color: "text-amber-600",
           },
-        ].map(s => (
-          <Card key={s.label} className="p-3 border-border/60">
-            <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
-          </Card>
-        ))}
+        ].map(s => {
+          const active = !!s.status && statusFilter.length === 1 && statusFilter[0] === s.status;
+          return (
+            <Card
+              key={s.label}
+              onClick={s.status ? () => setStatusFilter(v => v.length === 1 && v[0] === s.status ? [] : [s.status!]) : undefined}
+              className={cn(
+                "p-3 border-border/60",
+                s.status && "cursor-pointer transition-all hover:ring-2 hover:ring-primary/30",
+                active && "ring-2 ring-primary",
+              )}
+            >
+              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Toolbar */}

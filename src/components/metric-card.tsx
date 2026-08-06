@@ -12,6 +12,8 @@ export function MetricCard({
   accent = "default",
   editing,
   onRemove,
+  onClick,
+  active,
 }: {
   label: string;
   value: React.ReactNode;
@@ -22,6 +24,10 @@ export function MetricCard({
   accent?: "default" | "primary" | "success" | "warning" | "destructive";
   editing?: boolean;
   onRemove?: () => void;
+  /** When provided, the card becomes clickable (e.g. to quick-filter the list below it). */
+  onClick?: () => void;
+  /** Highlights the card as the currently-applied quick filter. Only meaningful with onClick. */
+  active?: boolean;
 }) {
   const accentClasses: Record<string, string> = {
     default: "bg-muted text-foreground",
@@ -30,11 +36,18 @@ export function MetricCard({
     warning: "bg-warning/20 text-warning-foreground",
     destructive: "bg-destructive/15 text-destructive",
   };
+  const Wrapper = onClick ? "button" : "div";
   return (
-    <div className={cn(
-      "group relative rounded-2xl border border-border/60 bg-card p-5 shadow-card hover:shadow-elegant transition-all overflow-hidden",
-      editing && "ring-2 ring-primary/40 ring-offset-2 ring-offset-background animate-fade-in",
-    )}>
+    <Wrapper
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={cn(
+        "group relative rounded-2xl border border-border/60 bg-card p-5 shadow-card hover:shadow-elegant transition-all overflow-hidden text-start w-full",
+        editing && "ring-2 ring-primary/40 ring-offset-2 ring-offset-background animate-fade-in",
+        onClick && "cursor-pointer hover:ring-2 hover:ring-primary/30",
+        onClick && active && "ring-2 ring-primary bg-primary/5",
+      )}
+    >
       {editing && onRemove && (
         <button
           onClick={onRemove}
@@ -80,7 +93,7 @@ export function MetricCard({
           <Icon className="h-5 w-5" />
         </div>
       </div>
-    </div>
+    </Wrapper>
   );
 }
 

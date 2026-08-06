@@ -57,8 +57,15 @@ function WarehouseManagement() {
     <div className="space-y-5">
       {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Total Warehouses" value={String(totalWH)} icon={Warehouse} accent="primary" />
-        <MetricCard label="Active" value={String(activeWH)} icon={CheckCircle} accent="success" />
+        <MetricCard
+          label="Total Warehouses" value={String(totalWH)} icon={Warehouse} accent="primary"
+          onClick={() => setStatusFilter([])} active={statusFilter.length === 0}
+        />
+        <MetricCard
+          label="Active" value={String(activeWH)} icon={CheckCircle} accent="success"
+          onClick={() => setStatusFilter(v => v.length === 1 && v[0] === "active" ? [] : ["active"])}
+          active={statusFilter.length === 1 && statusFilter[0] === "active"}
+        />
         <MetricCard label="SKUs Managed" value={String(totalSKUs)} icon={Package} accent="default" />
       </div>
 

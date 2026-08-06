@@ -81,8 +81,10 @@ function Rules() {
   const [branchFilter, setBranchFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const hasFilters = !!search || typeFilter !== "all" || branchFilter !== "all" || !!dateFrom || !!dateTo;
-  const clearFilters = () => { setSearch(""); setTypeFilter("all"); setBranchFilter("all"); setDateFrom(""); setDateTo(""); };
+  const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
+  const [categoryQuick, setCategoryQuick] = useState<"approval" | "discount" | "fee" | null>(null);
+  const hasFilters = !!search || typeFilter !== "all" || branchFilter !== "all" || !!dateFrom || !!dateTo || activeFilter !== "all" || !!categoryQuick;
+  const clearFilters = () => { setSearch(""); setTypeFilter("all"); setBranchFilter("all"); setDateFrom(""); setDateTo(""); setActiveFilter("all"); setCategoryQuick(null); };
 
   const reload = () => api.getComplianceRules({ includeInactive: true }).then(setRules).catch(() => {});
 
@@ -124,6 +126,12 @@ function Rules() {
     if (branchFilter !== "all" && (r.branchId ?? "all") !== branchFilter) return false;
     if (dateFrom && r.createdAt < dateFrom) return false;
     if (dateTo && r.createdAt > dateTo + "T23:59:59") return false;
+    if (activeFilter === "active" && !r.isActive) return false;
+    if (activeFilter === "inactive" && r.isActive) return false;
+    const t = r.ruleType?.toLowerCase() ?? "";
+    if (categoryQuick === "approval" && !t.includes("approval")) return false;
+    if (categoryQuick === "discount" && !(t.includes("discount") || t.includes("return"))) return false;
+    if (categoryQuick === "fee" && !(t.includes("fee") || t.includes("tax"))) return false;
     return true;
   });
 
@@ -188,11 +196,26 @@ function Rules() {
     >
       {loadError && <LoadErrorBanner onRetry={load} />}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Active Rules" value={loading ? "—" : String(active)} icon={Workflow} accent="primary" />
-        <MetricCard label="Inactive Rules" value={loading ? "—" : String(inactive)} icon={ToggleLeft} />
-        <MetricCard label="Approval Rules" value={loading ? "—" : String(approvalCount)} icon={ShieldCheck} accent="success" />
-        <MetricCard label="Discount Rules" value={loading ? "—" : String(discountCount)} icon={Percent} />
-        <MetricCard label="Fee / Tax Rules" value={loading ? "—" : String(feeCount)} icon={BadgeDollarSign} accent="warning" />
+        <MetricCard
+          label="Active Rules" value={loading ? "—" : String(active)} icon={Workflow} accent="primary"
+          onClick={() => setActiveFilter(v => v === "active" ? "all" : "active")} active={activeFilter === "active"}
+        />
+        <MetricCard
+          label="Inactive Rules" value={loading ? "—" : String(inactive)} icon={ToggleLeft}
+          onClick={() => setActiveFilter(v => v === "inactive" ? "all" : "inactive")} active={activeFilter === "inactive"}
+        />
+        <MetricCard
+          label="Approval Rules" value={loading ? "—" : String(approvalCount)} icon={ShieldCheck} accent="success"
+          onClick={() => setCategoryQuick(v => v === "approval" ? null : "approval")} active={categoryQuick === "approval"}
+        />
+        <MetricCard
+          label="Discount Rules" value={loading ? "—" : String(discountCount)} icon={Percent}
+          onClick={() => setCategoryQuick(v => v === "discount" ? null : "discount")} active={categoryQuick === "discount"}
+        />
+        <MetricCard
+          label="Fee / Tax Rules" value={loading ? "—" : String(feeCount)} icon={BadgeDollarSign} accent="warning"
+          onClick={() => setCategoryQuick(v => v === "fee" ? null : "fee")} active={categoryQuick === "fee"}
+        />
       </div>
 
       {!loading && rules.length > 0 && (

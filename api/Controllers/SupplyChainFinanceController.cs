@@ -141,7 +141,8 @@ public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
         [FromQuery] string? creditType,
         [FromQuery] Guid? poId,
         [FromQuery] Guid? transferId,
-        [FromQuery] Guid? sourceWarehouseId)
+        [FromQuery] Guid? sourceWarehouseId,
+        [FromQuery] Guid? sourceBranchId)
     {
         var query = db.SupplierCreditNotes
             .Include(c => c.Supplier)
@@ -154,6 +155,12 @@ public class SupplyChainFinanceController(BaqalaDbContext db) : ControllerBase
         if (sourceWarehouseId.HasValue)
             query = query.Where(c => c.TransferId.HasValue
                 && db.StockTransfers.Any(t => t.Id == c.TransferId && t.SourceWarehouseId == sourceWarehouseId));
+        // No SourceBranchId column on SupplierCreditNote itself — same join-through-TransferId
+        // pattern as sourceWarehouseId above, since a credit note is only ever created from a
+        // completed RTS transfer (see StockTransfersController).
+        if (sourceBranchId.HasValue)
+            query = query.Where(c => c.TransferId.HasValue
+                && db.StockTransfers.Any(t => t.Id == c.TransferId && t.SourceBranchId == sourceBranchId));
         return Ok(await query.OrderByDescending(c => c.CreatedAt).ToListAsync());
     }
 

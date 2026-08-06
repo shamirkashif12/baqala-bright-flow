@@ -91,9 +91,11 @@ const en: Record<string, string> = {
   "ZATCA Phase 2 Settings": "ZATCA Phase 2 Settings",
   "Compliance": "Compliance",
   "POS Settings": "POS Settings",
+  "General Settings": "General Settings",
   "Audit Logs": "Audit Logs",
   "Plans & Pricing": "Plans & Pricing",
   "Settings": "Settings",
+  "Business & Security Settings": "Business & Security Settings",
 
   // ── Roles ──────────────────────────────────────────────────────────────────
   "Owner": "Owner",

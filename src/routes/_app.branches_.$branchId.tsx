@@ -6,30 +6,33 @@ import { MetricCard } from "@/components/metric-card";
 import { Card } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  ArrowLeft, Pencil, MapPin, Phone, User, Package, Boxes, Plus,
-  ChevronDown, ChevronRight, Loader2, Warehouse as WarehouseIcon,
+  ArrowLeft, MapPin, Phone, Package, Boxes, Plus,
+  ChevronDown, ChevronRight, Loader2, Building2,
 } from "lucide-react";
 import {
   api,
-  type Warehouse, type WarehouseStock,
+  type Branch, type InventoryStock,
   type PurchaseOrder, type StockTransfer, type SupplierCreditNote, type InventoryBatch,
 } from "@/lib/api";
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { NewBatchDialog } from "@/components/new-batch-dialog";
-import { WarehouseFormSheet } from "@/components/warehouse-form-sheet";
 import { SARIcon } from "@/lib/currency";
 import { usePermission } from "@/lib/use-permission";
 
-export const Route = createFileRoute("/_app/warehouses_/$warehouseId")({
-  component: WarehouseDetail,
+export const Route = createFileRoute("/_app/branches_/$branchId")({
+  // Lets the Branches list's "Ledger" link land straight on the Ledger tab (?tab=ledger)
+  // instead of always opening on Stock & Batches — a direct visit with no ?tab still defaults there.
+  validateSearch: (search) => ({
+    tab: search.tab === "ledger" ? "ledger" : "inventory",
+  }),
+  component: BranchDetail,
   notFoundComponent: () => (
-    <PageShell title="Warehouse not found"><p className="text-sm text-muted-foreground">No warehouse with that ID.</p></PageShell>
+    <PageShell title="Branch not found"><p className="text-sm text-muted-foreground">No branch with that ID.</p></PageShell>
   ),
 });
 
@@ -42,68 +45,67 @@ function F({ label, value }: { label: string; value: string }) {
   );
 }
 
-function WarehouseDetail() {
-  const { warehouseId } = Route.useParams();
-  const { canEdit } = usePermission("Warehouses");
+function BranchDetail() {
+  const { branchId } = Route.useParams();
+  const { tab } = Route.useSearch();
   const { canCreate: canCreateBatch } = usePermission("Batches");
-  const [warehouse, setWarehouse] = useState<Warehouse | null>(null);
+  const [branch, setBranch] = useState<Branch | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFoundFlag, setNotFoundFlag] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
   const [addStockOpen, setAddStockOpen] = useState(false);
 
   const [productFilter, setProductFilter] = useState<string[]>([]);
-  const [stock, setStock] = useState<WarehouseStock[]>([]);
+  const [stock, setStock] = useState<InventoryStock[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
   const [stockLoadError, setStockLoadError] = useState(false);
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
-  const [wPos, setWPos] = useState<PurchaseOrder[]>([]);
+  const [bPos, setBPos] = useState<PurchaseOrder[]>([]);
   const [rtsTransfers, setRtsTransfers] = useState<StockTransfer[]>([]);
-  const [wCreditNotes, setWCreditNotes] = useState<SupplierCreditNote[]>([]);
+  const [bCreditNotes, setBCreditNotes] = useState<SupplierCreditNote[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
   const load = () => {
     setLoading(true);
-    api.getWarehouse(warehouseId)
-      .then(setWarehouse)
+    api.getBranch(branchId)
+      .then(setBranch)
       .catch(() => setNotFoundFlag(true))
       .finally(() => setLoading(false));
   };
-  useEffect(load, [warehouseId]);
+  useEffect(load, [branchId]);
 
   const loadStock = () => {
-    if (!warehouse) return;
+    if (!branch) return;
     setLoadingStock(true);
-    api.getWarehouseStock(warehouse.id)
+    api.getStock({ branchId: branch.id })
       .then(s => { setStock(s); setStockLoadError(false); })
       .catch(() => setStockLoadError(true))
       .finally(() => setLoadingStock(false));
   };
 
   const loadBatches = () => {
-    if (!warehouse) return;
-    api.getBatches({ warehouseId: [warehouse.id] }).then(setBatches).catch(() => {});
+    if (!branch) return;
+    api.getBatches({ branchId: [branch.id] }).then(setBatches).catch(() => {});
   };
 
   useEffect(() => {
-    if (!warehouse) return;
+    if (!branch) return;
     loadStock();
     loadBatches();
     setLoadingLedger(true);
     Promise.allSettled([
-      api.getPurchaseOrders({ warehouseId: warehouse.id }),
-      api.getStockTransfers({ sourceWarehouseId: warehouse.id, transferType: "warehouse_to_supplier" }),
-      api.getCreditNotes({ sourceWarehouseId: warehouse.id }),
+      api.getPurchaseOrders({ branchId: branch.id }),
+      api.getStockTransfers({ sourceBranchId: branch.id, transferType: "branch_to_supplier" }),
+      api.getCreditNotes({ sourceBranchId: branch.id }),
     ]).then(([posRes, rtsRes, cnRes]) => {
-      if (posRes.status === "fulfilled") setWPos(posRes.value);
+      if (posRes.status === "fulfilled") setBPos(posRes.value);
       if (rtsRes.status === "fulfilled") setRtsTransfers(rtsRes.value);
-      if (cnRes.status === "fulfilled") setWCreditNotes(cnRes.value);
+      if (cnRes.status === "fulfilled") setBCreditNotes(cnRes.value);
     }).finally(() => setLoadingLedger(false));
-  }, [warehouse?.id]);
+  }, [branch?.id]);
 
-  // Options come from this warehouse's own stock rows — a product held elsewhere can never match
+  // Options come from this branch's own stock rows — a product held elsewhere can never match
   // here, so listing the whole catalogue would only offer choices that return nothing.
   const productOptions = useMemo(() => {
     const byId = new Map<string, string>();
@@ -113,7 +115,6 @@ function WarehouseDetail() {
     return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [stock]);
 
-  // Stock reloads when the warehouse changes; drop selections that aren't held here.
   useEffect(() => {
     if (!productFilter.length) return;
     const validIds = new Set(productOptions.map(p => p.id));
@@ -139,41 +140,41 @@ function WarehouseDetail() {
   if (loading) {
     return (
       <PageShell title="Loading…">
-        <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading warehouse details…</div>
+        <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading branch details…</div>
       </PageShell>
     );
   }
 
-  if (notFoundFlag || !warehouse) {
+  if (notFoundFlag || !branch) {
     return (
-      <PageShell title="Warehouse not found">
-        <p className="text-sm text-muted-foreground">No warehouse with that ID.</p>
+      <PageShell title="Branch not found">
+        <p className="text-sm text-muted-foreground">No branch with that ID.</p>
       </PageShell>
     );
   }
 
   const transferById = new Map(rtsTransfers.map(t => [t.id, t]));
-  const activeCreditNotes = wCreditNotes.filter(cn => cn.status !== "cancelled");
-  const receivedPos = wPos.filter(p => p.status === "partial_received" || p.status === "fully_received");
+  const activeCreditNotes = bCreditNotes.filter(cn => cn.status !== "cancelled");
+  const receivedPos = bPos.filter(p => p.status === "partial_received" || p.status === "fully_received");
   const totalReceived = receivedPos.reduce((s, p) => s + p.totalAmount, 0);
-  const totalPaid = wPos.reduce((s, p) => s + p.paidAmount, 0);
+  const totalPaid = bPos.reduce((s, p) => s + p.paidAmount, 0);
   const rtsCredits = activeCreditNotes.reduce((s, cn) => s + cn.amount, 0);
   const netBalance = totalReceived - totalPaid - rtsCredits;
-  const allPayments = wPos
+  const allPayments = bPos
     .flatMap(p => (p.payments ?? []).map(pay => ({ ...pay, poNumber: p.poNumber })))
     .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate));
 
   return (
     <PageShell
-      title={warehouse.name}
-      subtitle={`${warehouse.code} · ${warehouse.city ?? "—"}`}
+      title={branch.name}
+      subtitle={`${branch.branchCode} · ${branch.city ?? "—"}`}
       actions={
         <>
-          <Link to="/warehouses" className={buttonVariants({ variant: "outline", size: "sm" }) + " gap-1.5"}>
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to Warehouses
+          <Link to="/branches" className={buttonVariants({ variant: "outline", size: "sm" }) + " gap-1.5"}>
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to Branches
           </Link>
-          <Badge variant="outline" className={warehouse.status === "active" ? "bg-success/15 text-success border-success/30" : "bg-muted text-muted-foreground"}>
-            {warehouse.status}
+          <Badge variant="outline" className={branch.status === "active" ? "bg-success/15 text-success border-success/30" : "bg-muted text-muted-foreground"}>
+            {branch.status}
           </Badge>
         </>
       }
@@ -183,42 +184,31 @@ function WarehouseDetail() {
         <MetricCard label="SKUs" value={String(skuCount)} icon={Package} accent="primary" />
         <MetricCard label="Total Units" value={String(Math.round(totalStock))} icon={Boxes} accent="success" />
         <MetricCard label="Reserved" value={String(Math.round(totalReserved))} icon={Boxes} accent="default" />
-        <MetricCard label="Capacity" value={warehouse.capacity ? warehouse.capacity.toLocaleString() : "—"} icon={WarehouseIcon} />
       </div>
 
       <Card className="p-5 border-border/60 shadow-card">
         <div className="flex items-start justify-between gap-3 mb-4">
-          <h3 className="font-bold text-sm flex items-center gap-2"><WarehouseIcon className="h-4 w-4 text-primary" /> Warehouse Info</h3>
-          {canEdit && (
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </Button>
-          )}
+          <h3 className="font-bold text-sm flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" /> Branch Info</h3>
+          <Link to="/branches" className="text-xs text-primary hover:underline">Manage in Branches</Link>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          {warehouse.city && (
+          {(branch.city || branch.address) && (
             <div className="flex items-start gap-2 text-sm">
               <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-              <span>{warehouse.address ? `${warehouse.address}, ` : ""}{warehouse.city}</span>
+              <span>{branch.address ? `${branch.address}, ` : ""}{branch.city}</span>
             </div>
           )}
-          {warehouse.contactPerson && (
-            <div className="flex items-center gap-2 text-sm">
-              <User className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span>{warehouse.contactPerson}</span>
-            </div>
-          )}
-          {warehouse.contactNumber && (
+          {branch.contactNumber && (
             <div className="flex items-center gap-2 text-sm">
               <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span>{warehouse.contactNumber}</span>
+              <span>{branch.contactNumber}</span>
             </div>
           )}
-          <F label="Created" value={new Date(warehouse.createdAt).toLocaleDateString("en-SA")} />
+          <F label="Created" value={new Date(branch.createdAt).toLocaleDateString("en-SA")} />
         </div>
       </Card>
 
-      <Tabs defaultValue="inventory">
+      <Tabs defaultValue={tab}>
         <TabsList className="h-9">
           <TabsTrigger value="inventory" className="text-xs">Stock & Batches</TabsTrigger>
           <TabsTrigger value="ledger" className="text-xs">Ledger</TabsTrigger>
@@ -302,7 +292,7 @@ function WarehouseDetail() {
                               </td>
                             </tr>
                             {isExpanded && (
-                              <BatchExpandRow productId={s.productId} locationType="warehouse" locationId={warehouse.id} colSpan={7} batches={batches} aggregateQuantity={s.quantity} />
+                              <BatchExpandRow productId={s.productId} locationType="branch" locationId={branch.id} colSpan={7} batches={batches} aggregateQuantity={s.quantity} />
                             )}
                           </Fragment>
                         );
@@ -396,11 +386,11 @@ function WarehouseDetail() {
                 {/* Returns to Supplier */}
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Returns to Supplier (RTS)</p>
-                  {wCreditNotes.length === 0 ? (
+                  {bCreditNotes.length === 0 ? (
                     <p className="text-sm text-muted-foreground py-4 text-center">No returns to supplier yet.</p>
                   ) : (
                     <div className="space-y-1.5">
-                      {wCreditNotes.map(cn => {
+                      {bCreditNotes.map(cn => {
                         const t = cn.transferId ? transferById.get(cn.transferId) : undefined;
                         return (
                           <div key={cn.id} className="flex items-center justify-between py-1.5 border-b border-border/30 text-xs">
@@ -432,19 +422,12 @@ function WarehouseDetail() {
         </TabsContent>
       </Tabs>
 
-      <WarehouseFormSheet
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        warehouse={warehouse}
-        onSaved={load}
-      />
-
       <NewBatchDialog
         open={addStockOpen}
         onOpenChange={setAddStockOpen}
-        locationType="warehouse"
-        locations={warehouse ? [{ id: warehouse.id, name: warehouse.name }] : []}
-        lockedLocationId={warehouse?.id ?? null}
+        locationType="branch"
+        locations={branch ? [{ id: branch.id, name: branch.name }] : []}
+        lockedLocationId={branch?.id ?? null}
         onCreated={() => { loadStock(); loadBatches(); }}
       />
     </PageShell>

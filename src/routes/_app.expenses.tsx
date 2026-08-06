@@ -57,6 +57,7 @@ function EntriesTab() {
   const [methodFilter, setMethodFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [statusQuick, setStatusQuick] = useState<"pending" | "approved" | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editExpense, setEditExpense] = useState<Expense | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
@@ -85,20 +86,23 @@ function EntriesTab() {
   }, [branchFilter, methodFilter, typeFilter]);
   useEffect(() => { load(); }, [load]);
 
-  const filtered = expenses.filter((e) => {
+  // Everything except the quick-filter cards apply — stats are computed off this so clicking a
+  // card to narrow the table below doesn't also change what the OTHER cards report.
+  const baseFiltered = expenses.filter((e) => {
     const matchQ = !q || e.referenceNumber?.toLowerCase().includes(q.toLowerCase()) || e.description?.toLowerCase().includes(q.toLowerCase());
     const mdf = !dateFrom || (!!e.expenseDate && e.expenseDate >= dateFrom);
     const mdt = !dateTo || (!!e.expenseDate && e.expenseDate <= dateTo);
     return matchQ && mdf && mdt;
   });
+  const filtered = baseFiltered.filter((e) => !statusQuick || e.status === statusQuick);
 
   const stats = useMemo(() => {
-    const total = filtered.reduce((s, e) => s + e.amount, 0);
-    const pendingCount = filtered.filter(e => e.status === "pending").length;
-    const approvedTotal = filtered.filter(e => e.status === "approved").reduce((s, e) => s + e.amount, 0);
-    const outstanding = filtered.reduce((s, e) => s + Math.max(0, e.amount - (e.paidAmount ?? e.amount)), 0);
+    const total = baseFiltered.reduce((s, e) => s + e.amount, 0);
+    const pendingCount = baseFiltered.filter(e => e.status === "pending").length;
+    const approvedTotal = baseFiltered.filter(e => e.status === "approved").reduce((s, e) => s + e.amount, 0);
+    const outstanding = baseFiltered.reduce((s, e) => s + Math.max(0, e.amount - (e.paidAmount ?? e.amount)), 0);
     return { total, pendingCount, approvedTotal, outstanding };
-  }, [filtered]);
+  }, [baseFiltered]);
 
   const openAdd = () => {
     setEditExpense(null);
@@ -189,9 +193,18 @@ function EntriesTab() {
       {loadError && <LoadErrorBanner onRetry={load} />}
       {/* ─── Summary ─── */}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        <MetricCard label="Total Expenses" value={<><SARIcon />{stats.total.toFixed(2)}</>} icon={Receipt} accent="primary" />
-        <MetricCard label="Pending Approval" value={String(stats.pendingCount)} icon={Clock} accent="warning" />
-        <MetricCard label="Approved" value={<><SARIcon />{stats.approvedTotal.toFixed(2)}</>} icon={CheckCircle} accent="success" />
+        <MetricCard
+          label="Total Expenses" value={<><SARIcon />{stats.total.toFixed(2)}</>} icon={Receipt} accent="primary"
+          onClick={() => setStatusQuick(null)} active={statusQuick === null}
+        />
+        <MetricCard
+          label="Pending Approval" value={String(stats.pendingCount)} icon={Clock} accent="warning"
+          onClick={() => setStatusQuick(v => v === "pending" ? null : "pending")} active={statusQuick === "pending"}
+        />
+        <MetricCard
+          label="Approved" value={<><SARIcon />{stats.approvedTotal.toFixed(2)}</>} icon={CheckCircle} accent="success"
+          onClick={() => setStatusQuick(v => v === "approved" ? null : "approved")} active={statusQuick === "approved"}
+        />
         <MetricCard label="Outstanding" value={<><SARIcon />{stats.outstanding.toFixed(2)}</>} icon={AlertCircle} accent="destructive" />
       </div>
       {/* ─── Toolbar ─── */}

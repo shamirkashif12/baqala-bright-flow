@@ -98,6 +98,9 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
       : (p.minCustomerTiers.includes(tier) ? p.minCustomerTiers.filter(t => t !== tier) : [...p.minCustomerTiers, tier]),
   }));
 
+  // Date <input> values are plain YYYY-MM-DD strings, so string comparison against today's own
+  // YYYY-MM-DD works consistently with the existing 'Until' > 'From' check just below.
+  const todayStr = new Date().toISOString().slice(0, 10);
   const isPack = form.unitType === "pack";
   const derivedUnitPrice = isPack && Number(form.packSize) > 0 && form.price !== ""
     ? Number(form.price) / Number(form.packSize)
@@ -111,6 +114,12 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
       return setError("A pack needs a pack size greater than zero.");
     if (form.effectiveFrom && form.effectiveTo && form.effectiveTo <= form.effectiveFrom)
       return setError("'Until' must be after 'From'.");
+    if (form.effectiveTo && form.effectiveTo < todayStr)
+      return setError("'Until' can't be in the past — the rule would expire the moment it's saved.");
+    // Only guarded for brand-new rules — editing an existing one may legitimately be a historical
+    // correction, so an already-past "From" date shouldn't block saving it.
+    if (!rule && form.effectiveFrom && form.effectiveFrom < todayStr)
+      return setError("'Valid from' can't be in the past for a new rule.");
 
     const basePayload = {
       productId: form.productId,
@@ -245,17 +254,19 @@ function RuleDialog({ open, rule, products, branches, onClose, onDone }: {
             <div>
               <Label className="text-xs">Valid from</Label>
               <Input type="date" className="h-9 mt-1" value={form.effectiveFrom}
+                min={rule ? undefined : todayStr}
                 onChange={e => { setForm(p => ({ ...p, effectiveFrom: e.target.value })); setError(""); }} />
             </div>
             <div>
               <Label className="text-xs">Until</Label>
               <Input type="date" className="h-9 mt-1" value={form.effectiveTo}
+                min={form.effectiveFrom || todayStr}
                 onChange={e => { setForm(p => ({ ...p, effectiveTo: e.target.value })); setError(""); }} />
             </div>
           </div>
           <p className="text-[10px] text-muted-foreground -mt-1.5">
             Blank = starts now, never expires. Two rules with abutting windows express "this price until
-            Friday, then that one".
+            Friday, then that one". {!rule && "'Valid from' can't be in the past for a new rule; "}'Until' can't be in the past.
           </p>
 
           <div>
