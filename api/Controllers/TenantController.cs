@@ -116,8 +116,15 @@ public class TenantController(
     // second one, no matter how the Dashboard's retry/redelivery lines up.
     private async Task CreateBootstrapUserIfNeededAsync(GatewayProvisionRequest req)
     {
-        if (string.IsNullOrWhiteSpace(req.Email)) return;
-        if (await db.Users.AnyAsync(u => u.Email == req.Email)) return;
+        // Production traffic nests these under `operator` (same shape sent to RPOS); the v2 guide's
+        // flat top-level fields are kept as a fallback for older callers/local test scripts.
+        var email = req.Operator?.Email ?? req.Email;
+        var fullName = req.Operator?.FullName ?? req.FullName;
+        var temporaryPassword = req.Operator?.TemporaryPassword ?? req.TemporaryPassword;
+        var requestedUsername = req.Operator?.Username;
+
+        if (string.IsNullOrWhiteSpace(email)) return;
+        if (await db.Users.AnyAsync(u => u.Email == email)) return;
 
         // Seeded as "Tenant Administrator" but Program.cs's one-time RenameRoles step renames it
         // to "Admin" on every startup (a product-naming decision, not a schema change) — match
@@ -157,8 +164,8 @@ public class TenantController(
         {
             Id = Guid.NewGuid(),
             EmployeeCode = employeeCode,
-            FullName = req.FullName ?? "Tenant Administrator",
-            Email = req.Email,
+            FullName = fullName ?? "Tenant Administrator",
+            Email = email,
             // Not carried in the provisioning payload — placeholder, satisfies the required
             // (non-nullable) columns; the admin fills in the real values from their own profile.
             // NationalId has a UNIQUE index (IX_employees_national_id) — a bare "" collided on
@@ -173,7 +180,7 @@ public class TenantController(
         };
         db.Employees.Add(employee);
 
-        var baseUsername = req.Email.Split('@')[0];
+        var baseUsername = string.IsNullOrWhiteSpace(requestedUsername) ? email.Split('@')[0] : requestedUsername;
         var username = baseUsername;
         var suffix = 1;
         while (await db.Users.AnyAsync(u => u.Username == username))
@@ -182,12 +189,12 @@ public class TenantController(
         var user = new User
         {
             Id = Guid.NewGuid(),
-            Email = req.Email,
+            Email = email,
             Username = username,
             // Same hashing scheme as AuthController.HashPassword/UsersController.BCryptHash —
             // whatever temporary password the Dashboard issued logs in normally afterward.
-            PasswordHash = HashPassword(req.TemporaryPassword ?? Guid.NewGuid().ToString("N")),
-            FullName = req.FullName ?? "Tenant Administrator",
+            PasswordHash = HashPassword(temporaryPassword ?? Guid.NewGuid().ToString("N")),
+            FullName = fullName ?? "Tenant Administrator",
             RoleId = adminRole.Id,
             BranchId = null, // tenant_admin is never branch-scoped, matching every other admin account
             Status = "active",
