@@ -48,6 +48,30 @@ public class ProductsController(
         categoryId = p.CategoryId,
     };
 
+    // Belt-and-braces for the barcode-uniqueness race the AnyAsync checks in Create/Update can't
+    // fully close (two concurrent requests for the same not-yet-taken barcode/SKU), and for any
+    // other unique-constraint hit at the DB layer. Without this, MySqlException bubbled up as an
+    // unhandled DbUpdateException and surfaced to the caller as a generic 500 ("Something went
+    // wrong on our end, Reference: ...") instead of an actionable message.
+    private async Task<IActionResult?> TrySaveChangesAsync()
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+            return null;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("Duplicate entry") == true)
+        {
+            var detail = ex.InnerException!.Message;
+            var message = detail.Contains("barcode", StringComparison.OrdinalIgnoreCase)
+                ? "That barcode is already assigned to another active product."
+                : detail.Contains("sku", StringComparison.OrdinalIgnoreCase)
+                    ? "That SKU is already used by another product."
+                    : "This save conflicts with an existing record — please refresh and try again.";
+            return Conflict(new { message });
+        }
+    }
+
     // Best-effort throughout: the catalog write is already committed by the time we log, so a
     // failed audit write must never turn a successful save into a 500 for the caller.
     private async Task TryAudit(string action, Product p, string severity = "info", object? before = null)
@@ -209,7 +233,7 @@ public class ProductsController(
         if (await NormalizeUnitFieldsAsync(product, existingId: null) is { } unitError)
             return BadRequest(new { message = unitError });
         db.Products.Add(product);
-        await db.SaveChangesAsync();
+        if (await TrySaveChangesAsync() is { } conflict) return conflict;
         // "Added Items" in the Employee Audit Center — a new catalog item was previously written
         // with no audit row at all, so adding a product left no trace of who did it.
         await TryAudit("create_product", product);
@@ -284,7 +308,7 @@ public class ProductsController(
         }
 
         product.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
+        if (await TrySaveChangesAsync() is { } conflict) return conflict;
 
         // "Price Changes" in the Employee Audit Center. A price edit previously fired a
         // notification (below) but wrote no audit row — the alert was transient and named no
