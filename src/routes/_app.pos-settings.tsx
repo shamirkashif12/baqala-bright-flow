@@ -193,7 +193,7 @@ function ReceiptLogoCard() {
       </div>
 
       <div className="space-y-2">
-        <Row title="Staff POS Receipt" desc="Printed in-store, for the cashier's own record"
+        <Row title="Paper Receipt"
           checked={showOnStaff} onChange={v => { setShowOnStaff(v); setDirty(true); }} />
         <Row title="Customer Slip — Online Order & Self-Checkout" desc="Shown/printed for customer-device orders (online ordering, self-checkout kiosk)"
           checked={showOnCustomer} onChange={v => { setShowOnCustomer(v); setDirty(true); }} />
