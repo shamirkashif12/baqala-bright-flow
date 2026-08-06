@@ -84,10 +84,11 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
     // exchanged for this app's own local JWT via the same GenerateJwt every normal login uses.
     // From that point on the session behaves exactly like a local login.
     //
-    // NOTE: the real signing key/issuer/audience come from TenantPlan (set by this instance's
-    // very first /pos/users/provision call — see RequireGatewaySignatureAttribute's bootstrap
-    // path and TenantPlanService.ApplyProvisionAsync), not appsettings.json. Config values remain
-    // a fallback for local/dev testing only, matching the same convention as the webhook secret.
+    // NOTE: the signing key is currently pinned in code (see gwKey below) and iss/aud validation
+    // is off — the TenantPlan/config resolution this used to do (provisioned via
+    // TenantPlanService.ApplyProvisionAsync) is temporarily bypassed until the Dashboard contract
+    // is stable. The TenantPlan gateway_jwt_* columns still exist and are still written by
+    // provisioning; restore the lookup here when re-enabling per-tenant secrets.
     [AllowAnonymous]
     [HttpPost("gateway-login")]
     public async Task<IActionResult> GatewayLogin([FromBody] GatewayLoginRequest req)
@@ -96,21 +97,14 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
             return BadRequest(new { message = "gatewayAccessToken is required." });
 
         var plan = await tenantPlans.GetCurrentPlanAsync();
-        var gwConfig = config.GetSection("TenantGateway:Jwt");
-        var gwKey = !string.IsNullOrWhiteSpace(plan.GatewayJwtKey) ? plan.GatewayJwtKey : gwConfig["Key"];
-        var gwIssuer = !string.IsNullOrWhiteSpace(plan.GatewayJwtIssuer) ? plan.GatewayJwtIssuer : gwConfig["Issuer"];
-        var gwAudience = !string.IsNullOrWhiteSpace(plan.GatewayJwtAudience) ? plan.GatewayJwtAudience : gwConfig["Audience"];
-        if (string.IsNullOrEmpty(gwKey))
-            return StatusCode(501, new { message = "Gateway SSO is not configured on this instance yet." });
-
-        // Microsoft.IdentityModel.Tokens rejects HS256 keys under 256 bits by default, even for
-        // validation (not just signing) — silently folded into the same generic "signature
-        // validation failed" exception as an actual mismatch, so a too-short key and a wrong key
-        // are indistinguishable from the error alone. The Dashboard's vendor-confirmed key for
-        // this ECR is genuinely short (136 bits) — same reason their minting side had to hand-roll
-        // raw HMACSHA256 instead of JwtSecurityTokenHandler.CreateToken. ShortKeyCryptoProviderFactory
-        // is the validation-side equivalent of that same workaround, not a security loosening: HS256
-        // security depends on the key being unguessable, not on it padding out to 32 bytes.
+        // TEMP: fixed signing key — TenantPlan/config lookup deliberately bypassed so a stale DB
+        // row or a leftover TenantGateway:Jwt value in a deployment's config can no longer break
+        // launch SSO. The Dashboard signs launch tokens with this exact secret and no iss/aud
+        // claims. Revert to the provisioned per-tenant secret once the Dashboard contract is
+        // stable. ShortKeyCryptoProviderFactory stays in the path so this keeps working even if
+        // the shared secret is ever rotated back under 32 bytes (IdentityModel 8.7+ otherwise
+        // hard-rejects HS256 keys below 256 bits — see the comment on that class).
+        const string gwKey = "tenant-baqala-123-gateway-signing-key-2026";
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(gwKey))
         {
             CryptoProviderFactory = new ShortKeyCryptoProviderFactory(),
@@ -121,10 +115,8 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         {
             principal = new JwtSecurityTokenHandler().ValidateToken(req.GatewayAccessToken, new TokenValidationParameters
             {
-                ValidateIssuer = !string.IsNullOrEmpty(gwIssuer),
-                ValidIssuer = gwIssuer,
-                ValidateAudience = !string.IsNullOrEmpty(gwAudience),
-                ValidAudience = gwAudience,
+                ValidateIssuer = false,
+                ValidateAudience = false,
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = signingKey,
                 ValidateLifetime = true,
