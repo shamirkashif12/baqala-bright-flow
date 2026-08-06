@@ -246,6 +246,20 @@ public class GatewayModule
     public string? Category { get; set; }
 }
 
+// The operator/login block as actually sent in production — nested, not flat. Role/RoleFallback
+// arrive as "SuperAdmin"/"Admin" but aren't read yet: this app has one bootstrap-admin role
+// (Program.cs's RenameRoles renames the seeded "Tenant Administrator" to "Admin"), so every
+// bootstrap operator gets that role regardless of what's sent here.
+public class GatewayOperator
+{
+    public string? FullName { get; set; }
+    public string? Email { get; set; }
+    public string? Username { get; set; }
+    public string? TemporaryPassword { get; set; }
+    public string? Role { get; set; }
+    public string? RoleFallback { get; set; }
+}
+
 public class GatewayLimits
 {
     public int? MaxBranches { get; set; }
@@ -263,9 +277,13 @@ public class GatewayProvisionRequest
     public int SubscriptionId { get; set; }
     public string? PlanName { get; set; }
     public string? Category { get; set; }
+    // Legacy flat shape (per the v2 integration guide). The Dashboard's actual traffic nests these
+    // under `operator` instead (same shape it sends RPOS) — Operator below is populated for that
+    // case; TenantController resolves Operator first, falling back to these so neither shape 404s.
     public string? FullName { get; set; }
     public string? Email { get; set; }
     public string? TemporaryPassword { get; set; }
+    public GatewayOperator? Operator { get; set; }
     public List<GatewayModule>? EnabledModules { get; set; }
     public GatewayLimits? Limits { get; set; }
     public DateTime? Timestamp { get; set; }
