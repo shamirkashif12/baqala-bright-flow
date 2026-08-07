@@ -664,10 +664,7 @@ function Batches() {
                           {b.branchId ? (
                             branches.find(br => br.id === b.branchId)?.name ?? "—"
                           ) : (
-                            <span className="inline-flex items-center gap-1.5">
-                              {warehouses.find(w => w.id === b.warehouseId)?.name ?? "—"}
-                              <span className="text-[10px] px-1 py-0.5 rounded bg-primary/10 text-primary font-semibold">WH</span>
-                            </span>
+                            warehouses.find(w => w.id === b.warehouseId)?.name ?? "—"
                           )}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{b.supplier?.name ?? "—"}</td>
@@ -691,8 +688,8 @@ function Batches() {
                           <div className="flex items-center justify-end gap-1">
                             {!hasStockLeft ? (
                               reclaimedBatchIds.has(b.id) ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground italic" title="This batch's remaining stock was returned to its supplier via a reclaim.">
-                                  <RotateCcw className="h-3 w-3" /> Reclaimed
+                                <span className="text-[10px] text-muted-foreground italic" title="This batch's remaining stock was returned to its supplier via a reclaim.">
+                                  Reclaimed
                                 </span>
                               ) : (
                                 <span className="text-[10px] text-muted-foreground italic" title="Remaining quantity is 0 — this batch was already written off automatically when it expired.">
@@ -709,9 +706,9 @@ function Batches() {
                                 )}
                                 {recallPerms.canEdit && canReclaim && (
                                   hasOpenReclaim ? (
-                                    <span className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-border/60 text-[10px] text-muted-foreground italic"
+                                    <span className="text-[10px] text-muted-foreground italic"
                                       title="A return to supplier for this product at this location has already been created and is awaiting approval">
-                                      <RotateCcw className="h-3 w-3" /> Reclaimed
+                                      Reclaimed
                                     </span>
                                   ) : (
                                     <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
