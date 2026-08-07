@@ -237,6 +237,82 @@ public class TenantController(
         });
     }
 
+    // Where "Manage Subscription" sends the browser. Hardcoded rather than required config, same
+    // reasoning as AuthController.FallbackGatewayJwtKey and the Dashboard's own
+    // PosIntegrationFallback: this instance's appsettings.json is gitignored and maintained by
+    // hand on each server, so a deploy that forgot the key would silently break the button.
+    // Externally reachable address of the Tenant Admin Dashboard — a browser opens this directly,
+    // so never a Docker container name. Config still wins when set, for staging/domain moves.
+    private const string DashboardBaseUrlFallback = "http://65.108.31.172:6080";
+
+    // The Dashboard's SSO landing route (src/pages/PosSsoCallback.tsx, registered in App.tsx).
+    private const string DashboardSsoPath = "/sso/pos";
+
+    // ─── Manage Subscription: outbound SSO handoff (POS → Tenant Admin Dashboard) ─────────────
+    //
+    // Mirror image of the Dashboard's "Launch ECR" flow (which lands on this app's
+    // /gateway-callback + AuthController.GatewayLogin): mints a short-lived token signed with the
+    // same bilateral gateway key, for the Dashboard's /sso/pos callback to exchange against
+    // POST /api/auth/pos/dashboard-login on the ECR gateway. The token carries the caller's email
+    // plus this instance's ecrId/businessId correlation keys; the ECR side re-verifies that the
+    // email matches that ECR's provisioned operator, so a token from this instance can only ever
+    // open THIS tenant's dashboard session. tenant_admin only — this is the admin identity the
+    // Dashboard created during onboarding (same email/password on both systems).
+    [HttpPost("dashboard-launch")]
+    public async Task<IActionResult> DashboardLaunch()
+    {
+        if (User.FindFirst("role")?.Value != "tenant_admin")
+            return Forbid();
+
+        var plan = await tenantPlans.GetCurrentPlanAsync();
+        if (plan.ProvisionedAt is null || plan.EcrId is null || plan.BusinessId is null)
+            return Conflict(new { message = "This instance has not been provisioned by the Tenant Admin Dashboard yet." });
+
+        var email = User.FindFirst("email")?.Value;
+        if (string.IsNullOrEmpty(email))
+            return Unauthorized(new { message = "Session has no email claim." });
+
+        // Same key-resolution order the Dashboard uses when SIGNING launch tokens toward us:
+        // per-instance provisioned secret first, pinned vendor key as the interim fallback (see
+        // AuthController.FallbackGatewayJwtKey). Signed with raw HMACSHA256 rather than
+        // JwtSecurityTokenHandler for the same short-key reason as ShortKeyCryptoProviderFactory.
+        var signingKey = plan.GatewayJwtKey ?? AuthController.FallbackGatewayJwtKey;
+        var token = MintDashboardSsoToken(signingKey, email, plan.EcrId.Value, plan.BusinessId.Value);
+
+        var dashboardBase = (config["TenantGateway:DashboardBaseUrl"] ?? DashboardBaseUrlFallback).TrimEnd('/');
+        var redirectUrl = $"{dashboardBase}{DashboardSsoPath}?token={Uri.EscapeDataString(token)}";
+
+        logger.LogInformation("Dashboard SSO launch minted for {Email} (ecrId {EcrId}, businessId {BusinessId}).",
+            email, plan.EcrId, plan.BusinessId);
+        return Ok(new { redirectUrl });
+    }
+
+    // Hand-rolled HS256 JWT: {header}.{payload}.{hmac}, all base64url. 120s lifetime — the token
+    // exists only to survive one cross-tab redirect and one exchange call. "purpose" pins this
+    // token to the POS→Dashboard direction so it can never be replayed against this app's own
+    // /api/auth/gateway-login (which is the Dashboard→POS direction on the same key).
+    private static string MintDashboardSsoToken(string key, string email, int ecrId, int businessId)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var header = Base64Url(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { alg = "HS256", typ = "JWT" }));
+        var payload = Base64Url(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            email,
+            ecrId,
+            businessId,
+            purpose = "dashboard-sso",
+            jti = Guid.NewGuid().ToString("N"),
+            iat = now,
+            exp = now + 120,
+        }));
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(key));
+        var signature = Base64Url(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{header}.{payload}")));
+        return $"{header}.{payload}.{signature}";
+    }
+
+    private static string Base64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
     private static TenantPlanResponse ToResponse(TenantPlan plan) => new()
     {
         TenantId = plan.TenantId,
