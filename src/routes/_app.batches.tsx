@@ -331,7 +331,8 @@ function RecallImpactDialog({ recallId, onClose }: { recallId: string | null; on
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function Batches() {
-  const { user } = useAuth();
+  const { user, canViewModule } = useAuth();
+  const canViewSupplierReturns = canViewModule("Supplier Returns");
   const companyHeader = useCompanyHeader();
   const lockedBranchId = user?.role !== "tenant_admin" ? (user?.branchId ?? null) : null;
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
@@ -412,6 +413,37 @@ function Batches() {
     }
   }
 
+  // A Reclaim only inserts a draft StockTransfer — RemainingQuantity isn't deducted until it's
+  // later approved AND dispatched (in_transit), so the batch row looks completely unchanged right
+  // after creating one and the button would otherwise stay clickable for a duplicate reclaim.
+  // There's no per-batch FK to lean on at this stage (StockTransferItem.BatchId is only filled in
+  // once dispatch actually moves stock), so pending reclaims are tracked by product + location —
+  // the same granularity Reclaim itself is created at.
+  const [openReclaimKeys, setOpenReclaimKeys] = useState<Set<string>>(new Set());
+  // Once a reclaim is dispatched (in_transit) or completed, DeductSourceAsync backfills the exact
+  // InventoryBatch.Id onto the StockTransferItem — so at that point a real per-batch match is
+  // possible, and a batch that hit RemainingQuantity 0 this way should read "Reclaimed", not
+  // "Already written off" (that label is reserved for the wastage/Discard path).
+  const [reclaimedBatchIds, setReclaimedBatchIds] = useState<Set<string>>(new Set());
+  async function loadOpenReclaims() {
+    if (!canViewSupplierReturns) { setOpenReclaimKeys(new Set()); setReclaimedBatchIds(new Set()); return; }
+    try {
+      const transfers = await api.getStockTransfers({ status: ["draft", "pending_approval", "approved", "in_transit", "completed"] });
+      const rts = (transfers ?? []).filter(t => t.transferType === "warehouse_to_supplier" || t.transferType === "branch_to_supplier");
+      setOpenReclaimKeys(new Set(
+        rts.filter(t => t.status === "draft" || t.status === "pending_approval" || t.status === "approved")
+          .flatMap(t => (t.items ?? []).map(i => `${i.productId}:${t.sourceBranchId ?? t.sourceWarehouseId}`))
+      ));
+      setReclaimedBatchIds(new Set(
+        rts.filter(t => t.status === "in_transit" || t.status === "completed")
+          .flatMap(t => (t.items ?? []).map(i => i.batchId)).filter((id): id is string => !!id)
+      ));
+    } catch {
+      setOpenReclaimKeys(new Set());
+      setReclaimedBatchIds(new Set());
+    }
+  }
+
   // FEFO enforcement warnings (soft, non-blocking): on a branch not using FEFO picking, flags
   // near-expiry batches sitting behind stock received more recently. Only meaningful per-branch
   // (the setting and the pick order are both branch-scoped), so this is skipped entirely when
@@ -443,6 +475,10 @@ function Batches() {
   useEffect(() => {
     loadRecalls();
   }, [recallStatusFilter, lockedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    loadOpenReclaims();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const nearExpiry = batches.filter(b => b.status === "near_expiry").length;
   const expired = batches.filter(b => b.status === "expired").length;
@@ -616,6 +652,7 @@ function Batches() {
                     // way, as long as a supplier is actually known for the batch.
                     const canDiscard = hasStockLeft && !!b.branchId;
                     const canReclaim = hasStockLeft && !!b.supplierId;
+                    const hasOpenReclaim = openReclaimKeys.has(`${b.productId}:${b.branchId ?? b.warehouseId}`);
                     return (
                       <tr key={b.id} className="border-t hover:bg-muted/20 transition-colors">
                         <td className="px-4 py-3">
@@ -653,9 +690,15 @@ function Batches() {
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
                             {!hasStockLeft ? (
-                              <span className="text-[10px] text-muted-foreground italic" title="Remaining quantity is 0 — this batch was already written off automatically when it expired.">
-                                Already written off
-                              </span>
+                              reclaimedBatchIds.has(b.id) ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground italic" title="This batch's remaining stock was returned to its supplier via a reclaim.">
+                                  <RotateCcw className="h-3 w-3" /> Reclaimed
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground italic" title="Remaining quantity is 0 — this batch was already written off automatically when it expired.">
+                                  Already written off
+                                </span>
+                              )
                             ) : (
                               <>
                                 {recallPerms.canEdit && canDiscard && (
@@ -665,10 +708,21 @@ function Batches() {
                                   </Button>
                                 )}
                                 {recallPerms.canEdit && canReclaim && (
-                                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
-                                    onClick={() => setReclaimBatch(b)} title="Return this batch to its supplier">
-                                    <RotateCcw className="h-3 w-3" /> Reclaim
-                                  </Button>
+                                  hasOpenReclaim ? (
+                                    <span className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-border/60 text-[10px] text-muted-foreground italic"
+                                      title="A return to supplier for this product at this location has already been created and is awaiting approval">
+                                      <RotateCcw className="h-3 w-3" /> Reclaimed
+                                    </span>
+                                  ) : (
+                                    <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
+                                      disabled={!canViewSupplierReturns}
+                                      onClick={() => setReclaimBatch(b)}
+                                      title={canViewSupplierReturns
+                                        ? "Return this batch to its supplier"
+                                        : "You don't have permission to view Supplier Returns, so you can't track this reclaim once created — ask an admin to grant access"}>
+                                      <RotateCcw className="h-3 w-3" /> Reclaim
+                                    </Button>
+                                  )
                                 )}
                               </>
                             )}
@@ -794,7 +848,7 @@ function Batches() {
       <RtsSheet
         open={!!reclaimBatch}
         onOpenChange={(v) => { if (!v) setReclaimBatch(null); }}
-        onCreated={() => { setReclaimBatch(null); toast.success("Return to supplier created"); loadBatches(); }}
+        onCreated={() => { setReclaimBatch(null); toast.success("Return to supplier created"); loadBatches(); loadOpenReclaims(); }}
         initialBatch={reclaimBatch ? {
           productId: reclaimBatch.productId,
           productName: reclaimBatch.product?.name ?? "Unknown product",

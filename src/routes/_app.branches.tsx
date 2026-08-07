@@ -463,11 +463,17 @@ function Branches() {
                 </div>
 
                 {/* Actions */}
-                <div className="flex gap-2 mt-3">
-                  <Button variant="outline" size="sm" className="flex-1" onClick={() => setViewBranch(b)}>View</Button>
-                  <Link to="/branches/$branchId" params={{ branchId: b.id }} search={{ tab: "ledger" }} className={buttonVariants({ variant: "outline", size: "sm" }) + " flex-1"}>Ledger</Link>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <Button variant="outline" size="sm" onClick={() => setViewBranch(b)}>View</Button>
+                  <Link to="/branches/$branchId" params={{ branchId: b.id }} search={{ tab: "ledger" }} className={buttonVariants({ variant: "outline", size: "sm" })}>Ledger</Link>
+                  <Link
+                    to="/branches/$branchId" params={{ branchId: b.id }} search={{ tab: "inventory" }}
+                    className={buttonVariants({ variant: "outline", size: "sm" }) + (canEdit ? "" : " col-span-2")}
+                  >
+                    Inventory
+                  </Link>
                   {canEdit && (
-                    <Button size="sm" className="flex-1 gradient-primary text-primary-foreground border-0"
+                    <Button size="sm" className="gradient-primary text-primary-foreground border-0"
                       onClick={() => setEditBranch(b)}>Manage</Button>
                   )}
                 </div>

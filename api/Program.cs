@@ -240,6 +240,18 @@ using (var migrationScope = app.Services.CreateScope())
     }
 }
 
+// ─── Backfill missing role permissions on new modules (all environments) ─────
+// Same reasoning as the migration bypass above: this only ever ADDS a RolePermission row
+// for a module a role doesn't already have one for (see EnsurePermissionsAsync), it never
+// overwrites an existing/customized permission — so it's safe to self-heal in production.
+// Was dev-only, which is why the "Customer Display" module (added after initial seeding)
+// never got backfilled onto any real tenant's roles and the feature was invisible in live.
+using (var permScope = app.Services.CreateScope())
+{
+    var permDb = permScope.ServiceProvider.GetRequiredService<BaqalaDbContext>();
+    await DataSeeder.EnsurePermissionsAsync(permDb);
+}
+
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
@@ -247,7 +259,6 @@ if (app.Environment.IsDevelopment())
     await DataSeeder.SeedAsync(db);
     await RenameRoles(db);
     await RenamePermissionModules(db);
-    await DataSeeder.EnsurePermissionsAsync(db);
     await DataSeeder.PatchPermissionsAsync(db);
     await DataSeeder.PatchPickerStockTransfersPermissionsAsync(db);
     await DataSeeder.PatchMarketingPermissionsAsync(db);

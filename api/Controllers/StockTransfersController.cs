@@ -380,7 +380,15 @@ public class StockTransfersController(BaqalaDbContext db, INotificationService n
 
         var (role, callerBranchId) = GetCallerContext();
         if (role is not null && role != "tenant_admin" && callerBranchId.HasValue)
-            query = query.Where(t => t.SourceBranchId == callerBranchId || t.DestBranchId == callerBranchId);
+        {
+            // A warehouse_to_supplier RTS has neither SourceBranchId nor DestBranchId set, so the
+            // branch-touching filter below would hide it from every branch-scoped caller — including
+            // whoever created it. Let the creator see their own warehouse-sourced transfers even
+            // though no branch is attached to the row.
+            var callerId = CallerId();
+            query = query.Where(t => t.SourceBranchId == callerBranchId || t.DestBranchId == callerBranchId
+                || (t.SourceBranchId == null && t.DestBranchId == null && t.CreatedBy == callerId));
+        }
 
         var all = await query.OrderByDescending(t => t.CreatedAt).ToListAsync();
         IEnumerable<StockTransfer> scoped = all;
