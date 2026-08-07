@@ -1498,7 +1498,7 @@ function Stocks() {
                       options={branches.map(b => ({ id: b.id, label: b.name }))}
                       selected={overviewBranchIds}
                       onChange={setOverviewBranchIds}
-                      className="h-8"
+                      className="h-9"
                     />
                   </div>
                 )}
@@ -1508,13 +1508,13 @@ function Stocks() {
                     options={allCategoryOptions.map(c => ({ id: c.id, label: c.name }))}
                     selected={categoryFilterIds}
                     onChange={setCategoryFilterIds}
-                    className="h-8"
+                    className="h-9"
                   />
                 </div>
-                <Input className="w-52 h-8" placeholder="Search product…" value={search} onChange={e => setSearch(e.target.value)} />
+                <Input className="w-52 h-9" placeholder="Search product…" value={search} onChange={e => setSearch(e.target.value)} />
                 {(search || categoryFilterIds.length > 0 || (!lockedBranchId && overviewBranchIds.length > 0)) && (
                   <Button
-                    variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
+                    variant="ghost" size="sm" className="h-9 gap-1 text-muted-foreground"
                     onClick={() => { setSearch(""); setCategoryFilterIds([]); if (!lockedBranchId) setOverviewBranchIds([]); }}
                   >
                     <X className="h-3.5 w-3.5" />Clear Filters

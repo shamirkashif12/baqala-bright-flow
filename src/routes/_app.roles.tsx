@@ -634,7 +634,7 @@ function Roles() {
             <div className="px-2 mb-2">
               <Input
                 placeholder="Search roles…"
-                className="h-8 text-xs"
+                className="h-9 text-xs"
                 value={roleSearch}
                 onChange={e => setRoleSearch(e.target.value)}
               />

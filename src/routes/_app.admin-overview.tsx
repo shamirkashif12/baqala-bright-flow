@@ -3,11 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import {
   Warehouse, Building2, Package, AlertTriangle, CalendarClock,
-  Boxes, TrendingDown, CheckCircle2,
+  Boxes, TrendingDown, CheckCircle2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, excludeDisabledBranches, type Branch, type Warehouse as WarehouseType, type InventoryStock, type Category } from "@/lib/api";
@@ -79,6 +80,13 @@ function AdminOverview() {
   const [branchFilter, setBranchFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [warehouseFilter, setWarehouseFilter] = useState<string[]>([]);
+
+  const hasFilters = branchFilter.length > 0 || categoryFilter.length > 0 || warehouseFilter.length > 0;
+  const clearFilters = () => {
+    setBranchFilter([]);
+    setCategoryFilter([]);
+    setWarehouseFilter([]);
+  };
 
   useEffect(() => {
     Promise.all([
@@ -205,6 +213,11 @@ function AdminOverview() {
             onChange={setWarehouseFilter}
           />
         </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
       </div>
 
       {loading ? (

@@ -12,7 +12,7 @@ import {
   Building2, Users, ScanBarcode, Activity,
   WifiOff, RefreshCw, AlertTriangle, Search, ArrowRight, Zap,
   LogIn, LogOut, Eye, ShieldCheck, Loader2,
-  Clock, CheckCircle2, XCircle, ToggleLeft, ToggleRight, UserCheck,
+  Clock, CheckCircle2, XCircle, ToggleLeft, ToggleRight, UserCheck, X,
 } from "lucide-react";
 import { api, type Branch, type Terminal, type User, type CashierShift } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
@@ -81,6 +81,13 @@ function ControlTower() {
   useEffect(() => {
     if (lockedBranchId) setBranchFilter(lockedBranchId);
   }, [lockedBranchId]);
+
+  const hasFilters = !!search || branchFilter !== (lockedBranchId ?? "all") || statusFilter !== "all";
+  const clearFilters = () => {
+    setSearch("");
+    setBranchFilter(lockedBranchId ?? "all");
+    setStatusFilter("all");
+  };
 
   const [branches, setBranches]   = useState<Branch[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
@@ -249,6 +256,11 @@ function ControlTower() {
               <SelectItem value="inactive">Inactive</SelectItem>
             </SelectContent>
           </Select>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
         </div>
       </Card>
 

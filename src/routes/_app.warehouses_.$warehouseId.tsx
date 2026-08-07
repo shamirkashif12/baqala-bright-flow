@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ArrowLeft, Pencil, MapPin, Phone, User, Package, Boxes, Plus,
-  MoreHorizontal, Loader2, Warehouse as WarehouseIcon,
+  MoreHorizontal, Loader2, Warehouse as WarehouseIcon, X,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
@@ -133,6 +133,12 @@ function WarehouseDetail() {
     });
   }, [stock, q, productFilter]);
 
+  const hasFilters = !!q || productFilter.length > 0;
+  const clearFilters = () => {
+    setQ("");
+    setProductFilter([]);
+  };
+
   const totalStock = stock.reduce((s, r) => s + r.quantity, 0);
   const totalReserved = stock.reduce((s, r) => s + r.reservedQuantity, 0);
   const skuCount = stock.length;
@@ -239,7 +245,12 @@ function WarehouseDetail() {
                     onChange={setProductFilter}
                   />
                 </div>
-                <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product name or SKU…" className="h-8 w-64 text-xs" />
+                <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product name or SKU…" className="h-9 w-64 text-xs" />
+                {hasFilters && (
+                  <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+                    <X className="h-3.5 w-3.5" /> Clear Filters
+                  </Button>
+                )}
                 {canCreateBatch && (
                   <Button size="sm" className="h-8 gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => setAddStockOpen(true)}>
                     <Plus className="h-3.5 w-3.5" /> Add Stock

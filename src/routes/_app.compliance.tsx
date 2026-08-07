@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable, Toolbar, StatusBadge } from "@/components/module-placeholder";
-import { ShieldCheck, Ban, AlertTriangle, Lock, Loader2 } from "lucide-react";
+import { ShieldCheck, Ban, AlertTriangle, Lock, Loader2, X } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { api, type TaxFeeRule, type PosSettingsRecord } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
@@ -152,6 +152,12 @@ function Compliance() {
     setStatusFilter(prev => prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]);
   }
 
+  const hasFilters = !!search || statusFilter.length > 0;
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter([]);
+  }
+
   function handleExport() {
     exportRowsAsCsv(
       ["Rule Name", "Rule Type", "VAT %", "Custom Fee", "Applicable To", "Status"],
@@ -283,6 +289,13 @@ function Compliance() {
         onFilterClick={() => setShowFilters(v => !v)}
         filtersActive={statusFilter.length > 0}
         onExport={handleExport}
+        extra={
+          hasFilters && (
+            <Button variant="ghost" size="sm" className="h-10 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )
+        }
       />
       {showFilters && ruleStatuses.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 -mt-2">

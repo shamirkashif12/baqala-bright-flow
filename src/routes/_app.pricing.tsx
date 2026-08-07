@@ -11,7 +11,7 @@ import { SearchableMultiSelect } from "@/components/report-filters/searchable-mu
 import { SearchableSelect } from "@/components/searchable-select";
 import { TierMultiSelect } from "@/components/tier-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Loader2, Trash2, Pencil, Power, Tag, Boxes } from "lucide-react";
+import { Plus, Loader2, Trash2, Pencil, Power, Tag, Boxes, X } from "lucide-react";
 import {
   api, excludeDisabledBranches, PRICE_TYPE_LABELS,
   type Branch, type Product, type ProductPriceList, type PriceListPayload,
@@ -321,6 +321,14 @@ function Pricing() {
   const [editing, setEditing] = useState<ProductPriceList | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const hasFilters = !!search || branchFilter.length > 0 || unitTypeFilter !== "all" || channelFilter !== "all";
+  const clearFilters = () => {
+    setSearch("");
+    setBranchFilter([]);
+    setUnitTypeFilter("all");
+    setChannelFilter("all");
+  };
+
   async function load() {
     setLoading(true);
     try {
@@ -396,6 +404,11 @@ function Pricing() {
             {PRICE_TYPES.map(t => <SelectItem key={t} value={t}>{PRICE_TYPE_LABELS[t]}</SelectItem>)}
           </SelectContent>
         </Select>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         {perms.canCreate && (
           <Button size="sm" className="h-9 gap-1.5" onClick={() => { setEditing(null); setDialogOpen(true); }}>

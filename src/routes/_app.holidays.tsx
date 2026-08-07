@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Pencil, Plus, Trash2, Download, Loader2, RotateCcw } from "lucide-react";
+import { Pencil, Plus, Trash2, Download, Loader2, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Holiday } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -207,6 +207,15 @@ function HolidaysTab() {
     return mq && mb && mt && ms && my;
   });
 
+  const hasFilters = !!q || branchFilter.length > 0 || typeFilter !== "all" || statusFilter.length > 0 || yearFilter !== "all";
+  const clearFilters = () => {
+    setQ("");
+    setBranchFilter([]);
+    setTypeFilter("all");
+    setStatusFilter([]);
+    setYearFilter("all");
+  };
+
   const handleExport = () => {
     exportRowsAsCsv(
       ["Name", "Date", "Type", "Branch", "Status", "Description"],
@@ -255,6 +264,11 @@ function HolidaysTab() {
             {years.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
           </SelectContent>
         </Select>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export

@@ -23,7 +23,7 @@ import {
   Wallet, ShoppingBag, Terminal as TerminalIcon, CalendarClock,
   Truck, Users, Clock3, PackageCheck, PackageX, Package, ArrowRight,
   LayoutDashboard, Timer, Warehouse, Undo2, Cigarette, Settings2,
-  TrendingUp, TrendingDown, Boxes, AlertTriangle, ShoppingCart, Ban, RefreshCw, Compass, type LucideIcon,
+  TrendingUp, TrendingDown, Boxes, AlertTriangle, ShoppingCart, Ban, RefreshCw, Compass, X, type LucideIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/dashboard")({ component: Dashboard });
@@ -519,6 +519,17 @@ function Dashboard() {
   // Turnover and movers are ledger-derived; flag when the ledger doesn't span the whole period.
   const invPartialLedger = !!invReport?.dataWindow && !invReport.dataWindow.coversFullPeriod;
 
+  // "Daily" + all branches (or the user's locked branch) is the dashboard's default view —
+  // only offer a reset once the admin has actually strayed from it.
+  const defaultBranch = lockedBranchId ?? "all";
+  const hasFilters = branch !== defaultBranch || period !== "Daily" || !!customFrom || !!customTo;
+  const clearFilters = () => {
+    setBranch(defaultBranch);
+    setPeriod("Daily");
+    setCustomFrom("");
+    setCustomTo("");
+  };
+
   return (
     <PageShell title="Dashboard" subtitle={`Live snapshot · ${selectedBranchName} · ${period}`}>
       {loadError && <LoadErrorBanner onRetry={loadDashboard} />}
@@ -557,6 +568,12 @@ function Dashboard() {
             <div className="flex items-end gap-1">
               <DateRangeField from={customFrom} to={customTo} onFromChange={setCustomFrom} onToChange={setCustomTo} />
             </div>
+          )}
+
+          {hasFilters && (
+            <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
           )}
 
           <div className="ml-auto flex items-center gap-2">

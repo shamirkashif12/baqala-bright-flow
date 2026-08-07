@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
-import { Warehouse, PackageCheck, Truck, Store, Pencil, Eye } from "lucide-react";
+import { Warehouse, PackageCheck, Truck, Store, Pencil, Eye, X } from "lucide-react";
 import { api, type Supplier } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
 import { toast } from "sonner";
@@ -184,6 +184,16 @@ function WarehouseSuppliers() {
     return mq && ms && mc && mcity && mpt && mst;
   });
 
+  const hasFilters = !!q || statusFilter.length > 0 || categoryFilter.length > 0 || cityFilter.length > 0 || paymentTermsFilter.length > 0 || supplyTypeQuick !== null;
+  function clearFilters() {
+    setQ("");
+    setStatusFilter([]);
+    setCategoryFilter([]);
+    setCityFilter([]);
+    setPaymentTermsFilter([]);
+    setSupplyTypeQuick(null);
+  }
+
   return (
     <PageShell title="Warehouse Suppliers" subtitle="Bulk supply partners feeding all branches">
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
@@ -213,9 +223,16 @@ function WarehouseSuppliers() {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         primaryLabel={canCreate ? "Add Supplier" : undefined}
-        extra={canCreate ? (
-          <Button size="sm" variant="outline" className="h-10" onClick={openCreate}>+ Quick Add</Button>
-        ) : undefined}
+        extra={
+          <>
+            {canCreate && <Button size="sm" variant="outline" className="h-10" onClick={openCreate}>+ Quick Add</Button>}
+            {hasFilters && (
+              <Button variant="ghost" size="sm" className="h-10 gap-1.5 text-xs" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5" /> Clear Filters
+              </Button>
+            )}
+          </>
+        }
       />
       <div className="flex flex-wrap items-center gap-2">
         <div className="w-36">

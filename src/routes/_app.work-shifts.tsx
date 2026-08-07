@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "@/components/module-placeholder";
-import { Download, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { Download, Pencil, Plus, Trash2, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type WorkShift, type Department, type Employee } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -292,6 +292,17 @@ function WorkShiftsTab() {
     return mb && ms && md && me && mw && md2;
   });
 
+  const hasFilters = branchFilter.length > 0 || statusFilter.length > 0 || departmentFilter.length > 0 ||
+    employeeFilter.length > 0 || workingDayFilter !== "all" || !!effectiveDateFilter;
+  const clearFilters = () => {
+    setBranchFilter([]);
+    setStatusFilter([]);
+    setDepartmentFilter([]);
+    setEmployeeFilter([]);
+    setWorkingDayFilter("all");
+    setEffectiveDateFilter("");
+  };
+
   const handleExport = () => exportRowsAsCsv(
     ["Shift Name", "Branch", "Working Days", "Start", "End", "Grace In (m)", "Grace Out (m)", "Assigned", "Status"],
     filtered.map(s => [s.name, s.branch?.name ?? "All Branches", s.workingDays, s.startTime, s.endTime, s.graceInMinutes, s.graceOutMinutes, s.assignedEmployees ?? 0, s.status]),
@@ -352,6 +363,11 @@ function WorkShiftsTab() {
         <Input type="date" value={effectiveDateFilter} onChange={e => setEffectiveDateFilter(e.target.value)} placeholder="Effective date" title="Effective Date" className="h-9 w-40" />
         {effectiveDateFilter && (
           <Button size="sm" variant="ghost" className="h-9 px-2 text-xs" onClick={() => setEffectiveDateFilter("")}>Clear date</Button>
+        )}
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
         )}
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={handleExport}>

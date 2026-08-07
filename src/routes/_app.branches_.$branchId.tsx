@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ArrowLeft, MapPin, Phone, Package, Boxes, Plus,
-  MoreHorizontal, Loader2, Building2,
+  MoreHorizontal, Loader2, Building2, X,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
@@ -134,6 +134,12 @@ function BranchDetail() {
     });
   }, [stock, q, productFilter]);
 
+  const hasFilters = !!q || productFilter.length > 0;
+  const clearFilters = () => {
+    setQ("");
+    setProductFilter([]);
+  };
+
   const totalStock = stock.reduce((s, r) => s + r.quantity, 0);
   const totalReserved = stock.reduce((s, r) => s + r.reservedQuantity, 0);
   const skuCount = stock.length;
@@ -229,7 +235,12 @@ function BranchDetail() {
                     onChange={setProductFilter}
                   />
                 </div>
-                <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product name or SKU…" className="h-8 w-64 text-xs" />
+                <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product name or SKU…" className="h-9 w-64 text-xs" />
+                {hasFilters && (
+                  <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+                    <X className="h-3.5 w-3.5" /> Clear Filters
+                  </Button>
+                )}
                 {canCreateBatch && (
                   <Button size="sm" className="h-8 gap-1.5 gradient-primary text-primary-foreground border-0" onClick={() => setAddStockOpen(true)}>
                     <Plus className="h-3.5 w-3.5" /> Add Stock
