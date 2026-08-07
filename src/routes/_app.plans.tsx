@@ -217,23 +217,35 @@ function Plans() {
   const [launching, setLaunching] = useState(false);
   const notified = useRef(false);
 
-  // Opens the Tenant Admin Dashboard already signed in as this same admin (the identity
-  // onboarding created for both systems) — see api/Controllers/TenantController.cs's
-  // DashboardLaunch. Navigates the current tab rather than opening a new one: subscription
-  // management is a continuation of this page, not a side trip, and the browser's Back button
-  // returns here. No setLaunching(false) on success — the page is being replaced, and clearing
-  // it would flash the button back to its idle label mid-navigation.
+  // Opens the Tenant Admin Dashboard in a new tab, already signed in as this same admin (the
+  // identity onboarding created for both systems) — see api/Controllers/TenantController.cs's
+  // DashboardLaunch. The POS stays open behind it, which is the point: a cashier's session
+  // shouldn't be navigated away from to look at billing.
+  //
+  // The blank tab is opened synchronously inside the click gesture and only pointed at the URL
+  // once the token comes back — a window.open() after the await reads as unsolicited and gets
+  // blocked. Deliberately NO "noopener" in the features string: it makes window.open() return
+  // null by spec, which would leave us holding no handle to navigate and silently fall through
+  // to the same-tab path. The opener reference is severed on the next line instead, while the
+  // blank tab is still same-origin and reachable.
   async function handleManageSubscription() {
     if (launching) return;
     setLaunching(true);
+    const tab = window.open("", "_blank");
+    if (tab) {
+      try { tab.opener = null; } catch { /* already cross-origin — nothing to sever */ }
+    }
     try {
       const { redirectUrl } = await api.getDashboardLaunchUrl();
-      window.location.href = redirectUrl;
+      if (tab && !tab.closed) tab.location.replace(redirectUrl);
+      else window.location.href = redirectUrl; // popup blocked — same tab beats going nowhere
     } catch (e) {
-      setLaunching(false);
+      tab?.close();
       toast.error("Couldn't open subscription management", {
         description: e instanceof Error ? e.message : "Please try again or contact support.",
       });
+    } finally {
+      setLaunching(false);
     }
   }
 
