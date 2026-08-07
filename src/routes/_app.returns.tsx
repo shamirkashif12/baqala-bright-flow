@@ -481,8 +481,8 @@ function Returns() {
                 active && "ring-2 ring-primary",
               )}
             >
-              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
+              <p className={`text-2xl md:text-3xl font-bold tracking-tight ${s.color}`}>{s.value}</p>
+              <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mt-1">{s.label}</p>
             </Card>
           );
         })}
@@ -512,7 +512,7 @@ function Returns() {
             onChange={setStatusFilter}
           />
         </div>
-        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} prefixLabel="Return Date:" className="h-9 w-36" />
         {(dateFrom || dateTo) && (
           <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
             <X className="h-3.5 w-3.5" />
@@ -738,8 +738,12 @@ function Returns() {
               </thead>
               <tbody>
                 {filtered.map((r) => (
-                  <tr key={r.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0 cursor-pointer" onClick={() => setViewReturn(r)}>
-                    <td className="px-3 py-3 font-mono text-xs font-bold">{r.returnNumber}</td>
+                  <tr key={r.id} className="border-b border-border/40 hover:bg-muted/30 last:border-0">
+                    <td className="px-3 py-3 font-mono text-xs font-bold">
+                      <button className="text-primary hover:underline focus-visible:underline outline-none" onClick={() => setViewReturn(r)}>
+                        {r.returnNumber}
+                      </button>
+                    </td>
                     <td className="px-3 py-3 font-mono text-xs">{r.order?.orderNumber ?? "—"}</td>
                     <td className="px-3 py-3">{r.customer?.fullName ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{allBranches.find(b => b.id === r.branchId)?.name ?? "—"}</td>
@@ -748,7 +752,7 @@ function Returns() {
                     <td className="px-3 py-3 text-xs capitalize">{r.refundMethod?.replace(/_/g, " ") ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{new Date(r.createdAt).toLocaleDateString("en-SA")}</td>
                     <td className="px-3 py-3"><StatusBadge status={r.status} /></td>
-                    <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                    <td className="px-3 py-3">
                       <div className="flex gap-1">
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setViewReturn(r)}>
                           <Eye className="h-3.5 w-3.5" />

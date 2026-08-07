@@ -184,7 +184,7 @@ function RegisteredUsers() {
             onChange={setBranchFilter}
           />
         </div>
-        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} prefixLabel="Created:" className="h-9 w-36" />
         {(dateFrom || dateTo) && (
           <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
             <X className="h-3.5 w-3.5" />

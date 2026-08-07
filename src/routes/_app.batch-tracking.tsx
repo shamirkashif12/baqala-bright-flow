@@ -505,7 +505,7 @@ function BatchLocationPanel({
           />
         </div>
         <div className="flex items-center gap-1">
-          <DateRangeField from={expiryFrom} to={expiryTo} onFromChange={setExpiryFrom} onToChange={setExpiryTo} />
+          <DateRangeField from={expiryFrom} to={expiryTo} onFromChange={setExpiryFrom} onToChange={setExpiryTo} prefixLabel="Expiry:" className="h-9 w-36" />
           {(expiryFrom || expiryTo) && (
             <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
               <X className="h-3.5 w-3.5" />

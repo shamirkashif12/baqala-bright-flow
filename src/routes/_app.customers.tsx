@@ -162,8 +162,8 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
       <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs text-muted-foreground">Loyalty Points</p>
-            <p className="text-3xl font-bold text-primary tabular-nums">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Loyalty Points</p>
+            <p className="text-3xl font-bold tracking-tight text-primary tabular-nums mt-1">
               <Star className="h-5 w-5 inline mr-1 text-yellow-500 mb-0.5" />
               {customer.loyaltyBalance.toLocaleString()}
             </p>
@@ -172,8 +172,8 @@ function CustomerDetail({ customer, tiers, onEdit }: { customer: Customer; tiers
             </p>
           </div>
           <div className="text-end">
-            <p className="text-xs text-muted-foreground">Total Spend</p>
-            <p className="text-lg font-bold tabular-nums">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Total Spend</p>
+            <p className="text-3xl font-bold tracking-tight tabular-nums mt-1">
               <SARIcon />{customer.totalSpend.toLocaleString("en-SA", { minimumFractionDigits: 2 })}
             </p>
           </div>
@@ -578,8 +578,8 @@ function Customers() {
               s.active && "ring-2 ring-primary",
             )}
           >
-            <div className="flex items-center gap-2 text-muted-foreground mb-1">{s.icon}<span className="text-xs">{s.label}</span></div>
-            <p className="text-xl font-bold tabular-nums">{s.value}</p>
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">{s.icon}<span className="text-[11px] font-medium uppercase tracking-wide">{s.label}</span></div>
+            <p className="text-2xl md:text-3xl font-bold tracking-tight tabular-nums">{s.value}</p>
           </Card>
         ))}
       </div>
@@ -597,7 +597,7 @@ function Customers() {
             {TIER_META_BASE.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
           </SelectContent>
         </Select>
-        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} prefixLabel="Joined:" className="h-9 w-36" />
         {hasFilters && (
           <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
             <X className="h-3.5 w-3.5" /> Clear Filters

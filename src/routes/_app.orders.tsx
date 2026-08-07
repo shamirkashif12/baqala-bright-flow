@@ -15,9 +15,10 @@ import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader as DHeader, DialogTitle as DTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from "@/components/ui/pagination";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
   Printer, Download, Globe, Pencil, Package, CreditCard,
-  User, Store, ChevronRight, Loader2, RefreshCw,
+  User, Store, Loader2, RefreshCw, MoreHorizontal, Eye,
   CheckCircle2, XCircle, Clock, Truck, AlertCircle, X, RotateCcw, Trash2, Ban,
   MapPin, Minus, Plus, Save, Phone, Mail,
 } from "lucide-react";
@@ -819,8 +820,12 @@ function VoidOrderDialog({ order, open, onClose, onDone }: {
 }
 
 // ─── Order Detail Drawer ──────────────────────────────────────────────────────
-function OrderDetail({ orderId, onStatusChanged }: {
+function OrderDetail({ orderId, onStatusChanged, autoAction }: {
   orderId: string; onStatusChanged: () => void;
+  // Lets a row's Actions dropdown jump straight to Edit/Void instead of landing on the plain
+  // detail view first — reuses this drawer's own dialogs/permission checks rather than
+  // duplicating them at the table level.
+  autoAction?: "edit" | "void" | null;
 }) {
   const { canEdit, canApprove, canDelete: canDeleteOrder } = usePermission("Orders");
   const companyHeader = useCompanyHeader();
@@ -835,7 +840,15 @@ function OrderDetail({ orderId, onStatusChanged }: {
 
   useEffect(() => {
     setLoading(true);
-    api.getOrder(orderId).then(o => { setOrder(o); setNewStatus(o.orderStatus); }).finally(() => setLoading(false));
+    api.getOrder(orderId).then(o => {
+      setOrder(o);
+      setNewStatus(o.orderStatus);
+      if (autoAction === "edit" && canEdit) setShowEditOrderDialog(true);
+      if (autoAction === "void" && canDeleteOrder) setShowVoidOrderDialog(true);
+    }).finally(() => setLoading(false));
+    // autoAction is only meant to fire once, right after this order loads — omitting it from deps
+    // is deliberate so it doesn't re-open if the dialogs above get closed and the effect re-runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
   const saveStatus = async () => {
@@ -890,20 +903,6 @@ function OrderDetail({ orderId, onStatusChanged }: {
               <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs text-destructive" onClick={() => setShowRefundDialog(true)}>
                 <RotateCcw className="h-3.5 w-3.5" /> Process Refund
               </Button>
-            )}
-            {!["cancelled", "refunded"].includes(order.orderStatus) && (
-              <>
-                {canEdit && (
-                  <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => setShowEditOrderDialog(true)}>
-                    <Pencil className="h-3.5 w-3.5" /> Edit
-                  </Button>
-                )}
-                {canDeleteOrder && (
-                  <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs text-destructive" onClick={() => setShowVoidOrderDialog(true)}>
-                    <Ban className="h-3.5 w-3.5" /> Void
-                  </Button>
-                )}
-              </>
             )}
           </div>
         </div>
@@ -1131,9 +1130,12 @@ function POSTab() {
   // detail sheet instead of landing on the bare list.
   const { orderId: linkedOrderId } = Route.useSearch();
   const [selectedId, setSelectedId] = useState<string | null>(linkedOrderId ?? null);
+  // Which dialog to jump straight to once the detail drawer's order finishes loading — set by the
+  // row Actions dropdown's Edit/Void items, cleared once a row is opened for plain viewing.
+  const [autoAction, setAutoAction] = useState<"edit" | "void" | null>(null);
   // Approval Center work that concerns THIS list — a queued cancellation/modification is invisible
   // on the order itself otherwise, which is exactly what made managers miss these requests.
-  const { canApprove: canApproveOrders } = usePermission("Orders");
+  const { canApprove: canApproveOrders, canEdit: canEditOrders, canDelete: canDeleteOrders } = usePermission("Orders");
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<Order | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -1304,17 +1306,25 @@ function POSTab() {
                       be a column of "waiting" they can do nothing about. */}
                   {(canApproveOrders || pendingApprovalCount > 0) && <th className="px-3 py-3 font-semibold">Approval</th>}
                   <th className="px-3 py-3 font-semibold">Date</th>
-                  <th className="px-3 py-3 font-semibold w-10"></th>
+                  <th className="px-3 py-3 font-semibold w-10">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((o) => (
+                {filtered.map((o) => {
+                  const orderEditable = !["cancelled", "refunded"].includes(o.orderStatus);
+                  return (
                   <tr
                     key={o.id}
-                    className="border-b border-border/40 hover:bg-muted/30 last:border-0 cursor-pointer transition-colors"
-                    onClick={() => setSelectedId(o.id)}
+                    className="border-b border-border/40 hover:bg-muted/30 last:border-0 transition-colors"
                   >
-                    <td className="px-3 py-3 font-mono text-xs font-bold text-primary">{o.orderNumber}</td>
+                    <td className="px-3 py-3 font-mono text-xs font-bold">
+                      <button
+                        className="text-primary hover:underline focus-visible:underline outline-none"
+                        onClick={() => { setAutoAction(null); setSelectedId(o.id); }}
+                      >
+                        {o.orderNumber}
+                      </button>
+                    </td>
                     <td className="px-3 py-3 text-xs">{o.branch?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{o.cashier?.fullName ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{o.customer?.fullName ?? "Walk-in"}</td>
@@ -1329,7 +1339,7 @@ function POSTab() {
                       )}
                     </td>
                     {(canApproveOrders || pendingApprovalCount > 0) && (
-                      <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                      <td className="px-3 py-3">
                         {o.pendingApproval ? (
                           <div className="flex flex-col gap-1.5">
                             <Badge variant="secondary" className="w-fit gap-1 text-[10px] whitespace-nowrap">
@@ -1367,10 +1377,32 @@ function POSTab() {
                       {new Date(o.createdAt).toLocaleDateString("en-SA")}
                     </td>
                     <td className="px-3 py-3">
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" title="Row actions">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => { setAutoAction(null); setSelectedId(o.id); }}>
+                            <Eye className="h-3.5 w-3.5 mr-2" /> View Details
+                          </DropdownMenuItem>
+                          {canEditOrders && orderEditable && (
+                            <DropdownMenuItem onClick={() => { setAutoAction("edit"); setSelectedId(o.id); }}>
+                              <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
+                            </DropdownMenuItem>
+                          )}
+                          {canDeleteOrders && orderEditable && (
+                            <DropdownMenuItem className="text-destructive" onClick={() => { setAutoAction("void"); setSelectedId(o.id); }}>
+                              <Ban className="h-3.5 w-3.5 mr-2" /> Void
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {filtered.length === 0 && (
                   <tr>
                     <td colSpan={canApproveOrders || pendingApprovalCount > 0 ? 10 : 9} className="text-center py-12 text-muted-foreground text-sm">
@@ -1448,7 +1480,7 @@ function POSTab() {
       </Dialog>
 
       {/* Order detail drawer */}
-      <Sheet open={!!selectedId} onOpenChange={v => !v && setSelectedId(null)}>
+      <Sheet open={!!selectedId} onOpenChange={v => { if (!v) { setSelectedId(null); setAutoAction(null); } }}>
         <SheetContent className="w-full sm:max-w-md overflow-y-auto">
           <SheetHeader className="mb-4">
             <SheetTitle className="flex items-center gap-2">
@@ -1459,6 +1491,7 @@ function POSTab() {
             <OrderDetail
               orderId={selectedId}
               onStatusChanged={load}
+              autoAction={autoAction}
             />
           )}
         </SheetContent>
@@ -1852,23 +1885,39 @@ function OnlineTab() {
                   <th className="px-3 py-3 font-semibold">Items</th>
                   <th className="px-3 py-3 font-semibold">Total</th>
                   <th className="px-3 py-3 font-semibold">Date</th>
-                  <th className="px-3 py-3 font-semibold w-10"></th>
+                  <th className="px-3 py-3 font-semibold w-10">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {orders.map(o => (
                   <tr
                     key={o.id}
-                    className="border-b border-border/40 hover:bg-muted/30 last:border-0 cursor-pointer transition-colors"
-                    onClick={() => setSelectedId(o.id)}
+                    className="border-b border-border/40 hover:bg-muted/30 last:border-0 transition-colors"
                   >
-                    <td className="px-3 py-3 font-mono text-xs font-bold text-primary">{o.orderNumber}</td>
+                    <td className="px-3 py-3 font-mono text-xs font-bold">
+                      <button className="text-primary hover:underline focus-visible:underline outline-none" onClick={() => setSelectedId(o.id)}>
+                        {o.orderNumber}
+                      </button>
+                    </td>
                     <td className="px-3 py-3 text-xs">{o.branch?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{o.delivery?.fullName ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{o.items.length}</td>
                     <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{fmtSAR(o.totalAmount)}</td>
                     <td className="px-3 py-3 text-xs text-muted-foreground">{new Date(o.createdAt).toLocaleDateString("en-SA")}</td>
-                    <td className="px-3 py-3"><ChevronRight className="h-4 w-4 text-muted-foreground" /></td>
+                    <td className="px-3 py-3">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" title="Row actions">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setSelectedId(o.id)}>
+                            <Eye className="h-3.5 w-3.5 mr-2" /> View Details
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
                   </tr>
                 ))}
                 {orders.length === 0 && (

@@ -239,7 +239,7 @@ function ApprovalCenter() {
         </div>
 
         <CollapsibleContent className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] pt-3 border-t border-border/50">
-          <FilterField label="Type">
+          <FilterField label="Type" className="max-w-xs">
             <SearchableMultiSelect
               placeholder="All Types"
               options={Object.entries(REQUEST_TYPE_LABELS).map(([id, label]) => ({ id, label }))}
