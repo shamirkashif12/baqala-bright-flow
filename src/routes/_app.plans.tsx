@@ -226,7 +226,11 @@ function Plans() {
   const plans = useMemo(() => resolvePlans(tenantPlan), [tenantPlan]);
   const CURRENT_PLAN = plans.find((p) => p.status === "current")!;
 
-  const overage = usage ? exceededLimits(usage, CURRENT_PLAN) : [];
+  // Both fetches must have settled: while tenantPlan is still null, resolvePlans falls back to
+  // the Standard catalog card, and usage arriving first fired a bogus "exceeds the Standard
+  // plan" toast for tenants actually provisioned on a higher tier (the notified guard then
+  // suppressed the corrected one forever).
+  const overage = usage && tenantPlan ? exceededLimits(usage, CURRENT_PLAN) : [];
   const nextTier = plans.find((p) => p.status === "upgrade");
 
   useEffect(() => {
