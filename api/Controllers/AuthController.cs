@@ -14,6 +14,12 @@ namespace BaqalaPOS.Api.Controllers;
 [Route("api/[controller]")]
 public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvironment env, IAuditService audit, ITenantPlanService tenantPlans) : ControllerBase
 {
+    // TEMP shared-with-the-Dashboard signing secret — see GatewayLogin's comment for why this is
+    // pinned in code for now. Also used by TenantController.DashboardLaunch to sign the OUTBOUND
+    // (POS → Dashboard "Manage Subscription") handoff token, so both SSO directions stay on the
+    // same key until per-tenant secrets are re-enabled; prefer TenantPlan.GatewayJwtKey when set.
+    internal const string FallbackGatewayJwtKey = "tenant-baqala-123-gateway-signing-key-2026";
+
     [AllowAnonymous]
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
@@ -104,8 +110,7 @@ public class AuthController(BaqalaDbContext db, IConfiguration config, IHostEnvi
         // stable. ShortKeyCryptoProviderFactory stays in the path so this keeps working even if
         // the shared secret is ever rotated back under 32 bytes (IdentityModel 8.7+ otherwise
         // hard-rejects HS256 keys below 256 bits — see the comment on that class).
-        const string gwKey = "tenant-baqala-123-gateway-signing-key-2026";
-        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(gwKey))
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(FallbackGatewayJwtKey))
         {
             CryptoProviderFactory = new ShortKeyCryptoProviderFactory(),
         };

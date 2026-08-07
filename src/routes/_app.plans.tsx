@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Check, Crown, Zap, Building2, Store, Globe, AlertTriangle, Minus } from "lucide-react";
+import { Check, Crown, Zap, Building2, Store, Globe, AlertTriangle, Minus, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
@@ -214,7 +214,30 @@ function Plans() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [tenantPlan, setTenantPlan] = useState<TenantPlanInfo | null>(null);
   const [detailsPlan, setDetailsPlan] = useState<Plan | null>(null);
+  const [launching, setLaunching] = useState(false);
   const notified = useRef(false);
+
+  // Opens the Tenant Admin Dashboard already signed in as this same admin (the identity
+  // onboarding created for both systems) — see api/Controllers/TenantController.cs's
+  // DashboardLaunch. The blank tab is opened synchronously inside the click gesture and only
+  // navigated once the URL comes back, otherwise the popup blocker eats the async window.open.
+  async function handleManageSubscription() {
+    if (launching) return;
+    setLaunching(true);
+    const tab = window.open("", "_blank", "noopener,noreferrer");
+    try {
+      const { redirectUrl } = await api.getDashboardLaunchUrl();
+      if (tab && !tab.closed) tab.location.replace(redirectUrl);
+      else window.location.href = redirectUrl; // popup blocked — fall back to same-tab
+    } catch (e) {
+      tab?.close();
+      toast.error("Couldn't open subscription management", {
+        description: e instanceof Error ? e.message : "Please try again or contact support.",
+      });
+    } finally {
+      setLaunching(false);
+    }
+  }
 
   useEffect(() => {
     Promise.all([api.getBranches(), api.getTerminals(), api.getUsers()])
@@ -386,6 +409,15 @@ function Plans() {
             )}
           </div>
           <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="gradient-primary text-primary-foreground border-0"
+              disabled={launching}
+              onClick={handleManageSubscription}
+            >
+              <ExternalLink className="h-4 w-4 mr-1.5" />
+              {launching ? "Opening…" : "Manage Subscription"}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => toast.info("Billing history", { description: "Please contact support or your account manager for your invoice history." })}>View invoices</Button>
             <Button variant="outline" size="sm" onClick={() => toast.info("Cancel subscription", { description: "Please contact support to cancel your subscription." })}>Cancel plan</Button>
           </div>

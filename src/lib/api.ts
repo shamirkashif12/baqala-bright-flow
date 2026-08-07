@@ -138,6 +138,10 @@ export const api = {
 
   // Tenant plan — pushed in by the external Tenant Admin Dashboard (see api/Controllers/TenantController.cs)
   getTenantPlan: () => request<TenantPlanInfo>("/api/tenant/plan"),
+  // "Manage Subscription" — returns a one-time signed URL that logs this tenant_admin straight
+  // into their own Tenant Admin Dashboard (plans/hardware/billing). tenant_admin only.
+  getDashboardLaunchUrl: () =>
+    request<{ redirectUrl: string }>("/api/tenant/dashboard-launch", { method: "POST" }),
 
   // Branches
   getBranches: (status?: string) =>
@@ -1251,6 +1255,8 @@ export interface Branch {
 export interface TenantPlanInfo {
   plan: {
     tenantId: string | null; planId: string | null; planName: string | null; ecrType: string | null;
+    // Tenant Admin Dashboard correlation keys — always sent by the API, null until provisioned.
+    businessId: number | null; ecrId: number | null; subscriptionId: number | null; category: string | null;
     limits: { maxBranches: number | null; maxTerminalsPerBranch: number | null; maxUsersPerBranch: number | null };
     maxProducts: number | null;
     features: Record<string, boolean>;
