@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { MetricCard } from "@/components/metric-card";
-import { HardDrive, Activity, Power, Wifi, Plus, Eye, Pencil, Battery, Thermometer, Signal } from "lucide-react";
+import { HardDrive, Activity, Power, Wifi, Plus, Eye, Pencil, Battery, Thermometer, Signal, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, excludeDisabledBranches, type DeviceRecord, type Branch, type Terminal } from "@/lib/api";
 import { usePermission } from "@/lib/use-permission";
@@ -144,6 +144,9 @@ function Devices() {
     !(st.length && !st.includes(d.status))
   ), [devices, q, br, st]);
 
+  const hasFilters = q !== "" || br.length > 0 || st.length > 0;
+  const clearFilters = () => { setQ(""); setBr([]); setSt([]); };
+
   const total = devices.length;
   const healthy = devices.filter(d => d.status === "active").length;
   const maintenance = devices.filter(d => d.status === "maintenance" || d.status === "offline").length;
@@ -230,6 +233,11 @@ function Devices() {
               onChange={setSt}
             />
           </div>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5" /> Clear Filters
+            </Button>
+          )}
           {canCreate && (
             <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
               <Plus className="h-4 w-4" /> Register Device

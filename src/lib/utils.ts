@@ -41,6 +41,11 @@ export function getPosBranchId(user: { role?: string | null; branchId?: string |
   try { return sessionStorage.getItem(POS_ADMIN_BRANCH_KEY) || undefined; } catch { return undefined; }
 }
 
+// Handoff key: set by the Branches page right after creating a branch (when the admin accepts
+// the "add a terminal now?" prompt) and consumed once by the Terminals page on mount to
+// auto-open its "Add Terminal" sheet pre-scoped to that branch.
+export const PENDING_TERMINAL_BRANCH_KEY = "pending_terminal_branch_id";
+
 // crypto.randomUUID() only exists in secure contexts (HTTPS/localhost); on plain-HTTP
 // deployments it's undefined and throws. Fall back to a Math.random-based v4 UUID there.
 export function uuid(): string {

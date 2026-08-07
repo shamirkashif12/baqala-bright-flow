@@ -334,6 +334,9 @@ function CategoriesPage() {
   const openAdd = (parentId?: string) => { setAddParentId(parentId); setAddOpen(true); };
   const closeDialogs = () => { setAddOpen(false); setAddParentId(undefined); setEditItem(null); };
 
+  const hasFilters = q !== "" || visibilityFilter !== "active";
+  const clearFilters = () => { setQ(""); setVisibilityFilter("active"); };
+
   return (
     <PageShell
       title="Categories"
@@ -415,6 +418,11 @@ function CategoriesPage() {
           {showInactive ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
           {showInactive ? "Hide Inactive" : `Show Inactive (${inactive})`}
         </Button>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
       </div>
 
       {/* ── Tree ── */}

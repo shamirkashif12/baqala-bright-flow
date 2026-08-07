@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Eye, Warehouse, Plus, Pencil, MapPin, User, CheckCircle, Package } from "lucide-react";
+import { Eye, Warehouse, Plus, Pencil, MapPin, User, CheckCircle, Package, X } from "lucide-react";
 import { api, type Warehouse as WarehouseType } from "@/lib/api";
 import { WarehouseFormSheet } from "@/components/warehouse-form-sheet";
 import { usePermission } from "@/lib/use-permission";
@@ -49,6 +49,9 @@ function WarehouseManagement() {
     });
   }, [warehouses, q, statusFilter]);
 
+  const hasFilters = q !== "" || statusFilter.length > 0;
+  const clearFilters = () => { setQ(""); setStatusFilter([]); };
+
   const totalWH = warehouses.length;
   const activeWH = warehouses.filter(w => w.status === "active").length;
   const totalSKUs = warehouses.reduce((s, w) => s + (w.stock?.length ?? 0), 0);
@@ -82,6 +85,11 @@ function WarehouseManagement() {
             onChange={setStatusFilter}
           />
         </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow" onClick={() => setCreateOpen(true)}>

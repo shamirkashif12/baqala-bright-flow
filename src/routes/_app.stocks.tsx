@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { DateRangeField } from "@/components/report-filters/date-range-field";
+import { FilterField } from "@/components/module-placeholder";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
@@ -1046,11 +1047,7 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
             />
           </div>
         )}
-        <div className="flex items-center gap-1">
-          <Input type="date" className="h-9 w-36" value={sessionDateFrom} onChange={e => setSessionDateFrom(e.target.value)} title="Started from" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={sessionDateTo} onChange={e => setSessionDateTo(e.target.value)} title="Started to" />
-        </div>
+        <DateRangeField from={sessionDateFrom} to={sessionDateTo} onFromChange={setSessionDateFrom} onToChange={setSessionDateTo} className="h-9 w-36" />
         {((!lockedBranchId && sessionBranchFilters.length > 0) || sessionDateFrom || sessionDateTo) && (
           <Button
             variant="ghost" size="sm" className="h-9 gap-1 text-muted-foreground"
@@ -1597,11 +1594,7 @@ function Stocks() {
                     onChange={setSiStatus}
                   />
                 </div>
-                <div className="flex items-center gap-1">
-                  <Input type="date" className="h-9 w-36" value={siDateFrom} onChange={e => setSiDateFrom(e.target.value)} title="Received from" />
-                  <span className="text-xs text-muted-foreground">–</span>
-                  <Input type="date" className="h-9 w-36" value={siDateTo} onChange={e => setSiDateTo(e.target.value)} title="Received to" />
-                </div>
+                <DateRangeField from={siDateFrom} to={siDateTo} onFromChange={setSiDateFrom} onToChange={setSiDateTo} className="h-9 w-36" />
                 {((!lockedBranchId && siBranch.length > 0) || siStatus.length > 0 || siDateFrom || siDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
@@ -1660,26 +1653,28 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Stock-Out Records</CardTitle>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-end gap-2 flex-wrap">
                 {!lockedBranchId && (
-                  <div className="w-36">
+                  <FilterField label="Branch" className="w-36">
                     <SearchableMultiSelect
                       placeholder="Branch"
                       options={branches.map(b => ({ id: b.id, label: b.name }))}
                       selected={soBranch}
                       onChange={setSoBranch}
+                      className="h-9"
                     />
-                  </div>
+                  </FilterField>
                 )}
-                <div className="w-36">
+                <FilterField label="Warehouse" className="w-36">
                   <SearchableMultiSelect
                     placeholder="Warehouse"
                     options={warehouses.map(w => ({ id: w.id, label: w.name }))}
                     selected={soWarehouse}
                     onChange={setSoWarehouse}
+                    className="h-9"
                   />
-                </div>
-                <DateRangeField from={soDateFrom} to={soDateTo} onFromChange={setSoDateFrom} onToChange={setSoDateTo} className="h-8 w-32" />
+                </FilterField>
+                <DateRangeField from={soDateFrom} to={soDateTo} onFromChange={setSoDateFrom} onToChange={setSoDateTo} className="h-9 w-36" />
                 {((!lockedBranchId && soBranch.length > 0) || soWarehouse.length > 0 || soDateFrom || soDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
@@ -1702,26 +1697,28 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Goods Received Notes</CardTitle>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-end gap-2 flex-wrap">
                 {!lockedBranchId && (
-                  <div className="w-36">
+                  <FilterField label="Branch" className="w-36">
                     <SearchableMultiSelect
                       placeholder="Branch"
                       options={branches.map(b => ({ id: b.id, label: b.name }))}
                       selected={grnBranch}
                       onChange={setGrnBranch}
+                      className="h-9"
                     />
-                  </div>
+                  </FilterField>
                 )}
-                <div className="w-36">
+                <FilterField label="Warehouse" className="w-36">
                   <SearchableMultiSelect
                     placeholder="Warehouse"
                     options={warehouses.map(w => ({ id: w.id, label: w.name }))}
                     selected={grnWarehouse}
                     onChange={setGrnWarehouse}
+                    className="h-9"
                   />
-                </div>
-                <div className="w-40">
+                </FilterField>
+                <FilterField label="Status" className="w-40">
                   <SearchableMultiSelect
                     placeholder="Status"
                     options={[
@@ -1732,9 +1729,10 @@ function Stocks() {
                     ]}
                     selected={grnStatus}
                     onChange={setGrnStatus}
+                    className="h-9"
                   />
-                </div>
-                <DateRangeField from={grnDateFrom} to={grnDateTo} onFromChange={setGrnDateFrom} onToChange={setGrnDateTo} className="h-8 w-32" />
+                </FilterField>
+                <DateRangeField from={grnDateFrom} to={grnDateTo} onFromChange={setGrnDateFrom} onToChange={setGrnDateTo} className="h-9 w-36" />
                 {(grnStatus.length > 0 || (!lockedBranchId && grnBranch.length > 0) || grnWarehouse.length > 0 || grnDateFrom || grnDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
@@ -1793,26 +1791,28 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Store Deliveries</CardTitle>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-end gap-2 flex-wrap">
                 {!lockedBranchId && (
-                  <div className="w-36">
+                  <FilterField label="Branch" className="w-36">
                     <SearchableMultiSelect
                       placeholder="Branch"
                       options={branches.map(b => ({ id: b.id, label: b.name }))}
                       selected={dlBranch}
                       onChange={setDlBranch}
+                      className="h-9"
                     />
-                  </div>
+                  </FilterField>
                 )}
-                <div className="w-36">
+                <FilterField label="Warehouse" className="w-36">
                   <SearchableMultiSelect
                     placeholder="Warehouse"
                     options={warehouses.map(w => ({ id: w.id, label: w.name }))}
                     selected={dlWarehouse}
                     onChange={setDlWarehouse}
+                    className="h-9"
                   />
-                </div>
-                <div className="w-36">
+                </FilterField>
+                <FilterField label="Status" className="w-36">
                   <SearchableMultiSelect
                     placeholder="Status"
                     options={[
@@ -1823,9 +1823,10 @@ function Stocks() {
                     ]}
                     selected={dlStatus}
                     onChange={setDlStatus}
+                    className="h-9"
                   />
-                </div>
-                <DateRangeField from={dlDateFrom} to={dlDateTo} onFromChange={setDlDateFrom} onToChange={setDlDateTo} className="h-8 w-32" />
+                </FilterField>
+                <DateRangeField from={dlDateFrom} to={dlDateTo} onFromChange={setDlDateFrom} onToChange={setDlDateTo} className="h-9 w-36" />
                 {(dlStatus.length > 0 || (!lockedBranchId && dlBranch.length > 0) || dlWarehouse.length > 0 || dlDateFrom || dlDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
@@ -1847,26 +1848,28 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">Wastage & Damage</CardTitle>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-end gap-2 flex-wrap">
                 {!lockedBranchId && (
-                  <div className="w-36">
+                  <FilterField label="Branch" className="w-36">
                     <SearchableMultiSelect
                       placeholder="Branch"
                       options={branches.map(b => ({ id: b.id, label: b.name }))}
                       selected={wsBranch}
                       onChange={setWsBranch}
+                      className="h-9"
                     />
-                  </div>
+                  </FilterField>
                 )}
-                <div className="w-36">
+                <FilterField label="Warehouse" className="w-36">
                   <SearchableMultiSelect
                     placeholder="Warehouse"
                     options={warehouses.map(w => ({ id: w.id, label: w.name }))}
                     selected={wsWarehouse}
                     onChange={setWsWarehouse}
+                    className="h-9"
                   />
-                </div>
-                <DateRangeField from={wsDateFrom} to={wsDateTo} onFromChange={setWsDateFrom} onToChange={setWsDateTo} className="h-8 w-32" />
+                </FilterField>
+                <DateRangeField from={wsDateFrom} to={wsDateTo} onFromChange={setWsDateFrom} onToChange={setWsDateTo} className="h-9 w-36" />
                 {((!lockedBranchId && wsBranch.length > 0) || wsWarehouse.length > 0 || wsDateFrom || wsDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"
@@ -1889,33 +1892,37 @@ function Stocks() {
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center gap-2 justify-between flex-wrap">
               <CardTitle className="text-base">Stock Movement Timeline</CardTitle>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-end gap-2 flex-wrap">
                 {!lockedBranchId && (
-                  <div className="w-40">
+                  <FilterField label="Branch" className="w-40">
                     <SearchableMultiSelect
                       placeholder="All Branches"
                       options={branches.map(b => ({ id: b.id, label: b.name }))}
                       selected={mvBranch}
                       onChange={setMvBranch}
+                      className="h-9"
                     />
-                  </div>
+                  </FilterField>
                 )}
-                <div className="w-40">
+                <FilterField label="Warehouse" className="w-40">
                   <SearchableMultiSelect
                     placeholder="All Warehouses"
                     options={warehouses.map(w => ({ id: w.id, label: w.name }))}
                     selected={mvWarehouse}
                     onChange={setMvWarehouse}
+                    className="h-9"
                   />
-                </div>
-                <Select value={mvType} onValueChange={setMvType}>
-                  <SelectTrigger className="h-8 w-52"><SelectValue placeholder="All Movement Types" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Movement Types</SelectItem>
-                    {MOVEMENT_TYPES.map(t => <SelectItem key={t} value={t}>{movementMeta(t).label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <DateRangeField from={mvDateFrom} to={mvDateTo} onFromChange={setMvDateFrom} onToChange={setMvDateTo} className="h-8 w-32" />
+                </FilterField>
+                <FilterField label="Movement Type" className="w-52">
+                  <Select value={mvType} onValueChange={setMvType}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="All Movement Types" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Movement Types</SelectItem>
+                      {MOVEMENT_TYPES.map(t => <SelectItem key={t} value={t}>{movementMeta(t).label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </FilterField>
+                <DateRangeField from={mvDateFrom} to={mvDateTo} onFromChange={setMvDateFrom} onToChange={setMvDateTo} className="h-9 w-36" />
                 {((!lockedBranchId && mvBranch.length > 0) || mvWarehouse.length > 0 || mvType !== "all" || mvDateFrom || mvDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"

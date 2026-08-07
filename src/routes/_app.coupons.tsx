@@ -298,6 +298,14 @@ function CouponsTab() {
         <MetricCard label="Total Coupons" value={String(coupons.length)} icon={Tag} accent="default" onClick={() => setActiveOnly(false)} active={!activeOnly} />
       </div>
 
+      {activeOnly && (
+        <div className="flex justify-end">
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => setActiveOnly(false)}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        </div>
+      )}
+
       {loading ? (
         <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
       ) : (
@@ -573,6 +581,14 @@ function DiscountsTab() {
         <MetricCard label="Active Discounts" value={String(active)} icon={PercentCircle} accent="primary" onClick={() => setActiveOnly(v => !v)} active={activeOnly} />
         <MetricCard label="Total Discounts" value={String(discounts.length)} icon={PercentCircle} accent="default" onClick={() => setActiveOnly(false)} active={!activeOnly} />
       </div>
+
+      {activeOnly && (
+        <div className="flex justify-end">
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => setActiveOnly(false)}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
@@ -901,6 +917,14 @@ function OffersTab() {
         <MetricCard label="Live Offers" value={String(active)} icon={Gift} accent="primary" onClick={() => setActiveOnly(v => !v)} active={activeOnly} />
         <MetricCard label="Total Offers" value={String(offers.length)} icon={Zap} accent="default" onClick={() => setActiveOnly(false)} active={!activeOnly} />
       </div>
+
+      {activeOnly && (
+        <div className="flex justify-end">
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => setActiveOnly(false)}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>

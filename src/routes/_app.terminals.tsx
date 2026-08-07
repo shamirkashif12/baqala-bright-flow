@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Eye, Pencil, X, Monitor, Activity, Plus, Wifi, CheckCircle2, AlertCircle, Clock, WifiOff, LogIn, LogOut, KeyRound, Copy, Lock } from "lucide-react";
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { usePlanFeature } from "@/lib/use-plan-feature";
 import { LockedFeatureNotice } from "@/components/locked-feature-notice";
+import { PENDING_TERMINAL_BRANCH_KEY } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/terminals")({ component: Terminals });
 
@@ -265,6 +267,16 @@ function Terminals() {
     api.getTenantPlan().then(setPlanInfo).catch(() => {});
   }, []);
 
+  // Consume the Branches page's "add a terminal now?" handoff — set once, right after a branch
+  // is created, and read only here so it never re-triggers on a later visit to this page.
+  useEffect(() => {
+    const pendingBranchId = sessionStorage.getItem(PENDING_TERMINAL_BRANCH_KEY);
+    if (!pendingBranchId) return;
+    sessionStorage.removeItem(PENDING_TERMINAL_BRANCH_KEY);
+    setForm({ ...emptyForm, branchId: pendingBranchId });
+    setCreateOpen(true);
+  }, []);
+
   const load = useCallback(() => {
     setLoading(true);
     // .catch() per call so one failing endpoint doesn't wipe out the others' data —
@@ -432,6 +444,18 @@ function Terminals() {
     ? `Terminal limit reached (${maxTerminalsPerBranch}) for ${selectedBranchName ?? "this branch"} under your plan. Upgrade to add more.`
     : undefined;
 
+  // Terminals tab filters
+  const hasTerminalFilters = !!q || (!lockedBranchId && br.length > 0) || st.length > 0 || !!syncFrom || !!syncTo;
+  const clearTerminalFilters = () => {
+    setQ(""); if (!lockedBranchId) setBr([]); setSt([]); setSyncFrom(""); setSyncTo("");
+  };
+
+  // Session Logs tab filters
+  const hasSessionLogFilters = slTerminal.length > 0 || slStatus.length > 0 || !!slDateFrom || !!slDateTo;
+  const clearSessionLogFilters = () => {
+    setSlTerminal([]); setSlStatus([]); setSlDateFrom(""); setSlDateTo("");
+  };
+
   return (
     <PageShell title="Terminals" subtitle="POS terminal registry, sessions and sync status">
       <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-4">
@@ -484,17 +508,12 @@ function Terminals() {
                 onChange={setSt}
               />
             </div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-muted-foreground whitespace-nowrap">Sync Date:</span>
-              <Input type="date" className="h-9 w-36" value={syncFrom} onChange={e => setSyncFrom(e.target.value)} />
-              <span className="text-xs text-muted-foreground">–</span>
-              <Input type="date" className="h-9 w-36" value={syncTo} onChange={e => setSyncTo(e.target.value)} />
-              {(syncFrom || syncTo) && (
-                <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setSyncFrom(""); setSyncTo(""); }}>
-                  <X className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
+            <DateRangeField from={syncFrom} to={syncTo} onFromChange={setSyncFrom} onToChange={setSyncTo} />
+            {hasTerminalFilters && (
+              <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearTerminalFilters}>
+                <X className="h-3.5 w-3.5" /> Clear Filters
+              </Button>
+            )}
           </div>
 
           {loading ? (
@@ -615,17 +634,12 @@ function Terminals() {
                 onChange={setSlStatus}
               />
             </div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
-              <Input type="date" className="h-9 w-36" value={slDateFrom} onChange={e => setSlDateFrom(e.target.value)} />
-              <span className="text-xs text-muted-foreground">–</span>
-              <Input type="date" className="h-9 w-36" value={slDateTo} onChange={e => setSlDateTo(e.target.value)} />
-              {(slDateFrom || slDateTo) && (
-                <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setSlDateFrom(""); setSlDateTo(""); }}>
-                  <X className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
+            <DateRangeField from={slDateFrom} to={slDateTo} onFromChange={setSlDateFrom} onToChange={setSlDateTo} />
+            {hasSessionLogFilters && (
+              <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearSessionLogFilters}>
+                <X className="h-3.5 w-3.5" /> Clear Filters
+              </Button>
+            )}
             <span className="text-xs text-muted-foreground ml-auto">{sessionLogs.length} session{sessionLogs.length !== 1 ? "s" : ""}</span>
           </div>
 

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, CheckCircle, XCircle, PackageCheck, Eye, RotateCcw, Trash2, X, Loader2 } from "lucide-react";
 import { api, type CustomerReturn, type CustomerReturnItem, type Order, type Customer, type OrderItem } from "@/lib/api";
@@ -511,17 +512,12 @@ function Returns() {
             onChange={setStatusFilter}
           />
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Return Date:</span>
-          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          {(dateFrom || dateTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        {(dateFrom || dateTo) && (
+          <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <div className="flex-1" />
         <Sheet open={sheetOpen} onOpenChange={v => { setSheetOpen(v); if (!v) { setForm(emptyForm); setItemRows([]); setInvoiceNumber(""); setMatchedOrder(null); setMatchedBranchName(""); setInvoiceError(""); setError(null); } }}>
           {canCreate && (

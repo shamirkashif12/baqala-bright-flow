@@ -1371,41 +1371,37 @@ function PurchaseOrders() {
             <TabsTrigger value="payables" className="gap-1.5"><DollarSign className="h-3.5 w-3.5" />Supplier Payables</TabsTrigger>
             <TabsTrigger value="returns" className="gap-1.5"><Package className="h-3.5 w-3.5" />Return / Credit Entries</TabsTrigger>
           </TabsList>
-          <div className="flex items-center gap-1">
+          <div className="flex items-end gap-1.5">
             <Input className="h-9 w-48 bg-muted/50" placeholder="Search PO # or supplier…" value={search} onChange={e => setSearch(e.target.value)} />
-            <div className="w-36">
-              <SearchableMultiSelect
-                placeholder="Branch"
-                options={branches.map(b => ({ id: b.id, label: b.name }))}
-                selected={branchIds}
-                onChange={setBranchIds}
-              />
-            </div>
-            <div className="w-36">
-              <SearchableMultiSelect
-                placeholder="Warehouse"
-                options={warehouses.map(w => ({ id: w.id, label: w.name }))}
-                selected={warehouseIds}
-                onChange={setWarehouseIds}
-              />
-            </div>
-            <div className="w-40">
-              <SearchableMultiSelect
-                placeholder="Created By"
-                options={users.map(u => ({ id: u.id, label: u.fullName }))}
-                selected={createdBy}
-                onChange={setCreatedBy}
-              />
-            </div>
-            <div className="w-40">
-              <SearchableMultiSelect
-                placeholder="Approved By"
-                options={users.map(u => ({ id: u.id, label: u.fullName }))}
-                selected={approvedBy}
-                onChange={setApprovedBy}
-              />
-            </div>
-            <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="h-9 w-32" />
+            <SearchableMultiSelect
+              className="w-40"
+              placeholder="Branch"
+              options={branches.map(b => ({ id: b.id, label: b.name }))}
+              selected={branchIds}
+              onChange={setBranchIds}
+            />
+            <SearchableMultiSelect
+              className="w-40"
+              placeholder="Warehouse"
+              options={warehouses.map(w => ({ id: w.id, label: w.name }))}
+              selected={warehouseIds}
+              onChange={setWarehouseIds}
+            />
+            <SearchableMultiSelect
+              className="w-40"
+              placeholder="Created By"
+              options={users.map(u => ({ id: u.id, label: u.fullName }))}
+              selected={createdBy}
+              onChange={setCreatedBy}
+            />
+            <SearchableMultiSelect
+              className="w-40"
+              placeholder="Approved By"
+              options={users.map(u => ({ id: u.id, label: u.fullName }))}
+              selected={approvedBy}
+              onChange={setApprovedBy}
+            />
+            <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="h-9 w-40" />
             {(dateFrom || dateTo) && (
               <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
                 <X className="h-3.5 w-3.5" />

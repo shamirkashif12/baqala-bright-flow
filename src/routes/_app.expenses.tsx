@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/module-placeholder";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { Plus, Receipt, Tags, CheckCircle, XCircle, X, Pencil, Trash2, Clock, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -95,6 +96,16 @@ function EntriesTab() {
     return matchQ && mdf && mdt;
   });
   const filtered = baseFiltered.filter((e) => !statusQuick || e.status === statusQuick);
+
+  const hasFilters = !!q || branchFilter.length > (lockedBranchId ? 1 : 0) || typeFilter !== "all" || methodFilter !== "all" || !!dateFrom || !!dateTo;
+  const clearFilters = () => {
+    setQ("");
+    setBranchFilter(lockedBranchId ? [lockedBranchId] : []);
+    setTypeFilter("all");
+    setMethodFilter("all");
+    setDateFrom("");
+    setDateTo("");
+  };
 
   const stats = useMemo(() => {
     const total = baseFiltered.reduce((s, e) => s + e.amount, 0);
@@ -208,7 +219,7 @@ function EntriesTab() {
         <MetricCard label="Outstanding" value={<><SARIcon />{stats.outstanding.toFixed(2)}</>} icon={AlertCircle} accent="destructive" />
       </div>
       {/* ─── Toolbar ─── */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search ref or description…" className="h-9 w-52 flex-shrink-0" />
         {!lockedBranchId && (
           <div className="w-40">
@@ -234,16 +245,12 @@ function EntriesTab() {
             {PAYMENT_METHODS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
           </SelectContent>
         </Select>
-        <div className="flex items-center gap-1">
-          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          {(dateFrom || dateTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={openAdd}>

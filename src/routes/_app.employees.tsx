@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
 import { StatusBadge, PaginatedDataTable } from "@/components/module-placeholder";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Eye, Pencil, Plus, Trash2, Camera, User as UserIcon, Phone, Building2, IdCard, CalendarClock, MoreHorizontal, Loader2, LayoutGrid, List, FileText } from "lucide-react";
+import { Eye, Pencil, Plus, Trash2, Camera, User as UserIcon, Phone, Building2, IdCard, CalendarClock, MoreHorizontal, Loader2, LayoutGrid, List, FileText, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   api, type Employee, type Department, type Designation, type Role, type WorkShift, type EmployeeShiftAssignment,
@@ -1301,6 +1301,16 @@ function EmployeesTab() {
     return mq && mb && md && mdes && ms && mrole && mcontract && mdoc && mshift && mleave;
   });
 
+  const hasFilters = q !== "" || branchFilter.length > 0 || departmentFilter.length > 0
+    || designationFilter.length > 0 || statusFilter.length > 0 || roleFilter.length > 0
+    || contractStatusFilter.length > 0 || documentStatusFilter.length > 0 || shiftFilter.length > 0
+    || leaveStatusFilter.length > 0;
+  const clearFilters = () => {
+    setQ(""); setBranchFilter([]); setDepartmentFilter([]); setDesignationFilter([]);
+    setStatusFilter([]); setRoleFilter([]); setContractStatusFilter([]); setDocumentStatusFilter([]);
+    setShiftFilter([]); setLeaveStatusFilter([]);
+  };
+
   // Backend export — respects the same branch/department/designation/role/status/search filters
   // the list applies, plus ACL masking, filter-summary/generated-by/at metadata and an audit log
   // entry (FRD 4.4), unlike the previous client-side CSV built from already-loaded rows.
@@ -1425,6 +1435,11 @@ function EmployeesTab() {
             onChange={setLeaveStatusFilter}
           />
         </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         <div className="flex items-center gap-1 rounded-lg border border-border/60 p-0.5">
           <Button size="icon" variant={viewMode === "card" ? "default" : "ghost"} className={`h-7 w-7 ${viewMode === "card" ? "gradient-primary text-primary-foreground" : ""}`} title="Card view" onClick={() => setViewMode("card")}>

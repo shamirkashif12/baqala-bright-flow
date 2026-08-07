@@ -20,6 +20,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { BatchExpandRow } from "@/components/batch-expand-row";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { TierMultiSelect } from "@/components/tier-multi-select";
 import { api, excludeDisabledBranches, PRICE_TYPE_LABELS, type InventoryStock, type InventoryBatch, type Category, type Branch, type Supplier, type Warehouse, type StockTransfer, type CustomerTier, type ProductPriceList, type ProductImage, type ProductVariant, type Product, type UnitOfMeasureOption, type ProductSubstitute } from "@/lib/api";
 import { DEFAULT_UNIT, unitSpec, unitSymbol } from "@/lib/units";
@@ -2753,10 +2754,7 @@ function Inventory() {
             />
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
-            <Input type="date" className="h-9 w-36" value={expiryFrom} onChange={e => setExpiryFrom(e.target.value)} title="Expiry from" />
-            <span className="text-xs text-muted-foreground">–</span>
-            <Input type="date" className="h-9 w-36" value={expiryTo} onChange={e => setExpiryTo(e.target.value)} title="Expiry to" />
+            <DateRangeField from={expiryFrom} to={expiryTo} onFromChange={setExpiryFrom} onToChange={setExpiryTo} className="h-9 w-36" />
             {(expiryFrom || expiryTo) && (
               <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" title="Clear expiry filter" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
                 <X className="h-3.5 w-3.5" />
@@ -2764,10 +2762,7 @@ function Inventory() {
             )}
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">Last Updated:</span>
-            <Input type="date" className="h-9 w-36" value={updatedFrom} onChange={e => setUpdatedFrom(e.target.value)} title="Last updated from" />
-            <span className="text-xs text-muted-foreground">–</span>
-            <Input type="date" className="h-9 w-36" value={updatedTo} onChange={e => setUpdatedTo(e.target.value)} title="Last updated to" />
+            <DateRangeField from={updatedFrom} to={updatedTo} onFromChange={setUpdatedFrom} onToChange={setUpdatedTo} className="h-9 w-36" />
             {(updatedFrom || updatedTo) && (
               <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" title="Clear last-updated filter" onClick={() => { setUpdatedFrom(""); setUpdatedTo(""); }}>
                 <X className="h-3.5 w-3.5" />
