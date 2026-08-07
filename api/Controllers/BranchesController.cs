@@ -64,6 +64,10 @@ public class BranchesController(BaqalaDbContext db, IAuditService audit, ITenant
         if (!await tenantPlans.CanCreateBranchAsync())
             return StatusCode(403, new { message = "Branch limit reached for your plan. Upgrade to add more branches." });
 
+        var trimmedName = branch.Name?.Trim() ?? "";
+        if (await db.Branches.AnyAsync(b => b.Name.ToLower() == trimmedName.ToLower()))
+            return BadRequest(new { message = $"A branch named \"{trimmedName}\" already exists." });
+
         branch.Id = Guid.NewGuid();
         branch.CreatedAt = branch.UpdatedAt = DateTime.UtcNow;
 
