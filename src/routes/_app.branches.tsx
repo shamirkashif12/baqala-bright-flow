@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
@@ -9,14 +9,21 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/searchable-select";
+import { AddressMapPicker } from "@/components/address-map-picker";
 import { Building2, MapPin, Phone, Plus, Search, Pencil, Trash2, ShoppingBag, Terminal, Copy, Check, Printer, Download, QrCode } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { api, type Branch, type TenantPlanInfo } from "@/lib/api";
 import { toast } from "sonner";
 import { usePermission } from "@/lib/use-permission";
 import { isValidSaudiPhone, sanitizePhoneInput, PHONE_MAX_LENGTH } from "@/lib/validation";
-import { cn } from "@/lib/utils";
+import { SAUDI_CITIES } from "@/lib/saudi-cities";
+import { cn, PENDING_TERMINAL_BRANCH_KEY } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/branches")({ component: Branches });
 
@@ -178,11 +185,15 @@ function ViewSheet({ branch, stats, onClose, onEdit }: {
 
 // ─── Branch Form Dialog ───────────────────────────────────────────────────────
 function BranchDialog({ open, branch, onClose, onDone }: {
-  open: boolean; branch: Branch | null; onClose: () => void; onDone: () => void;
+  open: boolean; branch: Branch | null; onClose: () => void; onDone: (created?: Branch) => void;
 }) {
   const [form, setForm] = useState<BranchForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [phoneError, setPhoneError] = useState("");
+  const [showMap, setShowMap] = useState(false);
+  const [mapLat, setMapLat] = useState<number | null>(null);
+  const [mapLng, setMapLng] = useState<number | null>(null);
+  const [addressTouched, setAddressTouched] = useState(false);
 
   useEffect(() => {
     if (branch) {
@@ -195,12 +206,30 @@ function BranchDialog({ open, branch, onClose, onDone }: {
       setForm(emptyForm);
     }
     setPhoneError("");
+    setShowMap(false);
+    setMapLat(null);
+    setMapLng(null);
+    setAddressTouched(false);
   }, [branch, open]);
 
   const set = (k: keyof BranchForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }));
 
   const setPhone = (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, contactNumber: sanitizePhoneInput(e.target.value) }));
+
+  // Never overwrite an address the admin already typed themselves — only auto-fill while the
+  // field is still empty/untouched, mirroring the public checkout page's map picker behavior.
+  const handleLocationChange = (lat: number, lng: number, resolvedAddress: string | null) => {
+    setMapLat(lat); setMapLng(lng);
+    if (resolvedAddress && !addressTouched) setForm(p => ({ ...p, address: resolvedAddress }));
+  };
+
+  const cityOptions = useMemo(() => {
+    const base = SAUDI_CITIES.map(c => ({ id: c, label: c }));
+    return form.city && !SAUDI_CITIES.includes(form.city)
+      ? [{ id: form.city, label: form.city }, ...base]
+      : base;
+  }, [form.city]);
 
   const handleSave = async () => {
     if (!form.name) { toast.error("Branch name is required."); return; }
@@ -214,11 +243,13 @@ function BranchDialog({ open, branch, onClose, onDone }: {
       if (branch) {
         await api.updateBranch(branch.id, form);
         toast.success("Branch updated.");
+        onDone();
       } else {
-        await api.createBranch(form);
+        const created = await api.createBranch(form);
         toast.success("Branch created.");
+        onDone(created);
       }
-      onDone(); onClose();
+      onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save branch.");
     } finally { setSaving(false); }
@@ -241,14 +272,39 @@ function BranchDialog({ open, branch, onClose, onDone }: {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <FieldRow label="City">
-              <Input value={form.city} onChange={set("city")} className="h-9" placeholder="Riyadh" />
+              <SearchableSelect
+                options={cityOptions}
+                value={form.city}
+                onChange={v => setForm(p => ({ ...p, city: v }))}
+                placeholder="Select city"
+                searchPlaceholder="Search city…"
+              />
             </FieldRow>
             <FieldRow label="Phone" error={phoneError}>
               <Input value={form.contactNumber} onChange={setPhone} className="h-9" maxLength={PHONE_MAX_LENGTH} placeholder="0501234567" inputMode="numeric" />
             </FieldRow>
           </div>
           <FieldRow label="Address">
-            <Input value={form.address} onChange={set("address")} className="h-9" placeholder="King Fahd Rd, Olaya" />
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Input
+                  value={form.address}
+                  onChange={e => { setAddressTouched(true); set("address")(e); }}
+                  className="h-9 flex-1"
+                  placeholder="King Fahd Rd, Olaya"
+                />
+                <Button
+                  type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0"
+                  title={showMap ? "Hide map" : "Choose from map"}
+                  onClick={() => setShowMap(v => !v)}
+                >
+                  <MapPin className="h-4 w-4" />
+                </Button>
+              </div>
+              {showMap && (
+                <AddressMapPicker latitude={mapLat} longitude={mapLng} onLocationChange={handleLocationChange} />
+              )}
+            </div>
           </FieldRow>
           {branch && (
             <FieldRow label="Status">
@@ -273,6 +329,7 @@ function BranchDialog({ open, branch, onClose, onDone }: {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 function Branches() {
+  const navigate = useNavigate();
   const { canCreate, canEdit, canDelete } = usePermission("Branches");
   const [branches, setBranches] = useState<Branch[]>([]);
   const [stats, setStats] = useState<Record<string, BranchStats>>({});
@@ -284,6 +341,10 @@ function Branches() {
   const [editBranch, setEditBranch] = useState<Branch | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [planInfo, setPlanInfo] = useState<TenantPlanInfo | null>(null);
+  // Prompted right after a branch is created — a branch can't process sales without a
+  // terminal, so we offer to jump straight into creating one instead of leaving the admin
+  // to discover the Terminals page on their own.
+  const [terminalPromptBranch, setTerminalPromptBranch] = useState<Branch | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -502,8 +563,31 @@ function Branches() {
         open={createOpen}
         branch={null}
         onClose={() => setCreateOpen(false)}
-        onDone={load}
+        onDone={(created) => { load(); if (created) setTerminalPromptBranch(created); }}
       />
+
+      <AlertDialog open={!!terminalPromptBranch} onOpenChange={v => !v && setTerminalPromptBranch(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add a terminal for {terminalPromptBranch?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A branch needs at least one terminal before it can process sales. Set one up now, or do it later from the Terminals page.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Later</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!terminalPromptBranch) return;
+                sessionStorage.setItem(PENDING_TERMINAL_BRANCH_KEY, terminalPromptBranch.id);
+                navigate({ to: "/terminals" });
+              }}
+            >
+              Add Terminal Now
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageShell>
   );
 }

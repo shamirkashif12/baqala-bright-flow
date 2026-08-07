@@ -510,10 +510,9 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // Terminal binding: derive the shift/terminal from the cashier's actual open shift
         // server-side rather than trusting client input (which never sent these at all) —
         // otherwise a sale has no verifiable link back to the terminal/shift that rang it up.
-        // FR-CHK-06: Cashier, Branch Manager, and Tenant Administrator accounts can all hold a
-        // shift (see ShiftsController.OpenShift / CheckInDialog's checkInRoles) — checking those
-        // roles out before a sale must block it the same as a Cashier, otherwise a checked-out
-        // manager/admin could ring up sales with no shift to reconcile against.
+        // FR-CHK-06: Cashier and Branch Manager accounts must be checked into an active shift
+        // before a sale is allowed, same as the client-side gate in _app.pos.tsx. Tenant
+        // Administrator is exempt — an admin has full POS access regardless of shift status.
         CashierShift? activeShift = null;
         string? checkoutWithoutShiftRole = null;
         if (order.CashierId.HasValue)
@@ -541,12 +540,13 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                 var cashierUser = await db.Users.Include(u => u.Role)
                     .FirstOrDefaultAsync(u => u.Id == order.CashierId);
                 var cashierAppRole = cashierUser?.Role?.Name is { } roleName ? RoleNormalizer.ToAppRole(roleName) : null;
-                if (cashierAppRole is "cashier" or "branch_manager" or "tenant_admin")
+                if (cashierAppRole is "cashier" or "branch_manager")
                     return BadRequest(new { message = "No active shift found for you at this terminal — check in before processing sales." });
 
-                // A role that structurally can't hold a shift at all (not in CheckInDialog's
-                // list) rang up a sale — the sale proceeds with no ShiftId to reconcile against,
-                // so log who did it (see audit entry after save below).
+                // Tenant Administrator (exempt from the shift gate above) or a role that
+                // structurally can't hold a shift at all (not in CheckInDialog's list) rang up a
+                // sale — the sale proceeds with no ShiftId to reconcile against, so log who did it
+                // (see audit entry after save below).
                 checkoutWithoutShiftRole = cashierUser?.Role?.Name ?? "Unknown role";
             }
         }

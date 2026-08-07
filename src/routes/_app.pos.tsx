@@ -874,11 +874,12 @@ function POS() {
   // real settings load.
   const [posPerms, setPosPerms] = useState({ cashierCanCoupon: true, cashierCanHoldOrder: true, allowNegativeStock: false, cashierMaxDiscountPct: 5, managerMaxDiscountPct: 25 });
   const isRestrictedCashier = user?.role === "cashier";
-  // Cashier, Branch Manager, and Tenant Administrator accounts can all hold a shift (mirrors
-  // ShiftsController.OpenShift's role check and CheckInDialog's checkInRoles) — any of them
-  // checking out must be gated from using POS, not just the literal "cashier" role. Other roles
-  // (Supervisor, etc.) structurally can't open a shift at all, so they're never gated on one.
-  const needsActiveShift = user?.role === "cashier" || user?.role === "branch_manager" || user?.role === "tenant_admin";
+  // Cashier and Branch Manager accounts must be checked into an active shift before using POS
+  // (mirrors OrdersController.Create's server-side check). Tenant Administrator is exempt — an
+  // admin has full POS access regardless of shift status, same as their blanket access elsewhere
+  // in the app. Other roles (Supervisor, etc.) structurally can't open a shift at all, so they're
+  // never gated on one.
+  const needsActiveShift = user?.role === "cashier" || user?.role === "branch_manager";
   const navigate = useNavigate();
   const search = Route.useSearch();
   // Enforcement previously existed only at the very last step (handleCharge threw if a cashier had
@@ -2373,12 +2374,11 @@ function POS() {
     try {
     if (!branch) throw new Error("No branch configured");
     if (!cart.length) throw new Error("Cart is empty");
-    // FR-CHK-06: Cashier, Branch Manager, and Tenant Administrator accounts can all hold a shift
-    // (CheckInDialog's checkInRoles / ShiftsController.OpenShift) — any of them must be blocked
-    // from charging without one, mirrored server-side in OrdersController.Create as the
-    // authoritative check. Other roles structurally can't open a shift at all, so they're never
-    // gated here; the server logs that override in the audit log since the resulting order has
-    // no ShiftId to reconcile against.
+    // FR-CHK-06: Cashier and Branch Manager accounts must be blocked from charging without an
+    // active shift, mirrored server-side in OrdersController.Create as the authoritative check.
+    // Tenant Administrator is exempt from this gate (see needsActiveShift above). Other roles
+    // structurally can't open a shift at all, so they're never gated here; the server logs that
+    // override in the audit log since the resulting order has no ShiftId to reconcile against.
     if (needsActiveShift && !shiftForBranch)
       throw new Error("No active shift found for you at this terminal. Please check in first.");
 
