@@ -135,23 +135,32 @@ public class TenantController(
         // Employee.BranchId is required, but no branch exists yet at first-provision time — this
         // app has no other concept of "a business with zero branches," so the bootstrap admin
         // gets one, same as any tenant would create through the UI (counts toward maxBranches,
-        // renameable later).
-        var lastBranchCode = await db.Branches
-            .Where(b => b.BranchCode != null && b.BranchCode.StartsWith("BR-"))
-            .OrderByDescending(b => b.BranchCode)
-            .Select(b => b.BranchCode)
-            .FirstOrDefaultAsync();
-        var nextBranch = lastBranchCode is not null && int.TryParse(lastBranchCode[3..], out var nb) ? nb + 1 : 1;
-        var branch = new Branch
+        // renameable later). Reuse an already-existing branch instead of always minting one: a
+        // retry that lands here with a different operator email (payload edits, redelivery
+        // quirks) still passes the email check above, and previously went on to mint a second
+        // "Main Branch" for a business that was already provisioned — this instance is
+        // single-tenant-per-database, so any branch already existing proves bootstrap already
+        // happened, regardless of which email did it.
+        var branch = await db.Branches.OrderBy(b => b.CreatedAt).FirstOrDefaultAsync();
+        if (branch is null)
         {
-            Id = Guid.NewGuid(),
-            BranchCode = $"BR-{nextBranch:D3}",
-            Name = "Main Branch",
-            Status = "active",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        };
-        db.Branches.Add(branch);
+            var lastBranchCode = await db.Branches
+                .Where(b => b.BranchCode != null && b.BranchCode.StartsWith("BR-"))
+                .OrderByDescending(b => b.BranchCode)
+                .Select(b => b.BranchCode)
+                .FirstOrDefaultAsync();
+            var nextBranch = lastBranchCode is not null && int.TryParse(lastBranchCode[3..], out var nb) ? nb + 1 : 1;
+            branch = new Branch
+            {
+                Id = Guid.NewGuid(),
+                BranchCode = $"BR-{nextBranch:D3}",
+                Name = "Main Branch",
+                Status = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.Branches.Add(branch);
+        }
 
         var lastEmpCode = await db.Employees
             .Where(e => e.EmployeeCode.StartsWith("EMP-"))

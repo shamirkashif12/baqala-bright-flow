@@ -18,6 +18,7 @@ import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { usePlanFeature } from "@/lib/use-plan-feature";
 import { LockedFeatureNotice } from "@/components/locked-feature-notice";
+import { PENDING_TERMINAL_BRANCH_KEY } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/terminals")({ component: Terminals });
 
@@ -263,6 +264,16 @@ function Terminals() {
   useEffect(() => {
     api.getTerminals().then(setAllTerminals);
     api.getTenantPlan().then(setPlanInfo).catch(() => {});
+  }, []);
+
+  // Consume the Branches page's "add a terminal now?" handoff — set once, right after a branch
+  // is created, and read only here so it never re-triggers on a later visit to this page.
+  useEffect(() => {
+    const pendingBranchId = sessionStorage.getItem(PENDING_TERMINAL_BRANCH_KEY);
+    if (!pendingBranchId) return;
+    sessionStorage.removeItem(PENDING_TERMINAL_BRANCH_KEY);
+    setForm({ ...emptyForm, branchId: pendingBranchId });
+    setCreateOpen(true);
   }, []);
 
   const load = useCallback(() => {
