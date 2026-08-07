@@ -798,6 +798,12 @@ export const api = {
   updateTenantSettings: (branchId: string, data: Record<string, string | null>) =>
     request<void>(`/api/settings/tenant/${branchId}`, { method: "PUT", body: JSON.stringify(data) }),
 
+  // Payment Integrations (Admin → Payments)
+  getPaymentIntegrations: (branchId: string) =>
+    request<PaymentIntegrationRecord[]>(`/api/payment-integrations/${branchId}`),
+  savePaymentIntegration: (branchId: string, provider: string, data: { isEnabled: boolean; config: Record<string, string | null> }) =>
+    request<PaymentIntegrationRecord>(`/api/payment-integrations/${branchId}/${provider}`, { method: "PUT", body: JSON.stringify(data) }),
+
   // Attendance
   getAttendance: (params?: { branchId?: string }) => {
     const q = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v != null && v !== "")) as Record<string, string>).toString();
@@ -2101,6 +2107,13 @@ export interface Notification {
   entityType?: string; entityId?: string;
   isRead: boolean; readAt?: string; createdAt: string;
   branchName?: string; terminalName?: string;
+}
+
+export interface PaymentIntegrationRecord {
+  provider: string;
+  isEnabled: boolean;
+  config: Record<string, string | null>;
+  updatedAt?: string;
 }
 
 export interface PosSettingsRecord {
