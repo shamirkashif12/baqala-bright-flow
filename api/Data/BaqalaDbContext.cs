@@ -127,6 +127,9 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     // Generic key-value settings per branch
     public DbSet<TenantSetting> TenantSettings { get; set; }
 
+    // Admin → Payments: per-branch payment provider connection state
+    public DbSet<PaymentIntegration> PaymentIntegrations { get; set; }
+
     // Tenant Admin Dashboard integration — plan config pushed in for this deployed instance
     public DbSet<TenantPlan> TenantPlans { get; set; }
 
@@ -213,6 +216,9 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
         modelBuilder.Entity<TenantSetting>()
             .HasIndex(t => new { t.BranchId, t.SettingKey }).IsUnique();
+
+        modelBuilder.Entity<PaymentIntegration>()
+            .HasIndex(p => new { p.BranchId, p.Provider }).IsUnique();
 
         modelBuilder.Entity<LoyaltyProgram>()
             .HasIndex(l => l.BranchId).IsUnique();

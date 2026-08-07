@@ -52,6 +52,7 @@ import {
   AlarmClockOff,
   Gavel,
   Percent,
+  CreditCard,
 } from "lucide-react";
 import {
   Sidebar,
@@ -263,6 +264,7 @@ const navGroups: NavGroup[] = [
       { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2,  module: "Compliance", planFeature: "zatca_compliance" },
       { title: "Compliance",             url: "/compliance",     icon: ShieldCheck, module: "Compliance", planFeature: "zatca_compliance" },
       { title: "General Settings",       url: "/pos-settings",   icon: Sliders,     module: "Settings" },
+      { title: "Payments",               url: "/payments",       icon: CreditCard,  module: "Settings" },
       { title: "Audit Logs",             url: "/audit-logs",     icon: History,     module: "Audit Logs" },
       { title: "Plans & Pricing",        url: "/plans",          icon: Crown,       roles: ["tenant_admin"] },
       { title: "Business & Security Settings", url: "/settings", icon: Settings,    module: "Settings" },
