@@ -219,23 +219,21 @@ function Plans() {
 
   // Opens the Tenant Admin Dashboard already signed in as this same admin (the identity
   // onboarding created for both systems) — see api/Controllers/TenantController.cs's
-  // DashboardLaunch. The blank tab is opened synchronously inside the click gesture and only
-  // navigated once the URL comes back, otherwise the popup blocker eats the async window.open.
+  // DashboardLaunch. Navigates the current tab rather than opening a new one: subscription
+  // management is a continuation of this page, not a side trip, and the browser's Back button
+  // returns here. No setLaunching(false) on success — the page is being replaced, and clearing
+  // it would flash the button back to its idle label mid-navigation.
   async function handleManageSubscription() {
     if (launching) return;
     setLaunching(true);
-    const tab = window.open("", "_blank", "noopener,noreferrer");
     try {
       const { redirectUrl } = await api.getDashboardLaunchUrl();
-      if (tab && !tab.closed) tab.location.replace(redirectUrl);
-      else window.location.href = redirectUrl; // popup blocked — fall back to same-tab
+      window.location.href = redirectUrl;
     } catch (e) {
-      tab?.close();
+      setLaunching(false);
       toast.error("Couldn't open subscription management", {
         description: e instanceof Error ? e.message : "Please try again or contact support.",
       });
-    } finally {
-      setLaunching(false);
     }
   }
 
