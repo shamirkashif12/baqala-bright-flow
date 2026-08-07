@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { StatusBadge } from "@/components/module-placeholder";
 import { Pencil, Plus, Download, X } from "lucide-react";
 import { toast } from "sonner";
@@ -356,10 +357,7 @@ function HrmAttendanceTab() {
           </SelectContent>
         </Select>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">From</span>
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-40" />
-          <span className="text-xs text-muted-foreground">To</span>
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-40" />
+          <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
         </div>
         {(q || branchFilter.length > 0 || departmentFilter.length > 0 || employeeFilter.length > 0 || shiftFilter.length > 0 || statusFilter.length > 0 || correctionFilter !== "all" || dateFrom !== todayStr || dateTo !== todayStr) && (
           <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={() => {

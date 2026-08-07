@@ -17,6 +17,7 @@ import { usePermission } from "@/lib/use-permission";
 import { useAuth } from "@/lib/auth";
 import { canManageUser } from "@/lib/role-hierarchy";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { isValidContactPersonName, sanitizeNameInput, CONTACT_PERSON_MAX_LENGTH } from "@/lib/validation";
 
 export const Route = createFileRoute("/_app/users")({
@@ -183,17 +184,12 @@ function RegisteredUsers() {
             onChange={setBranchFilter}
           />
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Created:</span>
-          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          {(dateFrom || dateTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        {(dateFrom || dateTo) && (
+          <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <div className="flex-1" />
         {canCreate && (
           <p className="text-xs text-muted-foreground italic max-w-xs text-end">

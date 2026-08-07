@@ -20,7 +20,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/module-placeholder";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
-import { Truck, Eye, Pencil, Plus, Trash2, Package, CheckCircle, Clock, ShoppingCart } from "lucide-react";
+import { Truck, Eye, Pencil, Plus, Trash2, Package, CheckCircle, Clock, ShoppingCart, X } from "lucide-react";
 import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
 import { api, type Supplier, type SupplierDocument, type PurchaseOrder, type SupplierCreditNote, type StockTransfer } from "@/lib/api";
@@ -909,6 +909,13 @@ function SuppliersTab() {
     return mq && ms && mc && mt && mcity && mpt;
   });
 
+  const hasFilters = q !== "" || statusFilter.length > 0 || categoryFilter.length > 0
+    || supplyTypeFilter.length > 0 || cityFilter.length > 0 || paymentTermsFilter.length > 0;
+  const clearFilters = () => {
+    setQ(""); setStatusFilter([]); setCategoryFilter([]); setSupplyTypeFilter([]);
+    setCityFilter([]); setPaymentTermsFilter([]);
+  };
+
   return (
     <div className="space-y-5">
       {loadError && <LoadErrorBanner onRetry={load} />}
@@ -934,7 +941,7 @@ function SuppliersTab() {
       {/* Filters + Actions */}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code, city, phone, CR/VAT…" className="h-9 w-60" />
-        <div className="w-36">
+        <div className="w-40">
           <SearchableMultiSelect
             placeholder="All Statuses"
             options={[
@@ -953,7 +960,7 @@ function SuppliersTab() {
             onChange={setCategoryFilter}
           />
         </div>
-        <div className="w-44">
+        <div className="w-40">
           <SearchableMultiSelect
             placeholder="All Supply Channels"
             options={[
@@ -965,7 +972,7 @@ function SuppliersTab() {
             onChange={setSupplyTypeFilter}
           />
         </div>
-        <div className="w-36">
+        <div className="w-40">
           <SearchableMultiSelect
             placeholder="All Cities"
             options={SAUDI_CITIES.map(c => ({ id: c, label: c }))}
@@ -973,7 +980,7 @@ function SuppliersTab() {
             onChange={setCityFilter}
           />
         </div>
-        <div className="w-36">
+        <div className="w-40">
           <SearchableMultiSelect
             placeholder="All Payment Terms"
             options={PAYMENT_TERMS_OPTIONS.map(t => ({ id: t, label: t }))}
@@ -981,6 +988,11 @@ function SuppliersTab() {
             onChange={setPaymentTermsFilter}
           />
         </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         {canCreate && (
           <Button size="sm" className="gradient-primary text-primary-foreground border-0 shadow-glow gap-1.5 h-9" onClick={() => { setForm(emptyForm); setFormErrors({}); setCreateOpen(true); }}>

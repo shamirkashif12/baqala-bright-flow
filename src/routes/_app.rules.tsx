@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { DataTable, StatusBadge, FilterField } from "@/components/module-placeholder";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -241,12 +242,7 @@ function Rules() {
               </SelectContent>
             </Select>
           </FilterField>
-          <FilterField label="From">
-            <Input type="date" className="h-9" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          </FilterField>
-          <FilterField label="To">
-            <Input type="date" className="h-9" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          </FilterField>
+          <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="h-9" />
           {hasFilters && (
             <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
               <X className="h-3.5 w-3.5" /> Clear Filters

@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import { DataTable, StatusBadge } from "@/components/module-placeholder";
 import { OrderInvoiceDialog } from "@/components/order-invoice-dialog";
@@ -107,10 +108,10 @@ function Sales() {
         )}
       </Card>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, branch, cashier…" className="h-9 w-56 flex-shrink-0" />
         {!lockedBranchId && (
-          <div className="w-44">
+          <div className="w-40">
             <SearchableMultiSelect
               placeholder="All Branches"
               options={branches.map(b => ({ id: b.id, label: b.name }))}
@@ -119,7 +120,7 @@ function Sales() {
             />
           </div>
         )}
-        <div className="w-44">
+        <div className="w-40">
           <SearchableMultiSelect
             placeholder="Payment Status"
             options={[
@@ -133,12 +134,7 @@ function Sales() {
             onChange={setPayFilter}
           />
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">From</span>
-          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-xs text-muted-foreground">To</span>
-          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        </div>
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
         {(q || branchIds.length > (lockedBranchId ? 1 : 0) || payFilter.length > 0 || dateFrom || dateTo) && (
           <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => {
             setQ(""); setBranchIds(lockedBranchId ? [lockedBranchId] : []); setPayFilter([]); setDateFrom(""); setDateTo("");

@@ -23,6 +23,7 @@ import { exportRowsAsCsv } from "@/lib/csv-export";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { fileToDataUrl } from "@/lib/image";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 
 export const Route = createFileRoute("/_app/leaves")({ component: Leaves });
 
@@ -286,10 +287,7 @@ function LeavesTab() {
           />
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">From</span>
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 w-36" />
-          <span className="text-xs text-muted-foreground">To</span>
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 w-36" />
+          <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="h-9 w-36" />
         </div>
         {(q || branchFilter.length > 0 || departmentFilter.length > 0 || approverFilter.length > 0 || typeFilter !== "all" || statusFilter.length > 0 || dateFrom || dateTo) && (
           <Button size="sm" variant="ghost" className="h-9 gap-1.5 text-xs" onClick={() => {

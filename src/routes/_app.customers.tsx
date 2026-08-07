@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import {
   Plus, Search, Star, Phone, Mail, ShoppingBag, TrendingUp,
   ChevronRight, Loader2, ArrowUpCircle, ArrowDownCircle, Gift, X, Clock, RefreshCcw,
@@ -541,6 +542,11 @@ function Customers() {
   const totalLoyalty = filtered.reduce((s, c) => s + c.loyaltyBalance, 0);
   const platinum = filtered.filter(c => c.tier === "platinum").length;
 
+  const hasFilters = !!(q || tierFilter !== "all" || dateFrom || dateTo);
+  const clearFilters = () => {
+    setQ(""); setTierFilter("all"); setDateFrom(""); setDateTo("");
+  };
+
   const handleSaved = () => {
     setEditTarget(null);
     setSelected(null);
@@ -591,17 +597,12 @@ function Customers() {
             {TIER_META_BASE.map(t => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
           </SelectContent>
         </Select>
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Joined:</span>
-          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          {(dateFrom || dateTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         {canDelete && (
           <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => setDuplicatesOpen(true)}>

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { MetricCard } from "@/components/metric-card";
 import {
   LogIn, LogOut, ShieldAlert, Undo2, Edit3, Trash2, ScanBarcode,
@@ -301,12 +302,7 @@ function AuditLogs() {
           placeholder="Search action, user, reference…"
           className="h-9 w-56 flex-shrink-0"
         />
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Date:</span>
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-36" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-36" />
-        </div>
+        <DateRangeField from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <div className="w-36">
           <SearchableMultiSelect
             placeholder="All Severity"

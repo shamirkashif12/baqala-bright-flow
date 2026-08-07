@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader as DHeader, DialogTitle as DTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1186,6 +1187,16 @@ function POSTab() {
   const pendingApprovalCount = filtered.filter(o => o.pendingApproval).length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const hasFilters = !!q || branchIds.length > (lockedBranchId ? 1 : 0) || stFilter.length > 0 || paymentMethodFilter.length > 0 || !!dateFrom || !!dateTo;
+  const clearFilters = () => {
+    setQ("");
+    setBranchIds(lockedBranchId ? [lockedBranchId] : []);
+    setStFilter([]);
+    setPaymentMethodFilter([]);
+    setDateFrom("");
+    setDateTo("");
+  };
+
   const decideApproval = async (order: Order, approved: boolean, reason?: string) => {
     if (!order.pendingApproval) return;
     setDecidingId(order.pendingApproval.id);
@@ -1225,10 +1236,10 @@ function POSTab() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search order number, branch, cashier…" className="h-9 w-64 flex-shrink-0" />
         {!lockedBranchId && (
-          <div className="w-44">
+          <div className="w-40">
             <SearchableMultiSelect
               placeholder="All Branches"
               options={branches.map(b => ({ id: b.id, label: b.name }))}
@@ -1237,7 +1248,7 @@ function POSTab() {
             />
           </div>
         )}
-        <div className="w-44">
+        <div className="w-40">
           <SearchableMultiSelect
             placeholder="All Statuses"
             options={ORDER_STATUSES.map(s => ({ id: s, label: s.replace(/_/g, " ") }))}
@@ -1245,7 +1256,7 @@ function POSTab() {
             onChange={setStFilter}
           />
         </div>
-        <div className="w-44">
+        <div className="w-40">
           <SearchableMultiSelect
             placeholder="All Payment Methods"
             options={["cash", "card", "wallet", "qr"].map(m => ({ id: m, label: paymentMethodLabel(m) }))}
@@ -1253,17 +1264,12 @@ function POSTab() {
             onChange={setPaymentMethodFilter}
           />
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Order Date:</span>
-          <Input type="date" className="h-9 w-36" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          {(dateFrom || dateTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+        <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => load()}>
           <RefreshCw className="h-4 w-4" /> Refresh

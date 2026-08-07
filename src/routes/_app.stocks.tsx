@@ -1047,11 +1047,7 @@ export function StocktakingPanel({ branches, warehouses }: { branches: Branch[];
             />
           </div>
         )}
-        <div className="flex items-center gap-1">
-          <Input type="date" className="h-9 w-36" value={sessionDateFrom} onChange={e => setSessionDateFrom(e.target.value)} title="Started from" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={sessionDateTo} onChange={e => setSessionDateTo(e.target.value)} title="Started to" />
-        </div>
+        <DateRangeField from={sessionDateFrom} to={sessionDateTo} onFromChange={setSessionDateFrom} onToChange={setSessionDateTo} className="h-9 w-36" />
         {((!lockedBranchId && sessionBranchFilters.length > 0) || sessionDateFrom || sessionDateTo) && (
           <Button
             variant="ghost" size="sm" className="h-9 gap-1 text-muted-foreground"
@@ -1598,11 +1594,7 @@ function Stocks() {
                     onChange={setSiStatus}
                   />
                 </div>
-                <div className="flex items-center gap-1">
-                  <Input type="date" className="h-9 w-36" value={siDateFrom} onChange={e => setSiDateFrom(e.target.value)} title="Received from" />
-                  <span className="text-xs text-muted-foreground">–</span>
-                  <Input type="date" className="h-9 w-36" value={siDateTo} onChange={e => setSiDateTo(e.target.value)} title="Received to" />
-                </div>
+                <DateRangeField from={siDateFrom} to={siDateTo} onFromChange={setSiDateFrom} onToChange={setSiDateTo} className="h-9 w-36" />
                 {((!lockedBranchId && siBranch.length > 0) || siStatus.length > 0 || siDateFrom || siDateTo) && (
                   <Button
                     variant="ghost" size="sm" className="h-8 gap-1 text-muted-foreground"

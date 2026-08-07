@@ -22,6 +22,7 @@ import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge as StatusBadge } from "@/components/batch-status-badge";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { toast } from "sonner";
 import { RtsSheet, type RtsInitialBatch } from "@/routes/_app.supplier-returns";
@@ -511,6 +512,14 @@ function Batches() {
     return mq && mbr && mwh && mef && met && ms;
   });
 
+  const hasFilters = !!search || (!lockedBranchId && (branchFilter.length > 0 || warehouseFilter.length > 0))
+    || statusFilter.length > 0 || !!expiryFrom || !!expiryTo;
+  const clearFilters = () => {
+    setSearch("");
+    if (!lockedBranchId) { setBranchFilter([]); setWarehouseFilter([]); }
+    setStatusFilter([]); setExpiryFrom(""); setExpiryTo("");
+  };
+
   return (
     <PageShell title="Batches & Expiry" subtitle="Wastage watch-list · near-expiry, expired & recalled stock">
       {loadError && <LoadErrorBanner onRetry={loadBatches} />}
@@ -581,17 +590,12 @@ function Batches() {
             onChange={setStatusFilter}
           />
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
-          <Input type="date" className="h-9 w-36" value={expiryFrom} onChange={e => setExpiryFrom(e.target.value)} title="Expiry from" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={expiryTo} onChange={e => setExpiryTo(e.target.value)} title="Expiry to" />
-          {(expiryFrom || expiryTo) && (
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+        <DateRangeField from={expiryFrom} to={expiryTo} onFromChange={setExpiryFrom} onToChange={setExpiryTo} className="h-9 w-36" />
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => exportCSV(filtered, branches, warehouses, companyHeader)} disabled={filtered.length === 0}>
           <Download className="h-4 w-4" /> Export ({filtered.length})
         </Button>

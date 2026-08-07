@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { LoadErrorBanner } from "@/components/load-error-banner";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { cn } from "@/lib/utils";
 import { api, type DashboardMetrics, type CashierShift, type Branch, type InventoryStock, type Terminal, type InventoryDashboardReport, type InventoryMoverRow } from "@/lib/api";
 import { SARIcon, fmtSAR } from "@/lib/currency";
@@ -523,7 +524,7 @@ function Dashboard() {
       {loadError && <LoadErrorBanner onRetry={loadDashboard} />}
       {/* Filter bar */}
       <Card className="p-3 border-border/60 shadow-card">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-end gap-2">
           <div data-tour="branch-selector">
             {isAdmin ? (
               <Select value={branch} onValueChange={setBranch}>
@@ -553,10 +554,8 @@ function Dashboard() {
           </div>
 
           {period === "Custom" && (
-            <div className="flex items-center gap-1">
-              <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="h-9 px-2 rounded-md border border-input bg-background text-sm" />
-              <span className="text-xs text-muted-foreground">to</span>
-              <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="h-9 px-2 rounded-md border border-input bg-background text-sm" />
+            <div className="flex items-end gap-1">
+              <DateRangeField from={customFrom} to={customTo} onFromChange={setCustomFrom} onToChange={setCustomTo} />
             </div>
           )}
 

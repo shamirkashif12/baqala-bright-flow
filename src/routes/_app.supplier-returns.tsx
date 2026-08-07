@@ -831,6 +831,9 @@ function SupplierReturns() {
     return rows;
   }, [filtered]);
 
+  const hasFilters = q !== "" || statusFilter.length > 0;
+  const clearFilters = () => { setQ(""); setStatusFilter([]); };
+
   const completed = transfers.filter(t => t.status === "completed");
   const totalRtsValue = completed.reduce(
     (s, t) => s + (t.items ?? []).reduce((si, i) => si + (i.receivedQuantity ?? i.requestedQuantity) * (i.unitCost ?? 0), 0),
@@ -875,6 +878,11 @@ function SupplierReturns() {
             onChange={setStatusFilter}
           />
         </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
         <div className="flex-1" />
         {canCreate && (
           <Button

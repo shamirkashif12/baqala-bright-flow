@@ -468,7 +468,7 @@ function Branches() {
                       <Building2 className="h-5 w-5 text-primary-foreground" />
                     </div>
                     <div>
-                      <h3 className="font-semibold leading-tight">{b.name}</h3>
+                      <h3 className="text-base font-semibold leading-tight">{b.name}</h3>
                       <p className="text-xs text-muted-foreground font-mono">{b.branchCode}</p>
                     </div>
                   </div>

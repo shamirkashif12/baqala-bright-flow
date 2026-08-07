@@ -16,6 +16,7 @@ import { usePermission } from "@/lib/use-permission";
 import { BatchStatusBadge } from "@/components/batch-status-badge";
 import { NewBatchDialog } from "@/components/new-batch-dialog";
 import { SearchableMultiSelect } from "@/components/report-filters/searchable-multi-select";
+import { DateRangeField } from "@/components/report-filters/date-range-field";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 
@@ -504,10 +505,7 @@ function BatchLocationPanel({
           />
         </div>
         <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Expiry:</span>
-          <Input type="date" className="h-9 w-36" value={expiryFrom} onChange={e => setExpiryFrom(e.target.value)} title="Expiry from" />
-          <span className="text-xs text-muted-foreground">–</span>
-          <Input type="date" className="h-9 w-36" value={expiryTo} onChange={e => setExpiryTo(e.target.value)} title="Expiry to" />
+          <DateRangeField from={expiryFrom} to={expiryTo} onFromChange={setExpiryFrom} onToChange={setExpiryTo} />
           {(expiryFrom || expiryTo) && (
             <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
               <X className="h-3.5 w-3.5" />
