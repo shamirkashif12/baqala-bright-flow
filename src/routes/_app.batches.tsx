@@ -590,7 +590,7 @@ function Batches() {
             onChange={setStatusFilter}
           />
         </div>
-        <DateRangeField from={expiryFrom} to={expiryTo} onFromChange={setExpiryFrom} onToChange={setExpiryTo} className="h-9 w-36" />
+        <DateRangeField from={expiryFrom} to={expiryTo} onFromChange={setExpiryFrom} onToChange={setExpiryTo} prefixLabel="Expiry:" className="h-9 w-36" />
         {hasFilters && (
           <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
             <X className="h-3.5 w-3.5" /> Clear Filters

@@ -1238,6 +1238,15 @@ function PurchaseOrders() {
     }).reduce((s, p) => s + p.paidAmount, 0);
   })();
 
+  const hasFilters = !!search || branchIds.length > 0 || warehouseIds.length > 0 || createdBy.length > 0 || approvedBy.length > 0;
+  const clearFilters = () => {
+    setSearch("");
+    setBranchIds([]);
+    setWarehouseIds([]);
+    setCreatedBy([]);
+    setApprovedBy([]);
+  };
+
   // A draft PO needs manager Approve/Reject first (mirrors the Stock Transfer flow); only once
   // approved does Send become available. Record who acted so Approved By is actually populated.
   const handleApprove = async (group: PurchaseOrder[]) => {
@@ -1401,6 +1410,11 @@ function PurchaseOrders() {
               selected={approvedBy}
               onChange={setApprovedBy}
             />
+            {hasFilters && (
+              <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5" /> Clear Filters
+              </Button>
+            )}
             <DateRangeField from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="h-9 w-40" />
             {(dateFrom || dateTo) && (
               <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" onClick={() => { setDateFrom(""); setDateTo(""); }}>

@@ -508,7 +508,7 @@ function Terminals() {
                 onChange={setSt}
               />
             </div>
-            <DateRangeField from={syncFrom} to={syncTo} onFromChange={setSyncFrom} onToChange={setSyncTo} />
+            <DateRangeField from={syncFrom} to={syncTo} onFromChange={setSyncFrom} onToChange={setSyncTo} prefixLabel="Sync Date:" className="h-9 w-36" />
             {hasTerminalFilters && (
               <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearTerminalFilters}>
                 <X className="h-3.5 w-3.5" /> Clear Filters
@@ -634,7 +634,7 @@ function Terminals() {
                 onChange={setSlStatus}
               />
             </div>
-            <DateRangeField from={slDateFrom} to={slDateTo} onFromChange={setSlDateFrom} onToChange={setSlDateTo} />
+            <DateRangeField from={slDateFrom} to={slDateTo} onFromChange={setSlDateFrom} onToChange={setSlDateTo} prefixLabel="Date:" className="h-9 w-36" />
             {hasSessionLogFilters && (
               <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearSessionLogFilters}>
                 <X className="h-3.5 w-3.5" /> Clear Filters

@@ -2357,8 +2357,6 @@ function Inventory() {
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [branchFilters, setBranchFilters] = useState<string[]>(lockedBranchId ? [lockedBranchId] : []);
   const [productFilters, setProductFilters] = useState<string[]>([]);
-  const [expiryFrom, setExpiryFrom] = useState("");
-  const [expiryTo, setExpiryTo] = useState("");
   const [updatedFrom, setUpdatedFrom] = useState("");
   const [updatedTo, setUpdatedTo] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -2537,18 +2535,16 @@ function Inventory() {
     const mc = categoryFilters.length === 0 || categoryFilters.includes(s.product?.category?.name ?? "");
     const mb = branchFilters.length === 0 || branchFilters.includes(s.branchId);
     const mp = productFilters.length === 0 || productFilters.includes(s.productId);
-    const mef = !expiryFrom || (!!s.expiryDate && s.expiryDate >= expiryFrom);
-    const met = !expiryTo || (!!s.expiryDate && s.expiryDate <= expiryTo + "T23:59:59");
     const muf = !updatedFrom || (!!s.lastUpdated && s.lastUpdated >= updatedFrom);
     const mut = !updatedTo || (!!s.lastUpdated && s.lastUpdated <= updatedTo + "T23:59:59");
     const mqf = !quickFilter
       || (quickFilter === "lowStock" && s.quantity > 0 && s.quantity <= s.reorderLevel)
       || (quickFilter === "outOfStock" && s.quantity === 0)
       || (quickFilter === "expiring" && (d => d !== null && d >= 0 && d <= 7)(daysLeft(s.expiryDate)));
-    return mq && mc && mb && mp && mef && met && muf && mut && mqf;
-  }), [stock, q, categoryFilters, branchFilters, productFilters, expiryFrom, expiryTo, updatedFrom, updatedTo, quickFilter]);
+    return mq && mc && mb && mp && muf && mut && mqf;
+  }), [stock, q, categoryFilters, branchFilters, productFilters, updatedFrom, updatedTo, quickFilter]);
 
-  const advancedFilterCount = productFilters.length + (expiryFrom ? 1 : 0) + (expiryTo ? 1 : 0) + (updatedFrom ? 1 : 0) + (updatedTo ? 1 : 0);
+  const advancedFilterCount = productFilters.length + (updatedFrom ? 1 : 0) + (updatedTo ? 1 : 0);
 
   // Metrics
   const totalSKUs = stock.length;
@@ -2596,8 +2592,8 @@ function Inventory() {
         >
           <CalendarClock className="h-8 w-8 text-warning shrink-0" />
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-warning/80">Near Expiry Items</p>
-            <p className="text-2xl font-black text-warning">{expiringSoon.length} SKUs</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-warning/80">Near Expiry Items</p>
+            <p className="text-3xl font-bold tracking-tight text-warning mt-1">{expiringSoon.length} SKUs</p>
             <p className="text-xs text-warning/70">Next 7 days · review now</p>
           </div>
         </button>
@@ -2611,8 +2607,8 @@ function Inventory() {
         >
           <AlertTriangle className="h-8 w-8 text-destructive shrink-0" />
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-destructive/80">Low Stock Items</p>
-            <p className="text-2xl font-black text-destructive">{lowStockItems.length} SKUs</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-destructive/80">Low Stock Items</p>
+            <p className="text-3xl font-bold tracking-tight text-destructive mt-1">{lowStockItems.length} SKUs</p>
             <p className="text-xs text-destructive/70">{criticalCount} critical · reorder soon</p>
           </div>
         </button>
@@ -2630,8 +2626,8 @@ function Inventory() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total SKUs</p>
-              <p className="text-3xl font-black mt-1">{totalSKUs.toLocaleString()}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Total SKUs</p>
+              <p className="text-3xl font-bold tracking-tight mt-1">{totalSKUs.toLocaleString()}</p>
             </div>
             <div className="h-12 w-12 rounded-xl gradient-primary flex items-center justify-center"><Boxes className="h-6 w-6 text-primary-foreground" /></div>
           </div>
@@ -2646,8 +2642,8 @@ function Inventory() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Low Stock</p>
-              <p className="text-3xl font-black mt-1 text-warning-foreground">{lowStockItems.length}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Low Stock</p>
+              <p className="text-3xl font-bold tracking-tight mt-1 text-warning-foreground">{lowStockItems.length}</p>
               <p className="text-xs text-destructive mt-1">↘ {criticalCount} critical</p>
             </div>
             <div className="h-12 w-12 rounded-xl bg-warning/20 flex items-center justify-center"><AlertTriangle className="h-6 w-6 text-warning" /></div>
@@ -2663,8 +2659,8 @@ function Inventory() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Expiring Soon</p>
-              <p className="text-3xl font-black mt-1">{expiringSoon.length}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Expiring Soon</p>
+              <p className="text-3xl font-bold tracking-tight mt-1">{expiringSoon.length}</p>
             </div>
             <div className="h-12 w-12 rounded-xl bg-orange-100 dark:bg-orange-950/40 flex items-center justify-center"><CalendarClock className="h-6 w-6 text-orange-500" /></div>
           </div>
@@ -2679,8 +2675,8 @@ function Inventory() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Out of Stock</p>
-              <p className="text-3xl font-black mt-1 text-destructive">{outOfStock.length}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Out of Stock</p>
+              <p className="text-3xl font-bold tracking-tight mt-1 text-destructive">{outOfStock.length}</p>
             </div>
             <div className="h-12 w-12 rounded-xl bg-destructive/15 flex items-center justify-center"><Package className="h-6 w-6 text-destructive" /></div>
           </div>
@@ -2754,15 +2750,7 @@ function Inventory() {
             />
           </div>
           <div className="flex items-center gap-1">
-            <DateRangeField from={expiryFrom} to={expiryTo} onFromChange={setExpiryFrom} onToChange={setExpiryTo} className="h-9 w-36" />
-            {(expiryFrom || expiryTo) && (
-              <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" title="Clear expiry filter" onClick={() => { setExpiryFrom(""); setExpiryTo(""); }}>
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <DateRangeField from={updatedFrom} to={updatedTo} onFromChange={setUpdatedFrom} onToChange={setUpdatedTo} className="h-9 w-36" />
+            <DateRangeField from={updatedFrom} to={updatedTo} onFromChange={setUpdatedFrom} onToChange={setUpdatedTo} prefixLabel="Last Updated:" className="h-9 w-36" />
             {(updatedFrom || updatedTo) && (
               <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground" title="Clear last-updated filter" onClick={() => { setUpdatedFrom(""); setUpdatedTo(""); }}>
                 <X className="h-3.5 w-3.5" />

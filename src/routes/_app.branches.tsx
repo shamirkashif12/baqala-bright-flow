@@ -16,7 +16,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/searchable-select";
 import { AddressMapPicker } from "@/components/address-map-picker";
-import { Building2, MapPin, Phone, Plus, Search, Pencil, Trash2, ShoppingBag, Terminal, Copy, Check, Printer, Download, QrCode } from "lucide-react";
+import { Building2, MapPin, Phone, Plus, Search, Pencil, Trash2, ShoppingBag, Terminal, Copy, Check, Printer, Download, QrCode, X } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { api, type Branch, type TenantPlanInfo } from "@/lib/api";
 import { toast } from "sonner";
@@ -387,6 +387,12 @@ function Branches() {
       || (b.city ?? "").toLowerCase().includes(q.toLowerCase()))
   );
 
+  const hasFilters = !!q || activeOnly;
+  const clearFilters = () => {
+    setQ("");
+    setActiveOnly(false);
+  };
+
   const maxBranches = planInfo?.plan.limits.maxBranches ?? null;
   const atBranchLimit = maxBranches !== null && branches.length >= maxBranches;
 
@@ -446,9 +452,16 @@ function Branches() {
         </Card>
       </div>
 
-      <div className="relative w-64">
-        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search branches…" className="h-9 pl-8" />
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="relative w-64">
+          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search branches…" className="h-9 pl-8" />
+        </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5" /> Clear Filters
+          </Button>
+        )}
       </div>
 
       {loading ? (
