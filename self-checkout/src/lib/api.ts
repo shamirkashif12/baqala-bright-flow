@@ -1,7 +1,11 @@
 export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5008";
 export const PRINTER_API_KEY = "selfcheckout_printer_api_url";
 export const RECEIPT_PRINTER_KEY = "selfcheckout_receipt_printer";
-export const DEFAULT_PRINTER_AGENT = "http://localhost:5008";
+// See src/lib/api.ts's DEFAULT_PRINTER_AGENT comment (same fix, same reasoning): the QZ cert
+// and signing key are one shared identity baked into every install, not per-machine, so the
+// server can answer the cert/sign challenge itself. No local agent is ever installed to listen
+// on a fixed port, so defaulting to one there left every request unsigned.
+export const DEFAULT_PRINTER_AGENT = BASE;
 
 export function getPrinterBase(): string {
   return localStorage.getItem(PRINTER_API_KEY) ?? DEFAULT_PRINTER_AGENT;
@@ -67,16 +71,12 @@ export function setupInstallerUrl(): string {
 }
 
 // Fixes the "Action Required" QZ Tray popup on Windows when QZ Tray is already installed
-// manually. Must read from THIS terminal's local agent, not the remote server — the cert
-// embedded needs to match what's actually paired with the QZ Tray running on this machine.
 export function qzTrustPs1Url(): string {
   return `${getPrinterBase()}/api/printer/qz-trust-ps1`;
 }
 
-// QZ Tray's cert/sign challenge must be answered by the local agent on this machine (same
-// reasoning as above) — routing these through the remote server would return whatever cert
-// that server happens to have on disk, which can silently mismatch what's trusted in this
-// machine's QZ Tray allowed.dat and leave every print request unsigned.
+// Cert/sign challenge — see the DEFAULT_PRINTER_AGENT comment above for why this defaults to
+// the same server (BASE) rather than a per-machine local agent.
 export function qzCertificateUrl(): string {
   return `${getPrinterBase()}/api/printer/qz-certificate`;
 }

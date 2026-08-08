@@ -960,6 +960,22 @@ rm -f /tmp/raw-thermal.ppd
 # Trust the POS server cert permanently — QZ Tray will auto-allow all
 # print requests with zero dialogs on every reboot. Cert is embedded so
 # no network request is needed.
+#
+# Ordering fix (same class of bug already found on Windows, commit 4a780a4):
+# the .run installer's own "spawn" task above already launched a live QZ Tray
+# process — see its own output, "Running spawn task... Starting QZ Tray...".
+# That process has qz-tray.properties loaded in memory. Writing override.crt /
+# authcert.override to disk below does NOTHING until QZ Tray actually restarts
+# and re-reads the file — so we must kill any running instance (whether from
+# the installer's spawn task just now, or a lingering instance from a previous
+# run of this exact script) BEFORE editing config, then let the fresh launch
+# at the bottom pick it up. Skipping this step is why "trusted — no dialogs
+# will appear" could print here while the dialog kept reappearing anyway.
+echo "   Stopping QZ Tray so trust settings take effect on next launch..."
+pkill -f 'qz-tray' 2>/dev/null || true
+sudo pkill -f 'qz-tray' 2>/dev/null || true
+sleep 2
+
 QZ_CERT=$(echo "{{embeddedCertBase64}}" | base64 -d 2>/dev/null || echo "")
 if [ -n "$QZ_CERT" ]; then
   # Install as override cert so QZ Tray treats it as if generated here
@@ -970,6 +986,13 @@ if [ -n "$QZ_CERT" ]; then
   grep -v "^$QZ_FP" ~/.qz/allowed.dat 2>/dev/null > /tmp/qz_allowed.tmp || true
   printf "%s\tQZ Tray Demo Cert\tQZ Industries, LLC\t{{certValidFrom}}\t{{certValidTo}}\ttrue\r\n" "$QZ_FP" >> /tmp/qz_allowed.tmp
   mv /tmp/qz_allowed.tmp ~/.qz/allowed.dat
+  # Defensive: strip any prior "Block" decision for this same fingerprint, in
+  # case an earlier failed attempt at this dialog got dismissed with "Block"
+  # and "Remember this decision" checked.
+  if [ -f ~/.qz/blocked.dat ]; then
+    grep -v "^$QZ_FP" ~/.qz/blocked.dat 2>/dev/null > /tmp/qz_blocked.tmp || true
+    mv -f /tmp/qz_blocked.tmp ~/.qz/blocked.dat
+  fi
   # override.crt alone does NOT get used unless qz-tray.properties explicitly points at it —
   # verified empirically against a live instance: the file existed with the right cert and a
   # matching allowed.dat entry, yet QZ Tray still showed "Action Required" until this property

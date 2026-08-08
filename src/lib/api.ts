@@ -1,6 +1,14 @@
 export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
 export const PRINTER_API_KEY = "baqala_printer_api_url";
-export const DEFAULT_PRINTER_AGENT = "http://localhost:5008";
+// QZ Tray's cert + signing key are a single shared identity baked into every install (the
+// setup script embeds the same api/qz-certs/certificate.pem into every machine's allowed.dat),
+// not generated per-machine — so the server that issued that cert can also answer the
+// cert/sign challenge. Defaulting here to a fixed "http://localhost:5008" (no local agent is
+// ever installed to listen there — see PrinterController.SetupInstaller) left qz-certificate/
+// qz-sign fetching nothing, so every request went out unsigned and QZ Tray showed its
+// "anonymous request / untrusted website" dialog on every browser. PRINTER_API_KEY still lets
+// a machine override this if a real local agent is ever stood up.
+export const DEFAULT_PRINTER_AGENT = BASE;
 // Fired on window after a successful api.notify() so NotificationsPopover can refetch
 // immediately instead of waiting for its poll interval.
 export const NOTIFICATION_CREATED_EVENT = "baqala:notification-created";
@@ -1113,13 +1121,9 @@ export const api = {
   // Returns the Windows PowerShell one-liner install command (no download needed)
   setupPs1Url: () => `${BASE}/api/printer/setup-ps1`,
   // Fixes the "Action Required" QZ Tray popup on Windows when QZ Tray is already installed.
-  // Must read the cert from THIS machine's local agent, not the remote server — the cert
-  // embedded needs to match what's actually paired with the QZ Tray running on this machine.
   qzTrustPs1Url: () => `${getPrinterBase()}/api/printer/qz-trust-ps1`,
-  // QZ Tray's cert/sign challenge must be answered by the local agent on this machine (same
-  // reasoning as above) — routing these through the remote server returns whatever cert that
-  // server happens to have on disk, which can silently mismatch what's trusted in this
-  // machine's QZ Tray allowed.dat/override.crt and leave every print request unsigned.
+  // Cert/sign challenge — see the DEFAULT_PRINTER_AGENT comment above for why this defaults
+  // to the same server (BASE) rather than a per-machine local agent.
   qzCertificateUrl: () => `${getPrinterBase()}/api/printer/qz-certificate`,
   qzSign: (toSign: string) =>
     fetch(`${getPrinterBase()}/api/printer/qz-sign`, {
