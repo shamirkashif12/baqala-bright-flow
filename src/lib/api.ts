@@ -440,9 +440,11 @@ export const api = {
       `/api/online-orders/public/${branchId}/card-payment`,
       { method: "POST", body: JSON.stringify({ items, latitude: coords?.latitude ?? null, longitude: coords?.longitude ?? null }) },
     ),
-  getOnlineCardPaymentStatus: (invoiceId: number) =>
+  // Branch-scoped: the status is looked up on the branch's own MyFatoorah account (Admin →
+  // Payments), the same one the invoice was raised on.
+  getOnlineCardPaymentStatus: (branchId: string, invoiceId: number) =>
     request<{ status: "paid" | "pending" | "failed"; rawStatus: string }>(
-      `/api/online-orders/public/card-payment/${invoiceId}/status`,
+      `/api/online-orders/public/${branchId}/card-payment/${invoiceId}/status`,
     ),
   getOnlineOrdersPaged: (params: { branchId?: string[]; status?: string[]; page: number; pageSize: number }) =>
     request<{ total: number; page: number; pageSize: number; items: OnlineOrder[] }>(`/api/online-orders${toQuery(params)}`),

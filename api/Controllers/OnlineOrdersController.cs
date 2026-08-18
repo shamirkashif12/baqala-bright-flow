@@ -71,6 +71,18 @@ public class OnlineOrdersController(
         return (branch, settings);
     }
 
+    // The branch's MyFatoorah account from Admin → Payments → MyFatoorah — null when the
+    // integration is off for this branch OR enabled without a usable API token, which is the one
+    // condition for "Pay Online" to exist at all: it gates the catalog flag, invoice creation,
+    // status polling and the pre-placement re-verification alike, so those four can never
+    // disagree about whether online payment is available.
+    private async Task<MyFatoorahMerchantAccount?> ResolveMyFatoorahAccountAsync(Guid branchId)
+    {
+        var row = await db.PaymentIntegrations.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.BranchId == branchId && p.Provider == "MyFatoorah" && p.IsEnabled);
+        return row is null ? null : MyFatoorahMerchantAccount.FromConfigJson(row.ConfigJson);
+    }
+
     // ── Public, unauthenticated ────────────────────────────────────────────
 
     [AllowAnonymous]
@@ -112,8 +124,7 @@ public class OnlineOrdersController(
         var companyProfile = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId);
         var logoDataUrl = companyProfile?.ShowLogoOnCustomerSlip == true ? companyProfile.LogoDataUrl : null;
 
-        var onlinePaymentEnabled = await db.PaymentIntegrations
-            .AnyAsync(p => p.BranchId == branchId && p.Provider == "MyFatoorah" && p.IsEnabled);
+        var onlinePaymentEnabled = await ResolveMyFatoorahAccountAsync(branchId) is not null;
 
         return Ok(new
         {
@@ -200,9 +211,8 @@ public class OnlineOrdersController(
             return NotFound(new { message = "Online ordering isn't available for this branch." });
         if (req?.Items is not { Count: > 0 }) return BadRequest(new { message = "Your cart is empty." });
 
-        var enabled = await db.PaymentIntegrations
-            .AnyAsync(p => p.BranchId == branchId && p.Provider == "MyFatoorah" && p.IsEnabled);
-        if (!enabled) return BadRequest(new { message = "Online payment isn't available for this branch." });
+        var account = await ResolveMyFatoorahAccountAsync(branchId);
+        if (account is null) return BadRequest(new { message = "Online payment isn't available for this branch." });
 
         var totals = await pricing.ComputeAsync(
             branchId, req.Items.Select(i => (i.ProductId, i.Quantity)), req.Latitude, req.Longitude);
@@ -214,18 +224,26 @@ public class OnlineOrdersController(
             return BadRequest(new { message = $"This order exceeds the maximum of SAR {settings.OnlineOrderingMaxOrderValueSar:F2} — please contact the branch directly." });
 
         var (success, invoice, error) = await myFatoorah.SendPaymentAsync(
-            totals.TotalAmount, "Online Customer", customerReference: null, HttpContext.RequestAborted);
+            account, totals.TotalAmount, "Online Customer", customerReference: null, HttpContext.RequestAborted);
         if (!success || invoice is null)
             return StatusCode(502, new { message = error ?? "Could not reach the payment gateway." });
 
         return Ok(new { invoiceId = invoice.InvoiceId, invoiceUrl = invoice.InvoiceUrl, totalAmount = totals.TotalAmount });
     }
 
+    // Branch-scoped (unlike a bare /card-payment/{invoiceId}/status) because the status lookup
+    // has to be made on the same MyFatoorah account the invoice was raised on — and that account
+    // is per branch (see ResolveMyFatoorahAccountAsync).
     [AllowAnonymous]
-    [HttpGet("public/card-payment/{invoiceId:long}/status")]
-    public async Task<IActionResult> GetOnlinePaymentStatus(long invoiceId)
+    [HttpGet("public/{branchId:guid}/card-payment/{invoiceId:long}/status")]
+    public async Task<IActionResult> GetOnlinePaymentStatus(Guid branchId, long invoiceId)
     {
-        var (success, status, error) = await myFatoorah.GetPaymentStatusAsync(invoiceId, HttpContext.RequestAborted);
+        var (branch, _) = await ResolveOnlineOrderingBranchAsync(branchId);
+        if (branch is null) return NotFound(new { message = "Online ordering isn't available for this branch." });
+        var account = await ResolveMyFatoorahAccountAsync(branchId);
+        if (account is null) return BadRequest(new { message = "Online payment isn't available for this branch." });
+
+        var (success, status, error) = await myFatoorah.GetPaymentStatusAsync(account, invoiceId, HttpContext.RequestAborted);
         if (!success || status is null)
             return StatusCode(502, new { message = error ?? "Could not reach the payment gateway." });
 
@@ -302,14 +320,24 @@ public class OnlineOrdersController(
         {
             if (req.PaymentReference is not { } invoiceId)
                 return BadRequest(new { message = "Missing payment reference." });
+            var account = await ResolveMyFatoorahAccountAsync(branchId);
+            if (account is null) return BadRequest(new { message = "Online payment isn't available for this branch." });
 
-            var (success, status, error) = await myFatoorah.GetPaymentStatusAsync(invoiceId, HttpContext.RequestAborted);
+            var (success, status, error) = await myFatoorah.GetPaymentStatusAsync(account, invoiceId, HttpContext.RequestAborted);
             if (!success || status is null)
                 return StatusCode(502, new { message = error ?? "Could not verify payment with the payment gateway." });
             if (status.Status != "Paid")
                 return BadRequest(new { message = "Payment hasn't been completed yet." });
             if (Math.Abs(status.InvoiceValue - totals.TotalAmount) > 0.01m)
                 return BadRequest(new { message = "Payment amount doesn't match the order total — please try again." });
+
+            // One paid invoice, one order. MyFatoorah reports "Paid" for that InvoiceId forever,
+            // so the two checks above alone would let the same payment be replayed into any number
+            // of same-total orders. This early check gives a clean message; the unique index on
+            // order_payments.gateway_invoice_id (see OrderPayment.GatewayInvoiceId) is what
+            // actually holds under concurrent replays — see the DbUpdateException handling below.
+            if (await db.OrderPayments.AnyAsync(p => p.GatewayInvoiceId == invoiceId))
+                return BadRequest(new { message = "This payment has already been used for another order." });
         }
         else if (req.PaymentMethod != "cash")
         {
@@ -389,7 +417,9 @@ public class OnlineOrdersController(
             {
                 Id = Guid.NewGuid(), OrderId = order.Id, PaymentMethod = "card",
                 Amount = order.TotalAmount, Status = "completed",
-                ReferenceNumber = req.PaymentReference!.Value.ToString(), CreatedAt = DateTime.UtcNow,
+                ReferenceNumber = req.PaymentReference!.Value.ToString(),
+                GatewayInvoiceId = req.PaymentReference.Value,
+                CreatedAt = DateTime.UtcNow,
             });
         }
         db.OrderDeliveryDetails.Add(new OrderDeliveryDetail
@@ -419,7 +449,19 @@ public class OnlineOrdersController(
             stock.UpdatedAt = DateTime.UtcNow;
         }
 
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException?.Message.Contains("Duplicate entry") == true &&
+            ex.InnerException.Message.Contains("gateway_invoice_id", StringComparison.OrdinalIgnoreCase))
+        {
+            // Two placements raced past the AnyAsync check above with the same paid InvoiceId; the
+            // unique index let exactly one through. Nothing was committed for this one — EF's
+            // SaveChanges is a single transaction — so the reservation bump above never landed.
+            return BadRequest(new { message = "This payment has already been used for another order." });
+        }
 
         // Tell the branch an order is waiting. This is the only event in the system with nobody
         // present when it happens — a POS sale has a cashier standing at the till, but an online

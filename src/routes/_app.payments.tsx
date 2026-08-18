@@ -209,8 +209,8 @@ function ProviderSetup({
           <div>
             <p className="text-sm font-medium">Enable {provider.name}</p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Turn this on once your credentials below are correct — cashiers can only use it while
-              enabled.
+              {provider.enableDescription ??
+                "Turn this on once your credentials below are correct — cashiers can only use it while enabled."}
             </p>
           </div>
           <Switch checked={isEnabled} onCheckedChange={setIsEnabled} disabled={!canEdit} />

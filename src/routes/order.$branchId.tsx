@@ -328,7 +328,7 @@ function PublicOrderPage() {
     return new Promise<number>((resolve, reject) => {
       payPollRef.current = setInterval(async () => {
         try {
-          const { status } = await api.getOnlineCardPaymentStatus(invoiceId);
+          const { status } = await api.getOnlineCardPaymentStatus(branchId, invoiceId);
           if (status === "paid") {
             stopPayPolling();
             resolve(invoiceId);

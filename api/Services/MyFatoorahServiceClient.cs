@@ -6,12 +6,38 @@ namespace BaqalaPOS.Api.Services;
 public record MyFatoorahInvoice(long InvoiceId, string InvoiceUrl);
 public record MyFatoorahInvoiceStatus(string Status, decimal InvoiceValue);
 
+/// A branch's own MyFatoorah account, as saved from Admin → Payments → MyFatoorah (the
+/// PaymentIntegration row's ConfigJson: "apiKey" + "environment", see the MyFatoorah entry in
+/// src/lib/payment-integrations.ts — the two key names must stay in sync). Forwarded to the
+/// middleware's MyFatoorah service on every call so each store can use its own MyFatoorah
+/// account rather than one shared token seeded in the middleware's DB.
+public sealed record MyFatoorahMerchantAccount(string ApiToken, bool IsLive)
+{
+    /// Parses the saved ConfigJson. Returns null when no usable token is stored — the client then
+    /// sends no override headers and the middleware falls back to its own shared credentials,
+    /// which is what pre-existing rows saved before this field mattered get.
+    public static MyFatoorahMerchantAccount? FromConfigJson(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson)) return null;
+        Dictionary<string, string?>? config;
+        try { config = JsonSerializer.Deserialize<Dictionary<string, string?>>(configJson); }
+        catch (JsonException) { return null; }
+        var token = config?.GetValueOrDefault("apiKey")?.Trim();
+        if (string.IsNullOrEmpty(token)) return null;
+        var environment = config!.GetValueOrDefault("environment")?.Trim();
+        var isLive = string.Equals(environment, "live", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(environment, "production", StringComparison.OrdinalIgnoreCase);
+        return new MyFatoorahMerchantAccount(token, isLive);
+    }
+}
+
 public interface IMyFatoorahServiceClient
 {
     Task<(bool Success, MyFatoorahInvoice? Invoice, string? Error)> SendPaymentAsync(
-        decimal amount, string customerName, string? customerReference, CancellationToken cancellationToken);
+        MyFatoorahMerchantAccount? account, decimal amount, string customerName, string? customerReference, CancellationToken cancellationToken);
 
-    Task<(bool Success, MyFatoorahInvoiceStatus? Status, string? Error)> GetPaymentStatusAsync(long invoiceId, CancellationToken cancellationToken);
+    Task<(bool Success, MyFatoorahInvoiceStatus? Status, string? Error)> GetPaymentStatusAsync(
+        MyFatoorahMerchantAccount? account, long invoiceId, CancellationToken cancellationToken);
 }
 
 // Calls the sibling MyFatoorah.Service microservice (finova-middleware-sme/dotnet-services/
@@ -19,15 +45,36 @@ public interface IMyFatoorahServiceClient
 // config-driven-base-URL shape as TenantGatewayClient (api/Services/TenantGatewayClient.cs), since
 // like the Tenant Admin Dashboard this points at a sibling service instance rather than a fixed
 // host. Auth is that service's own "secret-key" header convention (one shared key for this whole
-// tenant instance — see MyFatoorah.Service.Api.Middleware.ClientSecretKeyMiddleware), not a
-// per-branch credential, because that service's Client→Env mapping only supports one sandbox/live
-// MyFatoorah account per instance, matching this app's one-instance-per-tenant model.
+// tenant instance — see MyFatoorah.Service.Api.Middleware.ClientSecretKeyMiddleware). The
+// per-branch part — which MyFatoorah account the invoice is raised on — travels as that service's
+// X-MyFatoorah-Token / X-MyFatoorah-Env / X-MyFatoorah-Base-Url override headers (see
+// MyFatoorahMerchantAccount above and MyFatoorahControllerBase.ReadCredentialOverride over there).
+//
+// Config (appsettings / env vars):
+//   MyFatoorahService:BaseUrl     — reached through the middleware's YARP gateway, which strips the
+//                                   service prefix: "http://<gateway-host>:5100/myfatoorah" (the
+//                                   gateway then forwards /api/v2/myfatoorah/... to the service on
+//                                   :5300). Pointing straight at ":5300" (no prefix) also works.
+//   MyFatoorahService:SecretKey   — a Clients.SecretKey row in the middleware's myfatoorah_service
+//                                   DB (must be a DEV or PROD client — a TEST client is always mocked).
+//   MyFatoorahService:CurrencyIso — optional, defaults to SAR (this is a KSA app; every price and
+//                                   the amount-match check in PlacePublicOrder are in SAR).
+//   MyFatoorahService:SandboxApiBaseUrl / LiveApiBaseUrl — optional; MyFatoorah's own hosts that a
+//                                   branch's Test / Live token belongs to. Defaults below: the one
+//                                   global sandbox host, and MyFatoorah's Saudi live host (their
+//                                   live host is per country — api-sa is the KSA one).
 public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration config, ILogger<MyFatoorahServiceClient> logger) : IMyFatoorahServiceClient
 {
+    public const string DefaultSandboxApiBaseUrl = "https://apitest.myfatoorah.com";
+    public const string DefaultLiveApiBaseUrl = "https://api-sa.myfatoorah.com";
+
     public async Task<(bool, MyFatoorahInvoice?, string?)> SendPaymentAsync(
-        decimal amount, string customerName, string? customerReference, CancellationToken cancellationToken)
+        MyFatoorahMerchantAccount? account, decimal amount, string customerName, string? customerReference, CancellationToken cancellationToken)
     {
-        var currency = config["MyFatoorahService:CurrencyIso"] ?? "KWD";
+        // SAR, not MyFatoorah's KWD default: the invoice is raised for a SAR total and
+        // PlacePublicOrder compares GetPaymentStatus's InvoiceValue (reported in the invoice's
+        // display currency) against that same SAR total — any other currency fails that check.
+        var currency = config["MyFatoorahService:CurrencyIso"] ?? "SAR";
         var body = JsonSerializer.Serialize(new
         {
             CustomerName = customerName,
@@ -37,7 +84,7 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
             CustomerReference = customerReference,
         });
 
-        var (success, statusCode, raw) = await SendAsync(HttpMethod.Post, "/api/v2/myfatoorah/payment/send-payment", body, cancellationToken);
+        var (success, statusCode, raw) = await SendAsync(HttpMethod.Post, "/api/v2/myfatoorah/payment/send-payment", body, account, cancellationToken);
         if (!success)
         {
             logger.LogWarning("MyFatoorah SendPayment failed ({StatusCode}): {Body}", statusCode, raw);
@@ -54,10 +101,11 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
         return (true, invoice, null);
     }
 
-    public async Task<(bool, MyFatoorahInvoiceStatus?, string?)> GetPaymentStatusAsync(long invoiceId, CancellationToken cancellationToken)
+    public async Task<(bool, MyFatoorahInvoiceStatus?, string?)> GetPaymentStatusAsync(
+        MyFatoorahMerchantAccount? account, long invoiceId, CancellationToken cancellationToken)
     {
         var body = JsonSerializer.Serialize(new { Key = invoiceId.ToString(), KeyType = "InvoiceId" });
-        var (success, statusCode, raw) = await SendAsync(HttpMethod.Post, "/api/v2/myfatoorah/payment/payment-status", body, cancellationToken);
+        var (success, statusCode, raw) = await SendAsync(HttpMethod.Post, "/api/v2/myfatoorah/payment/payment-status", body, account, cancellationToken);
         if (!success)
         {
             logger.LogWarning("MyFatoorah GetPaymentStatus failed ({StatusCode}): {Body}", statusCode, raw);
@@ -77,7 +125,7 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
     }
 
     private async Task<(bool Success, int StatusCode, string Body)> SendAsync(
-        HttpMethod method, string path, string body, CancellationToken cancellationToken)
+        HttpMethod method, string path, string body, MyFatoorahMerchantAccount? account, CancellationToken cancellationToken)
     {
         var baseUrl = config["MyFatoorahService:BaseUrl"];
         var secretKey = config["MyFatoorahService:SecretKey"];
@@ -89,6 +137,14 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
             Content = new StringContent(body, Encoding.UTF8, "application/json"),
         };
         request.Headers.Add("secret-key", secretKey);
+        if (account is not null)
+        {
+            request.Headers.Add("X-MyFatoorah-Token", account.ApiToken);
+            request.Headers.Add("X-MyFatoorah-Env", account.IsLive ? "Live" : "Sandbox");
+            request.Headers.Add("X-MyFatoorah-Base-Url", account.IsLive
+                ? config["MyFatoorahService:LiveApiBaseUrl"] ?? DefaultLiveApiBaseUrl
+                : config["MyFatoorahService:SandboxApiBaseUrl"] ?? DefaultSandboxApiBaseUrl);
+        }
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -106,6 +162,9 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
                 return firstError.GetString();
             if (doc.RootElement.TryGetProperty("Message", out var msg))
                 return msg.GetString();
+            // The middleware's own envelope (auth failures, config errors) is lower-case.
+            if (doc.RootElement.TryGetProperty("message", out var mwMsg))
+                return mwMsg.GetString();
         }
         catch (JsonException)
         {
