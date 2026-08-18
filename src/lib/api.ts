@@ -426,6 +426,24 @@ export const api = {
     request<{ orderNumber: string; totalAmount: number }>(`/api/online-orders/public/${branchId}`, {
       method: "POST", body: JSON.stringify(data),
     }),
+  // "Pay Online" at checkout — creates a MyFatoorah invoice priced from the server's own quote
+  // (never a client-supplied amount) and returns its payment link/QR. getOnlineCardPaymentStatus
+  // is then polled until MyFatoorah reports it paid, at which point placeOnlineOrder is called
+  // with paymentMethod:"myfatoorah" + this invoiceId — the backend re-verifies the payment before
+  // ever creating the order. See OnlineOrdersController.InitiateOnlinePayment/PlacePublicOrder.
+  initiateOnlineCardPayment: (
+    branchId: string,
+    items: Array<{ productId: string; quantity: number }>,
+    coords?: { latitude?: number | null; longitude?: number | null },
+  ) =>
+    request<{ invoiceId: number; invoiceUrl: string; totalAmount: number }>(
+      `/api/online-orders/public/${branchId}/card-payment`,
+      { method: "POST", body: JSON.stringify({ items, latitude: coords?.latitude ?? null, longitude: coords?.longitude ?? null }) },
+    ),
+  getOnlineCardPaymentStatus: (invoiceId: number) =>
+    request<{ status: "paid" | "pending" | "failed"; rawStatus: string }>(
+      `/api/online-orders/public/card-payment/${invoiceId}/status`,
+    ),
   getOnlineOrdersPaged: (params: { branchId?: string[]; status?: string[]; page: number; pageSize: number }) =>
     request<{ total: number; page: number; pageSize: number; items: OnlineOrder[] }>(`/api/online-orders${toQuery(params)}`),
   updateOnlineOrderItems: (id: string, items: OnlineOrderItemEdit[]) =>
@@ -1837,6 +1855,9 @@ export interface OnlineOrderCatalogProduct {
 export interface OnlineOrderCatalog {
   branchName: string;
   logoDataUrl?: string;
+  // Whether this branch has MyFatoorah enabled (Admin → Payments) — gates whether the checkout
+  // step offers "Pay Online" alongside Cash on Delivery.
+  onlinePaymentEnabled: boolean;
   products: OnlineOrderCatalogProduct[];
 }
 
@@ -1872,6 +1893,9 @@ export interface PlaceOnlineOrderPayload {
   items: Array<{ productId: string; quantity: number }>;
   fullName: string; phone: string; email?: string;
   addressLine: string; latitude?: number | null; longitude?: number | null; notes?: string;
+  // "cash" (default) or "myfatoorah" — the latter requires paymentReference (the InvoiceId from
+  // initiateOnlineCardPayment) and is re-verified server-side before the order is created.
+  paymentMethod?: string; paymentReference?: number;
 }
 
 // unitPrice here is the admin's override — omitting a line removes it from the order.

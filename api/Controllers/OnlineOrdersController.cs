@@ -21,7 +21,11 @@ public record UpdateOnlineOrderDeliveryFeeRequest(decimal Amount, string? Reason
 
 public record PlaceOnlineOrderRequest(
     List<OnlineOrderItemRequest> Items, string FullName, string Phone, string? Email,
-    string AddressLine, decimal? Latitude, decimal? Longitude, string? Notes);
+    string AddressLine, decimal? Latitude, decimal? Longitude, string? Notes,
+    // "cash" (default, Cash on Delivery) or "myfatoorah" — for the latter, PaymentReference must be
+    // the InvoiceId returned by InitiateOnlinePayment, and payment is re-verified server-side
+    // against MyFatoorah (see PlacePublicOrder) before the order is ever created.
+    string PaymentMethod = "cash", long? PaymentReference = null);
 
 public record UpdateOnlineOrderItemsRequest(List<OnlineOrderItemEdit> Items);
 public record OnlineOrderItemEdit(Guid? OrderItemId, Guid ProductId, decimal Quantity, decimal UnitPrice);
@@ -45,6 +49,7 @@ public class OnlineOrdersController(
     IAuditService audit,
     IBatchConsumptionService batchConsumption,
     INotificationService notifications,
+    IMyFatoorahServiceClient myFatoorah,
     ILogger<OnlineOrdersController> logger) : ControllerBase
 {
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -107,10 +112,14 @@ public class OnlineOrdersController(
         var companyProfile = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId);
         var logoDataUrl = companyProfile?.ShowLogoOnCustomerSlip == true ? companyProfile.LogoDataUrl : null;
 
+        var onlinePaymentEnabled = await db.PaymentIntegrations
+            .AnyAsync(p => p.BranchId == branchId && p.Provider == "MyFatoorah" && p.IsEnabled);
+
         return Ok(new
         {
             branchName = branch.Name,
             logoDataUrl,
+            onlinePaymentEnabled,
             products = stocks.Select(s =>
             {
                 var line = priceByProduct.GetValueOrDefault(s.ProductId);
@@ -176,6 +185,59 @@ public class OnlineOrdersController(
         });
     }
 
+    // Creates a MyFatoorah invoice for the shopper's cart, priced authoritatively server-side (the
+    // same pricing + deliverability + min/max checks PlacePublicOrder itself enforces) — never for
+    // whatever amount the client might claim. No Order row is created here; the checkout page opens
+    // the returned InvoiceUrl for the shopper to pay, polls GetOnlinePaymentStatus, and only calls
+    // PlacePublicOrder (with PaymentMethod="myfatoorah" + this InvoiceId) once MyFatoorah confirms
+    // it's Paid — see PlacePublicOrder's re-verification of that same invoice before it trusts it.
+    [AllowAnonymous]
+    [HttpPost("public/{branchId:guid}/card-payment")]
+    public async Task<IActionResult> InitiateOnlinePayment(Guid branchId, [FromBody] QuoteOnlineOrderRequest req)
+    {
+        var (branch, settings) = await ResolveOnlineOrderingBranchAsync(branchId);
+        if (branch is null || settings is null)
+            return NotFound(new { message = "Online ordering isn't available for this branch." });
+        if (req?.Items is not { Count: > 0 }) return BadRequest(new { message = "Your cart is empty." });
+
+        var enabled = await db.PaymentIntegrations
+            .AnyAsync(p => p.BranchId == branchId && p.Provider == "MyFatoorah" && p.IsEnabled);
+        if (!enabled) return BadRequest(new { message = "Online payment isn't available for this branch." });
+
+        var totals = await pricing.ComputeAsync(
+            branchId, req.Items.Select(i => (i.ProductId, i.Quantity)), req.Latitude, req.Longitude);
+        if (!totals.Delivery.IsServiceable)
+            return BadRequest(new { message = totals.Delivery.UnserviceableMessage ?? "This branch doesn't deliver to that address." });
+        if (totals.GoodsTotal < settings.OnlineOrderingMinOrderAmountSar)
+            return BadRequest(new { message = $"Minimum order amount is SAR {settings.OnlineOrderingMinOrderAmountSar:F2}." });
+        if (totals.GoodsTotal > settings.OnlineOrderingMaxOrderValueSar)
+            return BadRequest(new { message = $"This order exceeds the maximum of SAR {settings.OnlineOrderingMaxOrderValueSar:F2} — please contact the branch directly." });
+
+        var (success, invoice, error) = await myFatoorah.SendPaymentAsync(
+            totals.TotalAmount, "Online Customer", customerReference: null, HttpContext.RequestAborted);
+        if (!success || invoice is null)
+            return StatusCode(502, new { message = error ?? "Could not reach the payment gateway." });
+
+        return Ok(new { invoiceId = invoice.InvoiceId, invoiceUrl = invoice.InvoiceUrl, totalAmount = totals.TotalAmount });
+    }
+
+    [AllowAnonymous]
+    [HttpGet("public/card-payment/{invoiceId:long}/status")]
+    public async Task<IActionResult> GetOnlinePaymentStatus(long invoiceId)
+    {
+        var (success, status, error) = await myFatoorah.GetPaymentStatusAsync(invoiceId, HttpContext.RequestAborted);
+        if (!success || status is null)
+            return StatusCode(502, new { message = error ?? "Could not reach the payment gateway." });
+
+        var simplified = status.Status switch
+        {
+            "Paid" => "paid",
+            "Expired" or "Canceled" => "failed",
+            _ => "pending",
+        };
+        return Ok(new { status = simplified, rawStatus = status.Status });
+    }
+
     [AllowAnonymous]
     [HttpPost("public/{branchId:guid}")]
     public async Task<IActionResult> PlacePublicOrder(Guid branchId, [FromBody] PlaceOnlineOrderRequest req)
@@ -231,6 +293,29 @@ public class OnlineOrdersController(
         if (totals.GoodsTotal > settings.OnlineOrderingMaxOrderValueSar)
             return BadRequest(new { message = $"This order exceeds the maximum of SAR {settings.OnlineOrderingMaxOrderValueSar:F2} — please contact the branch directly." });
 
+        // For a MyFatoorah-paid order, re-verify the payment server-side against MyFatoorah itself
+        // before ever creating the order — this endpoint is fully anonymous, so a client claiming
+        // PaymentMethod="myfatoorah" is never trusted on its own. Both that the invoice is actually
+        // Paid AND that it was raised for (approximately) this same total are checked, since prices
+        // can in principle have shifted between InitiateOnlinePayment and now.
+        if (req.PaymentMethod == "myfatoorah")
+        {
+            if (req.PaymentReference is not { } invoiceId)
+                return BadRequest(new { message = "Missing payment reference." });
+
+            var (success, status, error) = await myFatoorah.GetPaymentStatusAsync(invoiceId, HttpContext.RequestAborted);
+            if (!success || status is null)
+                return StatusCode(502, new { message = error ?? "Could not verify payment with the payment gateway." });
+            if (status.Status != "Paid")
+                return BadRequest(new { message = "Payment hasn't been completed yet." });
+            if (Math.Abs(status.InvoiceValue - totals.TotalAmount) > 0.01m)
+                return BadRequest(new { message = "Payment amount doesn't match the order total — please try again." });
+        }
+        else if (req.PaymentMethod != "cash")
+        {
+            return BadRequest(new { message = $"Unsupported payment method '{req.PaymentMethod}'." });
+        }
+
         // Combine paid + bonus quantities per product — a bogo/buy_a_get_b offer can add a bonus
         // line for a product the customer never directly requested (or add more of the SAME
         // product, e.g. "buy 3 get 1 free"), and availability/reservation both need to happen
@@ -268,7 +353,9 @@ public class OnlineOrdersController(
             CustomFeeAmount = totals.CustomFeeAmount,
             DeliveryFeeAmount = totals.Delivery.Amount,
             TotalAmount = totals.TotalAmount,
-            PaymentStatus = "pending",
+            // Cash on Delivery still settles at Deliver() (see below); a MyFatoorah order is already
+            // paid in full by the time it's placed — verified just above — so it's paid from the start.
+            PaymentStatus = req.PaymentMethod == "myfatoorah" ? "paid" : "pending",
             OrderStatus = "pending",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -296,6 +383,15 @@ public class OnlineOrdersController(
             });
         }
         db.Orders.Add(order);
+        if (req.PaymentMethod == "myfatoorah")
+        {
+            db.OrderPayments.Add(new OrderPayment
+            {
+                Id = Guid.NewGuid(), OrderId = order.Id, PaymentMethod = "card",
+                Amount = order.TotalAmount, Status = "completed",
+                ReferenceNumber = req.PaymentReference!.Value.ToString(), CreatedAt = DateTime.UtcNow,
+            });
+        }
         db.OrderDeliveryDetails.Add(new OrderDeliveryDetail
         {
             OrderId = order.Id,
@@ -565,21 +661,27 @@ public class OnlineOrdersController(
         if (order is null) return NotFound(new { message = "Online order not found." });
         if (order.OrderStatus != "pending") return BadRequest(new { message = "Only a pending order can be approved." });
 
-        // Cash on Delivery is the only option today — validated explicitly (rather than trusting
-        // whatever the client sends) so a new method can be added later purely by extending this
-        // check and the frontend dropdown, with no other backend change.
-        if (req.PaymentMethod != "cash")
-            return BadRequest(new { message = "Only Cash on Delivery is supported today." });
+        // A MyFatoorah order is already paid in full at placement time (see PlacePublicOrder) —
+        // there's no payment method left for staff to decide here, just fulfillment. Cash on
+        // Delivery is still the only method staff themselves choose at this step — validated
+        // explicitly (rather than trusting whatever the client sends) so a new method can be added
+        // later purely by extending this check and the frontend dropdown, with no other backend change.
+        if (order.PaymentStatus != "paid")
+        {
+            if (req.PaymentMethod != "cash")
+                return BadRequest(new { message = "Only Cash on Delivery is supported today." });
+
+            db.OrderPayments.Add(new OrderPayment
+            {
+                Id = Guid.NewGuid(), OrderId = order.Id, PaymentMethod = "cash",
+                Amount = order.TotalAmount, Status = "pending", CreatedAt = DateTime.UtcNow,
+            });
+        }
 
         order.OrderStatus = "ready_to_deliver";
         order.ApprovedBy = CallerId();
         order.ApprovedAt = DateTime.UtcNow;
         order.UpdatedAt = DateTime.UtcNow;
-        db.OrderPayments.Add(new OrderPayment
-        {
-            Id = Guid.NewGuid(), OrderId = order.Id, PaymentMethod = "cash",
-            Amount = order.TotalAmount, Status = "pending", CreatedAt = DateTime.UtcNow,
-        });
         await db.SaveChangesAsync();
 
         var (_, callerBranchId) = GetCallerContext();

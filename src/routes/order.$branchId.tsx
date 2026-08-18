@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import {
   Loader2, ShoppingCart, Plus, Minus, Search, Store, CheckCircle2, ArrowLeft, Trash2, MapPin,
-  User, Phone, Mail, StickyNote, PackageCheck, AlertCircle, CircleCheck,
+  User, Phone, Mail, StickyNote, PackageCheck, AlertCircle, CircleCheck, Banknote, CreditCard,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { api, type OnlineOrderCatalog, type OnlineOrderCatalogProduct, type OnlineOrderQuote } from "@/lib/api";
 import { SARIcon } from "@/lib/currency";
 import { AddressMapPicker } from "@/components/address-map-picker";
@@ -215,7 +216,21 @@ function PublicOrderPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmation, setConfirmation] = useState<{ orderNumber: string; totalAmount: number } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ orderNumber: string; totalAmount: number; paymentMethod: "cash" | "myfatoorah" } | null>(null);
+
+  // "cash" (Cash on Delivery) or "myfatoorah" (Pay Online) — only offered when the branch has
+  // enabled MyFatoorah (catalog.onlinePaymentEnabled). See handlePlaceOrder for how the latter
+  // creates a MyFatoorah invoice, shows it as a QR/popup, and polls before ever placing the order.
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "myfatoorah">("cash");
+  const [payPhase, setPayPhase] = useState<"form" | "paying">("form");
+  const [payInvoiceUrl, setPayInvoiceUrl] = useState<string | null>(null);
+  const [payPopupBlocked, setPayPopupBlocked] = useState(false);
+  const payPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopPayPolling = () => {
+    if (payPollRef.current) clearInterval(payPollRef.current);
+    payPollRef.current = null;
+  };
+  useEffect(() => () => stopPayPolling(), []);
 
   const [quote, setQuote] = useState<OnlineOrderQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -299,6 +314,35 @@ function PublicOrderPage() {
 
   const markTouched = (field: keyof FormErrors) => setTouched(prev => ({ ...prev, [field]: true }));
 
+  // Creates a MyFatoorah invoice for the cart (priced server-side), opens its checkout in a popup
+  // (MyFatoorah's hosted page sends X-Frame-Options: SAMEORIGIN so it can't be embedded directly —
+  // same constraint as the POS integration), and polls until MyFatoorah reports it Paid. The QR
+  // code stays visible as a fallback for a blocked popup or a shopper who'd rather use their phone.
+  const runOnlineCardPayment = async (): Promise<number> => {
+    const items = cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty }));
+    const { invoiceId, invoiceUrl } = await api.initiateOnlineCardPayment(branchId, items, { latitude, longitude });
+    setPayInvoiceUrl(invoiceUrl);
+    const popup = window.open(invoiceUrl, "myfatoorah-payment", "width=480,height=760");
+    setPayPopupBlocked(!popup);
+
+    return new Promise<number>((resolve, reject) => {
+      payPollRef.current = setInterval(async () => {
+        try {
+          const { status } = await api.getOnlineCardPaymentStatus(invoiceId);
+          if (status === "paid") {
+            stopPayPolling();
+            resolve(invoiceId);
+          } else if (status === "failed") {
+            stopPayPolling();
+            reject(new Error("Payment expired or was cancelled."));
+          }
+        } catch {
+          // Transient network hiccup — keep polling rather than failing on one blip.
+        }
+      }, 3000);
+    });
+  };
+
   const handlePlaceOrder = async () => {
     setTouched({ fullName: true, phone: true, email: true, addressLine: true });
     if (hasErrors) return;
@@ -311,6 +355,11 @@ function PublicOrderPage() {
     setSubmitting(true);
     setError(null);
     try {
+      let paymentReference: number | undefined;
+      if (paymentMethod === "myfatoorah") {
+        setPayPhase("paying");
+        paymentReference = await runOnlineCardPayment();
+      }
       const result = await api.placeOnlineOrder(branchId, {
         items: cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty })),
         fullName: fullName.trim(),
@@ -319,11 +368,15 @@ function PublicOrderPage() {
         addressLine: addressLine.trim(),
         latitude, longitude,
         notes: notes.trim() || undefined,
+        paymentMethod,
+        paymentReference,
       });
-      setConfirmation(result);
+      setConfirmation({ ...result, paymentMethod });
       setStep("confirmation");
       setCart({});
     } catch (e: unknown) {
+      stopPayPolling();
+      setPayPhase("form");
       setError(e instanceof Error ? e.message : "Couldn't place your order — please try again.");
     } finally {
       setSubmitting(false);
@@ -386,7 +439,9 @@ function PublicOrderPage() {
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t("Payment")}</span>
-              <span className="font-medium">{t("Cash on Delivery")}</span>
+              <span className="font-medium">
+                {confirmation.paymentMethod === "myfatoorah" ? t("Paid online") : t("Cash on Delivery")}
+              </span>
             </div>
           </div>
           <Button
@@ -421,7 +476,7 @@ function PublicOrderPage() {
             </div>
             <div className="min-w-0">
               <p className="font-semibold truncate leading-tight">{catalog.branchName}</p>
-              <p className="text-xs text-muted-foreground">{step === "checkout" ? t("Delivery details") : `${t("Order online")} · ${t("Cash on Delivery")}`}</p>
+              <p className="text-xs text-muted-foreground">{step === "checkout" ? t("Delivery details") : t("Order online")}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -544,6 +599,38 @@ function PublicOrderPage() {
 
         {step === "checkout" && (
           <div className="space-y-4 max-w-md mx-auto">
+          {payPhase === "paying" ? (
+            <Card className="p-6 space-y-4 border-border/60 shadow-card text-center">
+              <p className="text-sm font-semibold">{t("Complete your payment")}</p>
+              <p className="text-xs text-muted-foreground">
+                {t("A payment window opened for")} <SARIcon />{(quote?.totalAmount ?? cartTotal).toFixed(2)} — {t("or scan this QR code with your phone.")}
+              </p>
+              {payPopupBlocked && (
+                <p className="text-xs text-destructive">
+                  {t("Your browser blocked the payment popup — use the link or QR code below.")}
+                </p>
+              )}
+              {payInvoiceUrl && (
+                <div className="flex flex-col items-center gap-2">
+                  <QRCodeSVG value={payInvoiceUrl} size={160} level="M" />
+                  <a href={payInvoiceUrl} target="_blank" rel="noreferrer" className="text-xs text-primary underline">
+                    {t("Open payment link")}
+                  </a>
+                </div>
+              )}
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("Waiting for payment…")}
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => { stopPayPolling(); setPayPhase("form"); setSubmitting(false); }}
+              >
+                {t("Cancel")}
+              </Button>
+            </Card>
+          ) : (
+          <>
             <Card className="p-4 space-y-3 border-border/60 shadow-card">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("Your details")}</p>
               <div className="space-y-1.5">
@@ -604,12 +691,40 @@ function PublicOrderPage() {
               </div>
             </Card>
 
+            {catalog.onlinePaymentEnabled && (
+              <Card className="p-4 space-y-2 border-border/60 shadow-card">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("Payment method")}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={paymentMethod === "cash" ? "default" : "outline"}
+                    className={paymentMethod === "cash" ? "gradient-primary text-primary-foreground border-0" : ""}
+                    onClick={() => setPaymentMethod("cash")}
+                  >
+                    <Banknote className="h-3.5 w-3.5 mr-1.5" /> {t("Cash on Delivery")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={paymentMethod === "myfatoorah" ? "default" : "outline"}
+                    className={paymentMethod === "myfatoorah" ? "gradient-primary text-primary-foreground border-0" : ""}
+                    onClick={() => setPaymentMethod("myfatoorah")}
+                  >
+                    <CreditCard className="h-3.5 w-3.5 mr-1.5" /> {t("Pay Online")}
+                  </Button>
+                </div>
+              </Card>
+            )}
+
             <Card className="p-4 space-y-2 border-border/60 shadow-card">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <PackageCheck className="h-3.5 w-3.5" /> {t("Order summary")}
               </p>
               <QuoteBreakdown quote={quote} quoteLoading={quoteLoading} cartItems={cartItems} products={products} cartTotal={cartTotal} t={t} />
-              <p className="text-[11px] text-muted-foreground">{t("Payment: Cash on Delivery. Final total is confirmed by the store.")}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {paymentMethod === "myfatoorah"
+                  ? t("Payment: Pay online now via MyFatoorah (Apple Pay, Google Pay, mada, or card).")
+                  : t("Payment: Cash on Delivery. Final total is confirmed by the store.")}
+              </p>
             </Card>
 
             {error && (
@@ -627,6 +742,8 @@ function PublicOrderPage() {
             {hasErrors && Object.values(touched).some(Boolean) && (
               <p className="text-xs text-muted-foreground text-center">{t("Fix the highlighted fields above to continue.")}</p>
             )}
+          </>
+          )}
           </div>
         )}
       </div>

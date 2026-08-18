@@ -86,6 +86,7 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<BaqalaDbContext>();
 builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
 builder.Services.AddHttpClient<ITenantGatewayClient, TenantGatewayClient>();
+builder.Services.AddHttpClient<IMyFatoorahServiceClient, MyFatoorahServiceClient>();
 builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
 builder.Services.AddScoped<IZatcaService, ZatcaService>();
 
