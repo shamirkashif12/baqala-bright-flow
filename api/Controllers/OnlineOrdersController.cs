@@ -223,8 +223,11 @@ public class OnlineOrdersController(
         if (totals.GoodsTotal > settings.OnlineOrderingMaxOrderValueSar)
             return BadRequest(new { message = $"This order exceeds the maximum of SAR {settings.OnlineOrderingMaxOrderValueSar:F2} — please contact the branch directly." });
 
+        // The reference is the currency-proof binding PlacePublicOrder verifies against — see
+        // MyFatoorahOrderReference. Not a client input: computed here from the server's own total.
+        var reference = new MyFatoorahOrderReference(branchId, totals.TotalAmount).ToString();
         var (success, invoice, error) = await myFatoorah.SendPaymentAsync(
-            account, totals.TotalAmount, "Online Customer", customerReference: null, HttpContext.RequestAborted);
+            account, totals.TotalAmount, "Online Customer", reference, HttpContext.RequestAborted);
         if (!success || invoice is null)
             return StatusCode(502, new { message = error ?? "Could not reach the payment gateway." });
 
@@ -328,7 +331,19 @@ public class OnlineOrdersController(
                 return StatusCode(502, new { message = error ?? "Could not verify payment with the payment gateway." });
             if (status.Status != "Paid")
                 return BadRequest(new { message = "Payment hasn't been completed yet." });
-            if (Math.Abs(status.InvoiceValue - totals.TotalAmount) > 0.01m)
+
+            // Amount + branch check via the CustomerReference this app stamped at InitiateOnlinePayment
+            // — NOT via InvoiceValue, which MyFatoorah reports in the account's base currency (a KWD
+            // account shows a "37.200 SR" invoice as InvoiceValue 3.012), so comparing it to a SAR
+            // total only works by accident when the account happens to be SAR-based. The reference
+            // also pins the invoice to this branch, so an invoice paid on branch A can't place an
+            // order on branch B.
+            var reference = MyFatoorahOrderReference.Parse(status.CustomerReference);
+            if (reference is null)
+                return BadRequest(new { message = "This payment wasn't created for an online order here — please pay again." });
+            if (reference.BranchId != branchId)
+                return BadRequest(new { message = "This payment belongs to a different branch." });
+            if (Math.Abs(reference.AmountSar - totals.TotalAmount) > 0.01m)
                 return BadRequest(new { message = "Payment amount doesn't match the order total — please try again." });
 
             // One paid invoice, one order. MyFatoorah reports "Paid" for that InvoiceId forever,

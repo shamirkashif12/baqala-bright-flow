@@ -4,7 +4,35 @@ using System.Text.Json;
 namespace BaqalaPOS.Api.Services;
 
 public record MyFatoorahInvoice(long InvoiceId, string InvoiceUrl);
-public record MyFatoorahInvoiceStatus(string Status, decimal InvoiceValue);
+
+/// InvoiceValue is in the MyFatoorah ACCOUNT's base currency, not the invoice's display currency
+/// (a KWD-based account raising a "37.200 SR" invoice reports InvoiceValue 3.012) — so it is not
+/// safe to compare against a SAR order total. CustomerReference is whatever SendPaymentAsync
+/// stamped on the invoice, echoed back verbatim; that's what PlacePublicOrder verifies against.
+public record MyFatoorahInvoiceStatus(string Status, decimal InvoiceValue, string? CustomerReference, string? InvoiceDisplayValue);
+
+/// What this app stamps into MyFatoorah's CustomerReference when raising an invoice for an online
+/// order, and reads back from GetPaymentStatus to verify the payment before creating the order —
+/// currency-independent proof that THIS branch raised THIS invoice for THIS SAR total, which
+/// InvoiceValue can't give (see MyFatoorahInvoiceStatus). Format: "mart:{branchId:N}:{amount:F2}".
+public sealed record MyFatoorahOrderReference(Guid BranchId, decimal AmountSar)
+{
+    private const string Prefix = "mart:";
+
+    public override string ToString() =>
+        $"{Prefix}{BranchId:N}:{AmountSar.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}";
+
+    public static MyFatoorahOrderReference? Parse(string? reference)
+    {
+        if (reference is null || !reference.StartsWith(Prefix, StringComparison.Ordinal)) return null;
+        var parts = reference[Prefix.Length..].Split(':');
+        if (parts.Length != 2 ||
+            !Guid.TryParseExact(parts[0], "N", out var branchId) ||
+            !decimal.TryParse(parts[1], System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var amount))
+            return null;
+        return new MyFatoorahOrderReference(branchId, amount);
+    }
+}
 
 /// A branch's own MyFatoorah account, as saved from Admin → Payments → MyFatoorah (the
 /// PaymentIntegration row's ConfigJson: "apiKey" + "environment", see the MyFatoorah entry in
@@ -57,8 +85,11 @@ public interface IMyFatoorahServiceClient
 //                                   :5300). Pointing straight at ":5300" (no prefix) also works.
 //   MyFatoorahService:SecretKey   — a Clients.SecretKey row in the middleware's myfatoorah_service
 //                                   DB (must be a DEV or PROD client — a TEST client is always mocked).
-//   MyFatoorahService:CurrencyIso — optional, defaults to SAR (this is a KSA app; every price and
-//                                   the amount-match check in PlacePublicOrder are in SAR).
+//   MyFatoorahService:CurrencyIso — optional, defaults to SAR: the invoice's DISPLAY currency (what
+//                                   the shopper sees). Amounts are always this app's SAR totals, so
+//                                   leave it SAR even for a KWD-settled demo account — MyFatoorah
+//                                   converts at payment; setting KWD here would charge SAR figures
+//                                   as KWD (~13x).
 //   MyFatoorahService:SandboxApiBaseUrl / LiveApiBaseUrl — optional; MyFatoorah's own hosts that a
 //                                   branch's Test / Live token belongs to. Defaults below: the one
 //                                   global sandbox host, and MyFatoorah's Saudi live host (their
@@ -71,9 +102,10 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
     public async Task<(bool, MyFatoorahInvoice?, string?)> SendPaymentAsync(
         MyFatoorahMerchantAccount? account, decimal amount, string customerName, string? customerReference, CancellationToken cancellationToken)
     {
-        // SAR, not MyFatoorah's KWD default: the invoice is raised for a SAR total and
-        // PlacePublicOrder compares GetPaymentStatus's InvoiceValue (reported in the invoice's
-        // display currency) against that same SAR total — any other currency fails that check.
+        // Display currency of the invoice the shopper sees ("37.200 SR"), SAR by default since
+        // every amount here is SAR. The MyFatoorah account may settle in another currency (a KWD
+        // demo account converts at payment time) — that's fine, nothing downstream depends on it:
+        // PlacePublicOrder verifies the payment via the CustomerReference stamp, not the currency.
         var currency = config["MyFatoorahService:CurrencyIso"] ?? "SAR";
         var body = JsonSerializer.Serialize(new
         {
@@ -120,7 +152,9 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
         var data = root.GetProperty("Data");
         var status = new MyFatoorahInvoiceStatus(
             data.GetProperty("InvoiceStatus").GetString()!,
-            data.GetProperty("InvoiceValue").GetDecimal());
+            data.GetProperty("InvoiceValue").GetDecimal(),
+            data.TryGetProperty("CustomerReference", out var cr) && cr.ValueKind == JsonValueKind.String ? cr.GetString() : null,
+            data.TryGetProperty("InvoiceDisplayValue", out var dv) && dv.ValueKind == JsonValueKind.String ? dv.GetString() : null);
         return (true, status, null);
     }
 
