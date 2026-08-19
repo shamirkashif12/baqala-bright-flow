@@ -61,6 +61,7 @@ public class OnlineOrdersController(
     // ── Public, unauthenticated ────────────────────────────────────────────
 
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-public")]
     [HttpGet("public/{branchId:guid}/catalog")]
     public async Task<IActionResult> GetPublicCatalog(Guid branchId)
     {
@@ -140,6 +141,7 @@ public class OnlineOrdersController(
     // IOnlineOrderPricingService's own doc comment); without this the cart summary could only ever
     // show a naive unitPrice*qty guess with no visibility into fees until after the order is placed.
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-public")]
     [HttpPost("public/{branchId:guid}/quote")]
     public async Task<IActionResult> QuotePublicOrder(Guid branchId, [FromBody] QuoteOnlineOrderRequest req)
     {
@@ -183,6 +185,7 @@ public class OnlineOrdersController(
     // card, and OnlinePaymentReconcilerService finishes any payment whose browser went away.
 
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-payment")]
     [HttpPost("public/{branchId:guid}/card-payment")]
     public async Task<IActionResult> InitiateOnlinePayment(Guid branchId, [FromBody] PlaceOnlineOrderRequest req)
     {
@@ -195,6 +198,7 @@ public class OnlineOrdersController(
     // Branch-scoped because the lookup is made on the branch's own MyFatoorah account (the one
     // the invoice was raised on) and answered only for invoices this app recorded for that branch.
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-public")]
     [HttpGet("public/{branchId:guid}/card-payment/{invoiceId:long}/status")]
     public async Task<IActionResult> GetOnlinePaymentStatus(Guid branchId, long invoiceId)
     {
@@ -205,6 +209,7 @@ public class OnlineOrdersController(
     }
 
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-payment")]
     [HttpPost("public/{branchId:guid}")]
     public async Task<IActionResult> PlacePublicOrder(Guid branchId, [FromBody] PlaceOnlineOrderRequest req)
     {

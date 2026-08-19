@@ -58,6 +58,7 @@ public class OnlineCheckoutService(
     IMyFatoorahServiceClient myFatoorah,
     INotificationService notifications,
     IAuditService audit,
+    IPaymentIntegrationSecrets secrets,
     ILogger<OnlineCheckoutService> logger) : IOnlineCheckoutService
 {
     private static readonly string[] StaffRoles = ["Manager", "Admin"];
@@ -95,7 +96,7 @@ public class OnlineCheckoutService(
     {
         var row = await db.PaymentIntegrations.AsNoTracking()
             .FirstOrDefaultAsync(p => p.BranchId == branchId && p.Provider == "MyFatoorah" && p.IsEnabled, ct);
-        return row is null ? null : MyFatoorahMerchantAccount.FromConfigJson(row.ConfigJson);
+        return row is null ? null : MyFatoorahMerchantAccount.FromConfigJson(row.ConfigJson, secrets.Unprotect);
     }
 
     /// Prices the cart and applies the branch's serviceability + min/max gates. Shared by invoice
@@ -362,6 +363,14 @@ public class OnlineCheckoutService(
         await db.SaveChangesAsync(ct);
         logger.LogWarning("Online payment {InvoiceId} (branch {BranchId}) is paid but its order could not be created: {Reason}",
             payment.GatewayInvoiceId, payment.BranchId, reason);
+        // Audit trail for disputes ("I paid and got nothing") — one row per failed attempt, tied
+        // to the payment record, so the sequence of what was tried and why is reconstructible.
+        if (payment.Status == "paid")
+        {
+            await audit.LogAsync("Online payment without order", entityType: "OnlinePayment", entityId: payment.Id,
+                branchId: payment.BranchId, severity: "warning",
+                details: $"MyFatoorah invoice {payment.GatewayInvoiceId} · SAR {payment.AmountSar:F2} · attempt {payment.PlacementAttempts}: {reason}");
+        }
 
         // Tell staff once, the first time — a paid payment with no order is a customer waiting
         // for food that nobody knows about. Best-effort, like every notification call site.
@@ -499,6 +508,15 @@ public class OnlineCheckoutService(
             return CheckoutResult<PlacedOrder>.Success(new PlacedOrder(winner.Id, winner.OrderNumber, winner.TotalAmount));
         }
 
+        if (payment is not null)
+        {
+            // The one line that ties money to order in the audit log: invoice, MyFatoorah payment
+            // id, amount, order number.
+            await audit.LogAsync("Online payment verified · order created", entityType: "Order", entityId: order.Id,
+                branchId: branchId,
+                details: $"MyFatoorah invoice {payment.GatewayInvoiceId} (payment {payment.GatewayPaymentId ?? "?"}) · SAR {order.TotalAmount:F2} · {order.OrderNumber}");
+        }
+
         // Tell the branch an order is waiting. This is the only event in the system with nobody
         // present when it happens — an online order arrives while the shop is doing something
         // else, and it sits at "pending" until a human approves it. Best-effort: a failure here
@@ -533,7 +551,7 @@ public class OnlineCheckoutService(
         // Online off must still be able to refund what was paid while it was on.
         var row = await db.PaymentIntegrations.AsNoTracking()
             .FirstOrDefaultAsync(p => p.BranchId == payment.BranchId && p.Provider == "MyFatoorah", ct);
-        var account = row is null ? null : MyFatoorahMerchantAccount.FromConfigJson(row.ConfigJson);
+        var account = row is null ? null : MyFatoorahMerchantAccount.FromConfigJson(row.ConfigJson, secrets.Unprotect);
         if (account is null)
             return CheckoutResult<MyFatoorahRefund>.Fail(400, "This branch has no MyFatoorah account configured to refund from.");
 

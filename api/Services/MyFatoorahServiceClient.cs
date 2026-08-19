@@ -49,14 +49,16 @@ public sealed record MyFatoorahMerchantAccount(string ApiToken, bool IsLive)
 {
     /// Parses the saved ConfigJson. Returns null when no usable token is stored — the client then
     /// sends no override headers and the middleware falls back to its own shared credentials,
-    /// which is what pre-existing rows saved before this field mattered get.
-    public static MyFatoorahMerchantAccount? FromConfigJson(string? configJson)
+    /// which is what pre-existing rows saved before this field mattered get. `unprotect` decrypts
+    /// the at-rest-encrypted token (IPaymentIntegrationSecrets.Unprotect) — legacy plaintext rows
+    /// pass through it unchanged.
+    public static MyFatoorahMerchantAccount? FromConfigJson(string? configJson, Func<string?, string?> unprotect)
     {
         if (string.IsNullOrWhiteSpace(configJson)) return null;
         Dictionary<string, string?>? config;
         try { config = JsonSerializer.Deserialize<Dictionary<string, string?>>(configJson); }
         catch (JsonException) { return null; }
-        var token = config?.GetValueOrDefault("apiKey")?.Trim();
+        var token = unprotect(config?.GetValueOrDefault("apiKey"))?.Trim();
         if (string.IsNullOrEmpty(token)) return null;
         var environment = config!.GetValueOrDefault("environment")?.Trim();
         var isLive = string.Equals(environment, "live", StringComparison.OrdinalIgnoreCase) ||

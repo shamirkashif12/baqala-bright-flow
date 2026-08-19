@@ -10,7 +10,7 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/payment-integrations")]
-public class PaymentIntegrationsController(BaqalaDbContext db, IAuditService audit) : ControllerBase
+public class PaymentIntegrationsController(BaqalaDbContext db, IAuditService audit, IPaymentIntegrationSecrets secrets) : ControllerBase
 {
     // Server-side mirror of the frontend's provider catalog (src/lib/payment-integrations.ts) —
     // keeps GET returning one row per known provider even before it's ever been configured, and
@@ -52,6 +52,11 @@ public class PaymentIntegrationsController(BaqalaDbContext db, IAuditService aud
         var mergedConfig = new Dictionary<string, string?>(existingConfig);
         foreach (var (key, value) in request.Config)
             mergedConfig[key] = IsMaskedPlaceholder(value) ? existingConfig.GetValueOrDefault(key) : value;
+        // Secret fields are encrypted at rest (see PaymentIntegrationSecrets); Protect is a no-op
+        // on an already-protected value, so untouched (masked) fields and legacy plaintext rows
+        // both end up protected after this save.
+        foreach (var key in mergedConfig.Keys.ToList())
+            if (secrets.IsSecretField(key)) mergedConfig[key] = secrets.Protect(mergedConfig[key]);
 
         if (row is null)
         {
@@ -80,19 +85,16 @@ public class PaymentIntegrationsController(BaqalaDbContext db, IAuditService aud
 
     private static bool IsMaskedPlaceholder(string? value) => value != null && value.StartsWith("••••");
 
-    private static bool IsSecretField(string key) =>
-        key.Contains("key", StringComparison.OrdinalIgnoreCase) ||
-        key.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
-        key.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-        key.Contains("password", StringComparison.OrdinalIgnoreCase);
-
-    private static string? Mask(string key, string? value)
+    private string? Mask(string key, string? value)
     {
-        if (string.IsNullOrEmpty(value) || !IsSecretField(key)) return value;
-        return value.Length <= 4 ? "••••" : $"••••{value[^4..]}";
+        if (string.IsNullOrEmpty(value) || !secrets.IsSecretField(key)) return value;
+        // Decrypt first so the mask shows the real last four characters, never ciphertext.
+        var plain = secrets.Unprotect(value);
+        if (string.IsNullOrEmpty(plain)) return null;
+        return plain.Length <= 4 ? "••••" : $"••••{plain[^4..]}";
     }
 
-    private static PaymentIntegrationDto ToDto(string provider, PaymentIntegration? row)
+    private PaymentIntegrationDto ToDto(string provider, PaymentIntegration? row)
     {
         var config = ParseConfig(row?.ConfigJson);
         var masked = config.ToDictionary(kv => kv.Key, kv => Mask(kv.Key, kv.Value));

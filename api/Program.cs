@@ -90,6 +90,8 @@ builder.Services.AddHttpClient<IMyFatoorahServiceClient, MyFatoorahServiceClient
 // Online-order card checkout (invoice → status → order → refund) + the sweep that finishes
 // paid-but-unordered payments when the shopper's browser isn't around to.
 builder.Services.AddScoped<IOnlineCheckoutService, OnlineCheckoutService>();
+// Encrypts Admin → Payments credentials (MyFatoorah token etc.) at rest with the key ring above.
+builder.Services.AddSingleton<IPaymentIntegrationSecrets, PaymentIntegrationSecrets>();
 builder.Services.AddHostedService<OnlinePaymentReconcilerService>();
 builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
 builder.Services.AddScoped<IZatcaService, ZatcaService>();
@@ -167,6 +169,38 @@ builder.Services.AddAuthorization(options =>
     options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
         .Build();
+});
+
+// Per-IP rate limits for the anonymous online-ordering endpoints (OnlineOrdersController's
+// public/* routes) — the only unauthenticated write path in the app. Without these, a script
+// could raise thousands of MyFatoorah invoices on a merchant's account or hammer the payment
+// gateway through the status endpoint. Two policies, applied per endpoint with
+// [EnableRateLimiting]: "online-payment" for invoice creation (money-adjacent, cheap to abuse) and
+// "online-public" for catalog/quote/status (300 per min — real shoppers poll status every 3 s and
+// several may share one NAT address). Fixed windows per client IP; a rejected call gets a 429 with a
+// short JSON message the checkout page shows verbatim. When the API sits behind a reverse proxy
+// the client IP is whatever the proxy forwards — see the ForwardedHeaders note in the deployment
+// docs; without it every shopper shares the proxy's IP and one busy shop could rate-limit itself.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsync(
+            "{\"message\":\"Too many requests from your connection — please wait a moment and try again.\"}", ct);
+    };
+    static string ClientKey(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    options.AddPolicy("online-payment", ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        ClientKey(ctx), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20, Window = TimeSpan.FromMinutes(10), QueueLimit = 0,
+        }));
+    options.AddPolicy("online-public", ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        ClientKey(ctx), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 300, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+        }));
 });
 
 var app = builder.Build();
@@ -447,6 +481,7 @@ app.Use(async (context, next) =>
 });
 
 app.UseAuthorization();
+app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<BaqalaPOS.Api.Hubs.CustomerDisplayHub>("/hubs/customer-display");
 

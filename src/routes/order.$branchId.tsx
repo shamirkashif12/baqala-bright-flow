@@ -393,7 +393,16 @@ function PublicOrderPage() {
 
     return new Promise((resolve, reject) => {
       payCancelRef.current = () => reject(new PaymentCancelledError());
+      const startedAt = Date.now();
       payPollRef.current = setInterval(async () => {
+        // Don't poll forever: MyFatoorah invoices stay payable for days, but a shopper who has
+        // walked away shouldn't leave this tab hammering the status endpoint. After 20 minutes
+        // stop and explain — a payment made later still becomes an order server-side.
+        if (Date.now() - startedAt > 20 * 60_000) {
+          stopPayPolling();
+          reject(new Error(t("We stopped waiting for the payment. If you already paid, don't pay again — your order will still be created and the store will contact you. Otherwise, place the order again.")));
+          return;
+        }
         try {
           const s = await api.getOnlineCardPaymentStatus(branchId, invoiceId);
           if (attempt !== payAttemptRef.current) { stopPayPolling(); return; }
