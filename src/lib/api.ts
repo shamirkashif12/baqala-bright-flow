@@ -426,26 +426,34 @@ export const api = {
     request<{ orderNumber: string; totalAmount: number }>(`/api/online-orders/public/${branchId}`, {
       method: "POST", body: JSON.stringify(data),
     }),
-  // "Pay Online" at checkout — creates a MyFatoorah invoice priced from the server's own quote
-  // (never a client-supplied amount) and returns its payment link/QR. getOnlineCardPaymentStatus
-  // is then polled until MyFatoorah reports it paid, at which point placeOnlineOrder is called
-  // with paymentMethod:"myfatoorah" + this invoiceId — the backend re-verifies the payment before
-  // ever creating the order. See OnlineOrdersController.InitiateOnlinePayment/PlacePublicOrder.
-  initiateOnlineCardPayment: (
-    branchId: string,
-    items: Array<{ productId: string; quantity: number }>,
-    coords?: { latitude?: number | null; longitude?: number | null },
-  ) =>
+  // "Pay Online" at checkout — sends the WHOLE checkout (cart + delivery details, same payload as
+  // placeOnlineOrder) so the server can create a MyFatoorah invoice priced from its own quote AND
+  // keep a record of what was being bought. Returns the invoice's payment link/QR.
+  // getOnlineCardPaymentStatus is then polled; the first poll that finds it paid creates the order
+  // server-side and returns its orderNumber — no second "place order" call for card payments, and
+  // a shopper whose tab dies mid-payment still gets their order (server-side reconciler).
+  initiateOnlineCardPayment: (branchId: string, data: PlaceOnlineOrderPayload) =>
     request<{ invoiceId: number; invoiceUrl: string; totalAmount: number }>(
       `/api/online-orders/public/${branchId}/card-payment`,
-      { method: "POST", body: JSON.stringify({ items, latitude: coords?.latitude ?? null, longitude: coords?.longitude ?? null }) },
+      { method: "POST", body: JSON.stringify(data) },
     ),
   // Branch-scoped: the status is looked up on the branch's own MyFatoorah account (Admin →
-  // Payments), the same one the invoice was raised on.
+  // Payments), the same one the invoice was raised on. `orderNumber` is set once the order exists;
+  // "paid" without an orderNumber means the money was taken but the order couldn't be created
+  // (staff are notified and will place it or refund) — `problem` says why.
   getOnlineCardPaymentStatus: (branchId: string, invoiceId: number) =>
-    request<{ status: "paid" | "pending" | "failed"; rawStatus: string }>(
+    request<{ status: "paid" | "pending" | "failed"; rawStatus: string; orderNumber?: string | null; totalAmount?: number | null; problem?: string | null }>(
       `/api/online-orders/public/${branchId}/card-payment/${invoiceId}/status`,
     ),
+  // Staff: card payments MyFatoorah holds without a matching order here (see OnlinePayment).
+  getOnlinePaymentsNeedingAttention: (branchId?: string) =>
+    request<OnlinePaymentNeedingAttention[]>(`/api/online-orders/payments/attention${branchId ? `?branchId=${branchId}` : ""}`),
+  placeOrderFromOnlinePayment: (paymentId: string) =>
+    request<{ orderId: string; orderNumber: string; totalAmount: number }>(`/api/online-orders/payments/${paymentId}/place-order`, { method: "POST" }),
+  refundOnlinePayment: (paymentId: string, reason?: string) =>
+    request<{ refundId: number; refundReference?: string; status: string }>(`/api/online-orders/payments/${paymentId}/refund`, {
+      method: "POST", body: JSON.stringify({ reason }),
+    }),
   getOnlineOrdersPaged: (params: { branchId?: string[]; status?: string[]; page: number; pageSize: number }) =>
     request<{ total: number; page: number; pageSize: number; items: OnlineOrder[] }>(`/api/online-orders${toQuery(params)}`),
   updateOnlineOrderItems: (id: string, items: OnlineOrderItemEdit[]) =>
@@ -1898,6 +1906,16 @@ export interface PlaceOnlineOrderPayload {
   // "cash" (default) or "myfatoorah" — the latter requires paymentReference (the InvoiceId from
   // initiateOnlineCardPayment) and is re-verified server-side before the order is created.
   paymentMethod?: string; paymentReference?: number;
+}
+
+// A card payment MyFatoorah reports as paid whose order couldn't be created here — see
+// OnlinePayment on the API side. Staff either retry placing it (from the recorded checkout) or
+// refund it.
+export interface OnlinePaymentNeedingAttention {
+  id: string; branchId: string; branchName?: string;
+  invoiceId: number; invoiceUrl?: string; amountSar: number; paidAt?: string;
+  lastError?: string; placementAttempts: number;
+  customerName?: string; customerPhone?: string; itemCount: number;
 }
 
 // unitPrice here is the admin's override — omitting a line removes it from the order.

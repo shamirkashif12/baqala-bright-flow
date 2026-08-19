@@ -34,6 +34,15 @@ class PaymentCancelledError extends Error {
   constructor() { super("Payment cancelled."); this.name = "PaymentCancelledError"; }
 }
 
+// MyFatoorah took the payment but the server couldn't create the order (item ran out, price
+// moved…). Staff are notified server-side; the shopper must NOT pay again — handlePlaceOrder
+// turns this into a clear message carrying the invoice number they can quote.
+class PaymentReceivedNoOrderError extends Error {
+  constructor(public readonly invoiceId: number, public readonly problem: string | null) {
+    super("Payment received but the order could not be created."); this.name = "PaymentReceivedNoOrderError";
+  }
+}
+
 // Mirrors OnlineOrdersController.PlacePublicOrder's own re-validation exactly — this is a fully
 // anonymous endpoint, so the server never trusts these either, but matching the rules here means
 // a form that passes client-side always succeeds server-side too, instead of surprising the buyer
@@ -337,25 +346,38 @@ function PublicOrderPage() {
 
   const markTouched = (field: keyof FormErrors) => setTouched(prev => ({ ...prev, [field]: true }));
 
-  // Creates a MyFatoorah invoice for the cart (priced server-side), opens its checkout in a popup
-  // (MyFatoorah's hosted page sends X-Frame-Options: SAMEORIGIN so it can't be embedded directly —
-  // same constraint as the POS integration), and polls until MyFatoorah reports it Paid. The QR
-  // code stays visible as a fallback for a blocked popup or a shopper who'd rather use their phone.
+  // What the server needs to create the order — the same payload for cash and card. For card it
+  // is sent UP FRONT with the invoice request, so the server holds everything it needs to create
+  // the order the moment MyFatoorah reports the payment, with or without this tab still open.
+  const buildCheckoutPayload = () => ({
+    items: cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty })),
+    fullName: fullName.trim(),
+    phone: phone.trim(),
+    email: email.trim() || undefined,
+    addressLine: addressLine.trim(),
+    latitude, longitude,
+    notes: notes.trim() || undefined,
+  });
+
+  // Card payment: asks the server for a MyFatoorah invoice for this checkout, opens MyFatoorah's
+  // hosted page in the popup (it sends X-Frame-Options: SAMEORIGIN, so it can't be embedded) and
+  // polls until the server says the invoice is paid — at which point the server has ALREADY
+  // created the order and hands back its number. The QR code stays visible as a fallback for a
+  // blocked popup or a shopper who'd rather use their phone.
   //
   // `popup` is opened by the caller synchronously inside the click handler (see handlePlaceOrder)
   // and only pointed at the invoice here — browsers allow window.open during a user gesture but
   // block one that happens after an await, which is what used to trip the popup blocker.
-  const runOnlineCardPayment = async (popup: Window | null): Promise<number> => {
+  const runOnlineCardPayment = async (popup: Window | null): Promise<{ orderNumber: string; totalAmount: number }> => {
     const attempt = ++payAttemptRef.current;
     // Fresh attempt, fresh state: never show a previous attempt's invoice link/QR while this
     // one's invoice is still being created (that stale link is what got "re-opened" before).
     setPayInvoiceUrl(null);
     setPayPopupBlocked(!popup);
 
-    const items = cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty }));
     let invoiceId: number, invoiceUrl: string;
     try {
-      ({ invoiceId, invoiceUrl } = await api.initiateOnlineCardPayment(branchId, items, { latitude, longitude }));
+      ({ invoiceId, invoiceUrl } = await api.initiateOnlineCardPayment(branchId, buildCheckoutPayload()));
     } catch (e) {
       popup?.close();
       throw e;
@@ -369,16 +391,23 @@ function PublicOrderPage() {
     if (popup && !popup.closed) popup.location.href = invoiceUrl;
     else setPayPopupBlocked(true);
 
-    return new Promise<number>((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       payCancelRef.current = () => reject(new PaymentCancelledError());
       payPollRef.current = setInterval(async () => {
         try {
-          const { status } = await api.getOnlineCardPaymentStatus(branchId, invoiceId);
+          const s = await api.getOnlineCardPaymentStatus(branchId, invoiceId);
           if (attempt !== payAttemptRef.current) { stopPayPolling(); return; }
-          if (status === "paid") {
+          if (s.status === "paid") {
             stopPayPolling();
-            resolve(invoiceId);
-          } else if (status === "failed") {
+            if (s.orderNumber) {
+              resolve({ orderNumber: s.orderNumber, totalAmount: s.totalAmount ?? (quote?.totalAmount ?? cartTotal) });
+            } else {
+              // Money taken, order not created (e.g. an item ran out in the meantime). The store
+              // has been notified and will either place it by hand or refund — say so plainly,
+              // with the invoice number the shopper can quote.
+              reject(new PaymentReceivedNoOrderError(invoiceId, s.problem ?? null));
+            }
+          } else if (s.status === "failed") {
             stopPayPolling();
             reject(new Error("Payment expired or was cancelled."));
           }
@@ -401,7 +430,7 @@ function PublicOrderPage() {
     setSubmitting(true);
     setError(null);
     try {
-      let paymentReference: number | undefined;
+      let result: { orderNumber: string; totalAmount: number };
       if (paymentMethod === "myfatoorah") {
         // Open the payment window NOW, inside the click, while the browser still treats it as a
         // user gesture — it gets pointed at the invoice once the server has created it. A
@@ -409,19 +438,10 @@ function PublicOrderPage() {
         // up popups.
         const popup = window.open("", "myfatoorah-payment", "width=480,height=760");
         setPayPhase("paying");
-        paymentReference = await runOnlineCardPayment(popup);
+        result = await runOnlineCardPayment(popup);
+      } else {
+        result = await api.placeOnlineOrder(branchId, { ...buildCheckoutPayload(), paymentMethod: "cash" });
       }
-      const result = await api.placeOnlineOrder(branchId, {
-        items: cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty })),
-        fullName: fullName.trim(),
-        phone: phone.trim(),
-        email: email.trim() || undefined,
-        addressLine: addressLine.trim(),
-        latitude, longitude,
-        notes: notes.trim() || undefined,
-        paymentMethod,
-        paymentReference,
-      });
       setConfirmation({ ...result, paymentMethod });
       setStep("confirmation");
       setCart({});
@@ -434,8 +454,14 @@ function PublicOrderPage() {
       stopPayPolling();
       setPayPhase("form");
       setPayInvoiceUrl(null);
-      if (!(e instanceof PaymentCancelledError))
+      if (e instanceof PaymentReceivedNoOrderError) {
+        setError(
+          `${t("We received your payment")} (${t("ref.")} ${e.invoiceId})${e.problem ? ` — ${e.problem}` : ""}. ` +
+          t("The store has been notified and will confirm your order or refund you shortly. Please don't pay again."),
+        );
+      } else if (!(e instanceof PaymentCancelledError)) {
         setError(e instanceof Error ? e.message : "Couldn't place your order — please try again.");
+      }
     } finally {
       setSubmitting(false);
     }

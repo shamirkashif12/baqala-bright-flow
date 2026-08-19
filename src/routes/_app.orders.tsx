@@ -23,7 +23,7 @@ import {
   MapPin, Minus, Plus, Save, Phone, Mail,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Order, type OrderPayment, type Branch, type CustomerReturnItem, type Product, type OnlineOrder, type OnlineOrderItemEdit } from "@/lib/api";
+import { api, type Order, type OrderPayment, type Branch, type CustomerReturnItem, type Product, type OnlineOrder, type OnlineOrderItemEdit, type OnlinePaymentNeedingAttention } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/use-permission";
 import { useCompanyHeader } from "@/lib/use-company-header";
@@ -1532,7 +1532,11 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
   const [feeAmount, setFeeAmount] = useState(String(order.deliveryFeeAmount ?? 0));
   const [feeReason, setFeeReason] = useState("");
 
-  const editable = order.orderStatus === "pending";
+  const pending = order.orderStatus === "pending";
+  // A card-paid order's total is money already taken, so its lines/fee are frozen (the server
+  // refuses edits too) — staff can only approve it, or reject it, which refunds the customer.
+  const paidOnline = order.paymentStatus === "paid" || order.paymentStatus === "refunded";
+  const editable = pending && !paidOnline;
   const subtotal = items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
 
   const updateItem = (productId: string, patch: Partial<OnlineOrderItemEdit>) => {
@@ -1628,6 +1632,18 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
         <p className="font-mono text-sm font-bold text-primary">{order.orderNumber}</p>
         <SBadge status={order.orderStatus} />
       </div>
+
+      {paidOnline && (
+        <div className={`rounded-lg border px-3 py-2 text-xs flex items-center gap-2 ${
+          order.paymentStatus === "refunded" ? "border-warning/40 bg-warning/10" : "border-success/40 bg-success/10"}`}>
+          <CreditCard className="h-3.5 w-3.5 shrink-0" />
+          {order.paymentStatus === "refunded" ? (
+            <span><b>Refunded</b> — the online payment of <SARIcon />{order.totalAmount.toFixed(2)} was returned to the customer via MyFatoorah.</span>
+          ) : (
+            <span><b>Paid online</b> — <SARIcon />{order.totalAmount.toFixed(2)} received via MyFatoorah. Items and fees are locked; rejecting refunds the customer automatically.</span>
+          )}
+        </div>
+      )}
 
       {order.delivery && (
         <Card className="p-3 space-y-1.5 border-border/60">
@@ -1737,13 +1753,13 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
         <p className="text-xs text-destructive">Rejected: {order.rejectionReason}</p>
       )}
 
-      {editable && (
+      {pending && (
         <div className="flex gap-2">
           <Button className="flex-1 gradient-primary text-primary-foreground border-0" disabled={dirty} onClick={() => setApproving(true)}>
             Approve
           </Button>
           <Button variant="outline" className="flex-1 border-destructive/50 text-destructive" onClick={() => setRejecting(true)}>
-            Reject
+            {paidOnline ? "Reject & refund" : "Reject"}
           </Button>
         </div>
       )}
@@ -1757,7 +1773,11 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
         <DialogContent className="sm:max-w-sm">
           <DHeader><DTitle className="text-base">Approve order</DTitle></DHeader>
           <p className="text-sm text-muted-foreground">
-            Payment method: <span className="font-medium text-foreground">Cash on Delivery</span> (the only option available today).
+            {paidOnline ? (
+              <>Already <span className="font-medium text-foreground">paid online</span> — approving moves it to Ready to deliver.</>
+            ) : (
+              <>Payment method: <span className="font-medium text-foreground">Cash on Delivery</span> (the only option available today).</>
+            )}
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setApproving(false)} disabled={busy}>Cancel</Button>
@@ -1768,7 +1788,13 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
 
       <Dialog open={rejecting} onOpenChange={v => !busy && setRejecting(v)}>
         <DialogContent className="sm:max-w-sm">
-          <DHeader><DTitle className="text-base">Reject order</DTitle></DHeader>
+          <DHeader><DTitle className="text-base">{paidOnline ? "Reject order & refund" : "Reject order"}</DTitle></DHeader>
+          {paidOnline && (
+            <p className="text-sm text-muted-foreground">
+              The customer paid <span className="font-medium text-foreground"><SARIcon />{order.totalAmount.toFixed(2)}</span> online.
+              Rejecting refunds it in full through MyFatoorah first; if the refund fails, the order stays pending.
+            </p>
+          )}
           <Input value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Rejection reason (required)" className="h-9" />
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejecting(false)} disabled={busy}>Cancel</Button>
@@ -1816,6 +1842,128 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
   );
 }
 
+// Card payments MyFatoorah has taken whose order could not be created here (an item ran out
+// between paying and ordering, a price moved, the branch was switched off…). The money exists;
+// the order doesn't. Staff either place the order from what the shopper actually checked out
+// with, or refund. Hidden entirely when there's nothing to deal with — this is an exception
+// list, not a page section. Refreshes when the parent reloads and every minute on its own,
+// since the reconciler may add to (or clear) it without any user action.
+function PaymentsNeedingAttention({ branchId, canAct, refreshKey, onResolved }: {
+  branchId: string | null; canAct: boolean; refreshKey: number; onResolved: () => void;
+}) {
+  const [rows, setRows] = useState<OnlinePaymentNeedingAttention[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [refunding, setRefunding] = useState<OnlinePaymentNeedingAttention | null>(null);
+  const [refundReason, setRefundReason] = useState("");
+
+  const load = useCallback(() => {
+    api.getOnlinePaymentsNeedingAttention(branchId ?? undefined).then(setRows).catch(() => { /* keep last */ });
+  }, [branchId]);
+  useEffect(() => { load(); }, [load, refreshKey]);
+  useEffect(() => { const id = setInterval(load, 60_000); return () => clearInterval(id); }, [load]);
+
+  if (rows.length === 0) return null;
+
+  const placeOrder = async (p: OnlinePaymentNeedingAttention) => {
+    setBusyId(p.id);
+    try {
+      const r = await api.placeOrderFromOnlinePayment(p.id);
+      toast.success(`Order ${r.orderNumber} created for the paid invoice ${p.invoiceId}.`);
+      load(); onResolved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't create the order");
+    } finally { setBusyId(null); }
+  };
+
+  const refund = async () => {
+    if (!refunding) return;
+    setBusyId(refunding.id);
+    try {
+      const r = await api.refundOnlinePayment(refunding.id, refundReason.trim() || undefined);
+      toast.success(`Refund requested at MyFatoorah (ref ${r.refundReference ?? r.refundId}).`);
+      setRefunding(null); setRefundReason("");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Refund failed");
+    } finally { setBusyId(null); }
+  };
+
+  return (
+    <Card className="border-warning/50 bg-warning/5 shadow-card overflow-hidden">
+      <div className="px-4 py-3 border-b border-warning/30 flex items-center gap-2">
+        <CreditCard className="h-4 w-4 text-warning" />
+        <p className="text-sm font-semibold">Payments needing attention</p>
+        <span className="text-xs text-muted-foreground">— paid online, but no order could be created. Place the order or refund the customer.</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-start text-xs uppercase tracking-wider text-muted-foreground border-b border-border/60">
+              <th className="px-3 py-2 font-semibold">Paid</th>
+              <th className="px-3 py-2 font-semibold">Branch</th>
+              <th className="px-3 py-2 font-semibold">Customer</th>
+              <th className="px-3 py-2 font-semibold">Amount</th>
+              <th className="px-3 py-2 font-semibold">Why no order</th>
+              <th className="px-3 py-2 font-semibold w-56">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(p => (
+              <tr key={p.id} className="border-b border-border/40 last:border-0">
+                <td className="px-3 py-2 whitespace-nowrap text-xs">
+                  {p.paidAt ? new Date(p.paidAt).toLocaleString() : "—"}
+                  <div className="text-[10px] text-muted-foreground font-mono">inv {p.invoiceId}</div>
+                </td>
+                <td className="px-3 py-2 text-xs">{p.branchName ?? "—"}</td>
+                <td className="px-3 py-2 text-xs">
+                  {p.customerName ?? "—"}
+                  {p.customerPhone && <div className="text-muted-foreground">{p.customerPhone}</div>}
+                  <div className="text-[10px] text-muted-foreground">{p.itemCount} item{p.itemCount === 1 ? "" : "s"}</div>
+                </td>
+                <td className="px-3 py-2 tabular-nums font-semibold whitespace-nowrap"><SARIcon />{p.amountSar.toFixed(2)}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground max-w-[260px]">
+                  {p.lastError ?? "Not attempted yet"}
+                  {p.placementAttempts > 0 && <span className="ml-1 text-[10px]">({p.placementAttempts}×)</span>}
+                </td>
+                <td className="px-3 py-2">
+                  {canAct && (
+                    <div className="flex gap-1.5">
+                      <Button size="sm" className="h-7 text-xs" disabled={busyId === p.id} onClick={() => placeOrder(p)}>
+                        {busyId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Create order"}
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 text-xs border-destructive/50 text-destructive"
+                        disabled={busyId === p.id} onClick={() => { setRefunding(p); setRefundReason(""); }}>
+                        Refund
+                      </Button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Dialog open={!!refunding} onOpenChange={v => !busyId && !v && setRefunding(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DHeader><DTitle className="text-base">Refund online payment</DTitle></DHeader>
+          <p className="text-sm text-muted-foreground">
+            Returns <span className="font-medium text-foreground"><SARIcon />{refunding?.amountSar.toFixed(2)}</span> to the customer's card via
+            MyFatoorah (invoice {refunding?.invoiceId}). This can't be undone.
+          </p>
+          <Input value={refundReason} onChange={e => setRefundReason(e.target.value)} placeholder="Reason (optional)" className="h-9" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRefunding(null)} disabled={!!busyId}>Cancel</Button>
+            <Button variant="destructive" disabled={!!busyId} onClick={refund}>
+              {busyId ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refund"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
 function OnlineTab() {
   const { user, canViewModule } = useAuth();
   const { canApprove, canEdit } = usePermission("Online Orders");
@@ -1830,6 +1978,8 @@ function OnlineTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Bumped whenever the order list reloads so the "payments needing attention" panel re-checks too.
+  const [attentionKey, setAttentionKey] = useState(0);
 
   useEffect(() => { setPage(1); }, [status]);
 
@@ -1863,6 +2013,8 @@ function OnlineTab() {
   return (
     <div className="space-y-4">
       {loadError && <LoadErrorBanner onRetry={load} />}
+      <PaymentsNeedingAttention branchId={lockedBranchId} canAct={canApprove} refreshKey={attentionKey}
+        onResolved={() => { load(); setAttentionKey(k => k + 1); }} />
       <Tabs value={status} onValueChange={setStatus}>
         <TabsList>
           {ONLINE_STATUS_TABS.map(t => <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>)}

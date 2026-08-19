@@ -86,7 +86,11 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<BaqalaDbContext>();
 builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
 builder.Services.AddHttpClient<ITenantGatewayClient, TenantGatewayClient>();
-builder.Services.AddHttpClient<IMyFatoorahServiceClient, MyFatoorahServiceClient>();
+builder.Services.AddHttpClient<IMyFatoorahServiceClient, MyFatoorahServiceClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
+// Online-order card checkout (invoice → status → order → refund) + the sweep that finishes
+// paid-but-unordered payments when the shopper's browser isn't around to.
+builder.Services.AddScoped<IOnlineCheckoutService, OnlineCheckoutService>();
+builder.Services.AddHostedService<OnlinePaymentReconcilerService>();
 builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
 builder.Services.AddScoped<IZatcaService, ZatcaService>();
 

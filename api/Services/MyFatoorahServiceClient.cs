@@ -9,7 +9,13 @@ public record MyFatoorahInvoice(long InvoiceId, string InvoiceUrl);
 /// (a KWD-based account raising a "37.200 SR" invoice reports InvoiceValue 3.012) — so it is not
 /// safe to compare against a SAR order total. CustomerReference is whatever SendPaymentAsync
 /// stamped on the invoice, echoed back verbatim; that's what PlacePublicOrder verifies against.
-public record MyFatoorahInvoiceStatus(string Status, decimal InvoiceValue, string? CustomerReference, string? InvoiceDisplayValue);
+/// PaymentId is MyFatoorah's id of the successful transaction (null until paid) — the number on
+/// their settlement report and the key a refund can target.
+public record MyFatoorahInvoiceStatus(
+    string Status, decimal InvoiceValue, string? CustomerReference, string? InvoiceDisplayValue, string? PaymentId, string? AccountCurrency);
+
+/// Result of MakeRefund. Amount is what MyFatoorah accepted, in the ACCOUNT's currency.
+public record MyFatoorahRefund(long RefundId, string? RefundReference, decimal Amount);
 
 /// What this app stamps into MyFatoorah's CustomerReference when raising an invoice for an online
 /// order, and reads back from GetPaymentStatus to verify the payment before creating the order —
@@ -66,6 +72,12 @@ public interface IMyFatoorahServiceClient
 
     Task<(bool Success, MyFatoorahInvoiceStatus? Status, string? Error)> GetPaymentStatusAsync(
         MyFatoorahMerchantAccount? account, long invoiceId, CancellationToken cancellationToken);
+
+    /// Refunds `amountInAccountCurrency` of the invoice back to the shopper's original payment
+    /// method. MyFatoorah's MakeRefund takes the amount in the ACCOUNT's default currency (not the
+    /// invoice's display currency) — callers pass GetPaymentStatus's InvoiceValue for a full refund.
+    Task<(bool Success, MyFatoorahRefund? Refund, string? Error)> MakeRefundAsync(
+        MyFatoorahMerchantAccount? account, long invoiceId, decimal amountInAccountCurrency, string comment, CancellationToken cancellationToken);
 }
 
 // Calls the sibling MyFatoorah.Service microservice (finova-middleware-sme/dotnet-services/
@@ -150,12 +162,66 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
             return (false, null, ExtractMessage(raw) ?? "MyFatoorah declined the status request.");
 
         var data = root.GetProperty("Data");
+
+        // The successful transaction's PaymentId. MyFatoorah spells the success status "Succss"
+        // (their v2 typo is documented and stable) — accept the correct spelling too.
+        string? paymentId = null, accountCurrency = null;
+        if (data.TryGetProperty("InvoiceTransactions", out var txs) && txs.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var tx in txs.EnumerateArray())
+            {
+                // Every transaction row carries the account currency ("KD", "SR", ...) — the
+                // currency MakeRefund amounts are expressed in.
+                if (accountCurrency is null && tx.TryGetProperty("Currency", out var cur) && cur.ValueKind == JsonValueKind.String)
+                    accountCurrency = cur.GetString();
+                var txStatus = tx.TryGetProperty("TransactionStatus", out var ts) ? ts.GetString() : null;
+                if (txStatus is "Succss" or "Success" && tx.TryGetProperty("PaymentId", out var pid) && pid.ValueKind == JsonValueKind.String)
+                {
+                    paymentId = pid.GetString();
+                    break;
+                }
+            }
+        }
+
         var status = new MyFatoorahInvoiceStatus(
             data.GetProperty("InvoiceStatus").GetString()!,
             data.GetProperty("InvoiceValue").GetDecimal(),
             data.TryGetProperty("CustomerReference", out var cr) && cr.ValueKind == JsonValueKind.String ? cr.GetString() : null,
-            data.TryGetProperty("InvoiceDisplayValue", out var dv) && dv.ValueKind == JsonValueKind.String ? dv.GetString() : null);
+            data.TryGetProperty("InvoiceDisplayValue", out var dv) && dv.ValueKind == JsonValueKind.String ? dv.GetString() : null,
+            paymentId,
+            accountCurrency);
         return (true, status, null);
+    }
+
+    public async Task<(bool, MyFatoorahRefund?, string?)> MakeRefundAsync(
+        MyFatoorahMerchantAccount? account, long invoiceId, decimal amountInAccountCurrency, string comment, CancellationToken cancellationToken)
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            KeyType = "InvoiceId",
+            Key = invoiceId.ToString(),
+            Amount = amountInAccountCurrency,
+            ServiceChargeOnCustomer = false, // the merchant, not the shopper, absorbs MyFatoorah's fee on a refund
+            Comment = comment,
+        });
+        var (success, statusCode, raw) = await SendAsync(HttpMethod.Post, "/api/v2/myfatoorah/refund/make-refund", body, account, cancellationToken);
+        if (!success)
+        {
+            logger.LogWarning("MyFatoorah MakeRefund failed ({StatusCode}) for invoice {InvoiceId}: {Body}", statusCode, invoiceId, raw);
+            return (false, null, ExtractMessage(raw) ?? $"MyFatoorah refund failed ({statusCode}).");
+        }
+
+        using var doc = JsonDocument.Parse(raw);
+        var root = doc.RootElement;
+        if (!root.GetProperty("IsSuccess").GetBoolean())
+            return (false, null, ExtractMessage(raw) ?? "MyFatoorah declined the refund.");
+
+        var data = root.GetProperty("Data");
+        var refund = new MyFatoorahRefund(
+            data.GetProperty("RefundId").GetInt64(),
+            data.TryGetProperty("RefundReference", out var rr) && rr.ValueKind == JsonValueKind.String ? rr.GetString() : null,
+            data.TryGetProperty("Amount", out var amt) && amt.ValueKind == JsonValueKind.Number ? amt.GetDecimal() : amountInAccountCurrency);
+        return (true, refund, null);
     }
 
     private async Task<(bool Success, int StatusCode, string Body)> SendAsync(
