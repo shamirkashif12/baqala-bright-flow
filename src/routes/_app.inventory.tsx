@@ -53,6 +53,26 @@ function fmtPrice(n?: number | null) {
   return n.toFixed(2);
 }
 
+// Nearest *usable* expiry per `${productId}:${branchId}`, derived from the batch list: skip depleted,
+// already-expired (by status, or by date if the periodic write-off scan hasn't reached them yet)
+// batches — same rule batch-expand-row.tsx uses to exclude them from "tracked" on-hand — then keep
+// the earliest remaining. An already-expired batch isn't relevant to current stock, so it shouldn't
+// get to be "the" nearest-expiry date shown for a row whose real on-hand is backed by fine batches.
+function buildExpiryMap(batches: InventoryBatch[]): Map<string, string> {
+  const expiryMap = new Map<string, string>();
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  batches.forEach(batch => {
+    if (!batch.expiryDate || batch.remainingQuantity <= 0 || batch.status === "expired") return;
+    const expiry = new Date(batch.expiryDate);
+    if (Date.UTC(expiry.getUTCFullYear(), expiry.getUTCMonth(), expiry.getUTCDate()) < todayUtc) return;
+    const key = `${batch.productId}:${batch.branchId}`;
+    const existing = expiryMap.get(key);
+    if (!existing || new Date(batch.expiryDate) < new Date(existing)) expiryMap.set(key, batch.expiryDate);
+  });
+  return expiryMap;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function StockBadge({ qty, reorder }: { qty: number; reorder: number }) {
@@ -2378,6 +2398,10 @@ function Inventory() {
   // Mirror of allBatches readable synchronously inside load() — lets a refetch whose
   // getBatches call failed re-enrich rows from the previous batch list instead of blanking.
   const allBatchesRef = useRef<InventoryBatch[]>([]);
+  // The stock list exactly as the server returned it (before expiry enrichment). Kept so the batch
+  // list — which now arrives on its OWN, slower request — can re-enrich the same rows when it lands,
+  // deriving expiry from raw each time (idempotent) rather than layering onto already-enriched data.
+  const rawStockRef = useRef<StockItem[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [incomingTransfers, setIncomingTransfers] = useState<StockTransfer[]>([]);
@@ -2400,64 +2424,56 @@ function Inventory() {
   };
   useEffect(loadIncomingTransfers, [effectiveBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Re-derive each row's nearest-usable expiry from the raw stock + whatever batch list we currently
+  // hold, and publish it. Always maps from rawStockRef (never from already-enriched state), so it's
+  // safe to call both when stock first lands and again when the batch list arrives later.
+  const applyStockExpiry = () => {
+    const expiryMap = buildExpiryMap(allBatchesRef.current);
+    setStock(rawStockRef.current.map(item => ({
+      ...item,
+      expiryDate: expiryMap.get(`${item.productId}:${item.branchId}`) ?? item.expiryDate,
+    })));
+  };
+
+  // The batch list is heavy (the /inventory/batches response can be many MB) and only refines the
+  // nearest-expiry column and feeds the per-row batch breakdown / adjust dialog — none of which are
+  // needed at first paint. It loads on its OWN request, OUTSIDE the blocking load below, so a slow
+  // batches response no longer holds the whole table on "Loading inventory…". When it lands it
+  // re-enriches the rows already on screen; a failure quietly keeps the previous batch list rather
+  // than blanking expiry (its rejection is deliberately NOT folded into loadError — batches are an
+  // enhancement over each stock row's own expiryDate, not table-critical data).
+  const loadBatches = () => {
+    api.getBatches()
+      .then((batches) => { allBatchesRef.current = batches; setAllBatches(batches); applyStockExpiry(); })
+      .catch(() => {});
+  };
+
   const load = () => {
     setLoading(true);
-    // Batches load WITH the main batch so expiry data is on the rows at first paint —
-    // previously it was enriched after an extra round-trip, so every load had a window
-    // where "EXPIRED (BLOCKED): 0" / blank Expiry columns showed over real data, and a
-    // failed getBatches left it that way until a manual reload (86eyag3ny). allSettled +
-    // per-result application: one failed call keeps its previous data instead of zeroing
-    // the whole page. Keeps the full batch array around too (not just the earliest-expiry
-    // rollup) so each row's expand affordance can show every batch without a per-row fetch.
+    // allSettled + per-result application: one failed call keeps its previous data instead of
+    // zeroing the whole page. Stock renders as soon as these fast calls settle — it carries its own
+    // expiryDate for first paint, which loadBatches() then sharpens to the nearest active batch.
     Promise.allSettled([
       api.getStock({ branchId: lockedBranchId ?? undefined }),
       api.getCategories(),
       api.getBranches(),
       api.getWarehouses(),
       api.getSuppliers(),
-      api.getBatches(),
     ])
       .then((results) => {
-        const [s, c, b, w, sup, batches] = results;
+        const [s, c, b, w, sup] = results;
         if (c.status === "fulfilled") setCategories(c.value);
         if (b.status === "fulfilled") setBranches(excludeDisabledBranches(b.value));
         if (w.status === "fulfilled") setWarehouses(w.value);
         if (sup.status === "fulfilled") setSuppliers(sup.value);
-        if (batches.status === "fulfilled") {
-          allBatchesRef.current = batches.value;
-          setAllBatches(batches.value);
-        }
         if (s.status === "fulfilled") {
-          // Enrich from the freshest batch list we have — this fetch's, or the previous
-          // one's when getBatches failed — so a refetch (e.g. after a Stock-In elsewhere)
-          // never reverts already-correct expiry data to blank.
-          const expiryMap = new Map<string, string>();
-          allBatchesRef.current.forEach(batch => {
-            if (!batch.expiryDate || batch.remainingQuantity <= 0) return;
-            // Skip batches that are themselves already expired (by status, or by date if the
-            // periodic write-off scan hasn't reached them yet) — same rule batch-expand-row.tsx
-            // uses to exclude them from "tracked" on-hand. An already-expired batch isn't
-            // relevant to current stock, so it shouldn't get to be "the" nearest-expiry date
-            // shown for a row whose real on-hand is backed by fine, active batches.
-            if (batch.status === "expired") return;
-            const expiry = new Date(batch.expiryDate);
-            const now = new Date();
-            if (Date.UTC(expiry.getUTCFullYear(), expiry.getUTCMonth(), expiry.getUTCDate())
-              < Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) return;
-            const key = `${batch.productId}:${batch.branchId}`;
-            const existing = expiryMap.get(key);
-            if (!existing || new Date(batch.expiryDate) < new Date(existing)) {
-              expiryMap.set(key, batch.expiryDate);
-            }
-          });
-          setStock((s.value as StockItem[]).map(item => ({
-            ...item,
-            expiryDate: expiryMap.get(`${item.productId}:${item.branchId}`) ?? item.expiryDate,
-          })));
+          rawStockRef.current = s.value as StockItem[];
+          applyStockExpiry(); // enriches from the batch list we already hold (if any); refined on load
         }
         setLoadError(results.some(r => r.status === "rejected"));
       })
       .finally(() => setLoading(false));
+    loadBatches();
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [lockedBranchId]);
