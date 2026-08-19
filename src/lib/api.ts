@@ -1915,6 +1915,9 @@ export interface OnlinePaymentNeedingAttention {
   id: string; branchId: string; branchName?: string;
   invoiceId: number; invoiceUrl?: string; amountSar: number; paidAt?: string;
   lastError?: string; placementAttempts: number;
+  // Set when the payment already has an order that was cancelled outside the online flow (customer
+  // still charged) — then only Refund makes sense, not Create order.
+  orderNumber?: string | null; canPlace: boolean;
   customerName?: string; customerPhone?: string; itemCount: number;
 }
 

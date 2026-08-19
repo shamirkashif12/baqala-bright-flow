@@ -230,19 +230,35 @@ public class OnlineOrdersController(
         var (role, callerBranchId) = GetCallerContext();
         var scopedBranch = role == "tenant_admin" ? branchId : (callerBranchId ?? branchId);
 
-        var query = db.OnlinePayments.AsNoTracking().Where(p => p.Status == "paid");
-        if (scopedBranch is { } b) query = query.Where(p => p.BranchId == b);
-        var rows = await query.OrderBy(p => p.PaidAt).Take(200).ToListAsync();
+        // Two shapes of "money at MyFatoorah that doesn't match an order here":
+        //   (a) paid, no order could be created (status "paid");
+        //   (b) ordered, but the order was since cancelled WITHOUT the online Reject flow — i.e. by
+        //       a path that couldn't refund (POS void before the guard existed, a manual DB fix, ...)
+        //       — so the customer is still charged for a cancelled order.
+        var query =
+            from p in db.OnlinePayments.AsNoTracking()
+            join o in db.Orders.AsNoTracking() on p.OrderId equals o.Id into oj
+            from o in oj.DefaultIfEmpty()
+            where p.Status == "paid" ||
+                  (p.Status == "ordered" && o != null && o.OrderStatus == "cancelled" && o.PaymentStatus != "refunded")
+            select new { Payment = p, OrderNumber = o != null ? o.OrderNumber : null, OrderStatus = o != null ? o.OrderStatus : null };
+        if (scopedBranch is { } b) query = query.Where(x => x.Payment.BranchId == b);
+        var rows = await query.OrderBy(x => x.Payment.PaidAt).Take(200).ToListAsync();
 
         var branchNames = await db.Branches.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name);
-        return Ok(rows.Select(p =>
+        return Ok(rows.Select(x =>
         {
+            var p = x.Payment;
             PlaceOnlineOrderRequest? snapshot = null;
             try { snapshot = System.Text.Json.JsonSerializer.Deserialize<PlaceOnlineOrderRequest>(p.CheckoutJson); } catch (System.Text.Json.JsonException) { }
             return new
             {
                 p.Id, p.BranchId, branchName = branchNames.GetValueOrDefault(p.BranchId),
-                invoiceId = p.GatewayInvoiceId, p.InvoiceUrl, p.AmountSar, p.PaidAt, p.LastError, p.PlacementAttempts,
+                invoiceId = p.GatewayInvoiceId, p.InvoiceUrl, p.AmountSar, p.PaidAt, p.PlacementAttempts,
+                // For (b) the "problem" is the cancelled order, not a placement error.
+                lastError = x.OrderNumber is not null ? $"Order {x.OrderNumber} was cancelled outside the online flow — customer still charged." : p.LastError,
+                orderNumber = x.OrderNumber,
+                canPlace = x.OrderNumber is null,
                 customerName = snapshot?.FullName, customerPhone = snapshot?.Phone, itemCount = snapshot?.Items?.Count ?? 0,
             };
         }));
@@ -276,7 +292,17 @@ public class OnlineOrdersController(
         var (role, callerBranchId) = GetCallerContext();
         if (role != "tenant_admin" && callerBranchId is { } cb && cb != payment.BranchId) return Forbid();
         if (payment.Status == "ordered")
-            return BadRequest(new { message = "This payment already has an order — reject that order to refund it." });
+        {
+            // A live order is refunded by rejecting it (that path also releases stock). The
+            // exception is an order that was already cancelled by some other route (POS void
+            // before the guard existed) — the customer is still charged and Reject is no longer
+            // possible, so refund straight from the payment.
+            var linked = payment.OrderId is { } oid ? await db.Orders.FirstOrDefaultAsync(o => o.Id == oid) : null;
+            if (linked is null || linked.OrderStatus != "cancelled")
+                return BadRequest(new { message = "This payment already has an order — reject that order to refund it." });
+            if (linked.PaymentStatus == "refunded")
+                return BadRequest(new { message = "This payment has already been refunded." });
+        }
 
         var result = await checkout.RefundAsync(payment, req?.Reason?.Trim() is { Length: > 0 } r ? r : "refunded by staff (no order)", CallerId(), HttpContext.RequestAborted);
         if (!result.Ok) return StatusCode(result.StatusCode, new { message = result.Message });

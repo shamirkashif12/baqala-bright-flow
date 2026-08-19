@@ -843,6 +843,9 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
     api.getOrder(orderId).then(o => {
       setOrder(o);
       setNewStatus(o.orderStatus);
+      // Online orders are managed from the Online Orders tab (the API refuses these actions on
+      // them too) — never auto-open the POS edit/void dialogs for one.
+      if (o.source === "online") return;
       if (autoAction === "edit" && canEdit) setShowEditOrderDialog(true);
       if (autoAction === "void" && canDeleteOrder) setShowVoidOrderDialog(true);
     }).finally(() => setLoading(false));
@@ -879,6 +882,15 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
 
   return (
     <div className="space-y-5 pb-8">
+      {order.source === "online" && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs flex items-start gap-2">
+          <Globe className="h-3.5 w-3.5 mt-0.5 shrink-0 text-primary" />
+          <span>
+            <b>Online order</b> — approve, edit lines, reject{order.paymentStatus === "paid" ? " (refunds the customer via MyFatoorah)" : ""} and
+            deliver from the <a href="/orders?tab=online" className="underline text-primary">Online Orders</a> tab. POS edit / void / refund don't apply here.
+          </span>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -899,7 +911,7 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
                 Previously the only path to RefundDialog was picking "Refunded" from the status
                 selector below, which disappears the instant orderStatus flips to "cancelled" on
                 void — leaving no way to reach this screen at all for a voided-but-paid order. */}
-            {canApprove && order.orderStatus === "cancelled" && order.paymentStatus === "cancelled" && (
+            {canApprove && order.source !== "online" && order.orderStatus === "cancelled" && order.paymentStatus === "cancelled" && (
               <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs text-destructive" onClick={() => setShowRefundDialog(true)}>
                 <RotateCcw className="h-3.5 w-3.5" /> Process Refund
               </Button>
@@ -1053,7 +1065,7 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
         ) : (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">{statusIcon(order.orderStatus)}<span className="capitalize text-sm">{order.orderStatus.replace(/_/g, " ")}</span></div>
-            {canEdit && !["cancelled", "refunded"].includes(order.orderStatus) && (
+            {canEdit && order.source !== "online" && !["cancelled", "refunded"].includes(order.orderStatus) && (
               <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setEditing(true)}>
                 <Pencil className="h-3.5 w-3.5" /> Change
               </Button>
@@ -1311,7 +1323,9 @@ function POSTab() {
               </thead>
               <tbody>
                 {filtered.map((o) => {
-                  const orderEditable = !["cancelled", "refunded"].includes(o.orderStatus);
+                  // Online orders get their actions in the Online Orders tab (approve / edit lines /
+                  // reject-with-refund / deliver); the POS Edit/Void here would bypass all of that.
+                  const orderEditable = o.source !== "online" && !["cancelled", "refunded"].includes(o.orderStatus);
                   return (
                   <tr
                     key={o.id}
@@ -1893,7 +1907,7 @@ function PaymentsNeedingAttention({ branchId, canAct, refreshKey, onResolved }: 
       <div className="px-4 py-3 border-b border-warning/30 flex items-center gap-2">
         <CreditCard className="h-4 w-4 text-warning" />
         <p className="text-sm font-semibold">Payments needing attention</p>
-        <span className="text-xs text-muted-foreground">— paid online, but no order could be created. Place the order or refund the customer.</span>
+        <span className="text-xs text-muted-foreground">— paid online, but no valid order exists for the money (order never created, or cancelled outside the online flow). Create the order or refund the customer.</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -1922,15 +1936,18 @@ function PaymentsNeedingAttention({ branchId, canAct, refreshKey, onResolved }: 
                 </td>
                 <td className="px-3 py-2 tabular-nums font-semibold whitespace-nowrap"><SARIcon />{p.amountSar.toFixed(2)}</td>
                 <td className="px-3 py-2 text-xs text-muted-foreground max-w-[260px]">
+                  {p.orderNumber && <div className="font-mono text-[10px] text-foreground">{p.orderNumber}</div>}
                   {p.lastError ?? "Not attempted yet"}
                   {p.placementAttempts > 0 && <span className="ml-1 text-[10px]">({p.placementAttempts}×)</span>}
                 </td>
                 <td className="px-3 py-2">
                   {canAct && (
                     <div className="flex gap-1.5">
-                      <Button size="sm" className="h-7 text-xs" disabled={busyId === p.id} onClick={() => placeOrder(p)}>
-                        {busyId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Create order"}
-                      </Button>
+                      {p.canPlace !== false && (
+                        <Button size="sm" className="h-7 text-xs" disabled={busyId === p.id} onClick={() => placeOrder(p)}>
+                          {busyId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Create order"}
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline" className="h-7 text-xs border-destructive/50 text-destructive"
                         disabled={busyId === p.id} onClick={() => { setRefunding(p); setRefundReason(""); }}>
                         Refund
