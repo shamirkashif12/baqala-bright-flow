@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, type ReactNode } from "react";
 import { PageShell } from "@/components/app-topbar";
 import { LoadErrorBanner } from "@/components/load-error-banner";
 import { Card } from "@/components/ui/card";
@@ -20,7 +20,7 @@ import {
   Printer, Download, Globe, Pencil, Package, CreditCard,
   User, Store, Loader2, RefreshCw, MoreHorizontal, Eye,
   CheckCircle2, XCircle, Clock, Truck, AlertCircle, X, RotateCcw, Trash2, Ban,
-  MapPin, Minus, Plus, Save, Phone, Mail,
+  MapPin, Minus, Plus, Save, Phone, Mail, Banknote,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Order, type OrderPayment, type Branch, type CustomerReturnItem, type Product, type OnlineOrder, type OnlineOrderItemEdit, type OnlinePaymentNeedingAttention } from "@/lib/api";
@@ -1856,6 +1856,24 @@ function OnlineOrderDetail({ order, onItemsSaved, onStatusChanged }: {
   );
 }
 
+// How an online order is (or will be) paid, at a glance in the list. "paid" here always means
+// paid online through MyFatoorah before the order existed; "pending" is Cash on Delivery still
+// to be collected; "refunded" is money already sent back through MyFatoorah.
+function OnlinePaymentBadge({ paymentStatus }: { paymentStatus: string }) {
+  const map: Record<string, { label: string; cls: string; icon: ReactNode }> = {
+    paid: { label: "Paid online", cls: "bg-success/10 text-success border-success/30", icon: <CreditCard className="h-3 w-3" /> },
+    refunded: { label: "Refunded", cls: "bg-warning/10 text-warning border-warning/30", icon: <RotateCcw className="h-3 w-3" /> },
+    pending: { label: "Cash on delivery", cls: "text-muted-foreground", icon: <Banknote className="h-3 w-3" /> },
+    cancelled: { label: "Cancelled", cls: "text-muted-foreground", icon: <Ban className="h-3 w-3" /> },
+  };
+  const m = map[paymentStatus] ?? { label: paymentStatus.replace(/_/g, " "), cls: "text-muted-foreground", icon: null };
+  return (
+    <Badge variant="outline" className={`gap-1 text-[10px] whitespace-nowrap ${m.cls}`}>
+      {m.icon}{m.label}
+    </Badge>
+  );
+}
+
 // Card payments MyFatoorah has taken whose order could not be created here (an item ran out
 // between paying and ordering, a price moved, the branch was switched off…). The money exists;
 // the order doesn't. Staff either place the order from what the shopper actually checked out
@@ -2053,6 +2071,8 @@ function OnlineTab() {
                   <th className="px-3 py-3 font-semibold">Customer</th>
                   <th className="px-3 py-3 font-semibold">Items</th>
                   <th className="px-3 py-3 font-semibold">Total</th>
+                  <th className="px-3 py-3 font-semibold">Payment</th>
+                  <th className="px-3 py-3 font-semibold">Status</th>
                   <th className="px-3 py-3 font-semibold">Date</th>
                   <th className="px-3 py-3 font-semibold w-10">Actions</th>
                 </tr>
@@ -2072,6 +2092,8 @@ function OnlineTab() {
                     <td className="px-3 py-3 text-xs">{o.delivery?.fullName ?? "—"}</td>
                     <td className="px-3 py-3 text-xs">{o.items.length}</td>
                     <td className="px-3 py-3 tabular-nums font-semibold"><SARIcon />{fmtSAR(o.totalAmount)}</td>
+                    <td className="px-3 py-3"><OnlinePaymentBadge paymentStatus={o.paymentStatus} /></td>
+                    <td className="px-3 py-3"><SBadge status={o.orderStatus} /></td>
                     <td className="px-3 py-3 text-xs text-muted-foreground">{new Date(o.createdAt).toLocaleDateString("en-SA")}</td>
                     <td className="px-3 py-3">
                       <DropdownMenu>
@@ -2091,7 +2113,7 @@ function OnlineTab() {
                 ))}
                 {orders.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-muted-foreground text-sm">
+                    <td colSpan={9} className="text-center py-12 text-muted-foreground text-sm">
                       <AlertCircle className="h-6 w-6 mx-auto mb-2 opacity-40" />
                       No {ONLINE_STATUS_TABS.find(t => t.value === status)?.label.toLowerCase()} online orders.
                     </td>
