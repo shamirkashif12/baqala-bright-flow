@@ -239,6 +239,14 @@ public class OrderPayment
     [MaxLength(20), Column("status")]
     public string Status { get; set; } = "completed";
 
+    /// POS checkout only, request-side: the pos_card_payments row (NamiPay terminal
+    /// authorization) this payment settles. Not a column — OrdersController.Create verifies the
+    /// referenced authorization (approved, this branch, this amount, never spent on another
+    /// sale), stamps its RRN into ReferenceNumber, and links it to the order. Absent for legacy
+    /// card payments taken on a standalone terminal.
+    [NotMapped]
+    public Guid? PosCardPaymentId { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

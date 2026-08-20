@@ -400,6 +400,23 @@ export const api = {
   voidOrder: (id: string, data: { reason?: string }) =>
     request<OrderMutationResult>(`/api/orders/${id}`, { method: "DELETE", body: JSON.stringify(data) }),
 
+  // POS checkout card payments on the NamiPay terminal (via the finova middleware's Nami
+  // service). Flow: initiate returns a "processing" payment whose id the PaymentDialog polls;
+  // once "approved", its id goes into createOrder's payments[].posCardPaymentId so the server
+  // can verify the authorization and link it to the sale. A branch without an enabled Nami
+  // integration gets a 409 {error:"not_configured"} from initiate — the dialog then records the
+  // card payment the legacy way (standalone terminal). Cancel tells the server the cashier gave
+  // up waiting; if the terminal approved in the meantime the response comes back "approved" and
+  // the sale should still complete.
+  initiatePosCardPayment: (branchId: string, amount: number) =>
+    request<PosCardPaymentStatus>(`/api/pos/card-payments`, {
+      method: "POST", body: JSON.stringify({ branchId, amount }),
+    }),
+  getPosCardPaymentStatus: (id: string) =>
+    request<PosCardPaymentStatus>(`/api/pos/card-payments/${id}`),
+  cancelPosCardPayment: (id: string) =>
+    request<PosCardPaymentStatus>(`/api/pos/card-payments/${id}/cancel`, { method: "POST" }),
+
   // Online Ordering — the public catalog/checkout calls are unauthenticated (same request()
   // helper; it just has no token in localStorage on that page, same as the public loyalty page).
   getOnlineOrderCatalog: (branchId: string) =>
@@ -1919,6 +1936,20 @@ export interface OnlinePaymentNeedingAttention {
   // still charged) — then only Refund makes sense, not Create order.
   orderNumber?: string | null; canPlace: boolean;
   customerName?: string; customerPhone?: string; itemCount: number;
+}
+
+// A POS-checkout card payment on the NamiPay terminal (see initiatePosCardPayment). Once
+// "approved", referenceNumber carries the terminal's RRN — the reference printed on the
+// customer's slip and stamped onto the sale's payment row. message is cashier-facing (decline
+// reason / attention note). "ordered" means it's already linked to a completed sale.
+export interface PosCardPaymentStatus {
+  id: string;
+  status: "processing" | "approved" | "declined" | "cancelled" | "expired" | "ordered";
+  amount: number;
+  referenceNumber?: string | null;
+  authCode?: string | null;
+  panMasked?: string | null;
+  message?: string | null;
 }
 
 // unitPrice here is the admin's override — omitting a line removes it from the order.

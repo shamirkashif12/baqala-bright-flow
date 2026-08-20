@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { api, getUsbPrinter, type Product, type Category, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram, type PackBreakSuggestion } from "@/lib/api";
+import { api, getUsbPrinter, type Product, type Category, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram, type PackBreakSuggestion, type PosCardPaymentStatus } from "@/lib/api";
 import { DEFAULT_UNIT, isFractional, minQty, normalizeQty, qtyFromUnitCount, qtyStep, supportsCountEntry, unitSpec, unitSymbol } from "@/lib/units";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import { useBranch } from "@/lib/branch-context";
@@ -2366,7 +2366,11 @@ function POS() {
   // ─── Charge handler ────────────────────────────────────────────────────────────
   const handleCharge = async (
     paymentMethod: string,
-    splitPayments?: Array<{ method: string; amount: number }>
+    splitPayments?: Array<{ method: string; amount: number }>,
+    // The approved NamiPay terminal authorization backing this sale's card portion (see
+    // PaymentDialog's runTerminalPayment) — absent for cash sales and for branches without the
+    // Nami integration, where card is recorded the legacy way. The server re-verifies it.
+    cardPaymentRef?: { posCardPaymentId: string; referenceNumber?: string | null }
   ) => {
     // Drives the Customer Display's "Processing payment…" banner — true for the whole in-flight
     // window between this call and its resolution (success or failure), reset via `finally` below.
@@ -2402,11 +2406,14 @@ function POS() {
     const finalCustomFeeTotal = customFeeTotal + (hasCardPortion ? cardSurchargeTotal : 0);
     const finalTotal = total + (hasCardPortion ? cardSurchargeTotal : 0);
 
+    const cardPaymentFields = cardPaymentRef
+      ? { posCardPaymentId: cardPaymentRef.posCardPaymentId, referenceNumber: cardPaymentRef.referenceNumber ?? undefined }
+      : {};
     const payments = splitPayments
       ? splitPayments
           .filter((p) => p.amount > 0)
-          .map((p) => ({ paymentMethod: p.method, amount: p.amount, status: "completed" }))
-      : [{ paymentMethod, amount: finalTotal, status: "completed" }];
+          .map((p) => ({ paymentMethod: p.method, amount: p.amount, status: "completed", ...(p.method === "card" ? cardPaymentFields : {}) }))
+      : [{ paymentMethod, amount: finalTotal, status: "completed", ...(paymentMethod === "card" ? cardPaymentFields : {}) }];
 
     if (!checkoutRequestIdRef.current) checkoutRequestIdRef.current = uuid();
 
@@ -3553,6 +3560,7 @@ function POS() {
         open={payOpen}
         onOpenChange={setPayOpen}
         total={total}
+        branchId={branch?.id ?? null}
         cardSurchargeAmount={cardSurchargeTotal}
         availableCash={shiftForBranch ? shiftForBranch.openingAmount + shiftForBranch.cashSales : null}
         onCharge={handleCharge}
@@ -3780,10 +3788,16 @@ function Row({ k, v }: { k: string; v: ReactNode }) {
   );
 }
 
+// How long the dialog waits for the NamiPay terminal before giving up and cancelling — a card
+// tap/insert plus PIN entry resolves well within this; the reconciler catches anything slower.
+const CARD_TERMINAL_WAIT_MS = 120_000;
+const CARD_POLL_INTERVAL_MS = 2_500;
+
 function PaymentDialog({
   open,
   onOpenChange,
   total,
+  branchId,
   cardSurchargeAmount = 0,
   availableCash = null,
   onCharge,
@@ -3792,17 +3806,32 @@ function PaymentDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   total: number;
+  branchId: string | null;
   cardSurchargeAmount?: number;
   // The shift's opening float + cash sales so far — null when there's no active shift to check
   // against (e.g. a manager ringing up a sale with no shift concept), in which case no cap applies.
   availableCash?: number | null;
-  onCharge: (paymentMethod: string, splitPayments?: Array<{ method: string; amount: number }>) => Promise<void>;
+  onCharge: (
+    paymentMethod: string,
+    splitPayments?: Array<{ method: string; amount: number }>,
+    cardPaymentRef?: { posCardPaymentId: string; referenceNumber?: string | null },
+  ) => Promise<void>;
   onDone: () => void;
 }) {
   const [tab, setTab] = useState("cash");
   const [received, setReceived] = useState(total.toFixed(2));
   const [status, setStatus] = useState<"idle" | "waiting" | "success" | "failed">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // True while a NamiPay terminal payment is in flight — turns the footer's Cancel into
+  // "Cancel card payment" (which asks the server to abandon the terminal transaction) instead
+  // of closing the dialog mid-charge.
+  const [terminalWaiting, setTerminalWaiting] = useState(false);
+  const namiCancelRef = useRef(false);
+  // An approved terminal payment no completed sale has consumed yet — reused when Confirm is
+  // retried for the same amount (e.g. order creation failed after approval), so a retry can
+  // never charge the customer's card twice. The server refuses to spend it on two sales anyway;
+  // this just makes the retry work instead of erroring.
+  const approvedCardRef = useRef<{ posCardPaymentId: string; referenceNumber?: string | null; amount: number } | null>(null);
 
   // Split payment inputs (cash + card only)
   const [splitCash, setSplitCash] = useState("0.00");
@@ -3830,7 +3859,8 @@ function PaymentDialog({
   const splitChange = Math.max(0, splitCashTendered - splitRemainingAfterCard);
   const splitOk = splitCardNum <= splitEffectiveTotal && splitCashTendered >= splitRemainingAfterCard;
 
-  // Reset state when dialog opens
+  // Reset state when dialog opens. approvedCardRef deliberately survives — an approved terminal
+  // payment whose sale never completed is real money already taken, and must be reusable.
   useEffect(() => {
     if (open) {
       setReceived("");
@@ -3838,21 +3868,86 @@ function PaymentDialog({
       setErrorMsg(null);
       setSplitCash(total.toFixed(2));
       setSplitCard("0.00");
+      namiCancelRef.current = false;
     }
   }, [open, total]);
 
+  // Runs a card payment on the branch's NamiPay terminal: initiate → poll every couple of
+  // seconds until the terminal reports approved/declined. Returns the approved authorization to
+  // thread into the order's payments, or null when the branch has no Nami integration (the sale
+  // then records the card payment the legacy way, matching a standalone terminal). Declines,
+  // cancellations and timeouts throw with a cashier-facing message.
+  const runTerminalPayment = async (
+    amount: number,
+  ): Promise<{ posCardPaymentId: string; referenceNumber?: string | null } | null> => {
+    if (!branchId) return null;
+    if (approvedCardRef.current && Math.abs(approvedCardRef.current.amount - amount) < 0.005)
+      return approvedCardRef.current;
+
+    let init: PosCardPaymentStatus;
+    try {
+      init = await api.initiatePosCardPayment(branchId, amount);
+    } catch (e) {
+      if ((e as { body?: { error?: string } }).body?.error === "not_configured") return null;
+      throw e;
+    }
+
+    const approve = (p: PosCardPaymentStatus) => {
+      approvedCardRef.current = { posCardPaymentId: p.id, referenceNumber: p.referenceNumber, amount };
+      return approvedCardRef.current;
+    };
+
+    setTerminalWaiting(true);
+    try {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < CARD_TERMINAL_WAIT_MS) {
+        await new Promise((r) => setTimeout(r, CARD_POLL_INTERVAL_MS));
+        if (namiCancelRef.current) {
+          // Cancel double-checks with the terminal first — if it already approved, the server
+          // answers "approved" and the sale still completes rather than stranding the money.
+          const cancelled = await api.cancelPosCardPayment(init.id);
+          if (cancelled.status === "approved") return approve(cancelled);
+          throw new Error("Card payment cancelled.");
+        }
+        let s: PosCardPaymentStatus;
+        try {
+          s = await api.getPosCardPaymentStatus(init.id);
+        } catch {
+          continue; // transient poll error — keep waiting
+        }
+        if (s.status === "approved") return approve(s);
+        if (s.status === "declined") throw new Error(s.message ?? "The card was declined.");
+        if (s.status === "cancelled" || s.status === "expired")
+          throw new Error(s.message ?? "The card payment was not completed.");
+      }
+      const timedOut = await api.cancelPosCardPayment(init.id).catch(() => null);
+      if (timedOut?.status === "approved") return approve(timedOut);
+      throw new Error("No response from the card terminal — the payment attempt was cancelled. If the terminal printed an approval slip, call a manager before retrying.");
+    } finally {
+      setTerminalWaiting(false);
+    }
+  };
+
   const charge = async () => {
     setStatus("waiting");
+    namiCancelRef.current = false;
     try {
       if (tab === "split") {
+        const cardRef = splitCardNum > 0 ? await runTerminalPayment(splitCardNum) : null;
         const splitPayments = [
           { method: "cash", amount: splitCashApplied },
           { method: "card", amount: splitCardNum },
         ];
-        await onCharge("split", splitPayments);
+        await onCharge("split", splitPayments, cardRef ?? undefined);
+      } else if (tab === "card") {
+        // The terminal is asked for the surcharge-inclusive figure — the same total the sale
+        // records when any part of it is paid by card (see handleCharge's finalTotal).
+        const cardRef = await runTerminalPayment(total + cardSurchargeAmount);
+        await onCharge("card", undefined, cardRef ?? undefined);
       } else {
         await onCharge(tab);
       }
+      approvedCardRef.current = null; // consumed by the completed sale
       setStatus("success");
       if (tab === "cash") {
         api.notify("Payment", "Cash Payment Completed", "Cash Payment Completed",
@@ -3928,8 +4023,13 @@ function PaymentDialog({
           <TabsContent value="card" className="space-y-3 mt-4">
             <CardMachineStatus status={status} />
             <div className="rounded-lg bg-muted/40 p-3 text-sm">
-              Card machine: <strong>Geidea Terminal</strong>
+              Card machine: <strong>NamiPay Terminal</strong>
             </div>
+            {terminalWaiting && (
+              <p className="text-xs text-muted-foreground">
+                Ask the customer to tap or insert their card on the terminal.
+              </p>
+            )}
             {cardSurchargeAmount > 0 && (
               <div className="rounded-lg bg-muted/40 p-3 text-sm flex justify-between">
                 <span className="text-muted-foreground">Card payment surcharge</span>
@@ -3992,7 +4092,18 @@ function PaymentDialog({
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              // While the NamiPay terminal is waiting for the card, Cancel abandons THAT — the
+              // dialog stays open so the cashier can retry or switch tender; closing it mid-
+              // charge would leave the terminal transaction dangling for the reconciler to chase.
+              if (terminalWaiting) namiCancelRef.current = true;
+              else onOpenChange(false);
+            }}
+          >
+            {terminalWaiting ? "Cancel card payment" : "Cancel"}
+          </Button>
           <Button
             className="gradient-primary text-primary-foreground border-0"
             disabled={confirmDisabled}

@@ -87,12 +87,20 @@ builder.Services.AddDataProtection()
 builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
 builder.Services.AddHttpClient<ITenantGatewayClient, TenantGatewayClient>();
 builder.Services.AddHttpClient<IMyFatoorahServiceClient, MyFatoorahServiceClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
+// POS checkout card payments on the NamiPay terminal, via the middleware's Nami service. 75s:
+// the middleware's own worst case (token exchange + 3 retries against Nami's 15s-capped
+// upstream) is ~63s — status polls cap themselves far lower (see NamiPayServiceClient).
+builder.Services.AddHttpClient<INamiPayServiceClient, NamiPayServiceClient>(c => c.Timeout = TimeSpan.FromSeconds(75));
 // Online-order card checkout (invoice → status → order → refund) + the sweep that finishes
 // paid-but-unordered payments when the shopper's browser isn't around to.
 builder.Services.AddScoped<IOnlineCheckoutService, OnlineCheckoutService>();
 // Encrypts Admin → Payments credentials (MyFatoorah token etc.) at rest with the key ring above.
 builder.Services.AddSingleton<IPaymentIntegrationSecrets, PaymentIntegrationSecrets>();
 builder.Services.AddHostedService<OnlinePaymentReconcilerService>();
+// POS card checkout (initiate on the NamiPay terminal → poll → link to the sale) + the sweep
+// that resolves abandoned/late terminal payments and flags approved-but-unlinked ones to staff.
+builder.Services.AddScoped<IPosCardPaymentService, PosCardPaymentService>();
+builder.Services.AddHostedService<PosCardPaymentReconcilerService>();
 builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
 builder.Services.AddScoped<IZatcaService, ZatcaService>();
 

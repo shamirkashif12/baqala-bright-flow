@@ -584,6 +584,37 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         foreach (var d in order.Discounts) { d.Id = Guid.NewGuid(); d.OrderId = order.Id; d.CreatedAt = DateTime.UtcNow; }
         foreach (var s in order.ServiceCharges) { s.Id = Guid.NewGuid(); s.OrderId = order.Id; s.CreatedAt = DateTime.UtcNow; }
 
+        // Card payments taken on the NamiPay terminal: the POS references the authorization it
+        // obtained (POST /api/pos/card-payments) rather than just asserting "card was paid" —
+        // verify it here (approved, this branch, this amount, never spent on another sale) and
+        // stamp the terminal's own reference onto the recorded payment. The link is saved in the
+        // same SaveChanges as the order itself, and any rejection below discards it along with
+        // everything else. Card payments without a posCardPaymentId (standalone terminals) are
+        // recorded exactly as before.
+        foreach (var pay in order.Payments)
+        {
+            if (pay.PosCardPaymentId is not { } cardPaymentId) continue;
+            var cardPayment = await db.PosCardPayments.FirstOrDefaultAsync(p => p.Id == cardPaymentId);
+            if (cardPayment is null)
+                return BadRequest(new { message = "The card payment for this sale could not be found — take the card payment again." });
+            if (cardPayment.BranchId != order.BranchId)
+                return BadRequest(new { message = "The card payment belongs to a different branch." });
+            if (cardPayment.OrderId is not null)
+                return BadRequest(new { message = "That card payment was already used on another sale." });
+            if (cardPayment.Status != "approved")
+                return BadRequest(new { message = $"The card payment isn't approved (status: {cardPayment.Status}) — take the card payment again." });
+            if (Math.Abs(cardPayment.Amount - pay.Amount) > 0.01m)
+                return BadRequest(new { message = $"The approved card amount (SAR {cardPayment.Amount:F2}) doesn't match this sale's card portion (SAR {pay.Amount:F2}) — take the card payment again." });
+
+            pay.PaymentMethod = "card";
+            pay.Status = "completed";
+            pay.ReferenceNumber = cardPayment.Rrn ?? cardPayment.GatewayTransactionId;
+            cardPayment.OrderId = order.Id;
+            cardPayment.Status = "ordered";
+            cardPayment.ResolvedAt = DateTime.UtcNow;
+            cardPayment.UpdatedAt = DateTime.UtcNow;
+        }
+
         // ── Re-validate coupon/discount server-side ─────────────────────────────
         // Previously the client's DiscountAmount/CouponId were persisted verbatim with zero
         // re-checking (unlike loyalty-point redemption below, which IS re-validated) —
