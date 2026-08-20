@@ -856,6 +856,10 @@ export const api = {
     request<PaymentIntegrationRecord[]>(`/api/payment-integrations/${branchId}`),
   savePaymentIntegration: (branchId: string, provider: string, data: { isEnabled: boolean; config: Record<string, string | null> }) =>
     request<PaymentIntegrationRecord>(`/api/payment-integrations/${branchId}/${provider}`, { method: "PUT", body: JSON.stringify(data) }),
+  // MyFatoorah/Nami only — proves the credentials against the payment middleware without saving.
+  // Sends the form's current values; masked "••••1234" fields mean "test with what's saved".
+  testPaymentIntegration: (branchId: string, provider: string, config: Record<string, string | null>) =>
+    request<{ ok: boolean; message: string }>(`/api/payment-integrations/${branchId}/${provider}/test`, { method: "POST", body: JSON.stringify({ config }) }),
 
   // Attendance
   getAttendance: (params?: { branchId?: string }) => {

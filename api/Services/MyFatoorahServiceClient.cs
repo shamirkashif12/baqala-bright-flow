@@ -80,6 +80,12 @@ public interface IMyFatoorahServiceClient
     /// invoice's display currency) — callers pass GetPaymentStatus's InvoiceValue for a full refund.
     Task<(bool Success, MyFatoorahRefund? Refund, string? Error)> MakeRefundAsync(
         MyFatoorahMerchantAccount? account, long invoiceId, decimal amountInAccountCurrency, string comment, CancellationToken cancellationToken);
+
+    /// Admin → Payments "Test connection": proves the branch's saved token (or, when `account` is
+    /// null, the middleware's shared fallback account) actually works, without raising an invoice
+    /// or moving money. Success carries a short human-readable summary.
+    Task<(bool Success, string? Summary, string? Error)> TestConnectionAsync(
+        MyFatoorahMerchantAccount? account, CancellationToken cancellationToken);
 }
 
 // Calls the sibling MyFatoorah.Service microservice (finova-middleware-sme/dotnet-services/
@@ -224,6 +230,67 @@ public class MyFatoorahServiceClient(HttpClient httpClient, IConfiguration confi
             data.TryGetProperty("RefundReference", out var rr) && rr.ValueKind == JsonValueKind.String ? rr.GetString() : null,
             data.TryGetProperty("Amount", out var amt) && amt.ValueKind == JsonValueKind.Number ? amt.GetDecimal() : amountInAccountCurrency);
         return (true, refund, null);
+    }
+
+    public async Task<(bool, string?, string?)> TestConnectionAsync(
+        MyFatoorahMerchantAccount? account, CancellationToken cancellationToken)
+    {
+        // Pre-check the server config so a missing setup reads as a clear message, not a 500
+        // (SendAsync throws for missing config, which is right mid-checkout but not here).
+        if (string.IsNullOrWhiteSpace(config["MyFatoorahService:BaseUrl"]) || string.IsNullOrWhiteSpace(config["MyFatoorahService:SecretKey"]))
+            return (false, null, "The MyFatoorah middleware (MyFatoorahService:BaseUrl / SecretKey) is not configured on this server — ask your administrator to set it.");
+
+        // InitiatePayment is read-only on MyFatoorah's side (it just lists the payment methods +
+        // fees for an amount) but requires a valid token for the chosen environment — the cheapest
+        // real proof the credentials work.
+        var currency = config["MyFatoorahService:CurrencyIso"] ?? "SAR";
+        var body = JsonSerializer.Serialize(new { InvoiceAmount = 1, CurrencyIso = currency });
+        bool success;
+        int statusCode;
+        string raw;
+        try
+        {
+            (success, statusCode, raw) = await SendAsync(HttpMethod.Post, "/api/v2/myfatoorah/payment/initiate-payment", body, account, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            // SendAsync lets transport failures throw (its checkout callers surface them as 500s);
+            // for a connection test an unreachable middleware IS the answer, not an error.
+            logger.LogWarning(ex, "MyFatoorah test connection could not reach the middleware");
+            return (false, null, "The MyFatoorah middleware could not be reached.");
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return (false, null, "The MyFatoorah middleware timed out.");
+        }
+        if (!success)
+        {
+            logger.LogWarning("MyFatoorah test connection failed ({StatusCode}): {Body}", statusCode, raw);
+            return (false, null, ExtractMessage(raw) ?? $"MyFatoorah rejected the request ({statusCode}).");
+        }
+
+        using var doc = JsonDocument.Parse(raw);
+        var root = doc.RootElement;
+        if (!root.GetProperty("IsSuccess").GetBoolean())
+            return (false, null, ExtractMessage(raw) ?? "MyFatoorah declined the request.");
+
+        var count = 0;
+        var names = new List<string>();
+        if (root.TryGetProperty("Data", out var data) &&
+            data.TryGetProperty("PaymentMethods", out var methods) && methods.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var m in methods.EnumerateArray())
+            {
+                count++;
+                if (names.Count < 6 && m.TryGetProperty("PaymentMethodEn", out var name) && name.ValueKind == JsonValueKind.String)
+                    names.Add(name.GetString()!);
+            }
+        }
+        var whose = account is null ? " (using the middleware's shared MyFatoorah account — no branch token saved)" : "";
+        var summary = count == 0
+            ? $"Connected — MyFatoorah accepted the token{whose}, but no payment methods are enabled on the account yet."
+            : $"Connected{whose} — {count} payment method(s) available: {string.Join(", ", names)}{(count > names.Count ? ", …" : "")}.";
+        return (true, summary, null);
     }
 
     private async Task<(bool Success, int StatusCode, string Body)> SendAsync(

@@ -41,6 +41,11 @@ public interface INamiPayServiceClient
     /// Same-batch void (reversal) of an earlier purchase, keyed by its RRN.
     Task<(bool Success, NamiPayAck? Ack, string? Error)> InitiateReversalAsync(
         string orderRef, string terminalId, string rrn, decimal amount, CancellationToken cancellationToken);
+
+    /// Admin → Payments "Test connection": proves this server's secret-key is accepted by the
+    /// NamiPay middleware (no terminal involved — no money moves). Success carries a short
+    /// human-readable summary.
+    Task<(bool Success, string? Summary, string? Error)> TestConnectionAsync(CancellationToken cancellationToken);
 }
 
 // Calls the sibling Nami.Service microservice (finova-middleware-sme/dotnet-services/
@@ -151,6 +156,39 @@ public class NamiPayServiceClient(HttpClient httpClient, IConfiguration config, 
         {
             logger.LogWarning("NamiPay {Operation} returned non-JSON body: {Body}", operation, raw);
             return (false, null, "NamiPay returned an unreadable response.");
+        }
+    }
+
+    public async Task<(bool, string?, string?)> TestConnectionAsync(CancellationToken cancellationToken)
+    {
+        // Pre-check the server config so a missing setup reads as a clear message, not a 500
+        // (SendCoreAsync throws for missing config, which is right mid-checkout but not here).
+        if (string.IsNullOrWhiteSpace(config["NamiPayService:BaseUrl"]) || string.IsNullOrWhiteSpace(config["NamiPayService:SecretKey"]))
+            return (false, null, "The NamiPay middleware (NamiPayService:BaseUrl / SecretKey) is not configured on this server — ask your administrator to set it.");
+
+        // /payments/last is read-only: it just returns the most recent transaction record this
+        // client has, but it requires a valid secret-key — the cheapest real proof the middleware
+        // link works. 404 simply means no transaction has ever been run, which is still a pass.
+        var (ok, statusCode, raw) = await SendCoreAsync(HttpMethod.Get, "/api/nami/payments/last", null, cancellationToken);
+        if (!ok && statusCode == 404)
+            return (true, "Connected — the NamiPay middleware accepted this server's key (no transactions yet).", null);
+        if (!ok)
+        {
+            logger.LogWarning("NamiPay test connection failed ({StatusCode}): {Body}", statusCode, raw);
+            return (false, null, ExtractMessage(raw) ?? $"The NamiPay middleware rejected the request ({statusCode}).");
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            var tid = GetString(doc.RootElement, "tid");
+            return (true, tid is null
+                ? "Connected — the NamiPay middleware accepted this server's key."
+                : $"Connected — last transaction on terminal {tid} was {GetString(doc.RootElement, "responseMessage") ?? "recorded"}.", null);
+        }
+        catch (JsonException)
+        {
+            return (true, "Connected — the NamiPay middleware accepted this server's key.", null);
         }
     }
 

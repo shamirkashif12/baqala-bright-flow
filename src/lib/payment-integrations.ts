@@ -49,6 +49,8 @@ export interface PaymentProviderDef {
   setupNote?: string;
   /** Text under the "Enable" switch. Defaults to the generic credentials wording, which reads wrong for a provider with no credential fields here. */
   enableDescription?: string;
+  /** Shows a "Test connection" button in the setup form. Only for providers with a real rail behind them — the backend's test endpoint must support the provider (PaymentIntegrationsController.TestConnection). */
+  supportsTest?: boolean;
 }
 
 const ENV_SANDBOX_PRODUCTION = {
@@ -109,30 +111,29 @@ export const PAYMENT_PROVIDERS: PaymentProviderDef[] = [
     colorClass: "bg-amber-500/15 text-amber-600",
     initials: "N",
     logo: namiLogo,
+    // Card payments reach Nami through the finova middleware's Nami service
+    // (api/Services/NamiPayServiceClient.cs). Unlike MyFatoorah there are no per-branch
+    // credentials to collect: the merchant account, API secret and Sandbox/Production choice all
+    // live server-side in that middleware's own DB. The one thing the checkout flow reads from
+    // this form is WHICH terminal the amount is pushed to — PosCardPaymentService's
+    // ResolveNamiTerminalIdAsync reads exactly the "terminalId" key below; rename them together.
     fields: [
-      {
-        key: "merchantId",
-        label: "Merchant ID",
-        type: "text",
-        required: true,
-        placeholder: "e.g. 100234567",
-      },
       {
         key: "terminalId",
         label: "Terminal ID",
         type: "text",
         required: true,
-        placeholder: "e.g. TID-00123",
+        placeholder: "e.g. 8184000200000077",
+        helperText:
+          "The TID Nami assigns when this branch's terminal is provisioned — card amounts are pushed to this device.",
       },
-      {
-        key: "apiSecret",
-        label: "API Secret",
-        type: "password",
-        required: true,
-        helperText: "Provided by Nami when the terminal is provisioned",
-      },
-      ENV_SANDBOX_PRODUCTION,
     ],
+    setupNote:
+      "Nami merchant credentials and the Sandbox/Production environment are configured once on the payment middleware server, not per branch — " +
+      "the only setting needed here is which terminal (TID) this branch's card payments go to.",
+    enableDescription:
+      "Turn this on once the Terminal ID below is correct — the POS card tender pushes amounts to this device only while enabled.",
+    supportsTest: true,
   },
   {
     key: "MyFatoorah",
@@ -172,6 +173,7 @@ export const PAYMENT_PROVIDERS: PaymentProviderDef[] = [
       "Online ordering itself must also be switched on in POS Settings → Online Ordering.",
     enableDescription:
       "Turn this on once the API token below is correct — the ordering page only offers “Pay Online” while enabled.",
+    supportsTest: true,
   },
   {
     key: "ZATCA",

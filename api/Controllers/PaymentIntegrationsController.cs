@@ -10,7 +10,12 @@ namespace BaqalaPOS.Api.Controllers;
 
 [ApiController]
 [Route("api/payment-integrations")]
-public class PaymentIntegrationsController(BaqalaDbContext db, IAuditService audit, IPaymentIntegrationSecrets secrets) : ControllerBase
+public class PaymentIntegrationsController(
+    BaqalaDbContext db,
+    IAuditService audit,
+    IPaymentIntegrationSecrets secrets,
+    IMyFatoorahServiceClient myFatoorah,
+    INamiPayServiceClient namiPay) : ControllerBase
 {
     // Server-side mirror of the frontend's provider catalog (src/lib/payment-integrations.ts) —
     // keeps GET returning one row per known provider even before it's ever been configured, and
@@ -80,6 +85,39 @@ public class PaymentIntegrationsController(BaqalaDbContext db, IAuditService aud
         return Ok(ToDto(canonicalProvider, row));
     }
 
+    // "Test connection" for the providers that have a live rail behind them (the middleware's
+    // MyFatoorah and Nami services) — proves the credentials work without saving anything or
+    // moving money. Tests what the FORM currently shows: the submitted config is merged over the
+    // stored row with the same masked-placeholder semantics as Upsert (an untouched "••••1234"
+    // field means "use what's saved"), so a freshly typed token is tested before it's ever saved.
+    [RequirePermission("Settings", PermAction.Edit)]
+    [HttpPost("{branchId:guid}/{provider}/test")]
+    public async Task<IActionResult> TestConnection(
+        Guid branchId, string provider, [FromBody] PaymentIntegrationTestRequest request, CancellationToken ct)
+    {
+        var canonicalProvider = KnownProviders.FirstOrDefault(p => p.Equals(provider, StringComparison.OrdinalIgnoreCase));
+        if (canonicalProvider is not ("MyFatoorah" or "Nami"))
+            return BadRequest(new { message = $"A connection test isn't available for '{provider}'." });
+
+        var row = await db.PaymentIntegrations.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.BranchId == branchId && p.Provider == canonicalProvider, ct);
+        var mergedConfig = ParseConfig(row?.ConfigJson);
+        foreach (var (key, value) in request.Config ?? [])
+            if (!IsMaskedPlaceholder(value)) mergedConfig[key] = value;
+
+        (bool Ok, string? Summary, string? Error) result = canonicalProvider switch
+        {
+            // Nami has no per-branch credentials — the test proves this server ↔ middleware link
+            // (the terminal itself only comes into play on a real purchase push).
+            "Nami" => await namiPay.TestConnectionAsync(ct),
+            // Stored tokens are protected at rest, a freshly typed one is plaintext — Unprotect
+            // passes plaintext through unchanged, so the merged config works for both.
+            _ => await myFatoorah.TestConnectionAsync(
+                MyFatoorahMerchantAccount.FromConfigJson(JsonSerializer.Serialize(mergedConfig), secrets.Unprotect), ct),
+        };
+        return Ok(new PaymentIntegrationTestResult(result.Ok, result.Ok ? result.Summary! : result.Error!));
+    }
+
     private static Dictionary<string, string?> ParseConfig(string? json) =>
         json is { Length: > 0 } ? JsonSerializer.Deserialize<Dictionary<string, string?>>(json) ?? [] : [];
 
@@ -103,4 +141,6 @@ public class PaymentIntegrationsController(BaqalaDbContext db, IAuditService aud
 }
 
 public record PaymentIntegrationSaveRequest(bool IsEnabled, Dictionary<string, string?> Config);
+public record PaymentIntegrationTestRequest(Dictionary<string, string?>? Config);
 public record PaymentIntegrationDto(string Provider, bool IsEnabled, Dictionary<string, string?> Config, DateTime? UpdatedAt);
+public record PaymentIntegrationTestResult(bool Ok, string Message);
