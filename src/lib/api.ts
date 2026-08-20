@@ -408,6 +408,10 @@ export const api = {
   // card payment the legacy way (standalone terminal). Cancel tells the server the cashier gave
   // up waiting; if the terminal approved in the meantime the response comes back "approved" and
   // the sale should still complete.
+  // Whether the branch drives a real NamiPay terminal — lets the Take Payment dialog show the
+  // terminal flow (or the legacy manual-card path) honestly before Confirm is ever pressed.
+  getPosCardPaymentAvailability: (branchId: string) =>
+    request<{ configured: boolean }>(`/api/pos/card-payments/availability?branchId=${branchId}`),
   initiatePosCardPayment: (branchId: string, amount: number) =>
     request<PosCardPaymentStatus>(`/api/pos/card-payments`, {
       method: "POST", body: JSON.stringify({ branchId, amount }),

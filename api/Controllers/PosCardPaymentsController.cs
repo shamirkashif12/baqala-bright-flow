@@ -19,6 +19,13 @@ public class PosCardPaymentsController(IPosCardPaymentService payments) : Contro
     private Guid? CallerId() =>
         Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value, out var id) ? id : null;
 
+    // Whether this branch drives a real NamiPay terminal — the Take Payment dialog uses it to
+    // show the terminal flow honestly (vs. the legacy "record a standalone-machine card payment"
+    // path) instead of claiming a terminal is connected when none is configured.
+    [HttpGet("availability")]
+    public async Task<IActionResult> Availability([FromQuery] Guid branchId, CancellationToken ct) =>
+        Ok(new { configured = await payments.IsConfiguredAsync(branchId, ct) });
+
     [RequirePermission("POS", PermAction.Create)]
     [HttpPost]
     public async Task<IActionResult> Initiate([FromBody] InitiatePosCardPaymentRequest req, CancellationToken ct)

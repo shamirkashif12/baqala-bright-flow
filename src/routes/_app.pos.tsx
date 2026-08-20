@@ -40,7 +40,9 @@ import { isValidSaudiPhone } from "@/lib/validation";
 // but it isn't the same as a configured printer erroring for a real reason (bad name, out of
 // paper, etc.), which still gets a normal HTTP-style error message.
 function isPrinterNotSetUp(msg: string): boolean {
-  return /failed to fetch|networkerror when attempting to fetch/i.test(msg);
+  // Fetch-level failures = no local print agent reachable; "no printer configured" = the server
+  // answered cleanly that nothing is set up. Both mean "go to Printer Setup", not a print error.
+  return /failed to fetch|networkerror when attempting to fetch|no printer configured/i.test(msg);
 }
 
 // Distinguishes a printer-connectivity failure from a generic print error using the message
@@ -3826,6 +3828,10 @@ function PaymentDialog({
   // "Cancel card payment" (which asks the server to abandon the terminal transaction) instead
   // of closing the dialog mid-charge.
   const [terminalWaiting, setTerminalWaiting] = useState(false);
+  // Whether this branch actually drives a NamiPay terminal — decides what the Card tab claims.
+  // null = not known (lookup pending or failed): keep the optimistic terminal UI, since the
+  // initiate call's 409 fallback still routes an unconfigured branch to the manual path safely.
+  const [terminalConfigured, setTerminalConfigured] = useState<boolean | null>(null);
   const namiCancelRef = useRef(false);
   // An approved terminal payment no completed sale has consumed yet — reused when Confirm is
   // retried for the same amount (e.g. order creation failed after approval), so a retry can
@@ -3871,6 +3877,18 @@ function PaymentDialog({
       namiCancelRef.current = false;
     }
   }, [open, total]);
+
+  // Look up the branch's real terminal state when the dialog opens, so the Card tab doesn't
+  // claim "Connected" for a branch that has no NamiPay integration. A failed lookup leaves it
+  // null — the optimistic UI, with the initiate 409 fallback still guarding the actual charge.
+  useEffect(() => {
+    if (!open || !branchId) return;
+    let stale = false;
+    api.getPosCardPaymentAvailability(branchId)
+      .then((r) => { if (!stale) setTerminalConfigured(r.configured); })
+      .catch(() => { if (!stale) setTerminalConfigured(null); });
+    return () => { stale = true; };
+  }, [open, branchId]);
 
   // Runs a card payment on the branch's NamiPay terminal: initiate → poll every couple of
   // seconds until the terminal reports approved/declined. Returns the approved authorization to
@@ -4021,10 +4039,18 @@ function PaymentDialog({
           </TabsContent>
 
           <TabsContent value="card" className="space-y-3 mt-4">
-            <CardMachineStatus status={status} />
-            <div className="rounded-lg bg-muted/40 p-3 text-sm">
-              Card machine: <strong>NamiPay Terminal</strong>
-            </div>
+            <CardMachineStatus status={status} configured={terminalConfigured} />
+            {terminalConfigured === false ? (
+              <div className="rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
+                No NamiPay terminal is configured for this branch — this records a card payment
+                taken on a standalone card machine. A terminal can be connected in Admin →
+                Payments → Nami.
+              </div>
+            ) : (
+              <div className="rounded-lg bg-muted/40 p-3 text-sm">
+                Card machine: <strong>NamiPay Terminal</strong>
+              </div>
+            )}
             {terminalWaiting && (
               <p className="text-xs text-muted-foreground">
                 Ask the customer to tap or insert their card on the terminal.
@@ -4123,10 +4149,21 @@ function PaymentDialog({
   );
 }
 
-function CardMachineStatus({ status }: { status: "idle" | "waiting" | "success" | "failed" }) {
+function CardMachineStatus({
+  status,
+  configured,
+}: {
+  status: "idle" | "waiting" | "success" | "failed";
+  // true = branch has a NamiPay terminal, false = manual card recording, null = not known
+  configured?: boolean | null;
+}) {
   const map = {
-    idle: { c: "bg-success/15 text-success", l: "Connected · Ready" },
-    waiting: { c: "bg-warning/20 text-warning-foreground", l: "Waiting for payment…" },
+    // "Terminal ready" only when the branch really has one — a branch on the manual path used
+    // to see a green "Connected · Ready" chip with no terminal anywhere in sight.
+    idle: configured === false
+      ? { c: "bg-muted/60 text-muted-foreground", l: "Manual card entry" }
+      : { c: "bg-success/15 text-success", l: "Terminal ready" },
+    waiting: { c: "bg-warning/20 text-warning-foreground", l: configured === false ? "Recording payment…" : "Waiting for payment…" },
     success: { c: "bg-success/15 text-success", l: "Payment Approved" },
     failed: { c: "bg-destructive/15 text-destructive", l: "Payment Failed" },
   }[status];

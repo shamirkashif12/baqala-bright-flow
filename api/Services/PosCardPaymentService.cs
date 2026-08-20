@@ -28,6 +28,11 @@ public interface IPosCardPaymentService
     /// Polls NamiPay for one processing/cancelled row and applies the outcome to it (does not
     /// save) — shared by GetStatusAsync and PosCardPaymentReconcilerService.
     Task RefreshFromGatewayAsync(PosCardPayment payment, CancellationToken ct);
+
+    /// Whether the branch has an enabled Nami integration with a Terminal ID — what decides
+    /// between the real terminal flow and the legacy record-it-manually card path. Lets the POS
+    /// dialog tell the cashier the truth up front instead of discovering it on Confirm.
+    Task<bool> IsConfiguredAsync(Guid branchId, CancellationToken ct);
 }
 
 public class PosCardPaymentService(
@@ -150,6 +155,9 @@ public class PosCardPaymentService(
             payment.ResolvedAt = now;
         }
     }
+
+    public async Task<bool> IsConfiguredAsync(Guid branchId, CancellationToken ct) =>
+        await ResolveNamiTerminalIdAsync(branchId, ct) is not null;
 
     /// The branch's NamiPay TID from Admin → Payments → Nami (PaymentIntegration.ConfigJson's
     /// "terminalId" — the key name must stay in sync with the Nami entry in

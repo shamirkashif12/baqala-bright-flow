@@ -9,6 +9,12 @@ using Microsoft.IdentityModel.Tokens;
 using System.Linq;
 using System.Text;
 
+// cp437 (the thermal-receipt code page PrinterController.BuildEscPos encodes with) is not one of
+// .NET's built-in encodings on ANY platform — without this registration every server-side
+// print-receipt request dies in an unhandled ArgumentException (a bare 500 to the till) before
+// even checking whether a printer is configured.
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ─── Database (MySQL) ────────────────────────────────────────────────────────
