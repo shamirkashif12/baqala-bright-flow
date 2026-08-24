@@ -264,6 +264,10 @@ function Plans() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [tenantPlan, setTenantPlan] = useState<TenantPlanInfo | null>(null);
   const [catalog, setCatalog] = useState<EcrPlanTier[] | null>(null);
+  // Separate from `catalog` being null, which cannot distinguish "still asking" from "asked and
+  // got nothing". Without it the first paint shows the built-in fallback rows — different prices,
+  // different limits — for the second before the live ones replace them.
+  const [catalogSettled, setCatalogSettled] = useState(false);
   const [detailsPlan, setDetailsPlan] = useState<Plan | null>(null);
   const [launching, setLaunching] = useState(false);
   const notified = useRef(false);
@@ -306,7 +310,10 @@ function Plans() {
       .catch(() => setUsage(null));
     api.getTenantPlan().then(setTenantPlan).catch(() => setTenantPlan(null));
     // Never blocks the page: a missing catalog just means the built-in fallback rows.
-    api.getTenantPlanCatalog().then((t) => setCatalog(t ?? null)).catch(() => setCatalog(null));
+    api.getTenantPlanCatalog()
+      .then((t) => setCatalog(t ?? null))
+      .catch(() => setCatalog(null))
+      .finally(() => setCatalogSettled(true));
   }, []);
 
   const plans = useMemo(() => resolvePlans(tenantPlan, catalog), [tenantPlan, catalog]);
@@ -368,7 +375,13 @@ function Plans() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {plans.map((p) => {
+        {!catalogSettled
+          ? // A placeholder while the answer is in flight, rather than a full set of prices that
+            // are about to be replaced by different ones.
+            [0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-80 animate-pulse rounded-xl border border-border bg-card" />
+            ))
+          : plans.map((p) => {
           const discount = cycle === "Annual (−15%)" ? 0.85 : cycle === "Quarterly (−5%)" ? 0.95 : 1;
           const effectivePrice = p.price > 0 ? Math.round(p.price * discount) : 0;
 
