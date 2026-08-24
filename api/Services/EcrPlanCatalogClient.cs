@@ -82,12 +82,19 @@ public class EcrPlanCatalogClient(
 
     private const string CacheKey = "ecr:plan-catalog:grocery";
 
+    // Marks that a probe has run recently, successfully or not, so a page that reloads twice does
+    // not start a second walk through the same unreachable addresses.
+    private const string ProbedKey = "ecr:plan-catalog:grocery:probed";
+
+    // One probe at a time across the whole process, however many tabs ask at once.
+    private static int _probeRunning;
+
     // A price list changes when someone edits it in the Dashboard, which is rare.
     private static readonly TimeSpan CacheFor = TimeSpan.FromMinutes(10);
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public async Task<EcrCatalogResponse> GetCatalogAsync(CancellationToken ct = default)
+    public Task<EcrCatalogResponse> GetCatalogAsync(CancellationToken ct = default)
     {
         var source = new EcrCatalogSource(
             $"{PublicBaseUrl()}/api/purchase/plans?category={Category}",
@@ -95,20 +102,48 @@ public class EcrPlanCatalogClient(
             TenantPlanService.InternalFeatureKeys.OrderBy(k => k, StringComparer.Ordinal).ToList());
 
         if (cache.TryGetValue<IReadOnlyList<EcrPlanTier>>(CacheKey, out var cached))
-            return new EcrCatalogResponse(cached, source);
+            return Task.FromResult(new EcrCatalogResponse(cached, source));
 
-        foreach (var candidate in Candidates())
+        // Deliberately does NOT wait for the walk. Each unreachable address costs a full connect
+        // timeout, and this host blocks the route we most expect to work, so waiting meant the
+        // page sat on a spinner for the better part of half a minute before falling through to
+        // the browser — which then fetched the same data in well under a second. Hand the browser
+        // the address immediately and let the walk fill the cache in the background for next time.
+        StartProbe();
+        return Task.FromResult(new EcrCatalogResponse(null, source));
+    }
+
+    private void StartProbe()
+    {
+        if (cache.TryGetValue(ProbedKey, out _)) return;
+        if (Interlocked.CompareExchange(ref _probeRunning, 1, 0) != 0) return;
+        cache.Set(ProbedKey, true, CacheFor);
+
+        // Detached on purpose: nothing is waiting on it, so it must not carry the request's
+        // cancellation token — that token is cancelled the moment the response is written.
+        _ = Task.Run(async () =>
         {
-            var tiers = await TryFetchAsync(candidate, ct);
-            if (tiers is null) continue;
-            // Cached only on success: a failed fetch must be retried on the next page load, not
-            // remembered as "there are no plans" for the next ten minutes.
-            cache.Set(CacheKey, tiers, CacheFor);
-            return new EcrCatalogResponse(tiers, source);
-        }
-
-        logger.LogInformation("Plan catalog unreachable from this server; the browser will fetch it directly.");
-        return new EcrCatalogResponse(null, source);
+            try
+            {
+                foreach (var candidate in Candidates())
+                {
+                    var tiers = await TryFetchAsync(candidate, CancellationToken.None);
+                    if (tiers is null) continue;
+                    cache.Set(CacheKey, tiers, CacheFor);
+                    logger.LogInformation("Plan catalog reachable at {BaseUrl}; cached for {Minutes} minutes.", candidate, CacheFor.TotalMinutes);
+                    return;
+                }
+                logger.LogInformation("Plan catalog unreachable from this server; the browser fetches it directly.");
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Plan catalog probe failed.");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _probeRunning, 0);
+            }
+        });
     }
 
     // The address a BROWSER should use — always the public one, never a container-internal alias
