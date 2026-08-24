@@ -146,10 +146,30 @@ export const api = {
 
   // Tenant plan — pushed in by the external Tenant Admin Dashboard (see api/Controllers/TenantController.cs)
   getTenantPlan: () => request<TenantPlanInfo>("/api/tenant/plan"),
-  /** The live tier list the Tenant Admin Dashboard publishes — what is actually for sale,
-   *  rather than a table hardcoded in this app. Resolves to undefined (HTTP 204) when the
-   *  Dashboard is unreachable, so the Plans page can fall back instead of erroring. */
-  getTenantPlanCatalog: () => request<EcrPlanTier[] | undefined>("/api/tenant/plan/catalog"),
+  /** The live tier list the Tenant Admin Dashboard publishes — what is actually for sale, rather
+   *  than a table hardcoded in this app.
+   *
+   *  Two routes to the same data. Normally our own server fetches it; but the Dashboard's API
+   *  runs as a host process and this host blocks container → host-port routes, so that call
+   *  usually comes back empty. The browser has no such problem — it is already talking to both —
+   *  and the Dashboard's catalog endpoint is anonymous and CORS-open, so fetch it from here
+   *  instead. Resolves to undefined only when both routes fail, and the Plans page then falls
+   *  back to its built-in table rather than erroring over a comparison. */
+  getTenantPlanCatalog: async (): Promise<EcrPlanTier[] | undefined> => {
+    const res = await request<EcrCatalogResponse | undefined>("/api/tenant/plan/catalog");
+    if (res?.tiers?.length) return res.tiers;
+    if (!res?.source?.url) return undefined;
+    try {
+      // Deliberately a bare fetch, not request(): a different origin, and no token of ours to
+      // send to it.
+      const direct = await fetch(res.source.url, { headers: { Accept: "application/json" } });
+      if (!direct.ok) return undefined;
+      const body = (await direct.json()) as { data?: RawCatalogPlan[] };
+      return body.data?.length ? tiersFromRawCatalog(body.data, res.source) : undefined;
+    } catch {
+      return undefined;
+    }
+  },
   // "Manage Subscription" — returns a one-time signed URL that logs this tenant_admin straight
   // into their own Tenant Admin Dashboard (plans/hardware/billing). tenant_admin only.
   getDashboardLaunchUrl: () =>
@@ -1315,6 +1335,47 @@ export interface Branch {
   address?: string; city?: string; contactNumber?: string;
   commercialRegistration?: string; email?: string;
   status: string; createdAt: string;
+}
+
+/** Where to fetch the catalog when this app's own server could not, and how to read it. The map
+ *  is the backend's own slug → internal-key table, handed down rather than duplicated here. */
+export interface EcrCatalogSource { url: string; moduleKeyMap: Record<string, string[]>; internalKeys: string[] }
+export interface EcrCatalogResponse { tiers: EcrPlanTier[] | null; source: EcrCatalogSource }
+
+/** The Dashboard's public catalog payload — only the fields the tier table needs. */
+interface RawCatalogPlan {
+  name: string; monthlyPrice: number; yearlyPrice: number; currency: string | null;
+  maxLocations: number | null; maxTerminals: number | null; maxUsers: number | null; maxProducts: number | null;
+  isPopular: boolean; isActive: boolean;
+  modules?: { key: string; name: string }[] | null;
+  addOns?: { type: string; monthlyPrice: number; yearlyPrice: number }[] | null;
+}
+
+/** The same translation the backend does, driven by the table it handed us: a Dashboard module
+ *  slug covers one or more internal feature keys, and a module that maps to nothing gated in this
+ *  app is dropped rather than advertised as something the tenant would never see. */
+function tiersFromRawCatalog(plans: RawCatalogPlan[], source: EcrCatalogSource): EcrPlanTier[] {
+  const gated = new Set(source.internalKeys);
+  const keysFor = (slug: string) => (source.moduleKeyMap[slug] ?? []).filter((k) => gated.has(k));
+  return plans
+    .filter((p) => p.isActive)
+    .sort((a, b) => a.monthlyPrice - b.monthlyPrice)
+    .map((p) => ({
+      name: p.name,
+      monthlyPrice: p.monthlyPrice,
+      yearlyPrice: p.yearlyPrice,
+      currency: p.currency || "SAR",
+      limits: {
+        maxBranches: p.maxLocations,
+        maxTerminalsPerBranch: p.maxTerminals,
+        maxUsersPerBranch: p.maxUsers,
+        maxProducts: p.maxProducts,
+      },
+      features: [...new Set((p.modules ?? []).flatMap((m) => keysFor(m.key)))].sort(),
+      modules: (p.modules ?? []).filter((m) => keysFor(m.key).length > 0).map((m) => ({ key: m.key, name: m.name })),
+      addOns: p.addOns ?? [],
+      isPopular: p.isPopular,
+    }));
 }
 
 /** One purchasable tier exactly as the Tenant Admin Dashboard publishes it (mirrors

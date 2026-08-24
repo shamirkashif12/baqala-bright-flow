@@ -35,11 +35,21 @@ public record EcrPlanAddOn(string Type, decimal MonthlyPrice, decimal YearlyPric
 /// was selling 100/250/500. The catalog is the seller's record, so it is the one that belongs on
 /// screen.
 /// </summary>
+// What the browser needs to fetch the catalog itself when this server cannot. Url is the
+// Dashboard's public, anonymous, CORS-open endpoint; ModuleKeyMap is this project's own slug →
+// internal-key translation, handed down rather than duplicated in TypeScript so the two can
+// never drift apart.
+public record EcrCatalogSource(string Url, IReadOnlyDictionary<string, string[]> ModuleKeyMap, IReadOnlyList<string> InternalKeys);
+
+// Tiers is null when this server could not reach the Dashboard — the browser is then expected to
+// fetch Source.Url itself. Source is always populated.
+public record EcrCatalogResponse(IReadOnlyList<EcrPlanTier>? Tiers, EcrCatalogSource Source);
+
 public interface IEcrPlanCatalogClient
 {
     // Null when the Dashboard is unreachable or answers with something unusable — the caller is
     // expected to degrade rather than fail, since this only feeds a comparison table.
-    Task<IReadOnlyList<EcrPlanTier>?> GetTiersAsync(CancellationToken ct = default);
+    Task<EcrCatalogResponse> GetCatalogAsync(CancellationToken ct = default);
 }
 
 public class EcrPlanCatalogClient(
@@ -54,6 +64,19 @@ public class EcrPlanCatalogClient(
     // leave a stale price list on screen with nothing to show it had gone stale. Config still wins.
     private const string DefaultBaseUrl = "http://65.108.31.172:5000";
 
+    // The Dashboard's API runs as a plain host process, not a container on our network, and this
+    // host is known to block container → host-port routes — the same wall that forced the CRM to
+    // relay its price token through the browser. So try the host by every address a container
+    // might legitimately reach it by, and if none answer, the browser fetches it instead (see
+    // EcrCatalogResponse.Source). Order matters: the public address first, since it is the one
+    // that works when we are NOT containerised.
+    private static readonly string[] FallbackBaseUrls =
+    [
+        DefaultBaseUrl,
+        "http://host.docker.internal:5000",
+        "http://172.17.0.1:5000",
+    ];
+
     // One instance per tenant, and every one of them is a grocery/mart merchant.
     private const string Category = "Grocery";
 
@@ -64,17 +87,50 @@ public class EcrPlanCatalogClient(
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public async Task<IReadOnlyList<EcrPlanTier>?> GetTiersAsync(CancellationToken ct = default)
+    public async Task<EcrCatalogResponse> GetCatalogAsync(CancellationToken ct = default)
     {
-        if (cache.TryGetValue<IReadOnlyList<EcrPlanTier>>(CacheKey, out var cached)) return cached;
+        var source = new EcrCatalogSource(
+            $"{PublicBaseUrl()}/api/purchase/plans?category={Category}",
+            TenantPlanService.DashboardAliases,
+            TenantPlanService.InternalFeatureKeys.OrderBy(k => k, StringComparer.Ordinal).ToList());
 
-        var baseUrl = (config["TenantGateway:DashboardApiBaseUrl"] ?? DefaultBaseUrl).TrimEnd('/');
+        if (cache.TryGetValue<IReadOnlyList<EcrPlanTier>>(CacheKey, out var cached))
+            return new EcrCatalogResponse(cached, source);
+
+        foreach (var candidate in Candidates())
+        {
+            var tiers = await TryFetchAsync(candidate, ct);
+            if (tiers is null) continue;
+            // Cached only on success: a failed fetch must be retried on the next page load, not
+            // remembered as "there are no plans" for the next ten minutes.
+            cache.Set(CacheKey, tiers, CacheFor);
+            return new EcrCatalogResponse(tiers, source);
+        }
+
+        logger.LogInformation("Plan catalog unreachable from this server; the browser will fetch it directly.");
+        return new EcrCatalogResponse(null, source);
+    }
+
+    // The address a BROWSER should use — always the public one, never a container-internal alias
+    // that means nothing outside this host.
+    private string PublicBaseUrl() => (config["TenantGateway:DashboardApiBaseUrl"] ?? DefaultBaseUrl).TrimEnd('/');
+
+    private IEnumerable<string> Candidates()
+    {
+        var configured = config["TenantGateway:DashboardApiBaseUrl"]?.TrimEnd('/');
+        if (!string.IsNullOrWhiteSpace(configured)) yield return configured;
+        foreach (var url in FallbackBaseUrls)
+            if (!string.Equals(url, configured, StringComparison.OrdinalIgnoreCase)) yield return url;
+    }
+
+    private async Task<IReadOnlyList<EcrPlanTier>?> TryFetchAsync(string baseUrl, CancellationToken ct)
+    {
         try
         {
             using var response = await http.GetAsync($"{baseUrl}/api/purchase/plans?category={Category}", ct);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning("Plan catalog fetch returned {Status}; the Plans page will fall back.", (int)response.StatusCode);
+                logger.LogWarning("Plan catalog at {BaseUrl} returned {Status}.", baseUrl, (int)response.StatusCode);
                 return null;
             }
 
@@ -84,20 +140,15 @@ public class EcrPlanCatalogClient(
             var payload = JsonSerializer.Deserialize<CatalogEnvelope>(body, Json);
             if (payload?.Data is not { Count: > 0 }) return null;
 
-            var tiers = payload.Data
+            return payload.Data
                 .Where(p => p.IsActive)
                 .OrderBy(p => p.MonthlyPrice)
                 .Select(ToTier)
                 .ToList();
-
-            // Cached only on success: a failed fetch must be retried on the next page load, not
-            // remembered as "there are no plans" for the next ten minutes.
-            cache.Set(CacheKey, (IReadOnlyList<EcrPlanTier>)tiers, CacheFor);
-            return tiers;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            logger.LogWarning(ex, "Plan catalog unreachable; the Plans page will fall back.");
+            logger.LogDebug(ex, "Plan catalog not reachable at {BaseUrl}.", baseUrl);
             return null;
         }
     }

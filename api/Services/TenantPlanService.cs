@@ -223,6 +223,12 @@ public class TenantPlanService(BaqalaDbContext db) : ITenantPlanService
     // nothing here gates on a key that no module grants. Used by the live plan catalog to drop
     // Dashboard modules this project does not gate on, rather than list them as bullet points
     // whose effect the tenant could never see.
+    /// <summary>The slug → internal-key table, for handing to a client that has to do this
+    /// translation itself (the Plans page fetches the Dashboard catalog directly when this server
+    /// cannot reach it). Exposed rather than reimplemented in TypeScript so the two can never
+    /// drift apart.</summary>
+    internal static IReadOnlyDictionary<string, string[]> DashboardAliases => DashboardModuleAliases;
+
     internal static readonly IReadOnlySet<string> InternalFeatureKeys =
         DashboardModuleAliases.Values.SelectMany(keys => keys).ToHashSet(StringComparer.Ordinal);
 

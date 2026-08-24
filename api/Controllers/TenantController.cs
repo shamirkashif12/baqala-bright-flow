@@ -223,16 +223,17 @@ public class TenantController(
 
     // Read by the frontend Plans page and by any plan-aware UI — any authenticated user of this
     // instance shares the same enforced plan, so this isn't gated behind a specific permission.
-    // The tier table on the Plans page. Served from the Dashboard's own catalog rather than
-    // the copy that used to live in the frontend, which quietly went out of date every time
-    // someone edited a plan there. Returns 204 when the catalog is unreachable so the page can
-    // fall back to its built-in table instead of showing an error over a feature comparison.
+    // The tier table on the Plans page. Served from the Dashboard's own catalog rather than the
+    // copy that used to live in the frontend, which quietly went out of date every time someone
+    // edited a plan there.
+    //
+    // `tiers` is null when this server could not reach the Dashboard — which is the normal case
+    // here, since it runs as a host process and this host blocks container → host-port routes.
+    // `source` then tells the browser where to fetch it and how to translate it, so the page still
+    // shows live pricing over a route that is known to work.
     [HttpGet("plan/catalog")]
-    public async Task<IActionResult> GetPlanCatalog(CancellationToken ct)
-    {
-        var tiers = await planCatalog.GetTiersAsync(ct);
-        return tiers is null ? NoContent() : Ok(tiers);
-    }
+    public async Task<IActionResult> GetPlanCatalog(CancellationToken ct) =>
+        Ok(await planCatalog.GetCatalogAsync(ct));
 
     [HttpGet("plan")]
     public async Task<IActionResult> GetPlan()
