@@ -23,7 +23,13 @@ type PlanCatalogEntry = {
   limits: { branches?: number; terminals?: number; users?: number };
 };
 
-type Plan = PlanCatalogEntry & { status: "active" | "current" | "upgrade" | "contact" };
+// `limits` is always what the tier is SOLD with, so the ticks on a card and the usage line
+// underneath can never quote different numbers for the same plan. `enforced` is what this
+// instance actually caps at — only set on the current tier, and only when it differs.
+type Plan = PlanCatalogEntry & {
+  status: "active" | "current" | "upgrade" | "contact";
+  enforced?: { branches?: number; terminals?: number; users?: number };
+};
 
 // FALLBACK ONLY, and the home of Enterprise. The real Basic/Standard/Premium rows come from the
 // Tenant Admin Dashboard at GET /api/tenant/plan/catalog — that is where plans are actually
@@ -132,9 +138,15 @@ function resolvePlans(tenantPlan: TenantPlanInfo | null, catalog: EcrPlanTier[] 
     const status: Plan["status"] =
       i === currentIndex ? "current" : i < currentIndex ? "active" : p.name === "Enterprise" ? "contact" : "upgrade";
 
-    // Real enforced limits still win for the current tier: the catalog says what the tier is
-    // sold with, but this instance may carry an override or bought-in extra capacity on top.
-    const limits = i === currentIndex && tenantPlan?.plan.provisioned
+    // The card's ticks are built from the catalog ("1 Branch", "2 Terminals/Branch"), so the
+    // limits beside them have to come from the catalog too. Overriding them with the provisioned
+    // numbers made one card contradict itself — "1 Branch" in the list, "15/5 branches" in the
+    // usage line — because a stale provision had capped this instance at five.
+    //
+    // The enforced figure is not thrown away: it rides along on the current tier so it can be
+    // named where it differs. It is what actually stops someone creating a branch today, and the
+    // gap between the two is the thing worth noticing, not something to average away.
+    const enforced = i === currentIndex && tenantPlan?.plan.provisioned
       ? {
           branches: tenantPlan.plan.limits.maxBranches ?? undefined,
           // Enforced per-branch server-side; shown here as one flat number against a flat
@@ -142,9 +154,9 @@ function resolvePlans(tenantPlan: TenantPlanInfo | null, catalog: EcrPlanTier[] 
           terminals: tenantPlan.plan.limits.maxTerminalsPerBranch ?? undefined,
           users: tenantPlan.plan.limits.maxUsersPerBranch ?? undefined,
         }
-      : p.limits;
+      : undefined;
 
-    return { ...p, status, limits };
+    return { ...p, status, enforced };
   });
 }
 
@@ -323,6 +335,19 @@ function Plans() {
   // the Standard catalog card, and usage arriving first fired a bogus "exceeds the Standard
   // plan" toast for tenants actually provisioned on a higher tier (the notified guard then
   // suppressed the corrected one forever).
+  // Where this instance caps at something other than what the tier sells — a stale provision,
+  // or bought-in extra capacity — say so once, under the usage line, rather than quietly
+  // swapping one number for the other.
+  const enforcedNote = (() => {
+    const e = CURRENT_PLAN.enforced;
+    if (!e) return null;
+    const parts: string[] = [];
+    if (e.branches !== undefined && e.branches !== CURRENT_PLAN.limits.branches) parts.push(`${e.branches} branches`);
+    if (e.terminals !== undefined && e.terminals !== CURRENT_PLAN.limits.terminals) parts.push(`${e.terminals} terminals/branch`);
+    if (e.users !== undefined && e.users !== CURRENT_PLAN.limits.users) parts.push(`${e.users} users/branch`);
+    return parts.length ? `This instance is currently provisioned for ${parts.join(" · ")}.` : null;
+  })();
+
   const overage = usage && tenantPlan ? exceededLimits(usage, CURRENT_PLAN) : [];
   const nextTier = plans.find((p) => p.status === "upgrade");
 
@@ -481,6 +506,7 @@ function Plans() {
             {usage && (
               <p className={cn("text-sm mt-1", overage.length > 0 ? "text-warning font-medium" : "text-muted-foreground")}>
                 Usage: {usage.branches}/{CURRENT_PLAN.limits.branches ?? "∞"} branches · {usage.terminals}/{CURRENT_PLAN.limits.terminals ?? "∞"} terminals · {usage.users}/{CURRENT_PLAN.limits.users ?? "∞"} users
+                {enforcedNote && <span className="block text-muted-foreground">{enforcedNote}</span>}
               </p>
             )}
           </div>
