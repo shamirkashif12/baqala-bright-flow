@@ -14,6 +14,7 @@ public class TenantController(
     BaqalaDbContext db,
     ITenantPlanService tenantPlans,
     ITenantGatewayClient tenantGateway,
+    IEcrPlanCatalogClient planCatalog,
     IConfiguration config,
     ILogger<TenantController> logger) : ControllerBase
 {
@@ -222,6 +223,17 @@ public class TenantController(
 
     // Read by the frontend Plans page and by any plan-aware UI — any authenticated user of this
     // instance shares the same enforced plan, so this isn't gated behind a specific permission.
+    // The tier table on the Plans page. Served from the Dashboard's own catalog rather than
+    // the copy that used to live in the frontend, which quietly went out of date every time
+    // someone edited a plan there. Returns 204 when the catalog is unreachable so the page can
+    // fall back to its built-in table instead of showing an error over a feature comparison.
+    [HttpGet("plan/catalog")]
+    public async Task<IActionResult> GetPlanCatalog(CancellationToken ct)
+    {
+        var tiers = await planCatalog.GetTiersAsync(ct);
+        return tiers is null ? NoContent() : Ok(tiers);
+    }
+
     [HttpGet("plan")]
     public async Task<IActionResult> GetPlan()
     {

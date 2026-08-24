@@ -157,7 +157,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
 
     // ─── ZATCA Onboarding ─────────────────────────────────────────────────────
     [RequirePermission("Compliance", PermAction.Edit)]
-    [RequirePlanFeature("zatca_compliance")]
+    [RequirePlanFeature("zatca_phase2")]
     [HttpPost("zatca/onboarding/{branchId:guid}/csr")]
     public async Task<IActionResult> GenerateCsr(Guid branchId)
     {
@@ -173,7 +173,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
-    [RequirePlanFeature("zatca_compliance")]
+    [RequirePlanFeature("zatca_phase2")]
     [HttpPost("zatca/onboarding/{branchId:guid}/compliance-csid")]
     public async Task<IActionResult> GetComplianceCsid(Guid branchId, [FromBody] ZatcaOtpRequest req)
     {
@@ -199,7 +199,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
     }
 
     [RequirePermission("Compliance", PermAction.Edit)]
-    [RequirePlanFeature("zatca_compliance")]
+    [RequirePlanFeature("zatca_phase2")]
     [HttpPost("zatca/onboarding/{branchId:guid}/production-csid")]
     public async Task<IActionResult> GetProductionCsid(Guid branchId)
     {

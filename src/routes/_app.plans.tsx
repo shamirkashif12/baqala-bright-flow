@@ -9,7 +9,7 @@ import { Check, Crown, Zap, Building2, Store, Globe, AlertTriangle, Minus, Exter
 import { cn } from "@/lib/utils";
 import { SARIcon } from "@/lib/currency";
 import { toast } from "sonner";
-import { api, type TenantPlanInfo } from "@/lib/api";
+import { api, type EcrPlanTier, type TenantPlanInfo } from "@/lib/api";
 
 export const Route = createFileRoute("/_app/plans")({ component: Plans });
 
@@ -25,8 +25,13 @@ type PlanCatalogEntry = {
 
 type Plan = PlanCatalogEntry & { status: "active" | "current" | "upgrade" | "contact" };
 
-// Matches the "Fixed Bundles" pricing deck exactly (Basic/Standard/Premium — Enterprise below is
-// this app's own pre-existing custom/contact-sales tier, not part of that deck).
+// FALLBACK ONLY, and the home of Enterprise. The real Basic/Standard/Premium rows come from the
+// Tenant Admin Dashboard at GET /api/tenant/plan/catalog — that is where plans are actually
+// authored and priced, and this copy drifted from it badly (it still advertises 199/399/699 and
+// "Unlimited Branches" for Premium, against 100/250/500 and 10 branches actually being sold).
+// Kept so the page renders something when the Dashboard is unreachable. Enterprise is different:
+// it is this app's own contact-sales tier, not something the Dashboard sells, so it is appended
+// to the live rows rather than replaced by them.
 const PLAN_CATALOG: PlanCatalogEntry[] = [
   {
     name: "Basic", price: 199, tag: "For a single baqala", featured: false,
@@ -64,26 +69,71 @@ const PLAN_CATALOG: PlanCatalogEntry[] = [
   },
 ];
 
-const TIER_ORDER = PLAN_CATALOG.map((p) => p.name);
+const ENTERPRISE = PLAN_CATALOG.find((p) => p.name === "Enterprise")!;
+
+// Icon and one-line pitch per tier name — presentation the Dashboard has no opinion about, so
+// it stays here and is looked up by name. An unrecognised tier name still renders, with the
+// generic icon.
+const TIER_STYLE: Record<string, { icon: PlanCatalogEntry["icon"]; tag: string }> = {
+  Basic: { icon: Store, tag: "For a single baqala" },
+  Standard: { icon: Zap, tag: "Growing mart operators" },
+  Premium: { icon: Building2, tag: "Multi-branch operations" },
+};
+
+// Turns the Dashboard's live tiers into this page's card shape. The feature bullets are the
+// limits followed by the Dashboard's own module names — the same wording the tenant was quoted,
+// instead of a hand-written list that had to be remembered every time a plan changed.
+function catalogFromEcr(tiers: EcrPlanTier[]): PlanCatalogEntry[] {
+  const live = tiers.map((t) => {
+    const style = TIER_STYLE[t.name] ?? { icon: Store, tag: "Subscription plan" };
+    const cap = (n: number | null, one: string, many: string) =>
+      n === null ? `Unlimited ${many}` : `${n} ${n === 1 ? one : many}`;
+    return {
+      name: t.name,
+      price: t.monthlyPrice,
+      tag: style.tag,
+      featured: t.isPopular,
+      icon: style.icon,
+      limits: {
+        branches: t.limits.maxBranches ?? undefined,
+        terminals: t.limits.maxTerminalsPerBranch ?? undefined,
+        users: t.limits.maxUsersPerBranch ?? undefined,
+      },
+      f: [
+        cap(t.limits.maxBranches, "Branch", "Branches"),
+        cap(t.limits.maxTerminalsPerBranch, "Terminal/Branch", "Terminals/Branch"),
+        cap(t.limits.maxUsersPerBranch, "User/Branch", "Users/Branch"),
+        ...t.modules.map((m) => m.name),
+      ],
+    };
+  });
+  // Enterprise is this app's own contact-sales row and has no Dashboard equivalent.
+  return [...live, ENTERPRISE];
+}
 
 // Resolves which catalog tier is "current" from the real plan this instance was provisioned
 // with (GET /api/tenant/plan), falling back to the previous hardcoded Standard default when
 // unprovisioned or the Dashboard sent a plan name this catalog doesn't recognize — so this page
 // still renders sensibly before a real Tenant Dashboard exists.
-function resolvePlans(tenantPlan: TenantPlanInfo | null): Plan[] {
+function resolvePlans(tenantPlan: TenantPlanInfo | null, catalog: EcrPlanTier[] | null): Plan[] {
+  // Live rows when the Dashboard answered, the built-in table only as a fallback. An empty
+  // catalog counts as unavailable, not as "there is nothing to buy".
+  const entries = catalog?.length ? catalogFromEcr(catalog) : PLAN_CATALOG;
+  const tierOrder = entries.map((p) => p.name);
+
   const provisionedName = tenantPlan?.plan.provisioned ? tenantPlan.plan.planName : null;
   const matchedIndex = provisionedName
-    ? TIER_ORDER.findIndex((t) => t.toLowerCase() === provisionedName.toLowerCase())
+    ? tierOrder.findIndex((t) => t.toLowerCase() === provisionedName.toLowerCase())
     : -1;
-  const currentIndex = matchedIndex !== -1 ? matchedIndex : TIER_ORDER.indexOf("Standard");
+  const fallbackIndex = tierOrder.indexOf("Standard");
+  const currentIndex = matchedIndex !== -1 ? matchedIndex : fallbackIndex !== -1 ? fallbackIndex : 0;
 
-  return PLAN_CATALOG.map((p, i) => {
+  return entries.map((p, i) => {
     const status: Plan["status"] =
       i === currentIndex ? "current" : i < currentIndex ? "active" : p.name === "Enterprise" ? "contact" : "upgrade";
 
-    // Real enforced limits only replace the actual current tier's numbers — the other three
-    // rows are a static reference catalog (there's no multi-plan catalog endpoint from the
-    // Dashboard yet), not per-tier data pulled from the backend.
+    // Real enforced limits still win for the current tier: the catalog says what the tier is
+    // sold with, but this instance may carry an override or bought-in extra capacity on top.
     const limits = i === currentIndex && tenantPlan?.plan.provisioned
       ? {
           branches: tenantPlan.plan.limits.maxBranches ?? undefined,
@@ -213,6 +263,7 @@ function Plans() {
   const [cycle, setCycle] = useState<Cycle>("Monthly");
   const [usage, setUsage] = useState<Usage | null>(null);
   const [tenantPlan, setTenantPlan] = useState<TenantPlanInfo | null>(null);
+  const [catalog, setCatalog] = useState<EcrPlanTier[] | null>(null);
   const [detailsPlan, setDetailsPlan] = useState<Plan | null>(null);
   const [launching, setLaunching] = useState(false);
   const notified = useRef(false);
@@ -254,9 +305,11 @@ function Plans() {
       .then(([branches, terminals, users]) => setUsage({ branches: branches.length, terminals: terminals.length, users: users.length }))
       .catch(() => setUsage(null));
     api.getTenantPlan().then(setTenantPlan).catch(() => setTenantPlan(null));
+    // Never blocks the page: a missing catalog just means the built-in fallback rows.
+    api.getTenantPlanCatalog().then((t) => setCatalog(t ?? null)).catch(() => setCatalog(null));
   }, []);
 
-  const plans = useMemo(() => resolvePlans(tenantPlan), [tenantPlan]);
+  const plans = useMemo(() => resolvePlans(tenantPlan, catalog), [tenantPlan, catalog]);
   const CURRENT_PLAN = plans.find((p) => p.status === "current")!;
 
   // Both fetches must have settled: while tenantPlan is still null, resolvePlans falls back to

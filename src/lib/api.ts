@@ -146,6 +146,10 @@ export const api = {
 
   // Tenant plan — pushed in by the external Tenant Admin Dashboard (see api/Controllers/TenantController.cs)
   getTenantPlan: () => request<TenantPlanInfo>("/api/tenant/plan"),
+  /** The live tier list the Tenant Admin Dashboard publishes — what is actually for sale,
+   *  rather than a table hardcoded in this app. Resolves to undefined (HTTP 204) when the
+   *  Dashboard is unreachable, so the Plans page can fall back instead of erroring. */
+  getTenantPlanCatalog: () => request<EcrPlanTier[] | undefined>("/api/tenant/plan/catalog"),
   // "Manage Subscription" — returns a one-time signed URL that logs this tenant_admin straight
   // into their own Tenant Admin Dashboard (plans/hardware/billing). tenant_admin only.
   getDashboardLaunchUrl: () =>
@@ -1311,6 +1315,23 @@ export interface Branch {
   address?: string; city?: string; contactNumber?: string;
   commercialRegistration?: string; email?: string;
   status: string; createdAt: string;
+}
+
+/** One purchasable tier exactly as the Tenant Admin Dashboard publishes it (mirrors
+ *  api/Services/EcrPlanCatalogClient.cs). `modules` carries the Dashboard's own display names, so
+ *  the Plans page reads the same wording the tenant was quoted; `features` carries this app's
+ *  internal keys for anything that needs to compare against the live plan. Both are already
+ *  filtered to modules this app actually gates on. */
+export interface EcrPlanTier {
+  name: string;
+  monthlyPrice: number;
+  yearlyPrice: number;
+  currency: string;
+  limits: { maxBranches: number | null; maxTerminalsPerBranch: number | null; maxUsersPerBranch: number | null; maxProducts: number | null };
+  features: string[];
+  modules: { key: string; name: string }[];
+  addOns: { type: string; monthlyPrice: number; yearlyPrice: number }[];
+  isPopular: boolean;
 }
 
 // Mirrors api/Services/TenantPlanService.cs's TenantPlanResponse — null limits mean "no cap on

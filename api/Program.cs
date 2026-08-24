@@ -92,6 +92,11 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<BaqalaDbContext>();
 builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
 builder.Services.AddHttpClient<ITenantGatewayClient, TenantGatewayClient>();
+// Reads the live tier list the Tenant Admin Dashboard publishes, so the Plans page shows what
+// is actually for sale instead of a table hardcoded in the frontend. Short timeout: a
+// comparison table is never worth making the page wait.
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient<IEcrPlanCatalogClient, EcrPlanCatalogClient>(c => c.Timeout = TimeSpan.FromSeconds(8));
 builder.Services.AddHttpClient<IMyFatoorahServiceClient, MyFatoorahServiceClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
 // POS checkout card payments on the NamiPay terminal, via the middleware's Nami service. 75s:
 // the middleware's own worst case (token exchange + 3 retries against Nami's 15s-capped
