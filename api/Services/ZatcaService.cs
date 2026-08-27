@@ -122,6 +122,25 @@ public class ZatcaService(
         var privateKey = _protector.Unprotect(identity.PrivateKey!);
         var environment = MapApiEnvironment(identity.Environment);
 
+        // The compliance test documents must carry the real onboarded VAT number — ZATCA ties the
+        // compliance/production CSID certificate to the taxpayer's actual VAT and rejects any
+        // signed document whose supplier VAT doesn't match with a
+        // "User only allowed to use the vat number that exists in the authentication certificate"
+        // CERTIFICATE_ERRORS failure on every one of the 6 checks. This only surfaced in
+        // production/simulation — the sandbox environment's CSID isn't tied to a real VAT, so the
+        // template's placeholder sample VAT (311691066700003, ZATCA's own SDK sample) passed there
+        // undetected. All branches share one VAT/certificate (see ZatcaIdentity), so any branch's
+        // settings carrying it is representative.
+        var supplierSettings = await db.ZatcaSettings.Include(s => s.Branch)
+            .FirstOrDefaultAsync(s => s.VatRegistrationNumber != null)
+            ?? throw new InvalidOperationException("No branch has a ZATCA VAT registration number set. Complete branch ZATCA settings before running compliance tests.");
+        var supplier = new ZatcaParty(
+            RegistrationName: supplierSettings.SellerName ?? supplierSettings.Branch?.Name,
+            VatId: supplierSettings.VatRegistrationNumber,
+            Address: new ZatcaPartyAddress(supplierSettings.StreetName, supplierSettings.BuildingNumber, supplierSettings.CitySubdivisionName, supplierSettings.Branch?.City, supplierSettings.PostalZone),
+            PartyIdentificationSchemeId: "CRN",
+            PartyIdentificationId: supplierSettings.Branch?.CommercialRegistration);
+
         // ZATCA requires 6 fixed document types for compliance testing.
         var documentTypes = new (string Prefix, string TypeCode, string Description, string? InstructionNote)[]
         {
@@ -143,7 +162,7 @@ public class ZatcaService(
             var isSimplified = prefix.StartsWith("SIM", StringComparison.Ordinal);
             var subtype = isSimplified ? "0200000" : "0100000";
 
-            var doc = _xmlBuilder.ModifyForComplianceTest($"{prefix}-0001", subtype, typeCode, icv, pih, instructionNote);
+            var doc = _xmlBuilder.ModifyForComplianceTest($"{prefix}-0001", subtype, typeCode, icv, pih, instructionNote, supplier);
             var signed = _signer.Sign(doc, DecodeCertificateContent(identity.CcsidBinarySecurityToken), privateKey);
 
             var response = await apiClient.ComplianceChecksAsync(environment, identity.CcsidBinarySecurityToken, ccsidSecret, signed);
