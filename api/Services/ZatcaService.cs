@@ -406,7 +406,15 @@ public class ZatcaService(
                 .Any(e => e.TryGetProperty("message", out var msg) && (msg.GetString() ?? "").Contains("Compliance check already completed", StringComparison.Ordinal));
         }
 
-        var passed = alreadyCompliant || status.Contains("REPORTED", StringComparison.Ordinal) || status.Contains("CLEARED", StringComparison.Ordinal);
+        // Must be an exact match, not Contains: ZATCA's *failure* values are "NOT_CLEARED" and
+        // "NOT_REPORTED", which themselves contain the substrings "CLEARED"/"REPORTED" — the
+        // previous Contains() check marked every failed compliance test as passed, so the "Run
+        // Compliance Tests" step reported all 6 green locally while ZATCA's own /production/csids
+        // call correctly rejected with Missing-ComplianceSteps for all 6. Also require the HTTP
+        // call itself to have succeeded (2xx) — a 400 with a stray "CLEARED"/"REPORTED" substring
+        // anywhere in its body must not read as a pass.
+        var expectedStatus = isSimplified ? "REPORTED" : "CLEARED";
+        var passed = alreadyCompliant || (response.Success && status == expectedStatus);
         return (passed, status, alreadyCompliant);
     }
 
