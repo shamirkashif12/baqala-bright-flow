@@ -8,24 +8,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BaqalaPOS.Api.Controllers;
 
-public record OnlineOrderItemRequest(Guid ProductId, decimal Quantity);
-
-// The quote body grew from a bare item list to this so the delivery pin can be priced alongside
-// the basket — the fee depends on where the order is going, so a quote that doesn't know the
-// destination can't show the real total. Latitude/Longitude stay optional: an order placed
-// without a map pin still quotes, it just can't match a geographic rule.
-public record QuoteOnlineOrderRequest(
-    List<OnlineOrderItemRequest> Items, decimal? Latitude, decimal? Longitude);
+// OnlineOrderItemRequest / QuoteOnlineOrderRequest / PlaceOnlineOrderRequest live in
+// api/Models/OnlineOrderRequests.cs — they're shared with OnlineCheckoutService (which also
+// stores PlaceOnlineOrderRequest as the checkout snapshot on OnlinePayment).
 
 public record UpdateOnlineOrderDeliveryFeeRequest(decimal Amount, string? Reason);
-
-public record PlaceOnlineOrderRequest(
-    List<OnlineOrderItemRequest> Items, string FullName, string Phone, string? Email,
-    string AddressLine, decimal? Latitude, decimal? Longitude, string? Notes,
-    // "cash" (default, Cash on Delivery) or "myfatoorah" — for the latter, PaymentReference must be
-    // the InvoiceId returned by InitiateOnlinePayment, and payment is re-verified server-side
-    // against MyFatoorah (see PlacePublicOrder) before the order is ever created.
-    string PaymentMethod = "cash", long? PaymentReference = null);
 
 public record UpdateOnlineOrderItemsRequest(List<OnlineOrderItemEdit> Items);
 public record OnlineOrderItemEdit(Guid? OrderItemId, Guid ProductId, decimal Quantity, decimal UnitPrice);
@@ -49,7 +36,7 @@ public class OnlineOrdersController(
     IAuditService audit,
     IBatchConsumptionService batchConsumption,
     INotificationService notifications,
-    IMyFatoorahServiceClient myFatoorah,
+    IOnlineCheckoutService checkout,
     ILogger<OnlineOrdersController> logger) : ControllerBase
 {
     private (string? Role, Guid? BranchId) GetCallerContext()
@@ -74,6 +61,7 @@ public class OnlineOrdersController(
     // ── Public, unauthenticated ────────────────────────────────────────────
 
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-public")]
     [HttpGet("public/{branchId:guid}/catalog")]
     public async Task<IActionResult> GetPublicCatalog(Guid branchId)
     {
@@ -112,8 +100,10 @@ public class OnlineOrdersController(
         var companyProfile = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId);
         var logoDataUrl = companyProfile?.ShowLogoOnCustomerSlip == true ? companyProfile.LogoDataUrl : null;
 
-        var onlinePaymentEnabled = await db.PaymentIntegrations
-            .AnyAsync(p => p.BranchId == branchId && p.Provider == "MyFatoorah" && p.IsEnabled);
+        // "Pay Online" exists only when the branch has MyFatoorah enabled WITH a token (Admin →
+        // Payments) — the same condition that gates invoice creation and status polling, so the
+        // page and the server can never disagree about whether online payment is available.
+        var onlinePaymentEnabled = await checkout.ResolveMyFatoorahAccountAsync(branchId) is not null;
 
         return Ok(new
         {
@@ -151,6 +141,7 @@ public class OnlineOrdersController(
     // IOnlineOrderPricingService's own doc comment); without this the cart summary could only ever
     // show a naive unitPrice*qty guess with no visibility into fees until after the order is placed.
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-public")]
     [HttpPost("public/{branchId:guid}/quote")]
     public async Task<IActionResult> QuotePublicOrder(Guid branchId, [FromBody] QuoteOnlineOrderRequest req)
     {
@@ -185,279 +176,137 @@ public class OnlineOrdersController(
         });
     }
 
-    // Creates a MyFatoorah invoice for the shopper's cart, priced authoritatively server-side (the
-    // same pricing + deliverability + min/max checks PlacePublicOrder itself enforces) — never for
-    // whatever amount the client might claim. No Order row is created here; the checkout page opens
-    // the returned InvoiceUrl for the shopper to pay, polls GetOnlinePaymentStatus, and only calls
-    // PlacePublicOrder (with PaymentMethod="myfatoorah" + this InvoiceId) once MyFatoorah confirms
-    // it's Paid — see PlacePublicOrder's re-verification of that same invoice before it trusts it.
+    // ── Card payment (MyFatoorah) ──────────────────────────────────────────
+    // The whole card flow lives in OnlineCheckoutService; these endpoints only translate its
+    // results to HTTP. Shape of the flow: (1) card-payment raises the invoice AND records the
+    // full checkout; (2) the page opens the invoice URL and polls status; (3) the first status
+    // poll that finds it Paid creates the order server-side from the record and returns the
+    // order number — the browser never has to make a second, failable "place order" call for
+    // card, and OnlinePaymentReconcilerService finishes any payment whose browser went away.
+
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-payment")]
     [HttpPost("public/{branchId:guid}/card-payment")]
-    public async Task<IActionResult> InitiateOnlinePayment(Guid branchId, [FromBody] QuoteOnlineOrderRequest req)
+    public async Task<IActionResult> InitiateOnlinePayment(Guid branchId, [FromBody] PlaceOnlineOrderRequest req)
     {
-        var (branch, settings) = await ResolveOnlineOrderingBranchAsync(branchId);
-        if (branch is null || settings is null)
-            return NotFound(new { message = "Online ordering isn't available for this branch." });
-        if (req?.Items is not { Count: > 0 }) return BadRequest(new { message = "Your cart is empty." });
+        var result = await checkout.InitiateCardPaymentAsync(branchId, req, HttpContext.RequestAborted);
+        if (!result.Ok) return StatusCode(result.StatusCode, new { message = result.Message });
+        var v = result.Value!;
+        return Ok(new { invoiceId = v.InvoiceId, invoiceUrl = v.InvoiceUrl, totalAmount = v.TotalAmount });
+    }
 
-        var enabled = await db.PaymentIntegrations
-            .AnyAsync(p => p.BranchId == branchId && p.Provider == "MyFatoorah" && p.IsEnabled);
-        if (!enabled) return BadRequest(new { message = "Online payment isn't available for this branch." });
-
-        var totals = await pricing.ComputeAsync(
-            branchId, req.Items.Select(i => (i.ProductId, i.Quantity)), req.Latitude, req.Longitude);
-        if (!totals.Delivery.IsServiceable)
-            return BadRequest(new { message = totals.Delivery.UnserviceableMessage ?? "This branch doesn't deliver to that address." });
-        if (totals.GoodsTotal < settings.OnlineOrderingMinOrderAmountSar)
-            return BadRequest(new { message = $"Minimum order amount is SAR {settings.OnlineOrderingMinOrderAmountSar:F2}." });
-        if (totals.GoodsTotal > settings.OnlineOrderingMaxOrderValueSar)
-            return BadRequest(new { message = $"This order exceeds the maximum of SAR {settings.OnlineOrderingMaxOrderValueSar:F2} — please contact the branch directly." });
-
-        var (success, invoice, error) = await myFatoorah.SendPaymentAsync(
-            totals.TotalAmount, "Online Customer", customerReference: null, HttpContext.RequestAborted);
-        if (!success || invoice is null)
-            return StatusCode(502, new { message = error ?? "Could not reach the payment gateway." });
-
-        return Ok(new { invoiceId = invoice.InvoiceId, invoiceUrl = invoice.InvoiceUrl, totalAmount = totals.TotalAmount });
+    // Branch-scoped because the lookup is made on the branch's own MyFatoorah account (the one
+    // the invoice was raised on) and answered only for invoices this app recorded for that branch.
+    [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-public")]
+    [HttpGet("public/{branchId:guid}/card-payment/{invoiceId:long}/status")]
+    public async Task<IActionResult> GetOnlinePaymentStatus(Guid branchId, long invoiceId)
+    {
+        var result = await checkout.GetCardPaymentStatusAsync(branchId, invoiceId, HttpContext.RequestAborted);
+        if (!result.Ok) return StatusCode(result.StatusCode, new { message = result.Message });
+        var v = result.Value!;
+        return Ok(new { status = v.Status, rawStatus = v.RawStatus, orderNumber = v.OrderNumber, totalAmount = v.OrderTotal, problem = v.Problem });
     }
 
     [AllowAnonymous]
-    [HttpGet("public/card-payment/{invoiceId:long}/status")]
-    public async Task<IActionResult> GetOnlinePaymentStatus(long invoiceId)
-    {
-        var (success, status, error) = await myFatoorah.GetPaymentStatusAsync(invoiceId, HttpContext.RequestAborted);
-        if (!success || status is null)
-            return StatusCode(502, new { message = error ?? "Could not reach the payment gateway." });
-
-        var simplified = status.Status switch
-        {
-            "Paid" => "paid",
-            "Expired" or "Canceled" => "failed",
-            _ => "pending",
-        };
-        return Ok(new { status = simplified, rawStatus = status.Status });
-    }
-
-    [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("online-payment")]
     [HttpPost("public/{branchId:guid}")]
     public async Task<IActionResult> PlacePublicOrder(Guid branchId, [FromBody] PlaceOnlineOrderRequest req)
     {
-        var (branch, settings) = await ResolveOnlineOrderingBranchAsync(branchId);
-        if (branch is null || settings is null)
-            return NotFound(new { message = "Online ordering isn't available for this branch." });
+        var result = await checkout.PlacePublicOrderAsync(branchId, req, HttpContext.RequestAborted);
+        if (!result.Ok) return StatusCode(result.StatusCode, new { message = result.Message });
+        return Ok(new { result.Value!.OrderNumber, result.Value.TotalAmount });
+    }
 
-        // Mirrors the checkout form's own client-side checks — re-validated here because this is a
-        // fully anonymous endpoint and nothing from the client can be trusted.
-        if (string.IsNullOrWhiteSpace(req.FullName) || req.FullName.Trim().Length < 2)
-            return BadRequest(new { message = "Enter your full name." });
-        if (string.IsNullOrWhiteSpace(req.AddressLine) || req.AddressLine.Trim().Length < 8)
-            return BadRequest(new { message = "Enter a more detailed delivery address." });
-        var phoneDigits = new string((req.Phone ?? "").Where(char.IsDigit).ToArray());
-        if (phoneDigits.Length < 8) return BadRequest(new { message = "Enter a valid phone number." });
-        if (!string.IsNullOrWhiteSpace(req.Email) &&
-            !System.Text.RegularExpressions.Regex.IsMatch(req.Email.Trim(), @"^[^\s@]+@[^\s@]+\.[^\s@]+$"))
-            return BadRequest(new { message = "Enter a valid email address, or leave it blank." });
-        if (req.Items is not { Count: > 0 }) return BadRequest(new { message = "Your cart is empty." });
+    // ── Payments needing attention (staff) ─────────────────────────────────
+    // Money that exists at MyFatoorah without a matching order here: paid invoices whose order
+    // couldn't be created (stock gone, price moved, branch switched off...). Each can be placed
+    // (retry from the recorded checkout) or refunded. Same permission as approving orders.
 
-        // One stock row per requested product, fetched up front — for the initial eligibility
-        // check below. Tobacco is allowed (see GetPublicCatalog's comment); AllowSelfCheckout still
-        // gates other exclusions.
-        var productIds = req.Items.Select(i => i.ProductId).Distinct().ToList();
-        var stocks = (await db.InventoryStocks
-                .Include(s => s.Product)
-                .Where(s => s.BranchId == branchId)
-                .ToListAsync())
-            .Where(s => productIds.Contains(s.ProductId))
-            .ToDictionary(s => s.ProductId);
+    [RequirePermission("Online Orders", PermAction.Approve)]
+    [HttpGet("payments/attention")]
+    public async Task<IActionResult> GetPaymentsNeedingAttention([FromQuery] Guid? branchId)
+    {
+        var (role, callerBranchId) = GetCallerContext();
+        var scopedBranch = role == "tenant_admin" ? branchId : (callerBranchId ?? branchId);
 
-        foreach (var item in req.Items)
+        // Two shapes of "money at MyFatoorah that doesn't match an order here":
+        //   (a) paid, no order could be created (status "paid");
+        //   (b) ordered, but the order was since cancelled WITHOUT the online Reject flow — i.e. by
+        //       a path that couldn't refund (POS void before the guard existed, a manual DB fix, ...)
+        //       — so the customer is still charged for a cancelled order.
+        var query =
+            from p in db.OnlinePayments.AsNoTracking()
+            join o in db.Orders.AsNoTracking() on p.OrderId equals o.Id into oj
+            from o in oj.DefaultIfEmpty()
+            where p.Status == "paid" ||
+                  (p.Status == "ordered" && o != null && o.OrderStatus == "cancelled" && o.PaymentStatus != "refunded")
+            select new { Payment = p, OrderNumber = o != null ? o.OrderNumber : null, OrderStatus = o != null ? o.OrderStatus : null };
+        if (scopedBranch is { } b) query = query.Where(x => x.Payment.BranchId == b);
+        var rows = await query.OrderBy(x => x.Payment.PaidAt).Take(200).ToListAsync();
+
+        var branchNames = await db.Branches.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name);
+        return Ok(rows.Select(x =>
         {
-            if (!stocks.TryGetValue(item.ProductId, out var stock) || stock.Product is null ||
-                stock.Product.Status != "active" || !stock.Product.AllowSelfCheckout)
-                return BadRequest(new { message = "One or more items are no longer available." });
-        }
-
-        // Delivery is priced from the pin the shopper submitted, server-side — the client's own
-        // quote is a display convenience and is never trusted, same posture as every other number
-        // on this endpoint.
-        var totals = await pricing.ComputeAsync(
-            branchId, req.Items.Select(i => (i.ProductId, i.Quantity)), req.Latitude, req.Longitude);
-
-        if (!totals.Delivery.IsServiceable)
-            return BadRequest(new { message = totals.Delivery.UnserviceableMessage ?? "This branch doesn't deliver to that address." });
-
-        // Gates compare against the GOODS total, not the grand total: a delivery fee must never be
-        // what pushes an order over the branch maximum, nor count towards clearing its minimum.
-        if (totals.GoodsTotal < settings.OnlineOrderingMinOrderAmountSar)
-            return BadRequest(new { message = $"Minimum order amount is SAR {settings.OnlineOrderingMinOrderAmountSar:F2}." });
-        if (totals.GoodsTotal > settings.OnlineOrderingMaxOrderValueSar)
-            return BadRequest(new { message = $"This order exceeds the maximum of SAR {settings.OnlineOrderingMaxOrderValueSar:F2} — please contact the branch directly." });
-
-        // For a MyFatoorah-paid order, re-verify the payment server-side against MyFatoorah itself
-        // before ever creating the order — this endpoint is fully anonymous, so a client claiming
-        // PaymentMethod="myfatoorah" is never trusted on its own. Both that the invoice is actually
-        // Paid AND that it was raised for (approximately) this same total are checked, since prices
-        // can in principle have shifted between InitiateOnlinePayment and now.
-        if (req.PaymentMethod == "myfatoorah")
-        {
-            if (req.PaymentReference is not { } invoiceId)
-                return BadRequest(new { message = "Missing payment reference." });
-
-            var (success, status, error) = await myFatoorah.GetPaymentStatusAsync(invoiceId, HttpContext.RequestAborted);
-            if (!success || status is null)
-                return StatusCode(502, new { message = error ?? "Could not verify payment with the payment gateway." });
-            if (status.Status != "Paid")
-                return BadRequest(new { message = "Payment hasn't been completed yet." });
-            if (Math.Abs(status.InvoiceValue - totals.TotalAmount) > 0.01m)
-                return BadRequest(new { message = "Payment amount doesn't match the order total — please try again." });
-        }
-        else if (req.PaymentMethod != "cash")
-        {
-            return BadRequest(new { message = $"Unsupported payment method '{req.PaymentMethod}'." });
-        }
-
-        // Combine paid + bonus quantities per product — a bogo/buy_a_get_b offer can add a bonus
-        // line for a product the customer never directly requested (or add more of the SAME
-        // product, e.g. "buy 3 get 1 free"), and availability/reservation both need to happen
-        // against this combined figure, not just what was in the cart.
-        var neededByProduct = totals.Items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.Sum(i => i.Quantity));
-        var missingStockIds = neededByProduct.Keys.Except(stocks.Keys).ToList();
-        if (missingStockIds.Count > 0)
-        {
-            var extra = (await db.InventoryStocks.Include(s => s.Product)
-                    .Where(s => s.BranchId == branchId).ToListAsync())
-                .Where(s => missingStockIds.Contains(s.ProductId));
-            foreach (var s in extra) stocks[s.ProductId] = s;
-        }
-
-        foreach (var (productId, neededQty) in neededByProduct)
-        {
-            if (!stocks.TryGetValue(productId, out var stock) || stock.Product is null ||
-                stock.Product.Status != "active" || !stock.Product.AllowSelfCheckout)
-                return BadRequest(new { message = "One or more items are no longer available." });
-            var available = stock.Quantity - stock.ReservedQuantity;
-            if (available < neededQty)
-                return BadRequest(new { message = $"Only {Math.Max(0, available):0.##} of '{stock.Product.Name}' is available." });
-        }
-
-        var order = new Order
-        {
-            Id = Guid.NewGuid(),
-            OrderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
-            Source = "online",
-            BranchId = branchId,
-            CustomerId = null,
-            Subtotal = totals.Subtotal,
-            TaxAmount = totals.TaxAmount,
-            TobaccoFeeAmount = totals.TobaccoFeeAmount,
-            CustomFeeAmount = totals.CustomFeeAmount,
-            DeliveryFeeAmount = totals.Delivery.Amount,
-            TotalAmount = totals.TotalAmount,
-            // Cash on Delivery still settles at Deliver() (see below); a MyFatoorah order is already
-            // paid in full by the time it's placed — verified just above — so it's paid from the start.
-            PaymentStatus = req.PaymentMethod == "myfatoorah" ? "paid" : "pending",
-            OrderStatus = "pending",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        };
-        foreach (var line in totals.Items)
-        {
-            order.Items.Add(new OrderItem
+            var p = x.Payment;
+            PlaceOnlineOrderRequest? snapshot = null;
+            try { snapshot = System.Text.Json.JsonSerializer.Deserialize<PlaceOnlineOrderRequest>(p.CheckoutJson); } catch (System.Text.Json.JsonException) { }
+            return new
             {
-                Id = Guid.NewGuid(),
-                OrderId = order.Id,
-                ProductId = line.ProductId,
-                Quantity = line.Quantity,
-                UnitPrice = line.UnitPrice,
-                TotalPrice = line.TotalPrice,
-                TobaccoFeeAmount = line.TobaccoFeeAmount,
-                CreatedAt = DateTime.UtcNow,
-            });
-        }
-        foreach (var fee in totals.CustomFees)
-        {
-            order.ServiceCharges.Add(new OrderServiceCharge
-            {
-                Id = Guid.NewGuid(), OrderId = order.Id, TaxFeeRuleId = fee.TaxFeeRuleId,
-                Name = fee.Name, Amount = fee.Amount, CreatedAt = DateTime.UtcNow,
-            });
-        }
-        db.Orders.Add(order);
-        if (req.PaymentMethod == "myfatoorah")
-        {
-            db.OrderPayments.Add(new OrderPayment
-            {
-                Id = Guid.NewGuid(), OrderId = order.Id, PaymentMethod = "card",
-                Amount = order.TotalAmount, Status = "completed",
-                ReferenceNumber = req.PaymentReference!.Value.ToString(), CreatedAt = DateTime.UtcNow,
-            });
-        }
-        db.OrderDeliveryDetails.Add(new OrderDeliveryDetail
-        {
-            OrderId = order.Id,
-            FullName = req.FullName.Trim(),
-            Phone = req.Phone.Trim(),
-            Email = string.IsNullOrWhiteSpace(req.Email) ? null : req.Email.Trim(),
-            AddressLine = req.AddressLine.Trim(),
-            Latitude = req.Latitude,
-            Longitude = req.Longitude,
-            Notes = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim(),
-            // Snapshot of how the fee was arrived at — the rule can be edited or deleted later,
-            // and "why was I charged this?" is a question asked days afterwards.
-            DeliveryFeeRuleId = totals.Delivery.RuleId,
-            DeliveryFeeRuleName = totals.Delivery.RuleName,
-            DeliveryDistanceKm = totals.Delivery.DistanceKm,
-            CreatedAt = DateTime.UtcNow,
-        });
+                p.Id, p.BranchId, branchName = branchNames.GetValueOrDefault(p.BranchId),
+                invoiceId = p.GatewayInvoiceId, p.InvoiceUrl, p.AmountSar, p.PaidAt, p.PlacementAttempts,
+                // For (b) the "problem" is the cancelled order, not a placement error.
+                lastError = x.OrderNumber is not null ? $"Order {x.OrderNumber} was cancelled outside the online flow — customer still charged." : p.LastError,
+                orderNumber = x.OrderNumber,
+                canPlace = x.OrderNumber is null,
+                customerName = snapshot?.FullName, customerPhone = snapshot?.Phone, itemCount = snapshot?.Items?.Count ?? 0,
+            };
+        }));
+    }
 
-        // Reserve, don't deduct — on-hand stock and the StockMovement ledger are only touched at
-        // delivery (see Deliver below). A rejected/cancelled order simply releases the reservation.
-        foreach (var (productId, neededQty) in neededByProduct)
+    [RequirePermission("Online Orders", PermAction.Approve)]
+    [HttpPost("payments/{id:guid}/place-order")]
+    public async Task<IActionResult> PlaceOrderFromPayment(Guid id)
+    {
+        var payment = await db.OnlinePayments.FirstOrDefaultAsync(p => p.Id == id);
+        if (payment is null) return NotFound(new { message = "Payment not found." });
+        var (role, callerBranchId) = GetCallerContext();
+        if (role != "tenant_admin" && callerBranchId is { } cb && cb != payment.BranchId) return Forbid();
+
+        var result = await checkout.PlaceFromPaymentAsync(payment, HttpContext.RequestAborted, notifyOnFailure: false);
+        if (!result.Ok) return StatusCode(result.StatusCode, new { message = result.Message });
+        await audit.LogAsync("Online order created from paid payment", entityType: "Order", entityId: result.Value!.OrderId,
+            userId: CallerId(), branchId: payment.BranchId, module: "Online Orders",
+            details: $"MyFatoorah invoice {payment.GatewayInvoiceId} · {result.Value.OrderNumber}");
+        return Ok(new { result.Value.OrderId, result.Value.OrderNumber, result.Value.TotalAmount });
+    }
+
+    public record RefundOnlinePaymentRequest(string? Reason);
+
+    [RequirePermission("Online Orders", PermAction.Approve)]
+    [HttpPost("payments/{id:guid}/refund")]
+    public async Task<IActionResult> RefundPayment(Guid id, [FromBody] RefundOnlinePaymentRequest? req)
+    {
+        var payment = await db.OnlinePayments.FirstOrDefaultAsync(p => p.Id == id);
+        if (payment is null) return NotFound(new { message = "Payment not found." });
+        var (role, callerBranchId) = GetCallerContext();
+        if (role != "tenant_admin" && callerBranchId is { } cb && cb != payment.BranchId) return Forbid();
+        if (payment.Status == "ordered")
         {
-            var stock = stocks[productId];
-            stock.ReservedQuantity += neededQty;
-            stock.UpdatedAt = DateTime.UtcNow;
+            // A live order is refunded by rejecting it (that path also releases stock). The
+            // exception is an order that was already cancelled by some other route (POS void
+            // before the guard existed) — the customer is still charged and Reject is no longer
+            // possible, so refund straight from the payment.
+            var linked = payment.OrderId is { } oid ? await db.Orders.FirstOrDefaultAsync(o => o.Id == oid) : null;
+            if (linked is null || linked.OrderStatus != "cancelled")
+                return BadRequest(new { message = "This payment already has an order — reject that order to refund it." });
+            if (linked.PaymentStatus == "refunded")
+                return BadRequest(new { message = "This payment has already been refunded." });
         }
 
-        await db.SaveChangesAsync();
-
-        // Tell the branch an order is waiting. This is the only event in the system with nobody
-        // present when it happens — a POS sale has a cashier standing at the till, but an online
-        // order arrives while the shop is doing something else, and it sits at "pending" until a
-        // human approves it. Without this it's found by whoever next happens to open the Orders
-        // page.
-        //
-        // Best-effort, like every other notification call site: a failure here must never fail the
-        // customer's order, which is already committed above.
-        try
-        {
-            var itemCount = totals.Items.Sum(i => i.Quantity);
-            await notifications.NotifyRoleAsync(
-                ["Manager", "Admin"], branchId,
-                // The `type` stays "New Online Order" — it is the key the client routes and alerts
-                // on — but the title is written to be read, not parsed. It lands as the bold line of
-                // a desktop toast and of the notification bell, where the money is the one thing
-                // worth seeing without reading: "New order · SAR 34.25" answers "do I care?" from
-                // across the room, which "New Online Order" never did.
-                "Online Orders", "New Online Order",
-                $"New order · SAR {order.TotalAmount:F2}",
-                // Everything else, ordered by how quickly it is needed. The order number is last:
-                // it is the least scannable token and the only one nobody acts on from the alert
-                // itself — you click through to the Orders page regardless.
-                $"{req.FullName.Trim()} · {itemCount:0.##} item{(itemCount == 1 ? "" : "s")} · " +
-                $"waiting for approval · {order.OrderNumber}",
-                // "info", not "warning": a shop taking orders all day would otherwise have a
-                // permanently amber notification list, and amber would stop meaning anything. The
-                // urgency is carried by the alert sound and the unread badge instead.
-                severity: "info",
-                entityType: "Order", entityId: order.Id);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Notification failed for online order {OrderId}", order.Id);
-        }
-
-        return Ok(new { order.OrderNumber, order.TotalAmount });
+        var result = await checkout.RefundAsync(payment, req?.Reason?.Trim() is { Length: > 0 } r ? r : "refunded by staff (no order)", CallerId(), HttpContext.RequestAborted);
+        if (!result.Ok) return StatusCode(result.StatusCode, new { message = result.Message });
+        return Ok(new { refundId = result.Value!.RefundId, refundReference = result.Value.RefundReference, payment.Status });
     }
 
     // ── Admin / branch manager ─────────────────────────────────────────────
@@ -535,6 +384,11 @@ public class OnlineOrdersController(
         if (order is null) return NotFound(new { message = "Online order not found." });
         if (order.OrderStatus != "pending")
             return BadRequest(new { message = "Only a pending order's items can be edited." });
+        // A card-paid order's total is money already taken; changing its lines would silently
+        // over- or under-charge the customer with nothing to reconcile it. Frozen — reject (which
+        // refunds) and let the customer reorder, or deliver as is.
+        if (order.PaymentStatus == "paid")
+            return BadRequest(new { message = $"This order was already paid online (SAR {order.TotalAmount:F2}), so its items can't be changed. Reject it to refund the customer and ask them to reorder, or deliver it as is." });
         if (req.Items is not { Count: > 0 }) return BadRequest(new { message = "An order must have at least one line item." });
 
         var productIds = order.Items.Select(i => i.ProductId).Concat(req.Items.Select(i => i.ProductId)).Distinct().ToList();
@@ -620,6 +474,8 @@ public class OnlineOrdersController(
         if (order is null) return NotFound(new { message = "Online order not found." });
         if (order.OrderStatus != "pending")
             return BadRequest(new { message = "Only a pending order's delivery fee can be changed." });
+        if (order.PaymentStatus == "paid")
+            return BadRequest(new { message = $"This order was already paid online (SAR {order.TotalAmount:F2}), so its delivery fee can't be changed." });
 
         var previous = order.DeliveryFeeAmount;
         var amount = Math.Round(req.Amount, 2);
@@ -705,6 +561,21 @@ public class OnlineOrdersController(
         if (order is null) return NotFound(new { message = "Online order not found." });
         if (order.OrderStatus != "pending") return BadRequest(new { message = "Only a pending order can be rejected." });
 
+        // A card-paid order can only be rejected together with its refund — never "cancelled but
+        // we keep the money". The refund is requested at MyFatoorah first; if that fails the order
+        // stays pending and the caller sees why, so staff can retry or handle it by hand.
+        object? refundInfo = null;
+        if (order.PaymentStatus == "paid")
+        {
+            var payment = await db.OnlinePayments.FirstOrDefaultAsync(p => p.OrderId == order.Id);
+            if (payment is null)
+                return BadRequest(new { message = "This order was paid online but its payment record can't be found — refund it from the MyFatoorah portal before rejecting." });
+            var refund = await checkout.RefundAsync(payment, $"order {order.OrderNumber} rejected: {req.Reason.Trim()}", CallerId(), HttpContext.RequestAborted);
+            if (!refund.Ok)
+                return StatusCode(refund.StatusCode, new { message = $"Refund failed, so the order was NOT rejected: {refund.Message}" });
+            refundInfo = new { refundId = refund.Value!.RefundId, refundReference = refund.Value.RefundReference };
+        }
+
         var productIds = order.Items.Select(i => i.ProductId).Distinct().ToList();
         var stocks = (await db.InventoryStocks.Where(s => s.BranchId == order.BranchId).ToListAsync())
             .Where(s => productIds.Contains(s.ProductId))
@@ -724,9 +595,9 @@ public class OnlineOrdersController(
         var (_, callerBranchId) = GetCallerContext();
         await audit.LogAsync("Rejected online order", entityType: "Order", entityId: order.Id,
             userId: CallerId(), branchId: callerBranchId ?? order.BranchId, module: "Online Orders",
-            details: $"{order.OrderNumber}: {req.Reason.Trim()}");
+            details: $"{order.OrderNumber}: {req.Reason.Trim()}{(refundInfo is not null ? " · refunded online payment" : "")}");
 
-        return Ok(new { order.Id, order.OrderStatus, order.RejectionReason });
+        return Ok(new { order.Id, order.OrderStatus, order.RejectionReason, order.PaymentStatus, refund = refundInfo });
     }
 
     [RequirePermission("Online Orders", PermAction.Edit)]

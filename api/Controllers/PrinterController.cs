@@ -27,11 +27,22 @@ public class PrinterController(IConfiguration config) : ControllerBase
             UseShellExecute        = false,
             CreateNoWindow         = true,
         };
-        using var p = Process.Start(psi)!;
-        var stdout = await p.StandardOutput.ReadToEndAsync();
-        var stderr = await p.StandardError.ReadToEndAsync();
-        await p.WaitForExitAsync();
-        return (stdout.Trim(), stderr.Trim(), p.ExitCode);
+        try
+        {
+            using var p = Process.Start(psi)!;
+            var stdout = await p.StandardOutput.ReadToEndAsync();
+            var stderr = await p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync();
+            return (stdout.Trim(), stderr.Trim(), p.ExitCode);
+        }
+        catch (Exception ex)
+        {
+            // A host without CUPS installed (a bare app server, a container) has no lpstat/lp/
+            // lpinfo at all — Process.Start then throws, which used to surface as an unhandled
+            // 500 to the till. Degrade to a normal non-zero exit so callers answer with their
+            // own "no printer configured" / "could not print" messages instead.
+            return ("", $"'{cmd}' is not available on this server ({ex.Message}).", 127);
+        }
     }
 
     // Sanitise name/URI: only allow safe characters

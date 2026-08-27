@@ -261,7 +261,7 @@ const navGroups: NavGroup[] = [
       // { title: "Staff & Roles",          url: "/staff",          icon: Users,       module: "Users" },
       { title: "Maintenance",            url: "/maintenance",    icon: Wrench,      roles: ["tenant_admin"] },
       { title: "ZATCA Invoices",         url: "/zatca",          icon: ReceiptText, module: "Compliance", planFeature: "zatca_compliance" },
-      { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2,  module: "Compliance", planFeature: "zatca_compliance" },
+      { title: "ZATCA Phase 2 Settings", url: "/zatca-settings", icon: FileCheck2,  module: "Compliance", planFeature: "zatca_phase2" },
       { title: "Compliance",             url: "/compliance",     icon: ShieldCheck, module: "Compliance", planFeature: "zatca_compliance" },
       { title: "General Settings",       url: "/pos-settings",   icon: Sliders,     module: "Settings" },
       { title: "Payments",               url: "/payments",       icon: CreditCard,  module: "Settings" },
