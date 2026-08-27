@@ -131,8 +131,12 @@ public class ZatcaService(
         // template's placeholder sample VAT (311691066700003, ZATCA's own SDK sample) passed there
         // undetected. All branches share one VAT/certificate (see ZatcaIdentity), so any branch's
         // settings carrying it is representative.
+        // Excludes "" as well as null: PUT zatca/settings explicitly allows saving an empty string
+        // for this field (see UpsertSettings), so a null-only filter can pick a different branch's
+        // blanked-out settings ahead of the one actually carrying the real VAT, silently signing
+        // the compliance test documents with an empty seller VAT.
         var supplierSettings = await db.ZatcaSettings.Include(s => s.Branch)
-            .FirstOrDefaultAsync(s => s.VatRegistrationNumber != null)
+            .FirstOrDefaultAsync(s => s.VatRegistrationNumber != null && s.VatRegistrationNumber != "")
             ?? throw new InvalidOperationException("No branch has a ZATCA VAT registration number set. Complete branch ZATCA settings before running compliance tests.");
         var supplier = new ZatcaParty(
             RegistrationName: supplierSettings.SellerName ?? supplierSettings.Branch?.Name,
