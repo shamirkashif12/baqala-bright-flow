@@ -460,6 +460,22 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("varchar(500)")
                         .HasColumnName("legal_name");
 
+                    b.Property<string>("LogoDataUrl")
+                        .HasColumnType("longtext")
+                        .HasColumnName("logo_data_url");
+
+                    b.Property<string>("LogoEscPosBase64")
+                        .HasColumnType("longtext")
+                        .HasColumnName("logo_esc_pos_base64");
+
+                    b.Property<bool>("ShowLogoOnCustomerSlip")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("show_logo_on_customer_slip");
+
+                    b.Property<bool>("ShowLogoOnStaffReceipt")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("show_logo_on_staff_receipt");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("updated_at");
@@ -482,6 +498,8 @@ namespace BaqalaPOS.Api.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000002"),
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            ShowLogoOnCustomerSlip = false,
+                            ShowLogoOnStaffReceipt = false,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
                 });
@@ -845,6 +863,105 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("ReturnId");
 
                     b.ToTable("customer_return_items");
+                });
+
+            modelBuilder.Entity("BaqalaPOS.Api.Models.DeliveryFeeRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<decimal?>("CenterLatitude")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("center_latitude");
+
+                    b.Property<decimal?>("CenterLongitude")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("center_longitude");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("created_by");
+
+                    b.Property<decimal>("FeeAmount")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("fee_amount");
+
+                    b.Property<decimal?>("FreeAboveOrderAmount")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("free_above_order_amount");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsServiceable")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("is_serviceable");
+
+                    b.Property<decimal?>("MaxDistanceKm")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("max_distance_km");
+
+                    b.Property<decimal?>("MaxLatitude")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("max_latitude");
+
+                    b.Property<decimal?>("MaxLongitude")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("max_longitude");
+
+                    b.Property<decimal?>("MinDistanceKm")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("min_distance_km");
+
+                    b.Property<decimal?>("MinLatitude")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("min_latitude");
+
+                    b.Property<decimal?>("MinLongitude")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("min_longitude");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int")
+                        .HasColumnName("priority");
+
+                    b.Property<string>("RuleType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("rule_type");
+
+                    b.Property<string>("UnserviceableMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("unserviceable_message");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId", "IsActive");
+
+                    b.ToTable("delivery_fee_rules");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Department", b =>
@@ -2393,6 +2510,109 @@ namespace BaqalaPOS.Api.Migrations
                     b.ToTable("offers");
                 });
 
+            modelBuilder.Entity("BaqalaPOS.Api.Models.OnlinePayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("AmountSar")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("amount_sar");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<string>("CheckoutJson")
+                        .IsRequired()
+                        .HasColumnType("longtext")
+                        .HasColumnName("checkout_json");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("GatewayInvoiceId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("gateway_invoice_id");
+
+                    b.Property<string>("GatewayPaymentId")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("gateway_payment_id");
+
+                    b.Property<string>("InvoiceUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("invoice_url");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("last_error");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("order_id");
+
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("paid_at");
+
+                    b.Property<int>("PlacementAttempts")
+                        .HasColumnType("int")
+                        .HasColumnName("placement_attempts");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)")
+                        .HasColumnName("provider");
+
+                    b.Property<decimal?>("RefundAmount")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("refund_amount");
+
+                    b.Property<string>("RefundCurrency")
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasColumnName("refund_currency");
+
+                    b.Property<long?>("RefundId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("refund_id");
+
+                    b.Property<string>("RefundReference")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("refund_reference");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("resolved_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GatewayInvoiceId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.ToTable("online_payments");
+                });
+
             modelBuilder.Entity("BaqalaPOS.Api.Models.Order", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2435,6 +2655,10 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<Guid?>("CustomerId")
                         .HasColumnType("char(36)")
                         .HasColumnName("customer_id");
+
+                    b.Property<decimal>("DeliveryFeeAmount")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("delivery_fee_amount");
 
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("decimal(18,4)")
@@ -2550,6 +2774,32 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
+
+                    b.Property<decimal?>("DeliveryDistanceKm")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("delivery_distance_km");
+
+                    b.Property<DateTime?>("DeliveryFeeOverriddenAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("delivery_fee_overridden_at");
+
+                    b.Property<Guid?>("DeliveryFeeOverriddenBy")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("delivery_fee_overridden_by");
+
+                    b.Property<string>("DeliveryFeeOverrideReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("delivery_fee_override_reason");
+
+                    b.Property<Guid?>("DeliveryFeeRuleId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("delivery_fee_rule_id");
+
+                    b.Property<string>("DeliveryFeeRuleName")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("delivery_fee_rule_name");
 
                     b.Property<string>("Email")
                         .HasMaxLength(255)
@@ -2704,6 +2954,10 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
+                    b.Property<long?>("GatewayInvoiceId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("gateway_invoice_id");
+
                     b.Property<Guid>("OrderId")
                         .HasColumnType("char(36)")
                         .HasColumnName("order_id");
@@ -2768,6 +3022,47 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("TaxFeeRuleId");
 
                     b.ToTable("order_service_charges");
+                });
+
+            modelBuilder.Entity("BaqalaPOS.Api.Models.PaymentIntegration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<string>("ConfigJson")
+                        .HasColumnType("longtext")
+                        .HasColumnName("config_json");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("is_enabled");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId", "Provider")
+                        .IsUnique();
+
+                    b.ToTable("payment_integrations");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PayrollRun", b =>
@@ -2870,6 +3165,122 @@ namespace BaqalaPOS.Api.Migrations
                     b.HasIndex("PayrollRunId");
 
                     b.ToTable("payroll_run_employees");
+                });
+
+            modelBuilder.Entity("BaqalaPOS.Api.Models.PosCardPayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("amount");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("approved_at");
+
+                    b.Property<DateTime?>("AttentionNotifiedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("attention_notified_at");
+
+                    b.Property<string>("AuthCode")
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)")
+                        .HasColumnName("auth_code");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<Guid?>("CashierId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("cashier_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("GatewayTransactionId")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("gateway_transaction_id");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("last_error");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("order_id");
+
+                    b.Property<string>("OrderRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("order_ref");
+
+                    b.Property<string>("PanMasked")
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)")
+                        .HasColumnName("pan_masked");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)")
+                        .HasColumnName("provider");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("resolved_at");
+
+                    b.Property<string>("ResponseCode")
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasColumnName("response_code");
+
+                    b.Property<string>("ResponseMessage")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("response_message");
+
+                    b.Property<string>("Rrn")
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)")
+                        .HasColumnName("rrn");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TerminalId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)")
+                        .HasColumnName("terminal_id");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GatewayTransactionId");
+
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex("OrderRef")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.ToTable("pos_card_payments");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.PosSettings", b =>
@@ -3039,9 +3450,17 @@ namespace BaqalaPOS.Api.Migrations
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("offline_mode_enabled");
 
+                    b.Property<decimal>("OnlineOrderingDeliveryFeeSar")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("online_ordering_delivery_fee_sar");
+
                     b.Property<bool>("OnlineOrderingEnabled")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("online_ordering_enabled");
+
+                    b.Property<decimal>("OnlineOrderingFreeDeliveryAboveSar")
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("online_ordering_free_delivery_above_sar");
 
                     b.Property<decimal>("OnlineOrderingMaxOrderValueSar")
                         .HasColumnType("decimal(18,4)")
@@ -3270,8 +3689,7 @@ namespace BaqalaPOS.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Barcode")
-                        .IsUnique();
+                    b.HasIndex("Barcode");
 
                     b.HasIndex("CategoryId");
 
@@ -6350,6 +6768,16 @@ namespace BaqalaPOS.Api.Migrations
                     b.Navigation("Product");
 
                     b.Navigation("Return");
+                });
+
+            modelBuilder.Entity("BaqalaPOS.Api.Models.DeliveryFeeRule", b =>
+                {
+                    b.HasOne("BaqalaPOS.Api.Models.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Branch");
                 });
 
             modelBuilder.Entity("BaqalaPOS.Api.Models.Department", b =>
