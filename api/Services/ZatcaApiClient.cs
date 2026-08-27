@@ -63,7 +63,12 @@ public class ZatcaApiClient(HttpClient httpClient, ILogger<ZatcaApiClient> logge
 
     private static string EnvironmentSegment(string environment) => environment switch
     {
-        "production" => "production",
+        // ZATCA's gateway (Apigee) has no route for a literal "production" path segment — it's
+        // "core". Using "production" here returns a 500 Apigee routing fault
+        // ({"fault":{"faultstring":"Unable to route the message to a Target Endpoint",...}}), not
+        // a ZATCA-level error, which is easy to misread as an invalid OTP/CSR. Verified live
+        // against gw-fatoora.zatca.gov.sa: "core" returns a real ZATCA error body instead.
+        "production" => "core",
         "simulation" => "simulation",
         _ => "developer-portal", // sandbox / NonProduction
     };
