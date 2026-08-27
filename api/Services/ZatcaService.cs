@@ -43,13 +43,22 @@ public class ZatcaService(
         var settings = await GetOrCreateBranchSettingsAsync(branchId);
         var identity = await GetIdentityAsync();
 
+        // ZATCA rejects the CSR at the compliance-CSID step (CSR_VALIDATION /
+        // CSR_MISSING_VALUE_ERROR: "Organization Unit Name must be the 10-digit TIN number...")
+        // if this is a free-text branch name instead of the taxpayer's actual TIN — verified live
+        // against gw-fatoora.zatca.gov.sa/e-invoicing/core/compliance. Must be set explicitly per
+        // branch; there's no reliable way to derive a 10-digit TIN from the branch name or the
+        // 15-digit VAT number.
+        if (string.IsNullOrWhiteSpace(settings.TaxIdentificationNumber))
+            throw new InvalidOperationException("This branch's ZATCA Tax Identification Number (TIN) must be set before generating a CSR.");
+
         var config = new ZatcaCsrConfig(
             Environment: MapCsrEnvironment(identity.Environment),
             // Per ZATCA's Developer Portal Manual (§5.3.1): the CSR's Organization Identifier must
             // be the VAT registration number (15 digits, starting and ending with 3) — not the CR
             // number, which is a different, unrelated identifier used elsewhere on the invoice.
             OrganizationIdentifier: settings.VatRegistrationNumber ?? branch.CommercialRegistration ?? "",
-            OrganizationUnitName: branch.Name,
+            OrganizationUnitName: settings.TaxIdentificationNumber,
             OrganizationName: settings.SellerName ?? branch.Name,
             CountryName: "SA",
             InvoiceType: "1100", // supports both standard + simplified

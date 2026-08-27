@@ -121,6 +121,18 @@ public class ZatcaApiClient(HttpClient httpClient, ILogger<ZatcaApiClient> logge
             }
 
             logger.LogWarning("ZATCA request to {Url} returned {StatusCode} (attempt {Attempt}/{Retries}): {Body}", url, statusCode, attempt + 1, retries, body);
+
+            // A 4xx means ZATCA rejected the request itself (bad CSR, bad OTP, bad payload) —
+            // resending identical content won't produce a different outcome. Retrying is actively
+            // harmful for the OTP-bearing compliance call specifically: ZATCA invalidates the OTP
+            // after the first attempt regardless of whether that attempt succeeded, so a retry
+            // just resends an already-burned OTP and comes back "Invalid-OTP", masking the real
+            // first-attempt error (e.g. a CSR validation failure) with a misleading one. Only
+            // retry on network failures (caught above) or genuine transient failures (429/5xx).
+            if (statusCode is >= 400 and < 500 and not 429)
+            {
+                return new ZatcaApiResult(false, statusCode, ParseJsonSafely(body), body);
+            }
             if (attempt == retries - 1)
             {
                 return new ZatcaApiResult(false, statusCode, ParseJsonSafely(body), body);

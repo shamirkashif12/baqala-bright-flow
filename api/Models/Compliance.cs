@@ -95,6 +95,13 @@ public class ZatcaSettings
     [MaxLength(20), Column("vat_registration_number")]
     public string? VatRegistrationNumber { get; set; }
 
+    // ZATCA's CSR "Organization Unit Name" field — for taxpayers registered as (or as a member of)
+    // a tax group, ZATCA requires this to be the 10-digit Tax Identification Number of the branch
+    // being onboarded, not a free-text branch/display name. A CSR built with a display name here
+    // is rejected with CSR_VALIDATION/CSR_MISSING_VALUE_ERROR at the compliance-CSID step.
+    [MaxLength(20), Column("tax_identification_number")]
+    public string? TaxIdentificationNumber { get; set; }
+
     [MaxLength(500), Column("seller_name")]
     public string? SellerName { get; set; }
 

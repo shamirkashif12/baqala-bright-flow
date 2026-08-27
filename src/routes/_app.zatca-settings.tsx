@@ -97,7 +97,7 @@ function onboardingLabel(status?: string) {
 }
 
 const defaultZatca: ZatcaSettings = {
-  branchId: "", vatRegistrationNumber: "", sellerName: "",
+  branchId: "", vatRegistrationNumber: "", taxIdentificationNumber: "", sellerName: "",
   streetName: "", buildingNumber: "", citySubdivisionName: "", postalZone: "",
   phase2Enabled: false, environment: "sandbox", onboardingStatus: "not_started",
 };
@@ -295,6 +295,10 @@ function ZatcaSettings() {
                       <Input className="h-9" value={zatca.vatRegistrationNumber ?? ""} onChange={e => setZatca(p => ({ ...p, vatRegistrationNumber: e.target.value }))} placeholder="300012345600003" /></div>
                     <div className="space-y-1"><Label className="text-xs">CR Number (branch)</Label>
                       <Input className="h-9" value={branch.commercialRegistration ?? ""} disabled title="Edit on the Branches page" /></div>
+                  </div>
+                  <div className="space-y-1"><Label className="text-xs">Tax Identification Number (TIN)</Label>
+                    <Input className="h-9" value={zatca.taxIdentificationNumber ?? ""} onChange={e => setZatca(p => ({ ...p, taxIdentificationNumber: e.target.value }))} placeholder="1012345678" />
+                    <p className="text-[11px] text-muted-foreground">Required to generate a CSR. ZATCA rejects onboarding without the 10-digit TIN for this branch — distinct from the VAT and CR numbers above.</p>
                   </div>
                   <div className="space-y-1"><Label className="text-xs">Environment</Label>
                     <select value={zatca.environment} onChange={e => setZatca(p => ({ ...p, environment: e.target.value }))}

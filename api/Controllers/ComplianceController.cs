@@ -137,6 +137,7 @@ public class ComplianceController(BaqalaDbContext db, IZatcaService zatcaService
         // null out the rest of a branch's ZATCA configuration. A field is only cleared when the
         // caller explicitly sends "" (not null/absent) for it.
         settings.VatRegistrationNumber = updated.VatRegistrationNumber ?? settings.VatRegistrationNumber;
+        settings.TaxIdentificationNumber = updated.TaxIdentificationNumber ?? settings.TaxIdentificationNumber;
         settings.SellerName = updated.SellerName ?? settings.SellerName;
         settings.StreetName = updated.StreetName ?? settings.StreetName;
         settings.BuildingNumber = updated.BuildingNumber ?? settings.BuildingNumber;
@@ -399,6 +400,7 @@ public record CompanyLogoUpdateRequest(string? LogoDataUrl, string? LogoEscPosBa
 // shared Phase2Enabled/Environment flags (which the controller writes onto ZatcaIdentity).
 public record ZatcaSettingsUpdateRequest(
     string? VatRegistrationNumber,
+    string? TaxIdentificationNumber,
     string? SellerName,
     string? StreetName,
     string? BuildingNumber,
@@ -414,6 +416,7 @@ public record ZatcaSettingsDto(
     Guid Id,
     Guid BranchId,
     string? VatRegistrationNumber,
+    string? TaxIdentificationNumber,
     string? SellerName,
     string? StreetName,
     string? BuildingNumber,
@@ -430,7 +433,7 @@ public record ZatcaSettingsDto(
     DateTime UpdatedAt)
 {
     public static ZatcaSettingsDto From(ZatcaSettings s, ZatcaIdentity i) => new(
-        s.Id, s.BranchId, s.VatRegistrationNumber, s.SellerName,
+        s.Id, s.BranchId, s.VatRegistrationNumber, s.TaxIdentificationNumber, s.SellerName,
         s.StreetName, s.BuildingNumber, s.CitySubdivisionName, s.PostalZone,
         i.Phase2Enabled, i.Environment, i.EgsSerial, i.OnboardingStatus,
         HasCsr: !string.IsNullOrEmpty(i.Csr),

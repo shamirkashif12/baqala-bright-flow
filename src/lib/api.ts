@@ -2219,7 +2219,7 @@ export interface CompanyProfile {
 }
 
 export interface ZatcaSettings {
-  id?: string; branchId: string; vatRegistrationNumber?: string; sellerName?: string;
+  id?: string; branchId: string; vatRegistrationNumber?: string; taxIdentificationNumber?: string; sellerName?: string;
   streetName?: string; buildingNumber?: string; citySubdivisionName?: string; postalZone?: string;
   phase2Enabled: boolean; environment: string;
   egsSerial?: string; onboardingStatus?: string;
