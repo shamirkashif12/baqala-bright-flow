@@ -70,6 +70,7 @@ public class ZatcaService(
         var result = csrService.GenerateCsr(config);
 
         identity.Csr = result.CsrBase64;
+        identity.CsrBranchId = branchId;
         identity.PrivateKey = _protector.Protect(result.PrivateKeyRaw);
         identity.EgsSerial = result.EgsSerial;
         identity.OnboardingStatus = "csr_generated";
@@ -122,22 +123,23 @@ public class ZatcaService(
         var privateKey = _protector.Unprotect(identity.PrivateKey!);
         var environment = MapApiEnvironment(identity.Environment);
 
-        // The compliance test documents must carry the real onboarded VAT number — ZATCA ties the
-        // compliance/production CSID certificate to the taxpayer's actual VAT and rejects any
-        // signed document whose supplier VAT doesn't match with a
+        // The compliance test documents must carry the exact VAT baked into the CSR that got this
+        // certificate issued — ZATCA ties the compliance/production CSID certificate to that one
+        // VAT and rejects any signed document whose supplier VAT doesn't match it with a
         // "User only allowed to use the vat number that exists in the authentication certificate"
         // CERTIFICATE_ERRORS failure on every one of the 6 checks. This only surfaced in
         // production/simulation — the sandbox environment's CSID isn't tied to a real VAT, so the
         // template's placeholder sample VAT (311691066700003, ZATCA's own SDK sample) passed there
-        // undetected. All branches share one VAT/certificate (see ZatcaIdentity), so any branch's
-        // settings carrying it is representative.
-        // Excludes "" as well as null: PUT zatca/settings explicitly allows saving an empty string
-        // for this field (see UpsertSettings), so a null-only filter can pick a different branch's
-        // blanked-out settings ahead of the one actually carrying the real VAT, silently signing
-        // the compliance test documents with an empty seller VAT.
+        // undetected.
+        // Earlier versions of this guessed "any branch with a non-blank VAT" — which breaks the
+        // moment more than one branch has one set, since only the branch actually used to generate
+        // the CSR matches the issued certificate. Use identity.CsrBranchId (recorded by
+        // GenerateCsrAsync) so this is exact, not a guess.
+        if (identity.CsrBranchId is not { } csrBranchId)
+            throw new InvalidOperationException("No branch is recorded for the current CSR. Regenerate the CSR before running compliance tests.");
         var supplierSettings = await db.ZatcaSettings.Include(s => s.Branch)
-            .FirstOrDefaultAsync(s => s.VatRegistrationNumber != null && s.VatRegistrationNumber != "")
-            ?? throw new InvalidOperationException("No branch has a ZATCA VAT registration number set. Complete branch ZATCA settings before running compliance tests.");
+            .FirstOrDefaultAsync(s => s.BranchId == csrBranchId)
+            ?? throw new InvalidOperationException("The branch the CSR was generated for no longer has ZATCA settings. Regenerate the CSR.");
         var supplier = new ZatcaParty(
             RegistrationName: supplierSettings.SellerName ?? supplierSettings.Branch?.Name,
             VatId: supplierSettings.VatRegistrationNumber,

@@ -157,6 +157,15 @@ public class ZatcaIdentity
     [Column("csr")]
     public string? Csr { get; set; }
 
+    // Which branch's ZatcaSettings (VAT/name/address) were baked into the CSR above — the
+    // authenticated certificate ZATCA issues is permanently tied to that exact VAT. Without this,
+    // there was no way to know which branch's settings to reuse when building the compliance-test
+    // documents in RunOnboardingToProductionAsync: guessing "any branch with a non-blank VAT" broke
+    // as soon as more than one branch had one set, since only ONE of them actually matches the
+    // certificate — ZATCA rejects every mismatch with a certificate-permissions error.
+    [Column("csr_branch_id")]
+    public Guid? CsrBranchId { get; set; }
+
     [MaxLength(255), Column("egs_serial")]
     public string? EgsSerial { get; set; }
 
