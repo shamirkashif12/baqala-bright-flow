@@ -12,7 +12,7 @@ namespace BaqalaPOS.Api.Services;
 /// invoice layout — so what a user downloads looks like what they already saw and printed.</summary>
 public static class ReceiptPdfWriter
 {
-    public static byte[] Write(Order order, string? vatNumber, string? sellerName, string? crNumber, string? qrCodeOverride = null)
+    public static byte[] Write(Order order, string? vatNumber, string? sellerName, string? crNumber, string? qrCodeOverride = null, string? logoDataUrl = null)
     {
         QuestPDF.Settings.License = LicenseType.Community;
         PdfFonts.EnsureRegistered();
@@ -23,6 +23,7 @@ public static class ReceiptPdfWriter
         // formal invoice template.
         var dateStr = order.CreatedAt.ToLocalTime().ToString("M/d/yyyy, h:mm:ss tt");
         var qrBytes = BuildZatcaQr(order, vatNumber, name, qrCodeOverride);
+        var logoBytes = PdfFonts.DecodeLogo(logoDataUrl);
 
         // Net of all non-loyalty discounts, then loyalty broken out below — same "Subtotal" formula
         // the on-screen receipt uses (order-invoice-dialog.tsx / _app.pos.tsx).
@@ -43,6 +44,8 @@ public static class ReceiptPdfWriter
                 {
                     col.Spacing(3);
 
+                    if (logoBytes != null)
+                        col.Item().AlignCenter().Width(120).Height(28).Image(logoBytes).FitArea();
                     col.Item().AlignCenter().Text(name).FontSize(10.5f).Bold();
                     if (!string.IsNullOrWhiteSpace(vatNumber))
                         col.Item().AlignCenter().Text($"VAT {vatNumber}").FontColor("#666666");
@@ -56,12 +59,29 @@ public static class ReceiptPdfWriter
 
                     col.Item().PaddingVertical(5).BorderBottom(1).BorderColor("#bbbbbb");
 
+                    // Icon + number pair, auto-sized and pushed flush against the row's right edge by
+                    // the label's RelativeItem soaking up the rest of the width — mirrors the on-screen
+                    // receipt's <SARIcon />{amount} rendering instead of literal "SAR " text. Negative
+                    // spacing compensates for the glyph's own shape: its right edge is a thin diagonal
+                    // accent stroke, not a solid block, so even a zero gap still reads as visual
+                    // whitespace between icon and digits.
+                    void AmountCells(RowDescriptor r, decimal amount, bool negative = false, bool bold = false, float size = 8.5f)
+                    {
+                        var iconHeight = size * 0.8f;
+                        r.AutoItem().Row(pair =>
+                        {
+                            pair.AutoItem().AlignMiddle().Height(iconHeight).Svg(PdfFonts.SarSvg).FitHeight();
+                            var v = pair.AutoItem().AlignMiddle().PaddingLeft(-0.7f).Text($"{(negative ? "-" : "")}{amount:F2}").FontSize(size);
+                            if (bold) v.Bold();
+                        });
+                    }
+
                     foreach (var item in order.Items)
                     {
                         col.Item().Row(r =>
                         {
                             r.RelativeItem().Text($"{item.Quantity:G29} × {item.Product?.Name ?? "Item"}");
-                            r.ConstantItem(64).AlignRight().Text((item.Quantity * item.UnitPrice).ToString("F2"));
+                            AmountCells(r, item.Quantity * item.UnitPrice);
                         });
                     }
 
@@ -72,26 +92,36 @@ public static class ReceiptPdfWriter
                         col.Item().Row(r =>
                         {
                             var l = r.RelativeItem().Text(label).FontSize(size);
-                            var v = r.ConstantItem(64).AlignRight().Text(value).FontSize(size);
+                            var v = r.ConstantItem(72).AlignRight().Text(value).FontSize(size);
                             if (bold) { l.Bold(); v.Bold(); }
                         });
                     }
 
-                    Row("Subtotal", netSubtotal.ToString("F2"));
+                    void AmountRow(string label, decimal amount, bool negative = false, bool bold = false, float size = 8.5f)
+                    {
+                        col.Item().Row(r =>
+                        {
+                            var l = r.RelativeItem().Text(label).FontSize(size);
+                            if (bold) l.Bold();
+                            AmountCells(r, amount, negative, bold, size);
+                        });
+                    }
+
+                    AmountRow("Subtotal", netSubtotal);
                     if (order.LoyaltyPointsRedeemed > 0)
-                        Row($"Loyalty Redeemed ({order.LoyaltyPointsRedeemed:F0} pts)", $"-{order.LoyaltyDiscountAmount:F2}");
+                        AmountRow($"Loyalty Redeemed ({order.LoyaltyPointsRedeemed:F0} pts)", order.LoyaltyDiscountAmount, negative: true);
                     if (order.TobaccoFeeAmount > 0)
-                        Row("Tobacco Excise", order.TobaccoFeeAmount.ToString("F2"));
+                        AmountRow("Tobacco Excise", order.TobaccoFeeAmount);
                     foreach (var svc in order.ServiceCharges)
-                        Row(svc.Name, svc.Amount.ToString("F2"));
-                    Row($"VAT {vatPct:F0}%", order.TaxAmount.ToString("F2"));
-                    Row("Total", $"SAR {order.TotalAmount:F2}", bold: true, size: 10f);
+                        AmountRow(svc.Name, svc.Amount);
+                    AmountRow($"VAT {vatPct:F0}%", order.TaxAmount);
+                    AmountRow("Total", order.TotalAmount, bold: true, size: 10f);
 
                     if (order.Payments.Count > 1)
                     {
                         Row("Payment", "Split");
                         foreach (var p in order.Payments)
-                            Row($"  {Capitalize(p.PaymentMethod)}", p.Amount.ToString("F2"));
+                            AmountRow($"  {Capitalize(p.PaymentMethod)}", p.Amount);
                     }
                     else if (order.Payments.Count == 1)
                     {

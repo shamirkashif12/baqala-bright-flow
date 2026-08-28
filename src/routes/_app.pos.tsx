@@ -3590,7 +3590,7 @@ function POS() {
               <div id="pos-invoice" className="rounded-xl bg-muted/40 p-5 font-mono text-xs space-y-2">
                 <div className="text-center space-y-0.5">
                   {logoDataUrl && (
-                    <img src={logoDataUrl} alt="" className="h-12 mx-auto mb-1 object-contain" />
+                    <img src={logoDataUrl} alt="" className="h-9 max-w-[140px] mx-auto mb-1 object-contain" />
                   )}
                   <p className="font-bold text-sm">{invoice.sellerName}</p>
                   <p className="text-muted-foreground">VAT {invoice.vatNumber}</p>
@@ -3604,30 +3604,30 @@ function POS() {
                   {invoice.items.map((i) => (
                     <div key={i.sku} className="flex justify-between">
                       <span>{i.qty} × {i.name}</span>
-                      <span className="tabular-nums">{(i.qty * i.price).toFixed(2)}</span>
+                      <span className="tabular-nums"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{(i.qty * i.price).toFixed(2)}</span>
                     </div>
                   ))}
                 </div>
                 <div className="border-t border-dashed border-border pt-2 space-y-0.5">
                   {/* Net of coupon/auto/manual discounts, but NOT loyalty — that's broken out as
                       its own line below so the customer can see it, same as the checkout summary. */}
-                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{(invoice.subtotal - (invoice.discount - (invoice.loyaltyDiscountAmount ?? 0))).toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{(invoice.subtotal - (invoice.discount - (invoice.loyaltyDiscountAmount ?? 0))).toFixed(2)}</span></div>
                   {!!invoice.loyaltyPointsRedeemed && (
                     <div className="flex justify-between">
                       <span>Loyalty Redeemed ({invoice.loyaltyPointsRedeemed} pts)</span>
-                      <span className="tabular-nums">-{(invoice.loyaltyDiscountAmount ?? 0).toFixed(2)}</span>
+                      <span className="tabular-nums">-<SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{(invoice.loyaltyDiscountAmount ?? 0).toFixed(2)}</span>
                     </div>
                   )}
                   {!!invoice.tobaccoExcise && (
-                    <div className="flex justify-between"><span>Tobacco Excise</span><span className="tabular-nums">{invoice.tobaccoExcise.toFixed(2)}</span></div>
+                    <div className="flex justify-between"><span>Tobacco Excise</span><span className="tabular-nums"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{invoice.tobaccoExcise.toFixed(2)}</span></div>
                   )}
                   {invoice.fees?.map(f => (
-                    <div key={f.name} className="flex justify-between"><span>{f.name}</span><span className="tabular-nums">{f.amount.toFixed(2)}</span></div>
+                    <div key={f.name} className="flex justify-between"><span>{f.name}</span><span className="tabular-nums"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{f.amount.toFixed(2)}</span></div>
                   ))}
-                  <div className="flex justify-between"><span>{invoice.taxLabel}</span><span className="tabular-nums">{invoice.vat.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span>{invoice.taxLabel}</span><span className="tabular-nums"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{invoice.vat.toFixed(2)}</span></div>
                   <div className="flex justify-between font-bold text-sm pt-1">
                     <span>Total</span>
-                    <span className="tabular-nums">SAR {invoice.total.toFixed(2)}</span>
+                    <span className="tabular-nums"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{invoice.total.toFixed(2)}</span>
                   </div>
                   {invoice.splitBreakdown ? (
                     <>
@@ -3635,7 +3635,7 @@ function POS() {
                       {invoice.splitBreakdown.map(p => (
                         <div key={p.method} className="flex justify-between pl-2 text-muted-foreground">
                           <span className="capitalize">↳ {p.method}</span>
-                          <span className="tabular-nums">{p.amount.toFixed(2)}</span>
+                          <span className="tabular-nums"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{p.amount.toFixed(2)}</span>
                         </div>
                       ))}
                     </>

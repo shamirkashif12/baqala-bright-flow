@@ -8,6 +8,7 @@ import { api, getUsbPrinter, type Order } from "@/lib/api";
 import { qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import type { ReceiptData } from "@/lib/escpos";
 import { downloadBlob } from "@/lib/csv-export";
+import { SARIcon, fmtSAR } from "@/lib/currency";
 
 // Mirrors the same check in _app.pos.tsx — the local print agent being unreachable (not
 // installed / not running) surfaces as a bare fetch failure, which reads very differently from a
@@ -40,6 +41,16 @@ function buildZatcaTlv(sellerName: string, vatNumber: string, timestamp: string,
 
 function Row({ k, v }: { k: React.ReactNode; v: React.ReactNode }) {
   return <div className="flex justify-between"><span>{k}</span><span className="tabular-nums">{v}</span></div>;
+}
+
+function Amount({ value, negative }: { value: number; negative?: boolean }) {
+  return (
+    <span className="tabular-nums">
+      {negative && "-"}
+      <SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />
+      {fmtSAR(value)}
+    </span>
+  );
 }
 
 /** Read-only "Tax Invoice" view for a past order — same receipt layout (and ZATCA QR) shown right
@@ -168,7 +179,7 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
           <div id="order-invoice" className="rounded-xl bg-muted/40 p-5 font-mono text-xs space-y-2">
             <div className="text-center space-y-0.5">
               {logoDataUrl && (
-                <img src={logoDataUrl} alt="" className="h-12 mx-auto mb-1 object-contain" />
+                <img src={logoDataUrl} alt="" className="h-9 max-w-[140px] mx-auto mb-1 object-contain" />
               )}
               <p className="font-bold text-sm">{receipt.sellerName}</p>
               {receipt.vatNumber && <p className="text-muted-foreground">VAT {receipt.vatNumber}</p>}
@@ -182,23 +193,23 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
               {receipt.items.map((i, idx) => (
                 <div key={idx} className="flex justify-between">
                   <span>{i.qty} × {i.name}</span>
-                  <span className="tabular-nums">{(i.qty * i.price).toFixed(2)}</span>
+                  <Amount value={i.qty * i.price} />
                 </div>
               ))}
             </div>
             <div className="border-t border-dashed border-border pt-2 space-y-0.5">
               {/* Net of all non-loyalty discounts, matching the same "Subtotal" formula the
                   post-checkout invoice dialog uses (_app.pos.tsx) — loyalty is broken out below. */}
-              <Row k="Subtotal" v={(receipt.subtotal - (receipt.discount - (receipt.loyaltyDiscountAmount ?? 0))).toFixed(2)} />
+              <Row k="Subtotal" v={<Amount value={receipt.subtotal - (receipt.discount - (receipt.loyaltyDiscountAmount ?? 0))} />} />
               {!!receipt.loyaltyPointsRedeemed && (
-                <Row k={`Loyalty Redeemed (${receipt.loyaltyPointsRedeemed} pts)`} v={`-${(receipt.loyaltyDiscountAmount ?? 0).toFixed(2)}`} />
+                <Row k={`Loyalty Redeemed (${receipt.loyaltyPointsRedeemed} pts)`} v={<Amount value={receipt.loyaltyDiscountAmount ?? 0} negative />} />
               )}
-              {!!receipt.tobaccoExcise && <Row k="Tobacco Excise" v={receipt.tobaccoExcise.toFixed(2)} />}
-              {receipt.fees?.map(f => <Row key={f.name} k={f.name} v={f.amount.toFixed(2)} />)}
-              <Row k={receipt.taxLabel} v={receipt.vat.toFixed(2)} />
+              {!!receipt.tobaccoExcise && <Row k="Tobacco Excise" v={<Amount value={receipt.tobaccoExcise} />} />}
+              {receipt.fees?.map(f => <Row key={f.name} k={f.name} v={<Amount value={f.amount} />} />)}
+              <Row k={receipt.taxLabel} v={<Amount value={receipt.vat} />} />
               <div className="flex justify-between font-bold text-sm pt-1">
                 <span>Total</span>
-                <span className="tabular-nums">SAR {receipt.total.toFixed(2)}</span>
+                <Amount value={receipt.total} />
               </div>
               {receipt.splitBreakdown ? (
                 <>
@@ -206,7 +217,7 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
                   {receipt.splitBreakdown.map(p => (
                     <div key={p.method} className="flex justify-between pl-2 text-muted-foreground">
                       <span className="capitalize">↳ {p.method}</span>
-                      <span className="tabular-nums">{p.amount.toFixed(2)}</span>
+                      <Amount value={p.amount} />
                     </div>
                   ))}
                 </>

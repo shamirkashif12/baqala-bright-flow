@@ -293,7 +293,11 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
         var zatca = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == order.BranchId);
         var company = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId);
-        var pdfBytes = ReceiptPdfWriter.Write(order, zatca?.VatRegistrationNumber, zatca?.SellerName ?? order.Branch?.Name, company?.CrNumber, qr);
+        // Same Order.Source scoping as the on-screen dialog (order-invoice-dialog.tsx): "pos" is the
+        // staff-receipt scope, "online"/"kiosk" are the customer-facing slip scope.
+        var showLogo = order.Source == "pos" ? company?.ShowLogoOnStaffReceipt : company?.ShowLogoOnCustomerSlip;
+        var logoDataUrl = showLogo == true ? company?.LogoDataUrl : null;
+        var pdfBytes = ReceiptPdfWriter.Write(order, zatca?.VatRegistrationNumber, zatca?.SellerName ?? order.Branch?.Name, company?.CrNumber, qr, logoDataUrl);
         return File(pdfBytes, "application/pdf", $"invoice-{order.OrderNumber}.pdf");
     }
 
@@ -1364,12 +1368,16 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
                         item.Product = await db.Products.FindAsync(item.ProductId);
 
                     var zatca = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == order.BranchId);
+                    var company = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId);
+                    // An emailed invoice always goes to the customer, regardless of Order.Source —
+                    // so it's scoped by the customer-slip flag, not the staff-receipt one.
                     _ = emailService.SendInvoiceAsync(
                         customer.Email,
                         customer.FullName ?? customer.Email,
                         order,
                         zatca?.VatRegistrationNumber,
-                        zatca?.SellerName ?? order.Branch?.Name);
+                        zatca?.SellerName ?? order.Branch?.Name,
+                        company?.ShowLogoOnCustomerSlip == true ? company?.LogoDataUrl : null);
                 }
             }
         }

@@ -11,12 +11,12 @@ namespace BaqalaPOS.Api.Services;
 
 public interface IEmailService
 {
-    Task SendInvoiceAsync(string toEmail, string toName, Order order, string? vatNumber = null, string? sellerName = null);
+    Task SendInvoiceAsync(string toEmail, string toName, Order order, string? vatNumber = null, string? sellerName = null, string? logoDataUrl = null);
 }
 
 public class SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> logger) : IEmailService
 {
-    public async Task SendInvoiceAsync(string toEmail, string toName, Order order, string? vatNumber = null, string? sellerName = null)
+    public async Task SendInvoiceAsync(string toEmail, string toName, Order order, string? vatNumber = null, string? sellerName = null, string? logoDataUrl = null)
     {
         var host = config["Smtp:Host"];
         var user = config["Smtp:User"];
@@ -35,7 +35,7 @@ public class SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> l
         {
             QuestPDF.Settings.License = LicenseType.Community;
             PdfFonts.EnsureRegistered();
-            var pdfBytes = GeneratePdf(order, vatNumber, sellerName);
+            var pdfBytes = GeneratePdf(order, vatNumber, sellerName, logoDataUrl);
 
             var message = new MimeMessage();
             message.From.Add(new MailboxAddress(fromName, from));
@@ -71,9 +71,10 @@ public class SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> l
     }
 
     // ─── PDF ─────────────────────────────────────────────────────────────────────
-    private static byte[] GeneratePdf(Order order, string? vatNumber, string? sellerName)
+    private static byte[] GeneratePdf(Order order, string? vatNumber, string? sellerName, string? logoDataUrl)
     {
         var qrBytes = BuildZatcaQr(order, vatNumber, sellerName);
+        var logoBytes = PdfFonts.DecodeLogo(logoDataUrl);
         var branchName = sellerName ?? order.Branch?.Name ?? "";
         var dateStr = order.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy  HH:mm");
         var customerName = order.Customer?.FullName ?? "";
@@ -92,6 +93,11 @@ public class SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> l
                     // ── Header ───────────────────────────────────────────────
                     col.Item().BorderBottom(2).BorderColor("#000000").PaddingBottom(12).Column(hdr =>
                     {
+                        if (logoBytes != null)
+                        {
+                            hdr.Item().AlignCenter().Width(160).Height(36).Image(logoBytes).FitArea();
+                            hdr.Item().Height(6);
+                        }
                         hdr.Item().AlignCenter().Text("TAX INVOICE").FontSize(20).Bold().LetterSpacing(0.1f);
                         hdr.Item().Height(6);
                         hdr.Item().AlignCenter().Text(branchName).FontSize(13).Bold();

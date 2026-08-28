@@ -904,9 +904,9 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
             <div key={i} className="flex items-center justify-between text-sm bg-muted/30 rounded-lg px-3 py-2">
               <div>
                 <p className="font-medium">{(item as any).product?.name ?? "Product"}</p>
-                <p className="text-xs text-muted-foreground"><SARIcon />{item.unitPrice.toFixed(2)} × {item.quantity}</p>
+                <p className="text-xs text-muted-foreground"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{item.unitPrice.toFixed(2)} × {item.quantity}</p>
               </div>
-              <p className="font-semibold tabular-nums"><SARIcon />{item.totalPrice.toFixed(2)}</p>
+              <p className="font-semibold tabular-nums"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{item.totalPrice.toFixed(2)}</p>
             </div>
           ))}
           {(order.items ?? []).length === 0 && (
@@ -920,7 +920,7 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
       {/* Totals */}
       <div className="space-y-1.5 text-sm">
         <div className="flex justify-between text-muted-foreground">
-          <span>Subtotal</span><span><SARIcon />{order.subtotal.toFixed(2)}</span>
+          <span>Subtotal</span><span><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{order.subtotal.toFixed(2)}</span>
         </div>
         {/* discountAmount is the all-inclusive total (coupon + named discounts + loyalty) — show
             each manually-applied discount by name (order.discounts), then a fallback "Discount"
@@ -928,7 +928,7 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
             breakdown), so the lines below always sum to the total exactly. */}
         {(order.discounts ?? []).map(d => (
           <div key={d.id} className="flex justify-between text-red-600">
-            <span>{d.name}</span><span>-<SARIcon />{d.amount.toFixed(2)}</span>
+            <span>{d.name}</span><span>-<SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{d.amount.toFixed(2)}</span>
           </div>
         ))}
         {(() => {
@@ -936,33 +936,33 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
           const other = order.discountAmount - (order.loyaltyDiscountAmount ?? 0) - named;
           return other > 0.005 ? (
             <div className="flex justify-between text-red-600">
-              <span>Discount</span><span>-<SARIcon />{other.toFixed(2)}</span>
+              <span>Discount</span><span>-<SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{other.toFixed(2)}</span>
             </div>
           ) : null;
         })()}
         {!!order.loyaltyPointsRedeemed && order.loyaltyPointsRedeemed > 0 && (
           <div className="flex justify-between text-red-600">
             <span>Loyalty Redeemed ({order.loyaltyPointsRedeemed.toLocaleString()} pts)</span>
-            <span>-<SARIcon />{(order.loyaltyDiscountAmount ?? 0).toFixed(2)}</span>
+            <span>-<SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{(order.loyaltyDiscountAmount ?? 0).toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between text-muted-foreground">
-          <span>VAT</span><span><SARIcon />{order.taxAmount.toFixed(2)}</span>
+          <span>VAT</span><span><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{order.taxAmount.toFixed(2)}</span>
         </div>
         {/* Both fold into totalAmount but previously had no line here at all, so the total
             didn't visibly reconcile against subtotal/discount/VAT for any order that had one. */}
         {!!order.tobaccoFeeAmount && order.tobaccoFeeAmount > 0 && (
           <div className="flex justify-between text-muted-foreground">
-            <span>Tobacco Excise</span><span><SARIcon />{order.tobaccoFeeAmount.toFixed(2)}</span>
+            <span>Tobacco Excise</span><span><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{order.tobaccoFeeAmount.toFixed(2)}</span>
           </div>
         )}
         {!!order.customFeeAmount && order.customFeeAmount > 0 && (
           <div className="flex justify-between text-muted-foreground">
-            <span>Service Charge</span><span><SARIcon />{order.customFeeAmount.toFixed(2)}</span>
+            <span>Service Charge</span><span><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{order.customFeeAmount.toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
-          <span>Total</span><span className="text-primary"><SARIcon />{order.totalAmount.toFixed(2)}</span>
+          <span>Total</span><span className="text-primary"><SARIcon className="inline-block h-[0.85em] w-auto align-[-0.05em] -mr-[0.06em]" />{order.totalAmount.toFixed(2)}</span>
         </div>
       </div>
 
