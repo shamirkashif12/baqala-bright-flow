@@ -34,6 +34,7 @@ public class SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> l
         try
         {
             QuestPDF.Settings.License = LicenseType.Community;
+            PdfFonts.EnsureRegistered();
             var pdfBytes = GeneratePdf(order, vatNumber, sellerName);
 
             var message = new MimeMessage();
@@ -84,7 +85,7 @@ public class SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> l
                 page.Size(PageSizes.A4);
                 page.MarginHorizontal(50);
                 page.MarginVertical(45);
-                page.DefaultTextStyle(t => t.FontSize(10).FontFamily("Arial").FontColor("#000000"));
+                page.DefaultTextStyle(t => t.FontSize(10).FontFamily("Arial", PdfFonts.Arabic).FontColor("#000000"));
 
                 page.Content().Column(col =>
                 {

@@ -15,6 +15,7 @@ public static class ReceiptPdfWriter
     public static byte[] Write(Order order, string? vatNumber, string? sellerName, string? crNumber, string? qrCodeOverride = null)
     {
         QuestPDF.Settings.License = LicenseType.Community;
+        PdfFonts.EnsureRegistered();
 
         var name = sellerName ?? order.Branch?.Name ?? "Store";
         // Matches the on-screen receipt's new Date(...).toLocaleString("en-SA") rendering
@@ -36,7 +37,7 @@ public static class ReceiptPdfWriter
                 page.ContinuousSize(320);
                 page.MarginHorizontal(18);
                 page.MarginVertical(18);
-                page.DefaultTextStyle(t => t.FontSize(8.5f).FontFamily("Courier New").FontColor("#000000"));
+                page.DefaultTextStyle(t => t.FontSize(8.5f).FontFamily("Courier New", PdfFonts.Arabic).FontColor("#000000"));
 
                 page.Content().Background("#F5F5F7").Padding(14).Column(col =>
                 {

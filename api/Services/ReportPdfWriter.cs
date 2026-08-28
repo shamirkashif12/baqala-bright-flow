@@ -11,6 +11,7 @@ public static class ReportPdfWriter
     public static byte[] Write(string title, string filterSummary, (string Label, string Value)[] kpis, string[] headers, IReadOnlyList<object?[]> rows, string? companyHeader = null)
     {
         QuestPDF.Settings.License = LicenseType.Community;
+        PdfFonts.EnsureRegistered();
 
         return Document.Create(container =>
         {
@@ -19,7 +20,7 @@ public static class ReportPdfWriter
                 page.Size(PageSizes.A4.Landscape());
                 page.MarginHorizontal(28);
                 page.MarginVertical(28);
-                page.DefaultTextStyle(t => t.FontSize(8).FontFamily("Arial").FontColor("#000000"));
+                page.DefaultTextStyle(t => t.FontSize(8).FontFamily("Arial", PdfFonts.Arabic).FontColor("#000000"));
 
                 page.Content().Column(col =>
                 {

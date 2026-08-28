@@ -13,6 +13,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Zatca\Templates\*.xml" />
     <EmbeddedResource Include="Zatca\Templates\*.xsl" />
+    <EmbeddedResource Include="Assets\Fonts\*.ttf" />
   </ItemGroup>
 
   <ItemGroup>
