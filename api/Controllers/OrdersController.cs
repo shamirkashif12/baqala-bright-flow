@@ -251,6 +251,37 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return Ok(order);
     }
 
+    // Downloadable PDF for the "Download" button next to Print on the Orders/Sales/ZATCA invoice
+    // views — mirrors the on-screen "Tax Invoice" receipt card (OrderInvoiceDialog / the POS
+    // checkout dialog), not EmailService's separate, more formal A4 invoice used for emailing
+    // customers. qr lets the ZATCA Invoices page pass the real Phase 2-signed QR
+    // (ZatcaInvoice.QrCodeValue) it already has on hand instead of this rebuilding a weaker
+    // Phase-1 fallback.
+    [HttpGet("{id:guid}/invoice-pdf")]
+    public async Task<IActionResult> GetInvoicePdf(Guid id, [FromQuery] string? qr)
+    {
+        var (callerRole, callerBranchId) = GetCallerContext();
+
+        var order = await db.Orders
+            .Include(o => o.Branch)
+            .Include(o => o.Customer)
+            .Include(o => o.Payments)
+            .Include(o => o.ServiceCharges)
+            .Include(o => o.Items).ThenInclude(i => i.Product)
+            .FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound(new { message = "Order not found." });
+
+        // Same branch-scoping as GetById — a direct-by-id lookup must not let a branch-scoped
+        // caller download another branch's invoice.
+        if (callerRole is not null && callerRole != "tenant_admin" && callerBranchId.HasValue && order.BranchId != callerBranchId)
+            return NotFound(new { message = "Order not found." });
+
+        var zatca = await db.ZatcaSettings.FirstOrDefaultAsync(z => z.BranchId == order.BranchId);
+        var company = await db.CompanyProfiles.FindAsync(CompanyProfile.SingletonId);
+        var pdfBytes = ReceiptPdfWriter.Write(order, zatca?.VatRegistrationNumber, zatca?.SellerName ?? order.Branch?.Name, company?.CrNumber, qr);
+        return File(pdfBytes, "application/pdf", $"invoice-{order.OrderNumber}.pdf");
+    }
+
     /// <param name="allowPackBreak">
     /// The cashier has confirmed that unopened packs may be broken open to cover a shortfall of
     /// loose units (see the pack-break suggestion in the stock pre-flight below). A query flag

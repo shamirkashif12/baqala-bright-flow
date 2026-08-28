@@ -381,6 +381,12 @@ export const api = {
     request<{ total: number; page: number; pageSize: number; items: Order[] }>(`/api/orders${toQuery(params)}`),
   getOrder: (id: string) => request<Order>(`/api/orders/${id}`),
   getOrderByNumber: (num: string) => request<Order>(`/api/orders/by-number/${encodeURIComponent(num)}`),
+  // Same downloadable-PDF invoice template used to email customers their receipt, for the
+  // "Download" button next to Print on the Orders/Sales/ZATCA invoice views. qrCodeOverride lets a
+  // caller that already has the real ZATCA-signed QR (e.g. ZatcaInvoice.qrCodeValue) supply it
+  // directly instead of the server rebuilding a weaker Phase-1 fallback.
+  getOrderInvoicePdf: (id: string, qrCodeOverride?: string) =>
+    requestBlob(`/api/orders/${id}/invoice-pdf${toQuery({ qr: qrCodeOverride })}`),
   // allowPackBreak: the cashier has confirmed that unopened packs may be broken open to cover a
   // shortfall of loose units. Without it the server rejects such a sale with a 400 carrying a
   // `packBreakSuggestion` (see PackBreakSuggestion) describing exactly what to open — opening a

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Printer } from "lucide-react";
+import { Download, Loader2, Printer } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import { api, getUsbPrinter, type Order } from "@/lib/api";
 import { qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
 import type { ReceiptData } from "@/lib/escpos";
+import { downloadBlob } from "@/lib/csv-export";
 
 // Mirrors the same check in _app.pos.tsx — the local print agent being unreachable (not
 // installed / not running) surfaces as a bare fetch failure, which reads very differently from a
@@ -68,6 +69,7 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
   const [logoEscPos, setLogoEscPos] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!orderId) return;
@@ -146,6 +148,15 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
       .finally(() => setPrinting(false));
   };
 
+  const handleDownload = () => {
+    if (!order) return;
+    setDownloading(true);
+    api.getOrderInvoicePdf(order.id, qrCodeOverride)
+      .then((blob) => downloadBlob(blob, `invoice-${order.orderNumber}.pdf`))
+      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Failed to download invoice."))
+      .finally(() => setDownloading(false));
+  };
+
   return (
     <Dialog open={!!orderId} onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
@@ -220,6 +231,9 @@ export function OrderInvoiceDialog({ orderId, onClose, qrCodeOverride, banner, f
         <DialogFooter>
           {footerExtra}
           <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button variant="outline" className="gap-1.5" disabled={!receipt || downloading} onClick={handleDownload}>
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download
+          </Button>
           <Button
             className="gradient-primary text-primary-foreground border-0"
             disabled={!receipt || printing}

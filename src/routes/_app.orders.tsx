@@ -29,6 +29,7 @@ import { usePermission } from "@/lib/use-permission";
 import { useCompanyHeader } from "@/lib/use-company-header";
 import { SARIcon, fmtSAR } from "@/lib/currency";
 import { AddressMapPreview } from "@/components/address-map-picker";
+import { OrderInvoiceDialog } from "@/components/order-invoice-dialog";
 
 export const Route = createFileRoute("/_app/orders")({
   // Lets other pages (e.g. Sales) deep-link straight to a specific order's detail sheet instead of
@@ -188,77 +189,6 @@ function printOrders(orders: Order[], companyHeader: string) {
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
-  </body></html>`);
-  win.document.close();
-  win.focus();
-  setTimeout(() => { win.print(); win.close(); }, 400);
-}
-
-function printReceipt(order: Order, companyHeader: string) {
-  const payLine = order.payments && order.payments.length > 0 ? paymentBreakdownText(order.payments) : "—";
-  const items = (order.items ?? []).map(item => `
-    <tr>
-      <td style="padding:4px 0">${(item as any).product?.name ?? "Product"}</td>
-      <td style="padding:4px 0;text-align:center">${item.quantity}</td>
-      <td style="padding:4px 0;text-align:right">SAR ${item.unitPrice.toFixed(2)}</td>
-      <td style="padding:4px 0;text-align:right">SAR ${item.totalPrice.toFixed(2)}</td>
-    </tr>`).join("");
-
-  const win = window.open("", "_blank", "width=400,height=700");
-  if (!win) return;
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-    <title>Receipt ${order.orderNumber}</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'Courier New', monospace; font-size: 12px; color: #000; width: 300px; margin: 0 auto; padding: 16px 8px; }
-      .center { text-align: center; }
-      .bold { font-weight: bold; }
-      .large { font-size: 15px; }
-      .small { font-size: 10px; color: #555; }
-      .divider { border-top: 1px dashed #000; margin: 8px 0; }
-      table { width: 100%; border-collapse: collapse; }
-      th { font-size: 10px; text-align: left; border-bottom: 1px solid #000; padding-bottom: 4px; }
-      th:nth-child(2) { text-align: center; }
-      th:nth-child(3), th:nth-child(4) { text-align: right; }
-      .totals td { padding: 2px 0; }
-      .totals td:last-child { text-align: right; font-weight: bold; }
-      .total-row td { border-top: 1px solid #000; padding-top: 4px; font-size: 14px; font-weight: bold; }
-      @media print { body { padding: 0; } }
-    </style>
-  </head><body>
-    <div class="center bold large">${order.branch?.name ?? "Store"}</div>
-    ${companyHeader ? `<div class="center small" style="margin-top:2px">${companyHeader}</div>` : ""}
-    <div class="center small" style="margin-top:2px">Tax Receipt</div>
-    <div class="divider"></div>
-    <div class="small">Order: <span class="bold">${order.orderNumber}</span></div>
-    <div class="small">Date: ${new Date(order.createdAt).toLocaleString("en-SA", { dateStyle: "medium", timeStyle: "short" })}</div>
-    ${order.cashier ? `<div class="small">Cashier: ${order.cashier.fullName}</div>` : ""}
-    ${order.customer ? `<div class="small">Customer: ${order.customer.fullName}</div>` : ""}
-    <div class="small">Payment: <span>${payLine}</span></div>
-    <div class="divider"></div>
-    <table>
-      <thead><tr>
-        <th>Item</th><th>Qty</th><th>Price</th><th>Total</th>
-      </tr></thead>
-      <tbody>${items}</tbody>
-    </table>
-    <div class="divider"></div>
-    <table class="totals">
-      <tr><td>Subtotal</td><td>SAR ${order.subtotal.toFixed(2)}</td></tr>
-      ${(order.discounts ?? []).map(d => `<tr><td>${d.name}</td><td>-SAR ${d.amount.toFixed(2)}</td></tr>`).join("")}
-      ${(() => {
-        const named = (order.discounts ?? []).reduce((s, d) => s + d.amount, 0);
-        const other = order.discountAmount - (order.loyaltyDiscountAmount ?? 0) - named;
-        return other > 0.005 ? `<tr><td>Discount</td><td>-SAR ${other.toFixed(2)}</td></tr>` : "";
-      })()}
-      ${order.loyaltyPointsRedeemed ? `<tr><td>Loyalty Redeemed (${order.loyaltyPointsRedeemed} pts)</td><td>-SAR ${(order.loyaltyDiscountAmount ?? 0).toFixed(2)}</td></tr>` : ""}
-      <tr><td>VAT (15%)</td><td>SAR ${order.taxAmount.toFixed(2)}</td></tr>
-      ${order.tobaccoFeeAmount && order.tobaccoFeeAmount > 0 ? `<tr><td>Tobacco Excise</td><td>SAR ${order.tobaccoFeeAmount.toFixed(2)}</td></tr>` : ""}
-      ${order.customFeeAmount && order.customFeeAmount > 0 ? `<tr><td>Service Charge</td><td>SAR ${order.customFeeAmount.toFixed(2)}</td></tr>` : ""}
-      <tr class="total-row"><td>TOTAL</td><td>SAR ${order.totalAmount.toFixed(2)}</td></tr>
-    </table>
-    <div class="divider"></div>
-    <div class="center small" style="margin-top:8px">Thank you for your purchase!</div>
   </body></html>`);
   win.document.close();
   win.focus();
@@ -828,7 +758,6 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
   autoAction?: "edit" | "void" | null;
 }) {
   const { canEdit, canApprove, canDelete: canDeleteOrder } = usePermission("Orders");
-  const companyHeader = useCompanyHeader();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -837,6 +766,7 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
   const [showRefundDialog, setShowRefundDialog] = useState(false);
   const [showEditOrderDialog, setShowEditOrderDialog] = useState(false);
   const [showVoidOrderDialog, setShowVoidOrderDialog] = useState(false);
+  const [showInvoice, setShowInvoice] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -891,7 +821,7 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
           <SBadge status={order.orderStatus} />
           <SBadge status={order.paymentStatus} label={paymentBadgeLabel(order.paymentStatus)} />
           <div className="flex gap-1.5 mt-0.5">
-            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => printReceipt(order, companyHeader)}>
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => setShowInvoice(true)}>
               <Printer className="h-3.5 w-3.5" /> Print
             </Button>
             {/* A voided order that was already paid needs its money actually sent back — voiding
@@ -1103,6 +1033,10 @@ function OrderDetail({ orderId, onStatusChanged, autoAction }: {
           }}
         />
       )}
+
+      {/* Same Tax Invoice view/print/download as Sales and ZATCA Invoices, so the receipt printed
+          from here carries the same ZATCA QR instead of the old QR-less plain-HTML print. */}
+      <OrderInvoiceDialog orderId={showInvoice ? order.id : null} onClose={() => setShowInvoice(false)} />
     </div>
   );
 }

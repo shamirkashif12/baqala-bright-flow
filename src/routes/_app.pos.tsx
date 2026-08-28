@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Search, ScanBarcode, Pause, RotateCcw, Printer,
+  Search, ScanBarcode, Pause, RotateCcw, Printer, Download,
   Plus, Minus, Trash2, CreditCard, Banknote, Split,
   Info, CheckCircle2, Loader2, ShoppingCart, Tag, User, X, Package, QrCode,
   Building2, PrinterCheck, RefreshCw, AlertCircle, ImageOff, ClipboardCheck,
@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { api, getUsbPrinter, type Product, type Category, type Coupon, type Customer, type CashierShift, type Order, type Offer, type Discount, type TaxFeeRule, type InventoryBatch, type ResolvedPrice, type LoyaltyProgram, type PackBreakSuggestion } from "@/lib/api";
 import { DEFAULT_UNIT, isFractional, minQty, normalizeQty, qtyFromUnitCount, qtyStep, supportsCountEntry, unitSpec, unitSymbol } from "@/lib/units";
 import { qzConnect, qzIsConnected, qzListPrinters, qzPrintReceipt, qzPrintReceiptUsb } from "@/lib/qz";
+import { downloadBlob } from "@/lib/csv-export";
 import { useBranch } from "@/lib/branch-context";
 import { BranchFilter } from "@/components/branch-filter";
 import { LoadErrorBanner } from "@/components/load-error-banner";
@@ -112,6 +113,7 @@ type BonusContribution = { offerId: string; offerName: string; productId: string
 type DisplayCartItem = CartItem & { bonusQty: number; isBonusOnly: boolean };
 
 type InvoiceSnapshot = {
+  orderId: string;
   orderNumber: string;
   createdAt: string;
   items: CartItem[];
@@ -933,6 +935,7 @@ function POS() {
 
   // ─── Invoice snapshot (preserved after cart is cleared) ───────────────────────
   const [invoice, setInvoice] = useState<InvoiceSnapshot | null>(null);
+  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const autoPrintRef = useRef(false);
 
   // ─── Load products, tax rules, shifts on mount ────────────────────────────────
@@ -2488,6 +2491,7 @@ function POS() {
 
     // Snapshot invoice data before cart is cleared
     const invoiceData: InvoiceSnapshot = {
+      orderId: order.id,
       orderNumber: order.orderNumber,
       createdAt: order.createdAt ?? new Date().toISOString(),
       items: [...displayCart],
@@ -3642,6 +3646,21 @@ function POS() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setInvOpen(false)}>Close</Button>
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              disabled={!invoice || downloadingInvoice}
+              onClick={() => {
+                if (!invoice) return;
+                setDownloadingInvoice(true);
+                api.getOrderInvoicePdf(invoice.orderId, invoice.zatcaQrCode)
+                  .then((blob) => downloadBlob(blob, `invoice-${invoice.orderNumber}.pdf`))
+                  .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Failed to download invoice."))
+                  .finally(() => setDownloadingInvoice(false));
+              }}
+            >
+              {downloadingInvoice ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download
+            </Button>
             <Button
               className="gradient-primary text-primary-foreground border-0"
               disabled={!invoice}
