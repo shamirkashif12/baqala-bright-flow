@@ -124,15 +124,21 @@ public class ZatcaInvoiceXmlBuilder
     }
 
     // Mirrors InvoiceHelper::ModifyXml — used only for the 6 fixed ZATCA compliance-check
-    // documents, which reuse the template's baked-in sample supplier/customer/items and only
-    // vary id/type/counter/reason, unlike Build() which populates real transaction data.
-    public XmlDocument ModifyForComplianceTest(string id, string subtype, string invoiceTypeCode, int icv, string pih, string? instructionNote)
+    // documents, which reuse the template's baked-in sample customer/items and only vary
+    // id/type/counter/reason, unlike Build() which populates real transaction data. The supplier
+    // party MUST be overridden with the real onboarded VAT, though: ZATCA ties the compliance
+    // CSID certificate to the taxpayer's actual VAT number and rejects a signed document whose
+    // declared supplier VAT doesn't match it ("certificate-permissions" / CERTIFICATE_ERRORS) —
+    // the template's placeholder sample VAT only ever passed against the sandbox environment,
+    // where the CSID isn't tied to a real VAT.
+    public XmlDocument ModifyForComplianceTest(string id, string subtype, string invoiceTypeCode, int icv, string pih, string? instructionNote, ZatcaParty supplier)
     {
         var doc = LoadTemplate();
         var ns = CreateNamespaceManager(doc);
 
         SetNodeValue(doc, ns, "//cbc:ID", id);
         SetNodeValue(doc, ns, "//cbc:UUID", Guid.NewGuid().ToString());
+        UpdateParty(doc, ns, "AccountingSupplierParty", supplier);
 
         var invoiceTypeCodeNode = doc.SelectSingleNode("//cbc:InvoiceTypeCode", ns) as XmlElement;
         if (invoiceTypeCodeNode is not null)

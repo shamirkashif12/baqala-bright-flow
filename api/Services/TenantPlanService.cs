@@ -213,7 +213,24 @@ public class TenantPlanService(BaqalaDbContext db) : ITenantPlanService
         ["grocery-kpi-evaluation-business-intelligence"] = ["kpi_bi"],
         ["grocery-analytics-category-supplier-product-performance"] = ["kpi_bi"],
         ["grocery-self-service-kiosk"] = ["self_service_kiosk"],
+        // Phase 2 is a separate sale from basic ZATCA invoicing: it is the device-onboarding
+        // flow (CSR, compliance CSID, production CSID) plus signed-invoice submission, not
+        // the invoice list a Standard plan already gets.
+        ["grocery-zatca-phase-2-invoicing-audit-logs"] = ["zatca_phase2"],
     };
+
+    // Every internal key any gate in this project checks — the alias map's own targets, since
+    // nothing here gates on a key that no module grants. Used by the live plan catalog to drop
+    // Dashboard modules this project does not gate on, rather than list them as bullet points
+    // whose effect the tenant could never see.
+    /// <summary>The slug → internal-key table, for handing to a client that has to do this
+    /// translation itself (the Plans page fetches the Dashboard catalog directly when this server
+    /// cannot reach it). Exposed rather than reimplemented in TypeScript so the two can never
+    /// drift apart.</summary>
+    internal static IReadOnlyDictionary<string, string[]> DashboardAliases => DashboardModuleAliases;
+
+    internal static readonly IReadOnlySet<string> InternalFeatureKeys =
+        DashboardModuleAliases.Values.SelectMany(keys => keys).ToHashSet(StringComparer.Ordinal);
 
     // A blank FeaturesJson (the seeded/unprovisioned state) means "no features set" — same as
     // "{}" — see the seed comment in BaqalaDbContext.OnModelCreating for why it's seeded blank.

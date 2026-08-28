@@ -146,6 +146,30 @@ export const api = {
 
   // Tenant plan — pushed in by the external Tenant Admin Dashboard (see api/Controllers/TenantController.cs)
   getTenantPlan: () => request<TenantPlanInfo>("/api/tenant/plan"),
+  /** The live tier list the Tenant Admin Dashboard publishes — what is actually for sale, rather
+   *  than a table hardcoded in this app.
+   *
+   *  Two routes to the same data. Normally our own server fetches it; but the Dashboard's API
+   *  runs as a host process and this host blocks container → host-port routes, so that call
+   *  usually comes back empty. The browser has no such problem — it is already talking to both —
+   *  and the Dashboard's catalog endpoint is anonymous and CORS-open, so fetch it from here
+   *  instead. Resolves to undefined only when both routes fail, and the Plans page then falls
+   *  back to its built-in table rather than erroring over a comparison. */
+  getTenantPlanCatalog: async (): Promise<EcrPlanTier[] | undefined> => {
+    const res = await request<EcrCatalogResponse | undefined>("/api/tenant/plan/catalog");
+    if (res?.tiers?.length) return res.tiers;
+    if (!res?.source?.url) return undefined;
+    try {
+      // Deliberately a bare fetch, not request(): a different origin, and no token of ours to
+      // send to it.
+      const direct = await fetch(res.source.url, { headers: { Accept: "application/json" } });
+      if (!direct.ok) return undefined;
+      const body = (await direct.json()) as { data?: RawCatalogPlan[] };
+      return body.data?.length ? tiersFromRawCatalog(body.data, res.source) : undefined;
+    } catch {
+      return undefined;
+    }
+  },
   // "Manage Subscription" — returns a one-time signed URL that logs this tenant_admin straight
   // into their own Tenant Admin Dashboard (plans/hardware/billing). tenant_admin only.
   getDashboardLaunchUrl: () =>
@@ -406,6 +430,27 @@ export const api = {
   voidOrder: (id: string, data: { reason?: string }) =>
     request<OrderMutationResult>(`/api/orders/${id}`, { method: "DELETE", body: JSON.stringify(data) }),
 
+  // POS checkout card payments on the NamiPay terminal (via the finova middleware's Nami
+  // service). Flow: initiate returns a "processing" payment whose id the PaymentDialog polls;
+  // once "approved", its id goes into createOrder's payments[].posCardPaymentId so the server
+  // can verify the authorization and link it to the sale. A branch without an enabled Nami
+  // integration gets a 409 {error:"not_configured"} from initiate — the dialog then records the
+  // card payment the legacy way (standalone terminal). Cancel tells the server the cashier gave
+  // up waiting; if the terminal approved in the meantime the response comes back "approved" and
+  // the sale should still complete.
+  // Whether the branch drives a real NamiPay terminal — lets the Take Payment dialog show the
+  // terminal flow (or the legacy manual-card path) honestly before Confirm is ever pressed.
+  getPosCardPaymentAvailability: (branchId: string) =>
+    request<{ configured: boolean }>(`/api/pos/card-payments/availability?branchId=${branchId}`),
+  initiatePosCardPayment: (branchId: string, amount: number) =>
+    request<PosCardPaymentStatus>(`/api/pos/card-payments`, {
+      method: "POST", body: JSON.stringify({ branchId, amount }),
+    }),
+  getPosCardPaymentStatus: (id: string) =>
+    request<PosCardPaymentStatus>(`/api/pos/card-payments/${id}`),
+  cancelPosCardPayment: (id: string) =>
+    request<PosCardPaymentStatus>(`/api/pos/card-payments/${id}/cancel`, { method: "POST" }),
+
   // Online Ordering — the public catalog/checkout calls are unauthenticated (same request()
   // helper; it just has no token in localStorage on that page, same as the public loyalty page).
   getOnlineOrderCatalog: (branchId: string) =>
@@ -432,24 +477,34 @@ export const api = {
     request<{ orderNumber: string; totalAmount: number }>(`/api/online-orders/public/${branchId}`, {
       method: "POST", body: JSON.stringify(data),
     }),
-  // "Pay Online" at checkout — creates a MyFatoorah invoice priced from the server's own quote
-  // (never a client-supplied amount) and returns its payment link/QR. getOnlineCardPaymentStatus
-  // is then polled until MyFatoorah reports it paid, at which point placeOnlineOrder is called
-  // with paymentMethod:"myfatoorah" + this invoiceId — the backend re-verifies the payment before
-  // ever creating the order. See OnlineOrdersController.InitiateOnlinePayment/PlacePublicOrder.
-  initiateOnlineCardPayment: (
-    branchId: string,
-    items: Array<{ productId: string; quantity: number }>,
-    coords?: { latitude?: number | null; longitude?: number | null },
-  ) =>
+  // "Pay Online" at checkout — sends the WHOLE checkout (cart + delivery details, same payload as
+  // placeOnlineOrder) so the server can create a MyFatoorah invoice priced from its own quote AND
+  // keep a record of what was being bought. Returns the invoice's payment link/QR.
+  // getOnlineCardPaymentStatus is then polled; the first poll that finds it paid creates the order
+  // server-side and returns its orderNumber — no second "place order" call for card payments, and
+  // a shopper whose tab dies mid-payment still gets their order (server-side reconciler).
+  initiateOnlineCardPayment: (branchId: string, data: PlaceOnlineOrderPayload) =>
     request<{ invoiceId: number; invoiceUrl: string; totalAmount: number }>(
       `/api/online-orders/public/${branchId}/card-payment`,
-      { method: "POST", body: JSON.stringify({ items, latitude: coords?.latitude ?? null, longitude: coords?.longitude ?? null }) },
+      { method: "POST", body: JSON.stringify(data) },
     ),
-  getOnlineCardPaymentStatus: (invoiceId: number) =>
-    request<{ status: "paid" | "pending" | "failed"; rawStatus: string }>(
-      `/api/online-orders/public/card-payment/${invoiceId}/status`,
+  // Branch-scoped: the status is looked up on the branch's own MyFatoorah account (Admin →
+  // Payments), the same one the invoice was raised on. `orderNumber` is set once the order exists;
+  // "paid" without an orderNumber means the money was taken but the order couldn't be created
+  // (staff are notified and will place it or refund) — `problem` says why.
+  getOnlineCardPaymentStatus: (branchId: string, invoiceId: number) =>
+    request<{ status: "paid" | "pending" | "failed"; rawStatus: string; orderNumber?: string | null; totalAmount?: number | null; problem?: string | null }>(
+      `/api/online-orders/public/${branchId}/card-payment/${invoiceId}/status`,
     ),
+  // Staff: card payments MyFatoorah holds without a matching order here (see OnlinePayment).
+  getOnlinePaymentsNeedingAttention: (branchId?: string) =>
+    request<OnlinePaymentNeedingAttention[]>(`/api/online-orders/payments/attention${branchId ? `?branchId=${branchId}` : ""}`),
+  placeOrderFromOnlinePayment: (paymentId: string) =>
+    request<{ orderId: string; orderNumber: string; totalAmount: number }>(`/api/online-orders/payments/${paymentId}/place-order`, { method: "POST" }),
+  refundOnlinePayment: (paymentId: string, reason?: string) =>
+    request<{ refundId: number; refundReference?: string; status: string }>(`/api/online-orders/payments/${paymentId}/refund`, {
+      method: "POST", body: JSON.stringify({ reason }),
+    }),
   getOnlineOrdersPaged: (params: { branchId?: string[]; status?: string[]; page: number; pageSize: number }) =>
     request<{ total: number; page: number; pageSize: number; items: OnlineOrder[] }>(`/api/online-orders${toQuery(params)}`),
   updateOnlineOrderItems: (id: string, items: OnlineOrderItemEdit[]) =>
@@ -835,6 +890,10 @@ export const api = {
     request<PaymentIntegrationRecord[]>(`/api/payment-integrations/${branchId}`),
   savePaymentIntegration: (branchId: string, provider: string, data: { isEnabled: boolean; config: Record<string, string | null> }) =>
     request<PaymentIntegrationRecord>(`/api/payment-integrations/${branchId}/${provider}`, { method: "PUT", body: JSON.stringify(data) }),
+  // MyFatoorah/Nami only — proves the credentials against the payment middleware without saving.
+  // Sends the form's current values; masked "••••1234" fields mean "test with what's saved".
+  testPaymentIntegration: (branchId: string, provider: string, config: Record<string, string | null>) =>
+    request<{ ok: boolean; message: string }>(`/api/payment-integrations/${branchId}/${provider}/test`, { method: "POST", body: JSON.stringify({ config }) }),
 
   // Attendance
   getAttendance: (params?: { branchId?: string }) => {
@@ -1282,6 +1341,64 @@ export interface Branch {
   address?: string; city?: string; contactNumber?: string;
   commercialRegistration?: string; email?: string;
   status: string; createdAt: string;
+}
+
+/** Where to fetch the catalog when this app's own server could not, and how to read it. The map
+ *  is the backend's own slug → internal-key table, handed down rather than duplicated here. */
+export interface EcrCatalogSource { url: string; moduleKeyMap: Record<string, string[]>; internalKeys: string[] }
+export interface EcrCatalogResponse { tiers: EcrPlanTier[] | null; source: EcrCatalogSource }
+
+/** The Dashboard's public catalog payload — only the fields the tier table needs. */
+interface RawCatalogPlan {
+  name: string; monthlyPrice: number; yearlyPrice: number; currency: string | null;
+  maxLocations: number | null; maxTerminals: number | null; maxUsers: number | null; maxProducts: number | null;
+  isPopular: boolean; isActive: boolean;
+  modules?: { key: string; name: string }[] | null;
+  addOns?: { type: string; monthlyPrice: number; yearlyPrice: number }[] | null;
+}
+
+/** The same translation the backend does, driven by the table it handed us: a Dashboard module
+ *  slug covers one or more internal feature keys, and a module that maps to nothing gated in this
+ *  app is dropped rather than advertised as something the tenant would never see. */
+function tiersFromRawCatalog(plans: RawCatalogPlan[], source: EcrCatalogSource): EcrPlanTier[] {
+  const gated = new Set(source.internalKeys);
+  const keysFor = (slug: string) => (source.moduleKeyMap[slug] ?? []).filter((k) => gated.has(k));
+  return plans
+    .filter((p) => p.isActive)
+    .sort((a, b) => a.monthlyPrice - b.monthlyPrice)
+    .map((p) => ({
+      name: p.name,
+      monthlyPrice: p.monthlyPrice,
+      yearlyPrice: p.yearlyPrice,
+      currency: p.currency || "SAR",
+      limits: {
+        maxBranches: p.maxLocations,
+        maxTerminalsPerBranch: p.maxTerminals,
+        maxUsersPerBranch: p.maxUsers,
+        maxProducts: p.maxProducts,
+      },
+      features: [...new Set((p.modules ?? []).flatMap((m) => keysFor(m.key)))].sort(),
+      modules: (p.modules ?? []).filter((m) => keysFor(m.key).length > 0).map((m) => ({ key: m.key, name: m.name })),
+      addOns: p.addOns ?? [],
+      isPopular: p.isPopular,
+    }));
+}
+
+/** One purchasable tier exactly as the Tenant Admin Dashboard publishes it (mirrors
+ *  api/Services/EcrPlanCatalogClient.cs). `modules` carries the Dashboard's own display names, so
+ *  the Plans page reads the same wording the tenant was quoted; `features` carries this app's
+ *  internal keys for anything that needs to compare against the live plan. Both are already
+ *  filtered to modules this app actually gates on. */
+export interface EcrPlanTier {
+  name: string;
+  monthlyPrice: number;
+  yearlyPrice: number;
+  currency: string;
+  limits: { maxBranches: number | null; maxTerminalsPerBranch: number | null; maxUsersPerBranch: number | null; maxProducts: number | null };
+  features: string[];
+  modules: { key: string; name: string }[];
+  addOns: { type: string; monthlyPrice: number; yearlyPrice: number }[];
+  isPopular: boolean;
 }
 
 // Mirrors api/Services/TenantPlanService.cs's TenantPlanResponse — null limits mean "no cap on
@@ -1904,6 +2021,33 @@ export interface PlaceOnlineOrderPayload {
   paymentMethod?: string; paymentReference?: number;
 }
 
+// A card payment MyFatoorah reports as paid whose order couldn't be created here — see
+// OnlinePayment on the API side. Staff either retry placing it (from the recorded checkout) or
+// refund it.
+export interface OnlinePaymentNeedingAttention {
+  id: string; branchId: string; branchName?: string;
+  invoiceId: number; invoiceUrl?: string; amountSar: number; paidAt?: string;
+  lastError?: string; placementAttempts: number;
+  // Set when the payment already has an order that was cancelled outside the online flow (customer
+  // still charged) — then only Refund makes sense, not Create order.
+  orderNumber?: string | null; canPlace: boolean;
+  customerName?: string; customerPhone?: string; itemCount: number;
+}
+
+// A POS-checkout card payment on the NamiPay terminal (see initiatePosCardPayment). Once
+// "approved", referenceNumber carries the terminal's RRN — the reference printed on the
+// customer's slip and stamped onto the sale's payment row. message is cashier-facing (decline
+// reason / attention note). "ordered" means it's already linked to a completed sale.
+export interface PosCardPaymentStatus {
+  id: string;
+  status: "processing" | "approved" | "declined" | "cancelled" | "expired" | "ordered";
+  amount: number;
+  referenceNumber?: string | null;
+  authCode?: string | null;
+  panMasked?: string | null;
+  message?: string | null;
+}
+
 // unitPrice here is the admin's override — omitting a line removes it from the order.
 export interface OnlineOrderItemEdit { orderItemId?: string; productId: string; quantity: number; unitPrice: number; }
 
@@ -2081,7 +2225,7 @@ export interface CompanyProfile {
 }
 
 export interface ZatcaSettings {
-  id?: string; branchId: string; vatRegistrationNumber?: string; sellerName?: string;
+  id?: string; branchId: string; vatRegistrationNumber?: string; taxIdentificationNumber?: string; sellerName?: string;
   streetName?: string; buildingNumber?: string; citySubdivisionName?: string; postalZone?: string;
   phase2Enabled: boolean; environment: string;
   egsSerial?: string; onboardingStatus?: string;

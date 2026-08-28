@@ -63,7 +63,12 @@ public class ZatcaApiClient(HttpClient httpClient, ILogger<ZatcaApiClient> logge
 
     private static string EnvironmentSegment(string environment) => environment switch
     {
-        "production" => "production",
+        // ZATCA's gateway (Apigee) has no route for a literal "production" path segment — it's
+        // "core". Using "production" here returns a 500 Apigee routing fault
+        // ({"fault":{"faultstring":"Unable to route the message to a Target Endpoint",...}}), not
+        // a ZATCA-level error, which is easy to misread as an invalid OTP/CSR. Verified live
+        // against gw-fatoora.zatca.gov.sa: "core" returns a real ZATCA error body instead.
+        "production" => "core",
         "simulation" => "simulation",
         _ => "developer-portal", // sandbox / NonProduction
     };
@@ -116,6 +121,18 @@ public class ZatcaApiClient(HttpClient httpClient, ILogger<ZatcaApiClient> logge
             }
 
             logger.LogWarning("ZATCA request to {Url} returned {StatusCode} (attempt {Attempt}/{Retries}): {Body}", url, statusCode, attempt + 1, retries, body);
+
+            // A 4xx means ZATCA rejected the request itself (bad CSR, bad OTP, bad payload) —
+            // resending identical content won't produce a different outcome. Retrying is actively
+            // harmful for the OTP-bearing compliance call specifically: ZATCA invalidates the OTP
+            // after the first attempt regardless of whether that attempt succeeded, so a retry
+            // just resends an already-burned OTP and comes back "Invalid-OTP", masking the real
+            // first-attempt error (e.g. a CSR validation failure) with a misleading one. Only
+            // retry on network failures (caught above) or genuine transient failures (429/5xx).
+            if (statusCode is >= 400 and < 500 and not 429)
+            {
+                return new ZatcaApiResult(false, statusCode, ParseJsonSafely(body), body);
+            }
             if (attempt == retries - 1)
             {
                 return new ZatcaApiResult(false, statusCode, ParseJsonSafely(body), body);

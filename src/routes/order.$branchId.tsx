@@ -28,6 +28,21 @@ export const Route = createFileRoute("/order/$branchId")({ ssr: false, component
 type Step = "browse" | "checkout" | "confirmation";
 type Cart = Record<string, number>;
 
+// Thrown out of the Pay Online flow when the shopper pressed Cancel while the invoice was still
+// being created — handlePlaceOrder treats it as "nothing happened", not as an error to display.
+class PaymentCancelledError extends Error {
+  constructor() { super("Payment cancelled."); this.name = "PaymentCancelledError"; }
+}
+
+// MyFatoorah took the payment but the server couldn't create the order (item ran out, price
+// moved…). Staff are notified server-side; the shopper must NOT pay again — handlePlaceOrder
+// turns this into a clear message carrying the invoice number they can quote.
+class PaymentReceivedNoOrderError extends Error {
+  constructor(public readonly invoiceId: number, public readonly problem: string | null) {
+    super("Payment received but the order could not be created."); this.name = "PaymentReceivedNoOrderError";
+  }
+}
+
 // Mirrors OnlineOrdersController.PlacePublicOrder's own re-validation exactly — this is a fully
 // anonymous endpoint, so the server never trusts these either, but matching the rules here means
 // a form that passes client-side always succeeds server-side too, instead of surprising the buyer
@@ -226,11 +241,28 @@ function PublicOrderPage() {
   const [payInvoiceUrl, setPayInvoiceUrl] = useState<string | null>(null);
   const [payPopupBlocked, setPayPopupBlocked] = useState(false);
   const payPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Bumped on every Pay Online attempt and on Cancel. An attempt whose id no longer matches is
+  // stale — its in-flight invoice request must not open a popup, start polling, or place an
+  // order. Without this, Cancel only hid the panel: the earlier attempt kept running in the
+  // background and could still auto-place the order once its (old) invoice got paid.
+  const payAttemptRef = useRef(0);
+  // Rejects the current attempt's "waiting for payment" promise so handlePlaceOrder unwinds
+  // (through PaymentCancelledError) instead of hanging on an await that would never settle.
+  const payCancelRef = useRef<(() => void) | null>(null);
   const stopPayPolling = () => {
     if (payPollRef.current) clearInterval(payPollRef.current);
     payPollRef.current = null;
   };
-  useEffect(() => () => stopPayPolling(), []);
+  const cancelOnlinePayment = () => {
+    payAttemptRef.current += 1;
+    stopPayPolling();
+    payCancelRef.current?.();
+    payCancelRef.current = null;
+    setPayInvoiceUrl(null);
+    setPayPopupBlocked(false);
+    setPayPhase("form");
+  };
+  useEffect(() => () => { payAttemptRef.current += 1; stopPayPolling(); }, []);
 
   const [quote, setQuote] = useState<OnlineOrderQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -314,25 +346,77 @@ function PublicOrderPage() {
 
   const markTouched = (field: keyof FormErrors) => setTouched(prev => ({ ...prev, [field]: true }));
 
-  // Creates a MyFatoorah invoice for the cart (priced server-side), opens its checkout in a popup
-  // (MyFatoorah's hosted page sends X-Frame-Options: SAMEORIGIN so it can't be embedded directly —
-  // same constraint as the POS integration), and polls until MyFatoorah reports it Paid. The QR
-  // code stays visible as a fallback for a blocked popup or a shopper who'd rather use their phone.
-  const runOnlineCardPayment = async (): Promise<number> => {
-    const items = cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty }));
-    const { invoiceId, invoiceUrl } = await api.initiateOnlineCardPayment(branchId, items, { latitude, longitude });
-    setPayInvoiceUrl(invoiceUrl);
-    const popup = window.open(invoiceUrl, "myfatoorah-payment", "width=480,height=760");
+  // What the server needs to create the order — the same payload for cash and card. For card it
+  // is sent UP FRONT with the invoice request, so the server holds everything it needs to create
+  // the order the moment MyFatoorah reports the payment, with or without this tab still open.
+  const buildCheckoutPayload = () => ({
+    items: cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty })),
+    fullName: fullName.trim(),
+    phone: phone.trim(),
+    email: email.trim() || undefined,
+    addressLine: addressLine.trim(),
+    latitude, longitude,
+    notes: notes.trim() || undefined,
+  });
+
+  // Card payment: asks the server for a MyFatoorah invoice for this checkout, opens MyFatoorah's
+  // hosted page in the popup (it sends X-Frame-Options: SAMEORIGIN, so it can't be embedded) and
+  // polls until the server says the invoice is paid — at which point the server has ALREADY
+  // created the order and hands back its number. The QR code stays visible as a fallback for a
+  // blocked popup or a shopper who'd rather use their phone.
+  //
+  // `popup` is opened by the caller synchronously inside the click handler (see handlePlaceOrder)
+  // and only pointed at the invoice here — browsers allow window.open during a user gesture but
+  // block one that happens after an await, which is what used to trip the popup blocker.
+  const runOnlineCardPayment = async (popup: Window | null): Promise<{ orderNumber: string; totalAmount: number }> => {
+    const attempt = ++payAttemptRef.current;
+    // Fresh attempt, fresh state: never show a previous attempt's invoice link/QR while this
+    // one's invoice is still being created (that stale link is what got "re-opened" before).
+    setPayInvoiceUrl(null);
     setPayPopupBlocked(!popup);
 
-    return new Promise<number>((resolve, reject) => {
+    let invoiceId: number, invoiceUrl: string;
+    try {
+      ({ invoiceId, invoiceUrl } = await api.initiateOnlineCardPayment(branchId, buildCheckoutPayload()));
+    } catch (e) {
+      popup?.close();
+      throw e;
+    }
+    if (attempt !== payAttemptRef.current) {
+      // Cancelled while the invoice was being created — leave it unpaid, do nothing with it.
+      popup?.close();
+      throw new PaymentCancelledError();
+    }
+    setPayInvoiceUrl(invoiceUrl);
+    if (popup && !popup.closed) popup.location.href = invoiceUrl;
+    else setPayPopupBlocked(true);
+
+    return new Promise((resolve, reject) => {
+      payCancelRef.current = () => reject(new PaymentCancelledError());
+      const startedAt = Date.now();
       payPollRef.current = setInterval(async () => {
+        // Don't poll forever: MyFatoorah invoices stay payable for days, but a shopper who has
+        // walked away shouldn't leave this tab hammering the status endpoint. After 20 minutes
+        // stop and explain — a payment made later still becomes an order server-side.
+        if (Date.now() - startedAt > 20 * 60_000) {
+          stopPayPolling();
+          reject(new Error(t("We stopped waiting for the payment. If you already paid, don't pay again — your order will still be created and the store will contact you. Otherwise, place the order again.")));
+          return;
+        }
         try {
-          const { status } = await api.getOnlineCardPaymentStatus(invoiceId);
-          if (status === "paid") {
+          const s = await api.getOnlineCardPaymentStatus(branchId, invoiceId);
+          if (attempt !== payAttemptRef.current) { stopPayPolling(); return; }
+          if (s.status === "paid") {
             stopPayPolling();
-            resolve(invoiceId);
-          } else if (status === "failed") {
+            if (s.orderNumber) {
+              resolve({ orderNumber: s.orderNumber, totalAmount: s.totalAmount ?? (quote?.totalAmount ?? cartTotal) });
+            } else {
+              // Money taken, order not created (e.g. an item ran out in the meantime). The store
+              // has been notified and will either place it by hand or refund — say so plainly,
+              // with the invoice number the shopper can quote.
+              reject(new PaymentReceivedNoOrderError(invoiceId, s.problem ?? null));
+            }
+          } else if (s.status === "failed") {
             stopPayPolling();
             reject(new Error("Payment expired or was cancelled."));
           }
@@ -355,29 +439,38 @@ function PublicOrderPage() {
     setSubmitting(true);
     setError(null);
     try {
-      let paymentReference: number | undefined;
+      let result: { orderNumber: string; totalAmount: number };
       if (paymentMethod === "myfatoorah") {
+        // Open the payment window NOW, inside the click, while the browser still treats it as a
+        // user gesture — it gets pointed at the invoice once the server has created it. A
+        // reused window name means a second attempt navigates the same window instead of piling
+        // up popups.
+        const popup = window.open("", "myfatoorah-payment", "width=480,height=760");
         setPayPhase("paying");
-        paymentReference = await runOnlineCardPayment();
+        result = await runOnlineCardPayment(popup);
+      } else {
+        result = await api.placeOnlineOrder(branchId, { ...buildCheckoutPayload(), paymentMethod: "cash" });
       }
-      const result = await api.placeOnlineOrder(branchId, {
-        items: cartItems.map(i => ({ productId: i.product.productId, quantity: i.qty })),
-        fullName: fullName.trim(),
-        phone: phone.trim(),
-        email: email.trim() || undefined,
-        addressLine: addressLine.trim(),
-        latitude, longitude,
-        notes: notes.trim() || undefined,
-        paymentMethod,
-        paymentReference,
-      });
       setConfirmation({ ...result, paymentMethod });
       setStep("confirmation");
       setCart({});
+      // Leave nothing of this payment behind for the shopper's next order on this page.
+      stopPayPolling();
+      setPayPhase("form");
+      setPayInvoiceUrl(null);
+      setPayPopupBlocked(false);
     } catch (e: unknown) {
       stopPayPolling();
       setPayPhase("form");
-      setError(e instanceof Error ? e.message : "Couldn't place your order — please try again.");
+      setPayInvoiceUrl(null);
+      if (e instanceof PaymentReceivedNoOrderError) {
+        setError(
+          `${t("We received your payment")} (${t("ref.")} ${e.invoiceId})${e.problem ? ` — ${e.problem}` : ""}. ` +
+          t("The store has been notified and will confirm your order or refund you shortly. Please don't pay again."),
+        );
+      } else if (!(e instanceof PaymentCancelledError)) {
+        setError(e instanceof Error ? e.message : "Couldn't place your order — please try again.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -602,29 +695,35 @@ function PublicOrderPage() {
           {payPhase === "paying" ? (
             <Card className="p-6 space-y-4 border-border/60 shadow-card text-center">
               <p className="text-sm font-semibold">{t("Complete your payment")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("A payment window opened for")} <SARIcon />{(quote?.totalAmount ?? cartTotal).toFixed(2)} — {t("or scan this QR code with your phone.")}
-              </p>
-              {payPopupBlocked && (
-                <p className="text-xs text-destructive">
-                  {t("Your browser blocked the payment popup — use the link or QR code below.")}
-                </p>
-              )}
-              {payInvoiceUrl && (
-                <div className="flex flex-col items-center gap-2">
-                  <QRCodeSVG value={payInvoiceUrl} size={160} level="M" />
-                  <a href={payInvoiceUrl} target="_blank" rel="noreferrer" className="text-xs text-primary underline">
-                    {t("Open payment link")}
-                  </a>
+              {payInvoiceUrl ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    {t("A payment window opened for")} <SARIcon />{(quote?.totalAmount ?? cartTotal).toFixed(2)} — {t("or scan this QR code with your phone.")}
+                  </p>
+                  {payPopupBlocked && (
+                    <p className="text-xs text-destructive">
+                      {t("Your browser blocked the payment popup — use the link or QR code below.")}
+                    </p>
+                  )}
+                  <div className="flex flex-col items-center gap-2">
+                    <QRCodeSVG value={payInvoiceUrl} size={160} level="M" />
+                    <a href={payInvoiceUrl} target="_blank" rel="noreferrer" className="text-xs text-primary underline">
+                      {t("Open payment link")}
+                    </a>
+                  </div>
+                  <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("Waiting for payment…")}
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground py-6">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("Creating your payment link…")}
                 </div>
               )}
-              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("Waiting for payment…")}
-              </div>
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={() => { stopPayPolling(); setPayPhase("form"); setSubmitting(false); }}
+                onClick={() => { cancelOnlinePayment(); setSubmitting(false); }}
               >
                 {t("Cancel")}
               </Button>

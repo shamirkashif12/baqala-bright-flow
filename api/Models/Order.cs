@@ -223,8 +223,29 @@ public class OrderPayment
     [MaxLength(255), Column("reference_number")]
     public string? ReferenceNumber { get; set; }
 
+    /// The MyFatoorah InvoiceId this payment settled, for online orders paid via the gateway
+    /// (see OnlineOrdersController.PlacePublicOrder) — NULL for every other payment. Carries a
+    /// unique index (IX_order_payments_gateway_invoice_id) so one paid invoice can only ever
+    /// create one order: PlacePublicOrder is anonymous and re-verifies the invoice against
+    /// MyFatoorah, but "Paid" stays true forever, so without this a shopper could pay once and
+    /// replay the same InvoiceId into any number of same-total orders. Kept separate from
+    /// ReferenceNumber (free-text, shared with POS card refs) so the uniqueness is DB-enforced
+    /// even under concurrent replays, and so a POS ref that happens to equal an invoice number
+    /// can't be mistaken for it. MySQL unique indexes treat NULL as distinct, so the many NULLs
+    /// on cash/POS rows don't collide.
+    [Column("gateway_invoice_id")]
+    public long? GatewayInvoiceId { get; set; }
+
     [MaxLength(20), Column("status")]
     public string Status { get; set; } = "completed";
+
+    /// POS checkout only, request-side: the pos_card_payments row (NamiPay terminal
+    /// authorization) this payment settles. Not a column — OrdersController.Create verifies the
+    /// referenced authorization (approved, this branch, this amount, never spent on another
+    /// sale), stamps its RRN into ReferenceNumber, and links it to the order. Absent for legacy
+    /// card payments taken on a standalone terminal.
+    [NotMapped]
+    public Guid? PosCardPaymentId { get; set; }
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

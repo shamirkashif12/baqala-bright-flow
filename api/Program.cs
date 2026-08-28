@@ -9,6 +9,12 @@ using Microsoft.IdentityModel.Tokens;
 using System.Linq;
 using System.Text;
 
+// cp437 (the thermal-receipt code page PrinterController.BuildEscPos encodes with) is not one of
+// .NET's built-in encodings on ANY platform — without this registration every server-side
+// print-receipt request dies in an unhandled ArgumentException (a bare 500 to the till) before
+// even checking whether a printer is configured.
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ─── Database (MySQL) ────────────────────────────────────────────────────────
@@ -86,7 +92,26 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<BaqalaDbContext>();
 builder.Services.AddHttpClient<IZatcaApiClient, ZatcaApiClient>();
 builder.Services.AddHttpClient<ITenantGatewayClient, TenantGatewayClient>();
-builder.Services.AddHttpClient<IMyFatoorahServiceClient, MyFatoorahServiceClient>();
+// Reads the live tier list the Tenant Admin Dashboard publishes, so the Plans page shows what
+// is actually for sale instead of a table hardcoded in the frontend. Short timeout: a
+// comparison table is never worth making the page wait.
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient<IEcrPlanCatalogClient, EcrPlanCatalogClient>(c => c.Timeout = TimeSpan.FromSeconds(8));
+builder.Services.AddHttpClient<IMyFatoorahServiceClient, MyFatoorahServiceClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
+// POS checkout card payments on the NamiPay terminal, via the middleware's Nami service. 75s:
+// the middleware's own worst case (token exchange + 3 retries against Nami's 15s-capped
+// upstream) is ~63s — status polls cap themselves far lower (see NamiPayServiceClient).
+builder.Services.AddHttpClient<INamiPayServiceClient, NamiPayServiceClient>(c => c.Timeout = TimeSpan.FromSeconds(75));
+// Online-order card checkout (invoice → status → order → refund) + the sweep that finishes
+// paid-but-unordered payments when the shopper's browser isn't around to.
+builder.Services.AddScoped<IOnlineCheckoutService, OnlineCheckoutService>();
+// Encrypts Admin → Payments credentials (MyFatoorah token etc.) at rest with the key ring above.
+builder.Services.AddSingleton<IPaymentIntegrationSecrets, PaymentIntegrationSecrets>();
+builder.Services.AddHostedService<OnlinePaymentReconcilerService>();
+// POS card checkout (initiate on the NamiPay terminal → poll → link to the sale) + the sweep
+// that resolves abandoned/late terminal payments and flags approved-but-unlinked ones to staff.
+builder.Services.AddScoped<IPosCardPaymentService, PosCardPaymentService>();
+builder.Services.AddHostedService<PosCardPaymentReconcilerService>();
 builder.Services.AddScoped<IZatcaCsrService, ZatcaCsrService>();
 builder.Services.AddScoped<IZatcaService, ZatcaService>();
 
@@ -163,6 +188,38 @@ builder.Services.AddAuthorization(options =>
     options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
         .Build();
+});
+
+// Per-IP rate limits for the anonymous online-ordering endpoints (OnlineOrdersController's
+// public/* routes) — the only unauthenticated write path in the app. Without these, a script
+// could raise thousands of MyFatoorah invoices on a merchant's account or hammer the payment
+// gateway through the status endpoint. Two policies, applied per endpoint with
+// [EnableRateLimiting]: "online-payment" for invoice creation (money-adjacent, cheap to abuse) and
+// "online-public" for catalog/quote/status (300 per min — real shoppers poll status every 3 s and
+// several may share one NAT address). Fixed windows per client IP; a rejected call gets a 429 with a
+// short JSON message the checkout page shows verbatim. When the API sits behind a reverse proxy
+// the client IP is whatever the proxy forwards — see the ForwardedHeaders note in the deployment
+// docs; without it every shopper shares the proxy's IP and one busy shop could rate-limit itself.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsync(
+            "{\"message\":\"Too many requests from your connection — please wait a moment and try again.\"}", ct);
+    };
+    static string ClientKey(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    options.AddPolicy("online-payment", ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        ClientKey(ctx), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20, Window = TimeSpan.FromMinutes(10), QueueLimit = 0,
+        }));
+    options.AddPolicy("online-public", ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        ClientKey(ctx), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 300, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+        }));
 });
 
 var app = builder.Build();
@@ -443,6 +500,7 @@ app.Use(async (context, next) =>
 });
 
 app.UseAuthorization();
+app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<BaqalaPOS.Api.Hubs.CustomerDisplayHub>("/hubs/customer-display");
 

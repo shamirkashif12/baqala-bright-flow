@@ -95,6 +95,13 @@ public class ZatcaSettings
     [MaxLength(20), Column("vat_registration_number")]
     public string? VatRegistrationNumber { get; set; }
 
+    // ZATCA's CSR "Organization Unit Name" field — for taxpayers registered as (or as a member of)
+    // a tax group, ZATCA requires this to be the 10-digit Tax Identification Number of the branch
+    // being onboarded, not a free-text branch/display name. A CSR built with a display name here
+    // is rejected with CSR_VALIDATION/CSR_MISSING_VALUE_ERROR at the compliance-CSID step.
+    [MaxLength(20), Column("tax_identification_number")]
+    public string? TaxIdentificationNumber { get; set; }
+
     [MaxLength(500), Column("seller_name")]
     public string? SellerName { get; set; }
 
@@ -149,6 +156,15 @@ public class ZatcaIdentity
     // ─── ZATCA Onboarding State (encrypted at rest via IDataProtector) ────────
     [Column("csr")]
     public string? Csr { get; set; }
+
+    // Which branch's ZatcaSettings (VAT/name/address) were baked into the CSR above — the
+    // authenticated certificate ZATCA issues is permanently tied to that exact VAT. Without this,
+    // there was no way to know which branch's settings to reuse when building the compliance-test
+    // documents in RunOnboardingToProductionAsync: guessing "any branch with a non-blank VAT" broke
+    // as soon as more than one branch had one set, since only ONE of them actually matches the
+    // certificate — ZATCA rejects every mismatch with a certificate-permissions error.
+    [Column("csr_branch_id")]
+    public Guid? CsrBranchId { get; set; }
 
     [MaxLength(255), Column("egs_serial")]
     public string? EgsSerial { get; set; }

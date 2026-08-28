@@ -3,6 +3,7 @@ using System;
 using BaqalaPOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BaqalaPOS.Api.Migrations
 {
     [DbContext(typeof(BaqalaDbContext))]
-    partial class BaqalaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260827124309_AddZatcaSettingsTaxIdentificationNumber")]
+    partial class AddZatcaSettingsTaxIdentificationNumber
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -6295,10 +6298,6 @@ namespace BaqalaPOS.Api.Migrations
                     b.Property<string>("Csr")
                         .HasColumnType("longtext")
                         .HasColumnName("csr");
-
-                    b.Property<Guid?>("CsrBranchId")
-                        .HasColumnType("char(36)")
-                        .HasColumnName("csr_branch_id");
 
                     b.Property<string>("EgsSerial")
                         .HasMaxLength(255)

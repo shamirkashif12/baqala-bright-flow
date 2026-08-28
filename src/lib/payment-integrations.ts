@@ -47,6 +47,10 @@ export interface PaymentProviderDef {
   fields: PaymentField[];
   /** Extra context shown at the top of the setup form — used when full onboarding lives on a dedicated settings page elsewhere in the app. */
   setupNote?: string;
+  /** Text under the "Enable" switch. Defaults to the generic credentials wording, which reads wrong for a provider with no credential fields here. */
+  enableDescription?: string;
+  /** Shows a "Test connection" button in the setup form. Only for providers with a real rail behind them — the backend's test endpoint must support the provider (PaymentIntegrationsController.TestConnection). */
+  supportsTest?: boolean;
 }
 
 const ENV_SANDBOX_PRODUCTION = {
@@ -107,64 +111,69 @@ export const PAYMENT_PROVIDERS: PaymentProviderDef[] = [
     colorClass: "bg-amber-500/15 text-amber-600",
     initials: "N",
     logo: namiLogo,
+    // Card payments reach Nami through the finova middleware's Nami service
+    // (api/Services/NamiPayServiceClient.cs). Unlike MyFatoorah there are no per-branch
+    // credentials to collect: the merchant account, API secret and Sandbox/Production choice all
+    // live server-side in that middleware's own DB. The one thing the checkout flow reads from
+    // this form is WHICH terminal the amount is pushed to — PosCardPaymentService's
+    // ResolveNamiTerminalIdAsync reads exactly the "terminalId" key below; rename them together.
     fields: [
-      {
-        key: "merchantId",
-        label: "Merchant ID",
-        type: "text",
-        required: true,
-        placeholder: "e.g. 100234567",
-      },
       {
         key: "terminalId",
         label: "Terminal ID",
         type: "text",
         required: true,
-        placeholder: "e.g. TID-00123",
+        placeholder: "e.g. 8184000200000077",
+        helperText:
+          "The TID Nami assigns when this branch's terminal is provisioned — card amounts are pushed to this device.",
       },
-      {
-        key: "apiSecret",
-        label: "API Secret",
-        type: "password",
-        required: true,
-        helperText: "Provided by Nami when the terminal is provisioned",
-      },
-      ENV_SANDBOX_PRODUCTION,
     ],
+    setupNote:
+      "Nami merchant credentials and the Sandbox/Production environment are configured once on the payment middleware server, not per branch — " +
+      "the only setting needed here is which terminal (TID) this branch's card payments go to.",
+    enableDescription:
+      "Turn this on once the Terminal ID below is correct — the POS card tender pushes amounts to this device only while enabled.",
+    supportsTest: true,
   },
   {
     key: "MyFatoorah",
     name: "MyFatoorah",
     category: "Payment Gateway",
     priority: "Mandatory",
-    description: "Payment gateway for subscription billing and merchant customer payments.",
+    description:
+      "Online card payment (Apple Pay, Google Pay, mada, Visa/Mastercard) on this branch's public ordering page.",
     colorClass: "bg-emerald-500/15 text-emerald-600",
     initials: "MF",
     logo: myFatoorahLogo,
+    // Checkout doesn't call MyFatoorah directly — it goes through the finova middleware's
+    // MyFatoorah service (api/Services/MyFatoorahServiceClient.cs), forwarding THIS branch's own
+    // API token + environment on every call, so each store can use its own MyFatoorah account.
+    // The keys below (apiKey / environment) are exactly what MyFatoorahMerchantAccount reads
+    // out of the saved ConfigJson — rename them together.
     fields: [
       {
         key: "apiKey",
         label: "API Token",
         type: "password",
         required: true,
-        helperText: "MyFatoorah dashboard → Settings → API Keys",
+        helperText: "MyFatoorah portal → Integration Settings → API Key. Use the Test token while trying it out.",
       },
       {
         ...ENV_SANDBOX_PRODUCTION,
         default: "test",
+        helperText: "Test = MyFatoorah sandbox (apitest.myfatoorah.com). Live = your real KSA account (api-sa.myfatoorah.com) — money moves.",
         options: [
           { value: "test", label: "Test" },
           { value: "live", label: "Live" },
         ],
       },
-      {
-        key: "webhookUrl",
-        label: "Webhook URL",
-        type: "text",
-        required: false,
-        placeholder: "https://yourapp.com/webhooks/myfatoorah",
-      },
     ],
+    setupNote:
+      "Used by the branch's public online ordering page: shoppers get a “Pay Online” option (card / Apple Pay / Google Pay / mada) next to Cash on Delivery. " +
+      "Online ordering itself must also be switched on in POS Settings → Online Ordering.",
+    enableDescription:
+      "Turn this on once the API token below is correct — the ordering page only offers “Pay Online” while enabled.",
+    supportsTest: true,
   },
   {
     key: "ZATCA",

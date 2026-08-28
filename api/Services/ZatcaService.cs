@@ -43,13 +43,22 @@ public class ZatcaService(
         var settings = await GetOrCreateBranchSettingsAsync(branchId);
         var identity = await GetIdentityAsync();
 
+        // ZATCA rejects the CSR at the compliance-CSID step (CSR_VALIDATION /
+        // CSR_MISSING_VALUE_ERROR: "Organization Unit Name must be the 10-digit TIN number...")
+        // if this is a free-text branch name instead of the taxpayer's actual TIN — verified live
+        // against gw-fatoora.zatca.gov.sa/e-invoicing/core/compliance. Must be set explicitly per
+        // branch; there's no reliable way to derive a 10-digit TIN from the branch name or the
+        // 15-digit VAT number.
+        if (string.IsNullOrWhiteSpace(settings.TaxIdentificationNumber))
+            throw new InvalidOperationException("This branch's ZATCA Tax Identification Number (TIN) must be set before generating a CSR.");
+
         var config = new ZatcaCsrConfig(
             Environment: MapCsrEnvironment(identity.Environment),
             // Per ZATCA's Developer Portal Manual (§5.3.1): the CSR's Organization Identifier must
             // be the VAT registration number (15 digits, starting and ending with 3) — not the CR
             // number, which is a different, unrelated identifier used elsewhere on the invoice.
             OrganizationIdentifier: settings.VatRegistrationNumber ?? branch.CommercialRegistration ?? "",
-            OrganizationUnitName: branch.Name,
+            OrganizationUnitName: settings.TaxIdentificationNumber,
             OrganizationName: settings.SellerName ?? branch.Name,
             CountryName: "SA",
             InvoiceType: "1100", // supports both standard + simplified
@@ -61,6 +70,7 @@ public class ZatcaService(
         var result = csrService.GenerateCsr(config);
 
         identity.Csr = result.CsrBase64;
+        identity.CsrBranchId = branchId;
         identity.PrivateKey = _protector.Protect(result.PrivateKeyRaw);
         identity.EgsSerial = result.EgsSerial;
         identity.OnboardingStatus = "csr_generated";
@@ -113,6 +123,30 @@ public class ZatcaService(
         var privateKey = _protector.Unprotect(identity.PrivateKey!);
         var environment = MapApiEnvironment(identity.Environment);
 
+        // The compliance test documents must carry the exact VAT baked into the CSR that got this
+        // certificate issued — ZATCA ties the compliance/production CSID certificate to that one
+        // VAT and rejects any signed document whose supplier VAT doesn't match it with a
+        // "User only allowed to use the vat number that exists in the authentication certificate"
+        // CERTIFICATE_ERRORS failure on every one of the 6 checks. This only surfaced in
+        // production/simulation — the sandbox environment's CSID isn't tied to a real VAT, so the
+        // template's placeholder sample VAT (311691066700003, ZATCA's own SDK sample) passed there
+        // undetected.
+        // Earlier versions of this guessed "any branch with a non-blank VAT" — which breaks the
+        // moment more than one branch has one set, since only the branch actually used to generate
+        // the CSR matches the issued certificate. Use identity.CsrBranchId (recorded by
+        // GenerateCsrAsync) so this is exact, not a guess.
+        if (identity.CsrBranchId is not { } csrBranchId)
+            throw new InvalidOperationException("No branch is recorded for the current CSR. Regenerate the CSR before running compliance tests.");
+        var supplierSettings = await db.ZatcaSettings.Include(s => s.Branch)
+            .FirstOrDefaultAsync(s => s.BranchId == csrBranchId)
+            ?? throw new InvalidOperationException("The branch the CSR was generated for no longer has ZATCA settings. Regenerate the CSR.");
+        var supplier = new ZatcaParty(
+            RegistrationName: supplierSettings.SellerName ?? supplierSettings.Branch?.Name,
+            VatId: supplierSettings.VatRegistrationNumber,
+            Address: new ZatcaPartyAddress(supplierSettings.StreetName, supplierSettings.BuildingNumber, supplierSettings.CitySubdivisionName, supplierSettings.Branch?.City, supplierSettings.PostalZone),
+            PartyIdentificationSchemeId: "CRN",
+            PartyIdentificationId: supplierSettings.Branch?.CommercialRegistration);
+
         // ZATCA requires 6 fixed document types for compliance testing.
         var documentTypes = new (string Prefix, string TypeCode, string Description, string? InstructionNote)[]
         {
@@ -134,7 +168,7 @@ public class ZatcaService(
             var isSimplified = prefix.StartsWith("SIM", StringComparison.Ordinal);
             var subtype = isSimplified ? "0200000" : "0100000";
 
-            var doc = _xmlBuilder.ModifyForComplianceTest($"{prefix}-0001", subtype, typeCode, icv, pih, instructionNote);
+            var doc = _xmlBuilder.ModifyForComplianceTest($"{prefix}-0001", subtype, typeCode, icv, pih, instructionNote, supplier);
             var signed = _signer.Sign(doc, DecodeCertificateContent(identity.CcsidBinarySecurityToken), privateKey);
 
             var response = await apiClient.ComplianceChecksAsync(environment, identity.CcsidBinarySecurityToken, ccsidSecret, signed);
@@ -374,7 +408,15 @@ public class ZatcaService(
                 .Any(e => e.TryGetProperty("message", out var msg) && (msg.GetString() ?? "").Contains("Compliance check already completed", StringComparison.Ordinal));
         }
 
-        var passed = alreadyCompliant || status.Contains("REPORTED", StringComparison.Ordinal) || status.Contains("CLEARED", StringComparison.Ordinal);
+        // Must be an exact match, not Contains: ZATCA's *failure* values are "NOT_CLEARED" and
+        // "NOT_REPORTED", which themselves contain the substrings "CLEARED"/"REPORTED" — the
+        // previous Contains() check marked every failed compliance test as passed, so the "Run
+        // Compliance Tests" step reported all 6 green locally while ZATCA's own /production/csids
+        // call correctly rejected with Missing-ComplianceSteps for all 6. Also require the HTTP
+        // call itself to have succeeded (2xx) — a 400 with a stray "CLEARED"/"REPORTED" substring
+        // anywhere in its body must not read as a pass.
+        var expectedStatus = isSimplified ? "REPORTED" : "CLEARED";
+        var passed = alreadyCompliant || (response.Success && status == expectedStatus);
         return (passed, status, alreadyCompliant);
     }
 

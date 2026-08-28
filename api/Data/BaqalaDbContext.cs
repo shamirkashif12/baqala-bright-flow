@@ -130,6 +130,13 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
     // Admin → Payments: per-branch payment provider connection state
     public DbSet<PaymentIntegration> PaymentIntegrations { get; set; }
 
+    // Online-order card payments (MyFatoorah invoices) from creation through order/refund — see OnlinePayment
+    public DbSet<OnlinePayment> OnlinePayments { get; set; }
+
+    // POS-checkout card payments on the NamiPay terminal, from initiation through the sale they
+    // settle — see PosCardPayment
+    public DbSet<PosCardPayment> PosCardPayments { get; set; }
+
     // Tenant Admin Dashboard integration — plan config pushed in for this deployed instance
     public DbSet<TenantPlan> TenantPlans { get; set; }
 
@@ -219,6 +226,20 @@ public class BaqalaDbContext(DbContextOptions<BaqalaDbContext> options) : DbCont
 
         modelBuilder.Entity<PaymentIntegration>()
             .HasIndex(p => new { p.BranchId, p.Provider }).IsUnique();
+
+        modelBuilder.Entity<OnlinePayment>()
+            .HasIndex(p => p.GatewayInvoiceId).IsUnique();
+        modelBuilder.Entity<OnlinePayment>()
+            .HasIndex(p => new { p.Status, p.CreatedAt });
+
+        modelBuilder.Entity<PosCardPayment>()
+            .HasIndex(p => p.OrderRef).IsUnique();
+        modelBuilder.Entity<PosCardPayment>()
+            .HasIndex(p => new { p.Status, p.CreatedAt });
+        modelBuilder.Entity<PosCardPayment>()
+            .HasIndex(p => p.OrderId);
+        modelBuilder.Entity<PosCardPayment>()
+            .HasIndex(p => p.GatewayTransactionId);
 
         modelBuilder.Entity<LoyaltyProgram>()
             .HasIndex(l => l.BranchId).IsUnique();

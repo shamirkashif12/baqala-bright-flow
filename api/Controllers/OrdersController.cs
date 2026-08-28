@@ -22,6 +22,21 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         return (role, branchId);
     }
 
+    // Online orders are managed in Orders → Online Orders (OnlineOrdersController), which knows
+    // about their reservation-vs-deduction ledger timing, delivery fee, and — for card-paid ones —
+    // the MyFatoorah payment that has to be refunded when they're rejected. The generic POS Edit /
+    // Void / status / add-payment paths here know none of that: an edit here recomputes the total
+    // without the delivery fee, and Void just stamps the payment "cancelled" ("Refund Due"), leaving
+    // the customer's card payment untouched at the gateway. So they refuse online orders outright
+    // and point staff to the right screen. Returns null when the order is a normal POS/kiosk one.
+    private static string? OnlineOrderGuard(Order order)
+    {
+        if (order.Source != "online") return null;
+        return order.PaymentStatus is "paid" or "refunded"
+            ? "This is an online order paid by card — manage it from Orders → Online Orders (Reject there refunds the customer through MyFatoorah)."
+            : "This is an online order — manage it from Orders → Online Orders (approve, edit lines, reject, deliver).";
+    }
+
     // Branch-specific active program if one exists, else the one guaranteed business-wide
     // default (BranchId == null, seeded in BaqalaDbContext) — mirrors LoyaltyController's
     // identically-named resolver, duplicated per-controller like GetCallerContext above since
@@ -599,6 +614,37 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         foreach (var pay in order.Payments) { pay.Id = Guid.NewGuid(); pay.OrderId = order.Id; }
         foreach (var d in order.Discounts) { d.Id = Guid.NewGuid(); d.OrderId = order.Id; d.CreatedAt = DateTime.UtcNow; }
         foreach (var s in order.ServiceCharges) { s.Id = Guid.NewGuid(); s.OrderId = order.Id; s.CreatedAt = DateTime.UtcNow; }
+
+        // Card payments taken on the NamiPay terminal: the POS references the authorization it
+        // obtained (POST /api/pos/card-payments) rather than just asserting "card was paid" —
+        // verify it here (approved, this branch, this amount, never spent on another sale) and
+        // stamp the terminal's own reference onto the recorded payment. The link is saved in the
+        // same SaveChanges as the order itself, and any rejection below discards it along with
+        // everything else. Card payments without a posCardPaymentId (standalone terminals) are
+        // recorded exactly as before.
+        foreach (var pay in order.Payments)
+        {
+            if (pay.PosCardPaymentId is not { } cardPaymentId) continue;
+            var cardPayment = await db.PosCardPayments.FirstOrDefaultAsync(p => p.Id == cardPaymentId);
+            if (cardPayment is null)
+                return BadRequest(new { message = "The card payment for this sale could not be found — take the card payment again." });
+            if (cardPayment.BranchId != order.BranchId)
+                return BadRequest(new { message = "The card payment belongs to a different branch." });
+            if (cardPayment.OrderId is not null)
+                return BadRequest(new { message = "That card payment was already used on another sale." });
+            if (cardPayment.Status != "approved")
+                return BadRequest(new { message = $"The card payment isn't approved (status: {cardPayment.Status}) — take the card payment again." });
+            if (Math.Abs(cardPayment.Amount - pay.Amount) > 0.01m)
+                return BadRequest(new { message = $"The approved card amount (SAR {cardPayment.Amount:F2}) doesn't match this sale's card portion (SAR {pay.Amount:F2}) — take the card payment again." });
+
+            pay.PaymentMethod = "card";
+            pay.Status = "completed";
+            pay.ReferenceNumber = cardPayment.Rrn ?? cardPayment.GatewayTransactionId;
+            cardPayment.OrderId = order.Id;
+            cardPayment.Status = "ordered";
+            cardPayment.ResolvedAt = DateTime.UtcNow;
+            cardPayment.UpdatedAt = DateTime.UtcNow;
+        }
 
         // ── Re-validate coupon/discount server-side ─────────────────────────────
         // Previously the client's DiscountAmount/CouponId were persisted verbatim with zero
@@ -1374,6 +1420,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
 
         if (order.OrderStatus is "cancelled" or "refunded")
             return BadRequest(new { message = $"This order is already {order.OrderStatus} and cannot be changed further." });
+        if (OnlineOrderGuard(order) is { } blocked) return BadRequest(new { message = blocked });
 
         // A completed (paid, fulfilled) order can no longer be walked back through the
         // fulfillment pipeline or cancelled outright — the only legitimate reversal left is a
@@ -1465,6 +1512,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         var order = await db.Orders.Include(o => o.Items).Include(o => o.Payments).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { message = "Order not found." });
         if (order.OrderStatus == "cancelled") return BadRequest(new { message = "A cancelled order can't be edited." });
+        if (OnlineOrderGuard(order) is { } blocked) return BadRequest(new { message = blocked });
 
         var canSelfApprove = await PermissionCheck.HasPermissionAsync(User, db, "Orders", PermAction.Approve);
 
@@ -1582,6 +1630,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
         // original quantity with no awareness of returns, so voiding on top of that would add those
         // units back to stock a second time.
         if (order.OrderStatus == "refunded") return BadRequest(new { message = "This order has already been refunded — void the remaining return instead of voiding the whole order." });
+        if (OnlineOrderGuard(order) is { } blocked) return BadRequest(new { message = blocked });
 
         var settings = await db.PosSettings.AsNoTracking().FirstOrDefaultAsync(s => s.BranchId == order.BranchId);
         if (settings?.RequireReasonForVoid == true && string.IsNullOrWhiteSpace(req.Reason))
@@ -1682,6 +1731,7 @@ public class OrdersController(BaqalaDbContext db, IEmailService emailService, IZ
     {
         var order = await db.Orders.FindAsync(id);
         if (order is null) return NotFound(new { message = "Order not found." });
+        if (OnlineOrderGuard(order) is { } blocked) return BadRequest(new { message = blocked });
         payment.Id = Guid.NewGuid();
         payment.OrderId = id;
         payment.CreatedAt = DateTime.UtcNow;

@@ -182,7 +182,14 @@ public class InventoryController(
         var hasWarehouseFilter = warehouseId is { Length: > 0 };
         if (role is not null && role != "tenant_admin" && callerBranchId.HasValue && !hasWarehouseFilter) branchId = [callerBranchId.Value];
 
+        // AsNoTracking is load-bearing here, not just an optimisation: a tracking query runs EF's
+        // relationship fixup, which back-fills each included Supplier's `Batches` collection with the
+        // batches from this very query. The serializer then walks that collection, so every one of
+        // the N batches drags its supplier AND that supplier's ~35 sibling batches — turning a
+        // ~0.6 MB response into ~11 MB (and ~20 s). No-tracking materialises each row independently,
+        // leaving Supplier.Batches empty, so the response carries only what this endpoint returns.
         var query = db.InventoryBatches
+            .AsNoTracking()
             .Include(b => b.Product)
             .Include(b => b.Supplier)
             .AsQueryable();

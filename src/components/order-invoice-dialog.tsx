@@ -13,7 +13,7 @@ import { downloadBlob } from "@/lib/csv-export";
 // installed / not running) surfaces as a bare fetch failure, which reads very differently from a
 // real printer error (bad name, out of paper) and deserves a more actionable message.
 function isPrinterNotSetUp(msg: string): boolean {
-  return /failed to fetch|networkerror when attempting to fetch/i.test(msg);
+  return /failed to fetch|networkerror when attempting to fetch|no printer configured/i.test(msg);
 }
 
 // Same Phase-1-style 5-tag TLV QR builder duplicated in _app.pos.tsx / escpos.ts / self-checkout's

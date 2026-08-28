@@ -142,7 +142,7 @@ const ROUTE_RULES: RouteRule[] = [
   // enforces (ComplianceController.UpsertSettings requires Compliance+Edit) — so a
   // Finance User/Accountant granted Compliance access could never reach the page
   // to use it. Module-gate it like its sibling Compliance routes instead.
-  { url: "/zatca-settings",      module: "Compliance", planFeature: "zatca_compliance" },
+  { url: "/zatca-settings",      module: "Compliance", planFeature: "zatca_phase2" },
   { url: "/plans",               roles: ["tenant_admin"] },
   { url: "/mobile-pos",          roles: ["tenant_admin"] },
   { url: "/mpos-app",            roles: ["tenant_admin"] },
